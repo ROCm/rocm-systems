@@ -58,5 +58,5 @@ if __name__ == "__main__":
         input("Press Enter to detach...")
     else:
         time.sleep(int(duration) / 1000)
-    
+
     c_lib.detach()

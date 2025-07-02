@@ -20,10 +20,12 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -56,6 +58,8 @@ public:
 
     bool stop();
     bool cont();
+    bool handle_signals();
+    void detach_ptrace_session();
 
 private:
     bool find_library(void*& addr, int inpid, const std::string& library);
@@ -64,8 +68,9 @@ private:
     std::unordered_map<std::string, void*> target_library_addrs;
     std::unordered_map<std::string, void*> target_symbol_addrs;
 
-    const int pid;
-    bool      attached;
+    const int         pid;
+    bool              attached;
+    std::atomic<bool> detaching_ptrace_session;
 };
 
 }  // namespace attach

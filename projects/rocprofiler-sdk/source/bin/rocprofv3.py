@@ -1438,7 +1438,7 @@ def run(app_args, args, **kwargs):
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
             )
-    
+
     elif args.pid:
         update_env("ROCPROF_ATTACH_PID", args.pid)
         if args.attach_duration_msec is not None:
