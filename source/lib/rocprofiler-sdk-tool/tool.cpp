@@ -100,6 +100,7 @@
 #include <vector>
 
 #include <dlfcn.h>
+#include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -1535,6 +1536,132 @@ initialize_signal_handler(sigaction_func_t sigaction_func)
 }
 
 void
+wait_peer_finished(const pid_t &pid, const pid_t &ppid)
+{
+    auto this_func = std::string_view{__FUNCTION__};
+
+    auto get_peer_pid = [&ppid]() {
+        auto fname    = fmt::format("/proc/{}/task/{}/children", ppid, ppid);
+        auto ifs      = std::ifstream{fname};
+        auto peer_pid = std::vector<pid_t>{};
+        while(ifs)
+        {
+            pid_t val = 0;
+            ifs >> val;
+            if(ifs && !ifs.eof() && val > 0) peer_pid.emplace_back(val);
+        }
+        return peer_pid;
+    };
+
+    auto _peer = get_peer_pid();
+
+    if(_peer.size() <= 1)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}] has no peer process and no need to wait ",
+            ppid,
+            pid);
+
+        // if no peer process no need to wait
+        return;
+    }
+
+    ROCP_WARNING << fmt::format(
+        "[PPID={}][PID={}] rocprofv3 will wait for all {} peer processes under same parent finished to exit",
+        ppid,
+        pid,
+        _peer.size());
+
+    // Create a POSIX semaphore for synchronization
+    // Processes under the same parent share a same semaphore
+    sem_t *_sem = nullptr;
+    ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}] Creating existing semaphore in {}",
+            ppid,
+            pid,
+            this_func);
+
+    const std::string _sem_pid_group = "/finalization_process_sync_semaphore_pid_" + std::to_string(ppid);
+    _sem = sem_open(_sem_pid_group.c_str(), O_CREAT | O_EXCL, 0666, 0);
+    if(_sem == SEM_FAILED) 
+    {
+        if(errno == EEXIST) 
+        {
+            ROCP_INFO << fmt::format(
+                "[PPID={}][PID={}] Semaphore already exists in {}, opening existing semaphore",
+                ppid,
+                pid,
+                this_func);
+            _sem = sem_open(_sem_pid_group.c_str(), 0);
+            if(_sem == SEM_FAILED) 
+            {
+                ROCP_WARNING << fmt::format(
+                    "[PPID={}][PID={}] failed to open existing semaphore in {}",
+                    ppid,
+                    pid,
+                    this_func);
+            }
+        }
+        else
+        {
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}] failed to create semaphore in {}",
+                ppid,
+                pid,
+                this_func);
+        }
+    }
+
+    // Post to semephore that this process has finished its work
+    if(sem_post(_sem) == -1) 
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}] failed to post to semaphore in {}",
+            ppid,
+            pid,
+            this_func);
+    }
+
+    int _sem_val = 0;
+    do
+    {
+        if(sem_getvalue(_sem, &_sem_val) == -1) {
+            ROCP_WARNING << fmt::format(
+                "[PPID={}][PID={}] failed to get semaphore value in {}",
+                ppid,
+                pid,
+                this_func);
+        }
+        ROCP_TRACE << fmt::format(
+            "{} shows current sem_pid_group name: {} semaphore value: {}, peer size(): {}", 
+            this_func, 
+            _sem_pid_group, 
+            _sem_val, 
+            _peer.size());
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    } while(static_cast<unsigned long>(_sem_val) < _peer.size());
+
+    // Clean up semaphore
+    if(sem_close(_sem) == -1)
+    {
+        ROCP_INFO << fmt::format(
+            "[PPID={}][PID={}] failed to close semaphore in {}",
+            ppid,
+            pid,
+            this_func);
+    }
+    
+    if(sem_unlink(_sem_pid_group.c_str()) == -1)
+    {
+        ROCP_WARNING << fmt::format(
+            "[PPID={}][PID={}] failed to unlink semaphore or it is already unlinked in {}",
+            ppid,
+            pid,
+            this_func);
+    }
+}
+
+void
 finalize_rocprofv3(std::string_view context)
 {
     ROCP_INFO << "invoked: finalize_rocprofv3";
@@ -2850,6 +2977,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             signo);
 
         finalize_rocprofv3(this_func);
+        wait_peer_finished(this_pid, this_ppid);
 
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
