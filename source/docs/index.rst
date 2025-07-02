@@ -35,6 +35,7 @@ The documentation is structured as follows:
     * :ref:`using-rocpd-output-format`
     * :ref:`using-rocprofiler-sdk-roctx`
     * :ref:`using-rocprofv3-with-mpi`
+    * :ref:`using-rocprofv3-with-openmp`
     * :ref:`using-pc-sampling`
     * :ref:`using-thread-trace`
 
