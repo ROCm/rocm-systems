@@ -29,7 +29,7 @@ jobs:
   regex:
     runs-on: AMD-ROCm-Internal-dev1
     env:
-      FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx source/lib/output/format_path.cpp source/lib/rocprofiler-sdk-tool/config.cpp"
+      FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx source/lib/output/format_path.cpp source/lib/rocprofiler-sdk-tool/config.cpp source/lib/output/generateRocpd.cpp"
 
     steps:
     - uses: actions/checkout@v4
