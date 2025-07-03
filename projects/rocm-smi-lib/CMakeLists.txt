@@ -277,14 +277,14 @@ install(EXPORT rocm_smiTargets
 
 #License file
 set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
-# install license file in share/doc/rocm_smi-asan folder
+# install license file in share/doc/rocm-smi-lib-asan folder
 if( ENABLE_ASAN_PACKAGING )
   install(FILES ${CPACK_RESOURCE_FILE_LICENSE}
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI}-asan RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE}-asan RENAME LICENSE.txt
         COMPONENT asan)
 endif()
 install( FILES ${CPACK_RESOURCE_FILE_LICENSE}
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI} RENAME LICENSE.txt
+	DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${ROCM_SMI_PACKAGE} RENAME LICENSE.txt
         COMPONENT dev)
 
 ###########################
