@@ -273,20 +273,20 @@ if(ENABLE_ASAN_PACKAGING)
 # install license file in share/doc/amd_smi-asan folder
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}-asan
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}-asan
     RENAME LICENSE.txt
     COMPONENT asan)
 endif()
 # docs are installed into different share directory from tests and examples
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     RENAME LICENSE.txt
     COMPONENT dev)
 
 install(
     FILES ${CMAKE_CURRENT_SOURCE_DIR}/README.md
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     COMPONENT dev)
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example
@@ -360,11 +360,11 @@ configure_file(
 set(CPACK_DEBIAN_DEV_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/prerm")
 set(CPACK_DEBIAN_TESTS_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/${CPACK_PACKAGE_NAME}-tests/prerm")
 
-# install copyright file into share/doc/amd_smi/copyright
+# install copyright file into share/doc/amd-smi-lib/copyright
 # required for debian package compliance
 install(
     FILES "${CMAKE_CURRENT_BINARY_DIR}/DEBIAN/copyright"
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${AMD_SMI}
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}
     COMPONENT dev)
 
 # RPM package specific variables
