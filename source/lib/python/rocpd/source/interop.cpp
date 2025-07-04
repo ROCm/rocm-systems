@@ -38,6 +38,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/pytypes.h>
 #include <sqlite3.h>
+#include <algorithm>
 
 namespace rocpd
 {
