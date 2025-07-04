@@ -313,7 +313,8 @@ class Agent : public Checked<0xF6BC25EB17E6F917> {
   __forceinline uint32_t node_id() const { return node_id_; }
 
   // @brief Returns the driver associated with this agent.
-  __forceinline Driver& driver() const { return *driver_; }
+  __forceinline Driver& driver() { return *driver_; }
+  __forceinline const Driver& driver() const { return *driver_; }
 
   // @brief Getter for profiling_enabled_.
   __forceinline bool profiling_enabled() const { return profiling_enabled_; }
