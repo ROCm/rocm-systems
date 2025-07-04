@@ -77,7 +77,7 @@
 #include "suites/functional/aql_barrier_bit.h"
 #include "suites/functional/signal_kernel.h"
 #include "suites/functional/cu_masking.h"
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
 
 static RocrTstGlobals *sRocrtstGlvalues = nullptr;
 
@@ -563,9 +563,9 @@ int main(int argc, char** argv) {
   sRocrtstGlvalues = &settings;
 
   if (settings.monitor_verbosity > 0) {
-    rsmi_status_t rsmi_ret = rsmi_init(0);
-    if (rsmi_ret != RSMI_STATUS_SUCCESS) {
-      std::cout << "Failed to initialize ROCm smi" << std::endl;
+    amdsmi_status_t amdsmi_ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
+      std::cout << "Failed to initialize AMD smi" << std::endl;
       return 1;
     }
     DumpMonitorInfo();

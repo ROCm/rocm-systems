@@ -132,7 +132,7 @@ endif()
 
 # Required Defines first:
 find_package(hsa-runtime64 REQUIRED)
-find_package(rocm_smi REQUIRED)
+find_package(amd_smi REQUIRED)
 
 set (ONLY64STR "64")
 
@@ -286,7 +286,7 @@ aux_source_directory(${ROCRTST_ROOT}/common common_srcs)
 # Extend the list of libraries to be used for linking ROC Perf Apps
 #
 set(ROCRTST_LIBS ${ROCRTST_LIBS} hsa-runtime64::hsa-runtime64)
-set(ROCRTST_LIBS ${ROCRTST_LIBS} rocm_smi${ONLY64STR})
+set(ROCRTST_LIBS ${ROCRTST_LIBS} amd_smi)
 
 
 # Set Name for rocrtst

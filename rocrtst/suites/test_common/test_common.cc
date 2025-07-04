@@ -53,7 +53,7 @@
 
 #include "suites/test_common/test_base.h"
 #include "suites/test_common/test_common.h"
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
 
 static const struct option long_options[] = {
   {"iterations", required_argument, nullptr, 'i'},
@@ -143,7 +143,7 @@ int DumpMonitorInfo() {
   int64_t value_i64;
   std::string val_str;
   std::vector<std::string> val_vec;
-  rsmi_status_t rsmi_ret;
+  amdsmi_status_t amdsmi_ret;
   int dump_ret = 0;
 
   auto print_attr_label =
@@ -162,17 +162,58 @@ int DumpMonitorInfo() {
   std::cout << delim << std::endl;
   std::cout.setf(std::ios::dec, std::ios::basefield);
 
-  uint32_t num_mon_devices;
-  rsmi_ret = rsmi_num_monitor_devices(&num_mon_devices);
-  if (rsmi_ret != RSMI_STATUS_SUCCESS) {
-    std::cout << "rsmi_num_monitor_device() returned" << rsmi_ret << std::endl;
-    return 1;
+  // Get socket handles
+  uint32_t socket_count = AMDSMI_MAX_DEVICES;
+  amdsmi_socket_handle socket_handles[AMDSMI_MAX_DEVICES];
+  amdsmi_ret = amdsmi_get_socket_handles(&socket_count, socket_handles);
+  if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
+      std::cout << "Failed to get socket count. Error: " << 
+                                                      amdsmi_ret << std::endl;
+      amdsmi_shut_down();
+      return 1;
   }
 
-  for (uint32_t dindx = 0; dindx < num_mon_devices; ++dindx) {
-    auto print_frequencies = [&](rsmi_frequencies *freqs, std::string label) {
-      if (rsmi_ret != RSMI_STATUS_SUCCESS) {
-        std::cout << "get frequency call  returned " << rsmi_ret << std::endl;
+  uint32_t socket_processors = AMDSMI_MAX_DEVICES;
+  uint32_t total_num_processors = 0;
+
+  amdsmi_processor_handle processor_handles[AMDSMI_MAX_DEVICES];
+  amdsmi_processor_handle socket_processor_handles[AMDSMI_MAX_DEVICES];
+
+  // Collect devices from sockets
+  for (uint32_t socket_idx = 0; socket_idx < socket_count; ++socket_idx) {
+    amdsmi_ret = amdsmi_get_processor_handles(socket_handles[socket_idx], 
+      &socket_processors, socket_processor_handles);
+    if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
+        std::cout << "amdsmi_get_processor_handles() for socket " << 
+                        socket_idx << " returned " << amdsmi_ret << std::endl;
+        amdsmi_shut_down();
+        return 1;
+    }
+
+    for (uint32_t i = 0; i < socket_processors && 
+                        total_num_processors + i < AMDSMI_MAX_DEVICES; ++i) {
+      processor_handles[total_num_processors + i] = socket_processor_handles[i];
+    }
+    total_num_processors += socket_processors;
+  }
+
+  // Filter for GPU processors
+  uint32_t gpu_count = 0;
+  for (uint32_t i = 0; i < total_num_processors; ++i) {
+      processor_type_t processor_type;
+      amdsmi_ret = amdsmi_get_processor_type(processor_handles[i], 
+                                                              &processor_type);
+      if (amdsmi_ret == AMDSMI_STATUS_SUCCESS && 
+                              processor_type == AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+          gpu_count++;
+      }
+  }
+
+  for (uint32_t dindx = 0; dindx < gpu_count; ++dindx) {
+    auto print_frequencies = [&](amdsmi_frequencies_t *freqs, 
+                                                            std::string label) {
+      if (amdsmi_ret != AMDSMI_STATUS_SUCCESS) {
+        std::cout << "get frequency call  returned " << amdsmi_ret << std::endl;
         dump_ret = 1;
         return;
       }
@@ -191,8 +232,8 @@ int DumpMonitorInfo() {
     };
     auto print_val_str = [&](std::string val, std::string label) {
       std::cout << "\t** " << label;
-      if (ret != RSMI_STATUS_SUCCESS) {
-        std::cout << "not available; rsmi call returned" << rsmi_ret;
+      if (ret != AMDSMI_STATUS_SUCCESS) {
+        std::cout << "not available; amdsmi call returned" << amdsmi_ret;
         dump_ret = 1;
       } else {
         std::cout << val;
@@ -200,14 +241,14 @@ int DumpMonitorInfo() {
       std::cout << std:: endl;
     };
 
-    rsmi_ret = rsmi_dev_id_get(dindx, &value_u16);
+    amdsmi_ret = amdsmi_get_gpu_id(processor_handles[dindx], &value_u16);
     print_val_str(IntegerToString(value_u16), "Device ID: ");
 
-    rsmi_dev_perf_level perf;
+    amdsmi_dev_perf_level_t perf;
     std::string perf_str;
-    rsmi_ret = rsmi_dev_perf_level_get(dindx, &perf);
+    amdsmi_ret = amdsmi_get_gpu_perf_level(processor_handles[dindx], &perf);
     switch (perf) {
-      case RSMI_DEV_PERF_LEVEL_AUTO:
+      case AMDSMI_DEV_PERF_LEVEL_AUTO:
         perf_str = "auto";
         break;
       default:
@@ -215,36 +256,42 @@ int DumpMonitorInfo() {
     }
     print_val_str(perf_str, "Performance Level: ");
 
-    rsmi_ret = rsmi_dev_overdrive_level_get(dindx, &value_u32);
+    uint32_t overdrive_level;
+    amdsmi_ret = amdsmi_get_gpu_overdrive_level(processor_handles[dindx], 
+                                                            &overdrive_level);
 
     print_val_str(IntegerToString(value_u32, false) + "%", "OverDrive Level: ");
 
-    rsmi_frequencies freqs;
-    rsmi_ret = rsmi_dev_gpu_clk_freq_get(dindx, RSMI_CLK_TYPE_SYS, &freqs);
+    amdsmi_frequencies_t freqs;
+    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx], 
+                                                AMDSMI_CLK_TYPE_SYS, &freqs);
 
     print_frequencies(&freqs, "Supported GPU clock frequencies:\n");
 
-    rsmi_ret = rsmi_dev_gpu_clk_freq_get(dindx, RSMI_CLK_TYPE_MEM, &freqs);
+    amdsmi_ret = amdsmi_get_clk_freq(processor_handles[dindx], 
+                                                AMDSMI_CLK_TYPE_MEM, &freqs);
     print_frequencies(&freqs, "Supported GPU Memory clock frequencies:\n");
 
-
-    char mon_name[32];
-    rsmi_ret = rsmi_dev_name_get(dindx, mon_name, 32);
-    print_val_str(mon_name, "Monitor name: ");
-    rsmi_ret = rsmi_dev_temp_metric_get(dindx, 0,
-                                              RSMI_TEMP_CURRENT, &value_i64);
+    amdsmi_board_info_t board_info;
+    amdsmi_get_gpu_board_info(processor_handles[dindx], &board_info);
+    print_val_str(board_info.product_name, "Monitor name: ");
+    
+    amdsmi_ret = amdsmi_get_temp_metric(processor_handles[dindx], 
+                AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMP_CURRENT, &value_i64);
     print_val_str(IntegerToString(value_i64/1000, false) + "C",
                                                             "Temperature: ");
 
-    rsmi_ret = rsmi_dev_fan_speed_get(dindx, 0, &value_i64);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::cout << "not available; rsmi call returned" << rsmi_ret;
-      dump_ret = 1;
+    amdsmi_ret = amdsmi_get_gpu_fan_speed(processor_handles[dindx], 
+                                                                0, &value_i64);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        std::cout << "not available; amdsmi call returned" << amdsmi_ret;
+        dump_ret = 1;
     }
-    rsmi_ret = rsmi_dev_fan_speed_max_get(dindx, 0, &value_u64);
-    if (ret != RSMI_STATUS_SUCCESS) {
-      std::cout << "not available; rsmi call returned" << rsmi_ret;
-      dump_ret = 1;
+    amdsmi_ret = amdsmi_get_gpu_fan_speed_max(processor_handles[dindx], 
+                                                                0, &value_u64);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+        std::cout << "not available; amdsmi call returned" << amdsmi_ret;
+        dump_ret = 1;
     }
     if (print_attr_label("Current Fan Speed: ")) {
       std::cout << static_cast<float>(value_i64)/value_u64 * 100 << "% (" <<
