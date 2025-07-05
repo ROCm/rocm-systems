@@ -341,6 +341,8 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     shared_info.adapter_luid = desc_.adapter_luid;
     shared_info.flags = reinterpret_cast<uint32_t>(desc_.flags.reserved);
     shared_info.mem_flags = desc_.mem_flags;
+    shared_info.pid = dxg_runtime->parent_pid;
+    shared_info.gpu_addr = desc_.gpu_addr;
     args.pPrivateRuntimeData = &shared_info;
     args.PrivateRuntimeDataSize = sizeof(shared_info);
     args.Flags.NtSecuritySharing = 1;
@@ -416,7 +418,7 @@ ErrorCode GpuMemory::ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags) {
 }
 
 
-ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info) {
+ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info, gpusize *gpu_addr) {
   D3DKMT_QUERYRESOURCEINFOFROMNTHANDLE query_args;
   int dmabuf_fd = create_info.dmabuf_fd;
 
@@ -541,6 +543,16 @@ ErrorCode GpuMemory::ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info
       ret = ErrorCode::InvalidateParams;
       pr_err("open resource failed %d\n", static_cast<int>(ret));
       return ret;
+    }
+    if (shared_info.pid == dxg_runtime->parent_pid &&
+      create_info.flags.alloc_va &&
+      IsSameAdapter(shared_info.adapter_luid) &&
+      shared_info.gpu_addr) {
+      pr_info("import from same device and samve process, va is required. "
+               "a buffer can't be mapped to 2 va. delete the imported buffer, use the existing one.\n");
+      if (gpu_addr)
+        *gpu_addr = shared_info.gpu_addr;
+      return ErrorCode::SameProcessSameDevice;
     }
 
     desc_.size = shared_info.size;

@@ -205,7 +205,7 @@ public:
                                   gpusize base_addr,
                                   gpusize size);
 
-  ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem);
+  ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
   ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
   void HandleApertureFree(gpusize gpu_addr);
 

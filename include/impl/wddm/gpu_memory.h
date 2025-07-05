@@ -84,7 +84,8 @@ union GpuMemoryDescFlags {
     uint32_t is_va_required :1;
     uint32_t is_imported_vram_vmem	:1;
     uint32_t is_imported_vram_ipc	:1;
-    uint32_t unused : 20;
+    uint32_t is_imported_from_same_process : 3; // imported from same process, record shared cnt
+    uint32_t unused : 17;
   };
 
   uint32_t reserved;
@@ -148,6 +149,8 @@ struct SharedHandleInfo {
   uint64_t size;
   uint32_t flags;
   int mem_flags;
+  pid_t pid;
+  gpusize gpu_addr;
 };
 
 using GpuMemoryHandle = void *;
@@ -187,6 +190,9 @@ public:
   inline void GetQueueReference() { desc_.flags.is_queue_referenced = 1; }
   inline void PutQueueReference() { desc_.flags.is_queue_referenced = 0; }
   inline bool IsQueueReferenced() const { return desc_.flags.is_queue_referenced; }
+  inline void IncSharedReference() { desc_.flags.is_imported_from_same_process++; }
+  inline uint32_t DecSharedReference() { return (desc_.flags.is_imported_from_same_process == 0) ? 0 : --desc_.flags.is_imported_from_same_process; }
+  inline bool IsSharedFromSameProcess() const { return desc_.flags.is_imported_from_same_process > 0; }
 
   WinAllocationHandle GetAllocationHandle(size_t index) const { return alloc_handles_ptr_[index]; }
   size_t NumChunks() const { return num_allocations_; }
@@ -207,7 +213,7 @@ public:
   ErrorCode Evict();
 
   ErrorCode ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags = SHARED_ALLOCATION_ALL_ACCESS);
-  ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info);
+  ErrorCode ImportPhysicalHandle(const GpuMemoryCreateInfo &create_info, gpusize *gpu_addr = nullptr);
   ~GpuMemory();
 protected:
   explicit GpuMemory(WDDMDevice *device);

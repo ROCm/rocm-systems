@@ -54,6 +54,7 @@ enum class ErrorCode {
   Timeout,
   SyscallFail,
   InvalidateParams,
+  SameProcessSameDevice,
   Unknown,
 };
 

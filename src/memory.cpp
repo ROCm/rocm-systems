@@ -304,6 +304,14 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     if (gpu_mem->IsQueueReferenced())
       return HSAKMT_STATUS_ERROR;
 
+    wsl::thunk::GpuMemoryDescFlags flags;
+    flags.reserved = it->second.mem_flags_value;
+    if (flags.is_imported_vram_ipc &&
+      gpu_mem->DecSharedReference()) {
+      pr_info("memory is still referenced\n");
+      return HSAKMT_STATUS_SUCCESS;
+    }
+
     if (it->second.dmabuf_fd >= 0) {
       close(it->second.dmabuf_fd);
       it->second.dmabuf_fd = -1;
@@ -546,30 +554,45 @@ HSAKMT_STATUS import_dmabuf_fd(int DMABufFd,
     }
   }
 
-  auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
-  if (code == ErrorCode::Success) {
-    void *MemoryAddress;
-    if (alloc_va)
-      MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
-    else
-      MemoryAddress = reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
-
-    *GpuMemHandle = gpu_mem->GetGpuMemoryHandle();
-
+  gpusize gpu_va = 0;
+  auto code = dev->CreateGpuMemory(create_info, &gpu_mem, &gpu_va);
+  if (code == ErrorCode::SameProcessSameDevice) {
+    /* Unit_hipMemPoolExportToShareableHandle_SameProc */
+    pr_info("imported from same process, use the old one\n");
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    /*
-     * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
-     * HsaMemFlags, reference hsaKmtAllocMemoryAlign
-     * */
-   (*allocation_map_)[MemoryAddress] = Allocation(
-      *GpuMemHandle, MemoryAddress, (uint64_t)MemoryAddress,
-      gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
-      NodeId, gpu_mem->Flags());
-
+    auto it = allocation_map_->find((void*)gpu_va);
+    if (it == allocation_map_->end()) {
+      pr_err("where's the conflict buffer? va %#lx\n", create_info.va_hint);
+      return HSAKMT_STATUS_ERROR;
+    }
+    wsl::thunk::GpuMemory *conflict_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    conflict_mem->IncSharedReference();
+    *GpuMemHandle = it->second.handle;
     return HSAKMT_STATUS_SUCCESS;
+  } else if (code != ErrorCode::Success) {
+    pr_err("fail to import fd, ret %d\n", (int)code);
+    return HSAKMT_STATUS_ERROR;
   }
 
-  return HSAKMT_STATUS_ERROR;
+  void *MemoryAddress;
+  if (alloc_va)
+    MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+  else
+    MemoryAddress = reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
+
+  *GpuMemHandle = gpu_mem->GetGpuMemoryHandle();
+
+  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  /*
+   * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
+   * HsaMemFlags, reference hsaKmtAllocMemoryAlign
+   * */
+  (*allocation_map_)[MemoryAddress] = Allocation(
+    *GpuMemHandle, MemoryAddress, (uint64_t)MemoryAddress,
+    gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
+    NodeId, gpu_mem->Flags());
+
+  return HSAKMT_STATUS_SUCCESS;
 
 }
 
@@ -645,7 +668,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
     wsl::thunk::GpuMemoryDescFlags flags;
     flags.reserved = it->second.mem_flags_value;
     // IPC mem(vram)
-    if (flags.is_imported_vram_ipc) {
+    if (flags.is_imported_vram_ipc &&
+      gpu_mem->DecSharedReference() == 0) {
       allocation_map_->erase(it);
       delete gpu_mem;
       return HSAKMT_STATUS_SUCCESS;
@@ -811,7 +835,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     // IPC mem
     wsl::thunk::GpuMemoryDescFlags flags;
     flags.reserved = it->second.mem_flags_value;
-    if (flags.is_imported_vram_ipc) {
+    if (flags.is_imported_vram_ipc &&
+        !gpu_mem->IsSharedFromSameProcess()) {
       auto code = gpu_mem->UnmapGpuVirtualAddress(gpu_mem->GpuAddress(), gpu_mem->Size());
       if (code != ErrorCode::Success)
         return HSAKMT_STATUS_ERROR;

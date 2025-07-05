@@ -569,13 +569,14 @@ void WDDMDevice::UpdatePageFence(uint64_t fence_value) {
   } while (!page_fence_value_.compare_exchange_weak(current, fence_value));
 }
 
-ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem) {
+ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info,
+                                        GpuMemory **gpu_mem, gpusize *gpu_va) {
   ErrorCode ret;
 
   *gpu_mem = nullptr;
   auto mem = new GpuMemory(this);
   if (create_info.dmabuf_fd > 0)
-    ret = mem->ImportPhysicalHandle(create_info);
+    ret = mem->ImportPhysicalHandle(create_info, gpu_va);
   else 
     ret = mem->Init(create_info);
   if (ret == ErrorCode::Success)
