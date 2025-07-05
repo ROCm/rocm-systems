@@ -300,15 +300,15 @@ HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
     }
 
     gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    if (gpu_mem->IsQueueReferenced())
+      return HSAKMT_STATUS_ERROR;
+
     if (it->second.dmabuf_fd >= 0) {
       close(it->second.dmabuf_fd);
       it->second.dmabuf_fd = -1;
     }
     allocation_map_->erase(it);
   }
-
-  if (gpu_mem->IsQueueReferenced())
-    return HSAKMT_STATUS_ERROR;
 
   delete gpu_mem;
   return HSAKMT_STATUS_SUCCESS;
@@ -763,7 +763,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
       return HSAKMT_STATUS_SUCCESS;
   }
 
-  wsl::thunk::GpuMemoryHandle handle = nullptr;
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
 
@@ -794,14 +794,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
       return HSAKMT_STATUS_SUCCESS;
     }
 
-    handle = it->second.handle;
+    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+    if (gpu_mem->IsQueueReferenced())
+      return HSAKMT_STATUS_ERROR;
 
     allocation_map_->erase((void *)it->second.gpu_addr);
     allocation_map_->erase(it);
   }
-  auto gpu_mem = wsl::thunk::GpuMemory::Convert(handle);
-  if (gpu_mem->IsQueueReferenced())
-    return HSAKMT_STATUS_ERROR;
 
   delete gpu_mem;
   return HSAKMT_STATUS_SUCCESS;
