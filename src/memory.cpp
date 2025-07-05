@@ -451,6 +451,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
   pr_debug("number of nodes %lu\n", NumberOfNodes);
+  if (NumberOfNodes == 0) {
+    RegisterFlags.ui32.requiresVAddr = 0;
+    NumberOfNodes = 1;
+    NodeArray = (HSAuint32*)&(dxg_runtime->default_node);
+  }
 
   GraphicsResourceInfo->NodeId = NodeArray[0];
   return hsaKmtImportDMABufHandle(GraphicsResourceHandle,
