@@ -377,14 +377,21 @@ as_hex<void*>(void*, size_t);
     if(ROCPROFSYS_UNLIKELY((COND)))                                                      \
     {                                                                                    \
         char _msg_buffer[ROCPROFSYS_DEBUG_BUFFER_LEN];                                   \
+        bool _print_backtrace = ::rocprofsys::get_debug() ||                             \
+                                ::rocprofsys::get_verbose() >= 2 ||                      \
+                                ::rocprofsys::get_is_continuous_integration();           \
         snprintf(_msg_buffer, ROCPROFSYS_DEBUG_BUFFER_LEN,                               \
                  "[rocprof-sys][%i][%li][%s]%s", ROCPROFSYS_DEBUG_PROCESS_IDENTIFIER,    \
                  ROCPROFSYS_DEBUG_THREAD_IDENTIFIER, ROCPROFSYS_FUNCTION,                \
                  ::rocprofsys::debug::is_bracket(__VA_ARGS__) ? "" : " ");               \
         auto len = strlen(_msg_buffer);                                                  \
         snprintf(_msg_buffer + len, ROCPROFSYS_DEBUG_BUFFER_LEN - len, __VA_ARGS__);     \
-        throw ::rocprofsys::exception<TYPE>(                                             \
-            ::tim::log::string(::tim::log::color::fatal(), _msg_buffer));                \
+        if(!_print_backtrace)                                                            \
+            throw ::rocprofsys::exception<TYPE>(                                         \
+                ::tim::log::string(::tim::log::color::fatal(), _msg_buffer), false);     \
+        else                                                                             \
+            throw ::rocprofsys::exception<TYPE>(                                         \
+                ::tim::log::string(::tim::log::color::fatal(), _msg_buffer));            \
     }
 
 #define ROCPROFSYS_CONDITIONAL_BASIC_THROW_E(COND, TYPE, ...)                            \
