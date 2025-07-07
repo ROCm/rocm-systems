@@ -268,6 +268,16 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Optimized
 
+- **Reduced amd-smi's CLI's API calls needed to be called before reading or (re)setting GPU features**.  
+  - Now when users call any amd-smi CLI command, we have reduced the APIs needed to be called. Previously,
+  when a user would read a GPU's status, (for example) we would poll for other information helpful for our sets/reset
+  CLI calls. This change will increase overall run-time performance of the CLI tool.
+
+- **Removed partition information from the default `amd-smi static` CLI command**.  
+  - Users can still retrieve the same data by calling `amd-smi`, `amd-smi static -p`, or `amd-smi partition -c -m`/`sudo amd-smi partition -a`.  
+   ***Reason for this change***:  
+      Reading current_compute_partition may momentarily wake the GPU up. This is due to reading XCD registers, which is expected behavior. Changing partitions is not a trivial operation, `current_compute_partition` SYSFS controls this action.
+
 - **Optimized CLI command `amd-smi topology` in partition mode**.  
   - Reduced the number of `amdsmi_topo_get_p2p_status` API calls to one fourth.  
 

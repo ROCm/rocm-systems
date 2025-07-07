@@ -69,7 +69,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, default):
+                 xgmi, partition, ras, default, sys_argv=None):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -118,25 +118,58 @@ class AMDSMIParser(argparse.ArgumentParser):
                                   'reset', 'monitor', 'dmon', 'xgmi', 'partition', 'ras', 'default']
 
         # Add all subparsers
-        self._add_version_parser(self.subparsers, version)
-        self._add_list_parser(self.subparsers, list)
-        self._add_static_parser(self.subparsers, static)
-        self._add_firmware_parser(self.subparsers, firmware)
-        self._add_bad_pages_parser(self.subparsers, bad_pages)
-        self._add_metric_parser(self.subparsers, metric)
-        self._add_process_parser(self.subparsers, process)
-        self._add_profile_parser(self.subparsers, profile)
-        self._add_event_parser(self.subparsers, event)
-        self._add_topology_parser(self.subparsers, topology)
-        self._add_set_value_parser(self.subparsers, set_value)
-        self._add_reset_parser(self.subparsers, reset)
-        self._add_monitor_parser(self.subparsers, monitor)
-        self._add_xgmi_parser(self.subparsers, xgmi)
-        self._add_partition_parser(self.subparsers, partition)
-        self._add_ras_parser(self.subparsers, ras)
-
-        # the default command
-        self._add_default_parser(self.subparsers, default)
+        if sys_argv is not None:
+            if any(arg in sys_argv for arg in ['--help', '-h']):
+                self._add_version_parser(self.subparsers, version)
+                self._add_list_parser(self.subparsers, list)
+                self._add_static_parser(self.subparsers, static)
+                self._add_firmware_parser(self.subparsers, firmware)
+                self._add_bad_pages_parser(self.subparsers, bad_pages)
+                self._add_metric_parser(self.subparsers, metric)
+                self._add_process_parser(self.subparsers, process)
+                self._add_profile_parser(self.subparsers, profile)
+                self._add_event_parser(self.subparsers, event)
+                self._add_topology_parser(self.subparsers, topology)
+                self._add_set_value_parser(self.subparsers, set_value)
+                self._add_reset_parser(self.subparsers, reset)
+                self._add_monitor_parser(self.subparsers, monitor)
+                self._add_xgmi_parser(self.subparsers, xgmi)
+                self._add_partition_parser(self.subparsers, partition)
+                self._add_ras_parser(self.subparsers, ras)
+            elif any(arg in sys_argv for arg in ['version']):
+                self._add_version_parser(self.subparsers, version)
+            elif any(arg in sys_argv for arg in ['list']):
+                self._add_list_parser(self.subparsers, list)
+            elif any(arg in sys_argv for arg in ['static']):
+                self._add_static_parser(self.subparsers, static)
+            elif any(arg in sys_argv for arg in ['firmware', 'ucode']):
+                self._add_firmware_parser(self.subparsers, firmware)
+            elif any(arg in sys_argv for arg in ['bad-pages']):
+                self._add_bad_pages_parser(self.subparsers, bad_pages)
+            elif any(arg in sys_argv for arg in ['metric']):
+                self._add_metric_parser(self.subparsers, metric)
+            elif any(arg in sys_argv for arg in ['process']):
+                self._add_process_parser(self.subparsers, process)
+            elif any(arg in sys_argv for arg in ['profile']):
+                self._add_profile_parser(self.subparsers, profile)
+            elif any(arg in sys_argv for arg in ['event']):
+                self._add_event_parser(self.subparsers, event)
+            elif any(arg in sys_argv for arg in ['topology']):
+                self._add_topology_parser(self.subparsers, topology)
+            elif any(arg in sys_argv for arg in ['set', 'reset']):
+                self._add_set_value_parser(self.subparsers, set_value)
+                self._add_reset_parser(self.subparsers, reset)
+            elif any(arg in sys_argv for arg in ['monitor', 'dmon']):
+                self._add_monitor_parser(self.subparsers, monitor)
+            elif any(arg in sys_argv for arg in ['xgmi']):
+                self._add_xgmi_parser(self.subparsers, xgmi)
+            elif any(arg in sys_argv for arg in ['partition']):
+                self._add_partition_parser(self.subparsers, partition)
+            elif any(arg in sys_argv for arg in ['ras']):
+                self._add_ras_parser(self.subparsers, ras)
+            else:
+                # If no subcommand is given, add the default parser
+                self._add_default_parser(self.subparsers, default)
 
     def _not_negative_int(self, int_value, sub_arg=None):
         # Argument type validator
@@ -733,7 +766,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Might be able to remove Sudo requirement in ROCm 7.0
         ras_help = "Displays RAS features information;\n\tSudo may be required for some features"
         numa_help = "All numa node information" # Linux Baremetal only
-        partition_help = "Partition information"
+        partition_help = "Partition information:\n\t" \
+        "No longer available in default output.\n\tArgument is required to display." \
+        "\n\tEx. `amd-smi static -p` or use" \
+        "\n\t`amd-smi partition -c -m`/`sudo amd-smi partition -a`"
 
         # Options arguments help text for Hypervisors
         dfc_help = "All DFC FW table information"
