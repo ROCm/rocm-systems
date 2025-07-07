@@ -1049,8 +1049,8 @@ ADDR_E_RETURNCODE Lib::ApplyCustomizedPitchHeight(
     const ADDR2_COMPUTE_SURFACE_INFO_INPUT* pIn,    ///< [in] input structure
     UINT_32  elementBytes,                          ///< [in] element bytes per element
     UINT_32  pitchAlignInElement,                   ///< [in] pitch alignment in element
-    UINT_32* pPitch,                                ///< [in/out] pitch
-    UINT_32* pHeight                                ///< [in/out] height
+    UINT_32* pPitch,                                ///< [in,out] pitch
+    UINT_32* pHeight                                ///< [in,out] height
     ) const
 {
     ADDR_E_RETURNCODE returnCode = ADDR_OK;

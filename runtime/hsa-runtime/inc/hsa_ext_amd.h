@@ -3153,7 +3153,7 @@ hsa_status_t hsa_amd_spm_release(hsa_agent_t preferred_agent);
  *
  * @param[in] size_in_bytes size of the buffer
  *
- * @param[in/out] timeout timeout in milliseconds
+ * @param[in,out] timeout timeout in milliseconds
  *
  * @param[out] size_copied number of bytes copied
  *

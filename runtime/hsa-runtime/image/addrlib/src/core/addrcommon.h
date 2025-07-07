@@ -1021,7 +1021,7 @@ static inline UINT_32 GetCoordActiveMask(
 ****************************************************************************************************
 */
 static inline void FillEqBitComponents(
-    ADDR_EQUATION *pEquation) // [in/out] Equation to calculate bit components for
+    ADDR_EQUATION *pEquation) // [in,out] Equation to calculate bit components for
 {
     pEquation->numBitComponents = 1; // We always have at least the address
     for (UINT_32 xorN = 1; xorN < ADDR_MAX_EQUATION_COMP; xorN++)

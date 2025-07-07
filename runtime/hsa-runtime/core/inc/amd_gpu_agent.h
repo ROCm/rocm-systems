@@ -107,26 +107,26 @@ class GpuAgentInt : public core::Agent {
 
    // @brief Carve scratch memory for main from scratch pool.
    //
-   // @param [in/out] scratch Structure to be populated with the carved memory
+   // @param [in,out] scratch Structure to be populated with the carved memory
    // information.
    virtual void AcquireQueueMainScratch(ScratchInfo &scratch) = 0;
 
    // @brief Carve scratch memory for alt from scratch pool.
    //
-   // @param [in/out] scratch Structure to be populated with the carved memory
+   // @param [in,out] scratch Structure to be populated with the carved memory
    // information.
    virtual void AcquireQueueAltScratch(ScratchInfo &scratch) = 0;
 
    // @brief Release scratch memory from main back to scratch pool.
    //
-   // @param [in/out] scratch Scratch memory previously acquired with call to
+   // @param [in,out] scratch Scratch memory previously acquired with call to
    // ::AcquireQueueMainScratch.
    virtual void ReleaseQueueMainScratch(ScratchInfo &base) = 0;
 
    // @brief Release scratch memory back from alternate to scratch pool.
    //
-   // @param [in/out] scratch Scratch memory  previously acquired with call to
-   // ::AcquireQueueAltcratch.
+   // @param [in,out] scratch Scratch memory  previously acquired with call to
+   // ::AcquireQueueAltScratch.
    virtual void ReleaseQueueAltScratch(ScratchInfo &base) = 0;
 
    // @brief Translate the kernel start and end dispatch timestamp from agent
