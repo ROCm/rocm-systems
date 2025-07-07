@@ -45,7 +45,6 @@
 #include <fstream>
 #include <limits>
 #include <locale>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>

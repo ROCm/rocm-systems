@@ -43,7 +43,6 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
