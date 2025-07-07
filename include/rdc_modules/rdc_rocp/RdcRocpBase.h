@@ -81,10 +81,14 @@ class RdcRocpBase {
    */
   rdc_status_t map_entity_to_profiler();
 
+  void init_rocp_if_not();
+
   std::vector<rocprofiler_agent_v0_t> agents = {};
   std::vector<std::shared_ptr<CounterSampler>> samplers = {};
   std::map<rdc_field_t, const char*> field_to_metric = {};
   std::map<uint32_t, uint32_t> entity_to_prof_map = {};
+
+  bool m_is_initialized = false;
 
   // these fields must be divided by time passed
   std::unordered_set<rdc_field_t> eval_fields = {
