@@ -420,7 +420,7 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(
         if(((1 << header->error_severity) & severity_mask) !=
             static_cast<uint32_t>(1 << header->error_severity)) {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] cper header rejected with severity: 0x"
-                << std::hex << (1 << header->error_severity) << ", given severity_mask: 0x"
+                << std::hex << (header->error_severity) << ", given severity_mask: 0x"
                 << std::hex << severity_mask << ", record_length:"
                 << std::dec << header->record_length;
             LOG_DEBUG(ss);
@@ -428,7 +428,7 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(
         }
         else {
             ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__ << "[CPER] cper header accepted with severity: 0x"
-                << std::hex << (1 << header->error_severity) << ", given severity_mask: 0x"
+                << std::hex << (header->error_severity) << ", given severity_mask: 0x"
                 << std::hex << severity_mask << ", record_length:"
                 << std::dec << header->record_length;
             LOG_DEBUG(ss);
@@ -468,9 +468,9 @@ amdsmi_status_t amdsmi_get_gpu_cper_entries_by_path(
    *buf_size = data_idx;
 
     ss << __PRETTY_FUNCTION__ << "\n:" << __LINE__
-        << "[CPER] *entry_count: " << entry_count
-        << ", *cursor: " << cursor
-        << ", *buf_size: " << buf_size;
+        << "[CPER] *entry_count: " << *entry_count
+        << ", *cursor: " << *cursor
+        << ", *buf_size: " << *buf_size;
 
     LOG_DEBUG(ss);
     return AMDSMI_STATUS_SUCCESS;
