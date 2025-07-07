@@ -42,7 +42,7 @@ endif()
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-add_compile_options(-Wall -Werror)
+add_compile_options(-Wall -Wno-error=ignored-attributes -Werror)
 # To set addition RUNPATH in libraries
 # installed in /opt/rocm-ver/lib/roctracer
 set(ROCM_APPEND_PRIVLIB_RPATH "$ORIGIN/..")
