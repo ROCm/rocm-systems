@@ -48,8 +48,8 @@ subtrees:
   entries:
   - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
     title: AMD SMI examples (GitHub)
-  - url: https://github.com/ROCm/rocm_smi_lib/tree/amd-staging/example
-    title: ROCm SMI lib examples (GitHub)
+  - url: https://rocm.blogs.amd.com/software-tools-optimization/amd-smi-overview/README.html
+    title: AMD SMI CLI walkthrough
 
 - caption: About
   entries:

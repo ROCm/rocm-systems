@@ -32,7 +32,11 @@ See the [requirements](#install_reqs) section for more information.
 
 3. Install Go 1.20+.
 
-   For example, to install from [https://golang.org/dl/go1.20.12.linux-amd64.tar.gz]():
+   Download Go from [https://go.dev/dl/](https://go.dev/dl/) and follow the
+   official installation documentation at [Download and
+   install](https://go.dev/doc/install).
+
+   Alternatively, use a third-party utility like update-golang.
 
    ```bash
    git clone https://github.com/udhos/update-golang
