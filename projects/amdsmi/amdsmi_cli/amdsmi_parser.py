@@ -1065,7 +1065,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         engine_help = "All engine usages"
         pid_help = "Gets all process information about the specified process based on Process ID"
         name_help = "Gets all process information about the specified process based on Process Name.\
-                    \nIf multiple processes have the same name, information is returned for all of them."
+                    \nIf multiple processes have the same name, information is returned for all of them.\
+                    \nProcess Name may require elevated permissions."
 
 
         # Create process subparser
@@ -1356,7 +1357,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
-        process_help = "Enable Process information table below monitor output"
+        process_help = "Enable Process information table below monitor output;\n    Process Name may require elevated permissions"
         violation_help = "Monitor power and thermal violation status (%%);\n    Only available for MI300 or newer ASICs"
 
         # Create monitor subparser
