@@ -42,6 +42,10 @@
       return AMDSMI_STATUS_BUSY; \
     }
 
+extern "C" {
+    void amdsmi_free_name_value_pairs(void *p);
+}
+
 amdsmi_status_t smi_amdgpu_find_hwmon_dir(amd::smi::AMDSmiGPUDevice* device, std::string* full_path);
 amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amdsmi_board_info_t *info);
 amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int *cap);

@@ -143,6 +143,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Removed
 
+- **Removed unnecessary API, `amdsmi_free_name_value_pairs(),` from amdsmi.h**
+  - This API is only used internally to free up memory from the python interface and does not need to be
+  exposed to the User.
+
 - **Removed unused definitions**  
   - `AMDSMI_MAX_NAME`
   - `AMDSMI_256_LENGTH`

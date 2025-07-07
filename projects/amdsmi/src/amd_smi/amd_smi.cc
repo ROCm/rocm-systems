@@ -62,6 +62,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_kfd.h"
 
+
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
 static bool initialized_lib = false;
