@@ -84,37 +84,6 @@ error_map = \
 }
 
 
-def handle_exceptions(func):
-    """Exposes, silences, and logs AMD SMI exceptions to users what exception was raised.
-
-        params:
-            func: test function(s) that use decorator to expose AMD SMI exceptions
-        return:
-            On success - original function is returned
-            On failure - silences error and prints to user what exception was caught
-        """
-
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except amdsmi.AmdSmiRetryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiRetryException: {}".format(e))
-            amdsmi.amdsmi_shut_down()
-            pass
-        except amdsmi.AmdSmiTimeoutException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiTimeoutException: {}".format(e))
-            amdsmi.amdsmi_shut_down()
-            pass
-        except amdsmi.AmdSmiLibraryException as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught AmdSmiLibraryException: {}".format(e))
-            amdsmi.amdsmi_shut_down()
-            pass
-        except Exception as e:
-            print("**** [ERROR] | Test: " + str(func.__name__) + " | Caught unknown exception: {}".format(e))
-            amdsmi.amdsmi_shut_down()
-            pass
-    return wrapper
-
 class TestAmdSmiPythonBDF(unittest.TestCase):
     valid_bdfs = {
         "00:00.0": [0, 0, 0, 0],
@@ -535,7 +504,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
 
-    #@handle_exceptions
+
     def test_clean_gpu_local_data(self):
         raise_exception = None
         self.setUp()
@@ -554,7 +523,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_cpu_apb_disable(self):
         raise_exception = None
         self.setUp()
@@ -573,7 +542,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_cpu_apb_enable(self):
         raise_exception = None
         self.setUp()
@@ -592,7 +561,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_first_online_core_on_cpu_socket(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_first_online_core_on_cpu_socket as it fails.")
@@ -613,7 +582,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_free_name_value_pairs(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_free_name_value_pairs as it is not implemented yet.")
@@ -630,7 +599,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_clk_freq(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_clock_info as it fails.")
@@ -652,7 +621,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_clock_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_clock_info as it fails.")
@@ -674,7 +643,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_cclk_limit(self):
         raise_exception = None
         self.setUp()
@@ -693,7 +662,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_core_boostlimit(self):
         raise_exception = None
         self.setUp()
@@ -712,7 +681,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
         if raise_exception:
             raise raise_exception
 
-    #@handle_exceptions
+
     def test_get_cpu_core_current_freq_limit(self):
         raise_exception = None
         self.setUp()
@@ -731,7 +700,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_core_energy(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_core_energy as it fails.")
@@ -752,7 +721,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_current_io_bandwidth(self):
         raise_exception = None
         self.setUp()
@@ -772,7 +741,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_ddr_bw(self):
         raise_exception = None
         self.setUp()
@@ -791,7 +760,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_dimm_power_consumption(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_power_consumption as it fails.")
@@ -814,7 +783,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_dimm_temp_range_and_refresh_rate(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_temp_range_and_refresh_rate as it fails.")
@@ -837,7 +806,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_dimm_thermal_sensor(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_dimm_thermal_sensor as it fails.")
@@ -860,7 +829,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_family(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_family as it fails.")
@@ -877,7 +846,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_fclk_mclk(self):
         raise_exception = None
         self.setUp()
@@ -896,7 +865,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_handles(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_cpu_handles as it is not implemented yet.")
@@ -913,7 +882,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_hsmp_driver_version(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_hsmp_driver_version as it fails.")
@@ -934,7 +903,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_hsmp_proto_ver(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_hsmp_proto_ver as it fails.")
@@ -955,7 +924,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_model(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_model as it fails.")
@@ -975,7 +944,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_prochot_status(self):
         raise_exception = None
         self.setUp()
@@ -994,7 +963,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_pwr_svi_telemetry_all_rails(self):
         raise_exception = None
         self.setUp()
@@ -1013,7 +982,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_smu_fw_version(self):
         raise_exception = None
         self.setUp()
@@ -1032,7 +1001,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_c0_residency(self):
         raise_exception = None
         self.setUp()
@@ -1051,7 +1020,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_current_active_freq_limit(self):
         raise_exception = None
         self.setUp()
@@ -1070,7 +1039,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_energy(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_cpu_socket_energy as it fails.")
@@ -1091,7 +1060,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_freq_range(self):
         raise_exception = None
         self.setUp()
@@ -1110,7 +1079,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_lclk_dpm_level(self):
         raise_exception = None
         self.setUp()
@@ -1130,7 +1099,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_power(self):
         raise_exception = None
         self.setUp()
@@ -1149,7 +1118,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_power_cap(self):
         raise_exception = None
         self.setUp()
@@ -1168,7 +1137,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_power_cap_max(self):
         raise_exception = None
         self.setUp()
@@ -1187,7 +1156,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_cpu_socket_temperature(self):
         raise_exception = None
         self.setUp()
@@ -1206,7 +1175,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_energy_count(self):
         raise_exception = None
         self.setUp()
@@ -1225,7 +1194,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_esmi_err_msg(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_esmi_err_msg as it is not implemented yet.")
@@ -1243,7 +1212,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_fw_info(self):
         raise_exception = None
         self.setUp()
@@ -1262,7 +1231,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_accelerator_partition_profile(self):
         raise_exception = None
         self.setUp()
@@ -1281,7 +1250,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_accelerator_partition_profile_config(self):
         raise_exception = None
         self.setUp()
@@ -1300,7 +1269,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_activity(self):
         raise_exception = None
         self.setUp()
@@ -1319,7 +1288,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_asic_info(self):
         raise_exception = None
         self.setUp()
@@ -1338,7 +1307,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_bad_page_info(self):
         raise_exception = None
         self.setUp()
@@ -1357,7 +1326,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_bad_page_threshold(self):
         raise_exception = None
         self.setUp()
@@ -1376,7 +1345,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_bdf_id(self):
         raise_exception = None
         self.setUp()
@@ -1395,7 +1364,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_board_info(self):
         raise_exception = None
         self.setUp()
@@ -1414,7 +1383,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_cache_info(self):
         raise_exception = None
         self.setUp()
@@ -1433,7 +1402,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_compute_partition(self):
         raise_exception = None
         self.setUp()
@@ -1452,7 +1421,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_compute_process_gpus(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_compute_process_gpus as it fails.")
@@ -1471,7 +1440,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_compute_process_info(self):
         raise_exception = None
         self.setUp()
@@ -1490,7 +1459,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_compute_process_info_by_pid(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_compute_process_info_by_pid as it fails.")
@@ -1509,7 +1478,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_device_bdf(self):
         raise_exception = None
         self.setUp()
@@ -1528,7 +1497,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_device_uuid(self):
         raise_exception = None
         self.setUp()
@@ -1547,7 +1516,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_driver_info(self):
         raise_exception = None
         self.setUp()
@@ -1566,7 +1535,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_ecc_count(self):
         raise_exception = None
         self.setUp()
@@ -1586,7 +1555,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_ecc_enabled(self):
         raise_exception = None
         self.setUp()
@@ -1605,7 +1574,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_ecc_status(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_ecc_status as it fails.")
@@ -1627,7 +1596,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_enumeration_info(self):
         raise_exception = None
         self.setUp()
@@ -1646,7 +1615,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_event_notification as it is not implemented yet.")
@@ -1667,7 +1636,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_fan_rpms(self):
         raise_exception = None
         self.setUp()
@@ -1686,7 +1655,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_fan_speed(self):
         raise_exception = None
         self.setUp()
@@ -1705,7 +1674,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_fan_speed_max(self):
         raise_exception = None
         self.setUp()
@@ -1724,7 +1693,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_id(self):
         raise_exception = None
         self.setUp()
@@ -1743,7 +1712,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_kfd_info(self):
         raise_exception = None
         self.setUp()
@@ -1762,7 +1731,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_mem_overdrive_level(self):
         raise_exception = None
         self.setUp()
@@ -1781,7 +1750,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_memory_partition(self):
         raise_exception = None
         self.setUp()
@@ -1800,7 +1769,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_memory_partition_config(self):
         raise_exception = None
         self.setUp()
@@ -1819,7 +1788,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_memory_reserved_pages(self):
         raise_exception = None
         self.setUp()
@@ -1838,7 +1807,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_memory_total(self):
         raise_exception = None
         self.setUp()
@@ -1858,7 +1827,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_memory_usage(self):
         raise_exception = None
         self.setUp()
@@ -1878,7 +1847,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_metrics_header_info(self):
         raise_exception = None
         self.setUp()
@@ -1897,7 +1866,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_metrics_info(self):
         raise_exception = None
         self.setUp()
@@ -1916,7 +1885,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_od_volt_curve_regions(self):
         raise_exception = None
         self.setUp()
@@ -1936,7 +1905,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_od_volt_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_od_volt_info as it fails.")
@@ -1957,7 +1926,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_overdrive_level(self):
         raise_exception = None
         self.setUp()
@@ -1976,7 +1945,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_pci_bandwidth(self):
         raise_exception = None
         self.setUp()
@@ -1995,7 +1964,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_pci_replay_counter(self):
         raise_exception = None
         self.setUp()
@@ -2014,7 +1983,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_pci_throughput(self):
         raise_exception = None
         self.setUp()
@@ -2033,7 +2002,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_perf_level(self):
         raise_exception = None
         self.setUp()
@@ -2052,7 +2021,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_pm_metrics_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_pm_metrics_info as it fails.")
@@ -2073,7 +2042,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_power_profile_presets(self):
         raise_exception = None
         self.setUp()
@@ -2092,7 +2061,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_process_isolation(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_process_isolation as it is not implemented yet.")
@@ -2113,7 +2082,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_process_list(self):
         raise_exception = None
         self.setUp()
@@ -2132,7 +2101,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_ras_block_features_enabled(self):
         raise_exception = None
         self.setUp()
@@ -2151,7 +2120,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_ras_feature_info(self):
         raise_exception = None
         self.setUp()
@@ -2170,7 +2139,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_reg_table_info(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_reg_table_info as it fails.")
@@ -2192,7 +2161,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_revision(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_gpu_revision as it is not implemented yet.")
@@ -2213,7 +2182,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_subsystem_id(self):
         raise_exception = None
         self.setUp()
@@ -2232,7 +2201,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_subsystem_name(self):
         raise_exception = None
         self.setUp()
@@ -2251,7 +2220,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_topo_numa_affinity(self):
         raise_exception = None
         self.setUp()
@@ -2270,7 +2239,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_total_ecc_count(self):
         raise_exception = None
         self.setUp()
@@ -2289,7 +2258,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_vbios_info(self):
         raise_exception = None
         self.setUp()
@@ -2308,7 +2277,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_vendor_name(self):
         raise_exception = None
         self.setUp()
@@ -2327,7 +2296,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_virtualization_mode(self):
         raise_exception = None
         self.setUp()
@@ -2346,7 +2315,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_volt_metric(self):
         raise_exception = None
         self.setUp()
@@ -2374,7 +2343,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_vram_info(self):
         raise_exception = None
         self.setUp()
@@ -2393,7 +2362,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_vram_usage(self):
         raise_exception = None
         self.setUp()
@@ -2412,7 +2381,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_vram_vendor(self):
         raise_exception = None
         self.setUp()
@@ -2431,7 +2400,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_xcd_counter(self):
         raise_exception = None
         self.setUp()
@@ -2450,7 +2419,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_xgmi_link_status(self):
         raise_exception = None
         self.setUp()
@@ -2469,7 +2438,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_hsmp_metrics_table(self):
         raise_exception = None
         self.setUp()
@@ -2488,7 +2457,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_hsmp_metrics_table_version(self):
         raise_exception = None
         self.setUp()
@@ -2507,7 +2476,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_lib_version(self):
         raise_exception = None
         self.setUp()
@@ -2522,7 +2491,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_link_metrics(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_link_metrics as it fails.")
@@ -2543,7 +2512,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_link_topology_nearest(self):
         raise_exception = None
         self.setUp()
@@ -2563,7 +2532,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_minmax_bandwidth_between_processors(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_minmax_bandwidth_between_processors as it fails.")
@@ -2585,7 +2554,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_pcie_info(self):
         raise_exception = None
         self.setUp()
@@ -2604,7 +2573,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_power_cap_info(self):
         raise_exception = None
         self.setUp()
@@ -2623,7 +2592,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_power_info(self):
         raise_exception = None
         self.setUp()
@@ -2642,7 +2611,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_count_from_handles(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_processor_count_from_handles as it is not implemented yet.")
@@ -2663,7 +2632,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_handle_from_bdf(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_processor_handle_from_bdf as it fails.")
@@ -2686,7 +2655,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_handles(self):
         raise_exception = None
         self.setUp()
@@ -2699,7 +2668,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_handles_by_type(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_processor_handles_by_type as it is not implemented yet.")
@@ -2720,7 +2689,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_info(self):
         raise_exception = None
         self.setUp()
@@ -2739,7 +2708,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_processor_type(self):
         raise_exception = None
         self.setUp()
@@ -2758,7 +2727,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_soc_pstate(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_soc_pstate as it is not implemented yet.")
@@ -2779,7 +2748,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_socket_handles(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_socket_handles as it fails.")
@@ -2796,7 +2765,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_socket_info(self):
         raise_exception = None
         self.setUp()
@@ -2816,7 +2785,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_temp_metric(self):
         raise_exception = None
         self.setUp()
@@ -2844,7 +2813,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_threads_per_core(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_threads_per_core as it fails.")
@@ -2862,7 +2831,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_utilization_count(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_utilization_count as it fails.")
@@ -2884,7 +2853,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_violation_status(self):
         raise_exception = None
         self.setUp()
@@ -2903,7 +2872,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_xgmi_info(self):
         raise_exception = None
         self.setUp()
@@ -2922,7 +2891,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_xgmi_plpd(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_get_xgmi_plpd as it is not implemented yet.")
@@ -2943,7 +2912,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_counter_group_supported(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_counter_group_supported as it fails.")
@@ -2972,7 +2941,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             test_gpu_counter_group_supported
         '''
 
-    #@handle_exceptions
+
     def test_gpu_create_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_create_counter as it fails.")
@@ -2994,7 +2963,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_destroy_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_destroy_counter as it fails.")
@@ -3014,7 +2983,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_read_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_read_counter as it fails.")
@@ -3037,7 +3006,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_get_gpu_available_counters(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_get_gpu_available_counters as it fails.")
@@ -3059,7 +3028,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_control_counter(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_gpu_control_counter as it fails.")
@@ -3079,7 +3048,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_validate_ras_eeprom(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_gpu_validate_ras_eeprom as it is not implemented yet.")
@@ -3100,7 +3069,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_gpu_xgmi_error_status(self):
         raise_exception = None
         self.setUp()
@@ -3119,7 +3088,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_init(self):
         raise_exception = None
         self.setUp()
@@ -3134,7 +3103,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_shut_down(self):
         raise_exception = None
         self.setUp()
@@ -3149,7 +3118,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_init_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_init_gpu_event_notification as it is not implemented yet.")
@@ -3170,7 +3139,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_is_P2P_accessible(self):
         raise_exception = None
         self.setUp()
@@ -3190,7 +3159,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_is_gpu_power_management_enabled(self):
         raise_exception = None
         self.setUp()
@@ -3209,7 +3178,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_reset_gpu(self):
         raise_exception = None
         self.setUp()
@@ -3228,7 +3197,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_reset_gpu_fan(self):
         raise_exception = None
         self.setUp()
@@ -3247,7 +3216,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_reset_gpu_xgmi_error(self):
         raise_exception = None
         self.setUp()
@@ -3266,7 +3235,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_clk_freq(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_clk_freq as it is not complete.")
@@ -3290,7 +3259,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_core_boostlimit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_core_boostlimit as it is not complete.")
@@ -3313,7 +3282,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_df_pstate_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_df_pstate_range as it is not complete.")
@@ -3337,7 +3306,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_gmi3_link_width_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_gmi3_link_width_range as it is not complete.")
@@ -3361,7 +3330,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_pcie_link_rate(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_pcie_link_rate as it is not complete.")
@@ -3384,7 +3353,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_pwr_efficiency_mode(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_set_cpu_pwr_efficiency_mode as it is not implemented is not yet implemented.")
@@ -3407,7 +3376,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_socket_boostlimit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_boostlimit as it is not complete.")
@@ -3430,7 +3399,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_socket_lclk_dpm_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_lclk_dpm_level as it is not complete.")
@@ -3455,7 +3424,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_socket_power_cap(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_socket_power_cap as it is not complete.")
@@ -3478,7 +3447,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_cpu_xgmi_width(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_cpu_xgmi_width as it is not complete.")
@@ -3502,7 +3471,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_accelerator_partition_profile(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_accelerator_partition_profile as it is not complete.")
@@ -3525,7 +3494,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_clk_limit(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_clk_limit as it is not complete.")
@@ -3557,7 +3526,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_clk_range(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_clk_range as it is not complete.")
@@ -3582,7 +3551,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_compute_partition(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_compute_partition as it is not complete.")
@@ -3604,7 +3573,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_event_notification_mask(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_set_gpu_event_notification_mask as it is not implemented yet.")
@@ -3625,7 +3594,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_fan_speed(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_fan_speed as it is not complete.")
@@ -3648,7 +3617,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_memory_partition(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_memory_partition as it is not complete.")
@@ -3670,7 +3639,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_memory_partition_mode(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_memory_partition_mode as it is not complete.")
@@ -3692,7 +3661,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_od_clk_info(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_od_clk_info as it is not complete.")
@@ -3724,7 +3693,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_od_volt_info(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_od_volt_info as it is not complete.")
@@ -3749,7 +3718,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_overdrive_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_overdrive_level as it is not complete.")
@@ -3772,7 +3741,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_pci_bandwidth(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_pci_bandwidth as it is not complete.")
@@ -3795,7 +3764,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_perf_determinism_mode(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_perf_determinism_mode as it is not complete.")
@@ -3818,7 +3787,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_perf_level(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_perf_level as it is not complete.")
@@ -3841,7 +3810,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_power_profile(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_gpu_power_profile as it is not complete.")
@@ -3863,7 +3832,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_gpu_process_isolation(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_set_gpu_process_isolation as it is not yet implemented.")
@@ -3886,7 +3855,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_power_cap(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_power_cap as it is not complete.")
@@ -3909,7 +3878,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_soc_pstate(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_soc_pstate as it is not complete.")
@@ -3932,7 +3901,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_set_xgmi_plpd(self):
         if self.TODO_SKIP_NOT_COMPLETE:
             self.skipTest("Skipping test_set_xgmi_plpd as it is not complete.")
@@ -3955,7 +3924,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_status_code_to_string(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_status_code_to_string as it fails.")
@@ -3969,7 +3938,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_stop_gpu_event_notification(self):
         if self.TODO_SKIP_NYI:
             self.skipTest("Skipping test_stop_gpu_event_notification as it is not implemented yet.")
@@ -3990,7 +3959,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_topo_get_link_type(self):
         raise_exception = None
         self.setUp()
@@ -4010,7 +3979,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_topo_get_link_weight(self):
         raise_exception = None
         self.setUp()
@@ -4030,7 +3999,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_topo_get_numa_node_number(self):
         raise_exception = None
         self.setUp()
@@ -4049,7 +4018,7 @@ class TestAmdSmiPythonBDF(unittest.TestCase):
             raise raise_exception
         self.tearDown()
 
-    #@handle_exceptions
+
     def test_topo_get_p2p_status(self):
         if self.TODO_SKIP_FAIL:
             self.skipTest("Skipping test_topo_get_p2p_status as it fails.")
