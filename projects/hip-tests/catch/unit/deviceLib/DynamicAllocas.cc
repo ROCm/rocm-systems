@@ -37,6 +37,26 @@ template <typename T> bool verifyResult(T* output, T* expected, int N) {
   return true;
 }
 
+// Host device memory allocator
+enum BufferIndex {
+  align = 0, h0, h1, h2, h3, h4, h5, h6, h7, h8, h9
+};
+
+static std::vector<std::unique_ptr<int[]>> allocate_host_memory(int num_arrays, int num_elements) {
+  std::vector<std::unique_ptr<int[]>> buffers(num_arrays);
+
+  for(auto& buf : buffers) buf = std::make_unique<int[]>(num_elements);
+
+  for (size_t i = 0; i < num_elements; ++i) {
+    buffers[h0][i] = i;
+    buffers[h1][i] = num_elements - 1 - i;
+    buffers[h2][i] = 5;
+    buffers[align][i] = 0;
+  }
+
+  return buffers;
+}
+
 // Kernels exercising dynamic allocations
 extern "C" __global__ void test_kernel_uniform_dynamic_alloca(int* a, int* b, int N) {
   volatile int* tmp = (int*)__builtin_alloca(N * 4);
@@ -87,19 +107,7 @@ static void runKernelUniformDynamicAllocasTest() {
   std::unique_ptr<int> num_elements = std::make_unique<int>(20);
 
   // allocate mem for the result on host side
-  size_t no_array_elements = 20;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 20; i++) {
-    h1[i] = i;
-    h2[i] = 19 - i;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(6, 20);
 
   // allocate device memory for result
   int* d1 = nullptr;
@@ -112,43 +120,43 @@ static void runKernelUniformDynamicAllocasTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // kernel uniform dynamic alloca
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_uniform_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2,
                      *size_kernel);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h2].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_uniform_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2);
 
-  HIP_CHECK(hipMemcpy(r2.get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r2.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h2].get(), host_memory_arrays[h3].get(), 20));
 
   // kernel uniform dynamic alloca over-aligned
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_uniform_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0, d1,
                      d2, *size_kernel);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h2].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_uniform_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0,
                      d1, d2);
 
-  HIP_CHECK(hipMemcpy(r3.get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d1, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r3.get(), 20));
-  REQUIRE(verifyResult(r2.get(), align.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h2].get(), host_memory_arrays[h4].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[align].get(), 20));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -205,19 +213,8 @@ static void runKernelDivergentDynamicAllocasTest() {
   size_t size = 20 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(20);
   // allocate mem for the result on host side
-  size_t no_array_elements = 20;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 20; i++) {
-    h1[i] = i;
-    h2[i] = 19 - i;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(6, 20);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -229,40 +226,40 @@ static void runKernelDivergentDynamicAllocasTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // kernel divergent dynamic alloca
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_divergent_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h2].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_divergent_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2);
 
-  HIP_CHECK(hipMemcpy(r2.get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r2.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h2].get(), host_memory_arrays[h3].get(), 20));
 
   // kernel divergent dynamic alloca over aligned
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_divergent_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0, d1,
                      d2);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h2].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_divergent_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0,
                      d1, d2);
 
-  HIP_CHECK(hipMemcpy(r3.get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d1, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r3.get(), 20));
-  REQUIRE(verifyResult(r2.get(), align.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h2].get(), host_memory_arrays[h4].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[align].get(), 20));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -364,26 +361,10 @@ extern "C" __global__ void validate_kernel_multiple_dynamic_alloca_over_aligned(
 static void runKernelMultipleDynamicAllocasTest() {
   size_t size = 20 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(20);
+
   // allocate mem for the result on host side
-  size_t no_array_elements = 20;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 20; i++) {
-    h1[i] = i;
-    h2[i] = 19 - i;
-    h3[i] = 5;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(11, 20);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -399,59 +380,59 @@ static void runKernelMultipleDynamicAllocasTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // kernel multiple dynamic alloca
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_multiple_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2, d3,
                      *size_kernel);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_multiple_dynamic_alloca, dim3(1), dim3(1), 0, 0, d1, d2, d3);
 
-  HIP_CHECK(hipMemcpy(r4.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r5.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r4.get(), 20));
-  REQUIRE(verifyResult(r2.get(), r5.get(), 20));
-  REQUIRE(verifyResult(r3.get(), r6.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h6].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h7].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h8].get(), 20));
 
   // kernel multiple dynamic alloca over aligned
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(test_kernel_multiple_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0, d1,
                      d2, d3, d4, *size_kernel);
 
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(validate_kernel_multiple_dynamic_alloca_over_aligned, dim3(1), dim3(1), 0, 0,
                      d1, d2, d3);
 
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 20));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 20));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 20));
-  REQUIRE(verifyResult(r4.get(), align.get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 20));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 20));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -532,26 +513,10 @@ extern "C" __global__ void validate_multiple_device_functions_nested(int* a, int
 static void runDeviceMultipleDynamicAllocasNestedTest() {
   size_t size = 50 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(50);
+
   // allocate mem for the result on host side
-  size_t no_array_elements = 50;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 50; i++) {
-    h1[i] = i;
-    h2[i] = 49 - i;
-    h3[i] = 7;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(11, 50);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -567,30 +532,30 @@ static void runDeviceMultipleDynamicAllocasNestedTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // multiple device functions nested
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d4, align.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d4, host_memory_arrays[align].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
   hipLaunchKernelGGL(test_multiple_device_functions_nested, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4,
                      *size_kernel);
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(validate_multiple_device_functions_nested, dim3(1), dim3(1), 0, 0, d1, d2, d3);
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 50));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 50));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 50));
-  REQUIRE(verifyResult(r4.get(), align.get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 50));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -654,26 +619,10 @@ extern "C" __global__ void validate_multiple_device_functions(int* a, int* b, in
 static void runDeviceMultipleDynamicAllocasTest() {
   size_t size = 50 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(50);
+
   // allocate mem for the result on host side
-  size_t no_array_elements = 50;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 50; i++) {
-    h1[i] = i;
-    h2[i] = 49 - i;
-    h3[i] = 7;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(11, 50);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -689,30 +638,30 @@ static void runDeviceMultipleDynamicAllocasTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // multiple device functions
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d4, align.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d4, host_memory_arrays[align].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
   hipLaunchKernelGGL(test_multiple_device_functions, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4,
                      *size_kernel);
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(validate_multiple_device_functions, dim3(1), dim3(1), 0, 0, d1, d2, d3);
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 50));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 50));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 50));
-  REQUIRE(verifyResult(r4.get(), align.get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 50));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -888,26 +837,10 @@ extern "C" __global__ void validate_function_calls_parameter_passing_over_aligne
 static void runDeviceMultipleDynamicAllocasParameterPassingTest() {
   size_t size = 50 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(50);
+
   // allocate mem for the result on host side
-  size_t no_array_elements = 50;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 50; i++) {
-    h1[i] = i;
-    h2[i] = 49 - i;
-    h3[i] = 7;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(11, 50);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -923,56 +856,56 @@ static void runDeviceMultipleDynamicAllocasParameterPassingTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // function calls with parameter passing
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d4, align.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d4, host_memory_arrays[align].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
   hipLaunchKernelGGL(test_function_calls_parameter_passing, dim3(1), dim3(1), 0, 0, d1, d2, d3, d4,
                      *size_kernel);
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(validate_function_calls_parameter_passing, dim3(1), dim3(1), 0, 0, d1, d2, d3);
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 50));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 50));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 50));
-  REQUIRE(verifyResult(r4.get(), align.get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 50));
 
   // function calls with parameter passing over aligned
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
   hipLaunchKernelGGL(test_function_calls_parameter_passing_over_aligned, dim3(1), dim3(1), 0, 0, d1,
                      d2, d3, d4, *size_kernel);
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(validate_function_calls_parameter_passing_over_aligned, dim3(1), dim3(1), 0, 0,
                      d1, d2, d3);
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 50));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 50));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 50));
-  REQUIRE(verifyResult(r4.get(), align.get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 50));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
@@ -1031,26 +964,10 @@ extern "C" __global__ void validate_function_calls_parameter_passing_sandwiched(
 static void runDeviceMultipleDynamicAllocasParameterPassingSandwichedTest() {
   size_t size = 50 * sizeof(int);
   std::unique_ptr<int> num_elements = std::make_unique<int>(50);
+
   // allocate mem for the result on host side
-  size_t no_array_elements = 50;
-  std::unique_ptr<int[]> h1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> h3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r1 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r2 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r3 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r4 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r5 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r6 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> r7 = std::make_unique<int[]>(no_array_elements);
-  std::unique_ptr<int[]> align = std::make_unique<int[]>(no_array_elements);
-  // initialize the memory
-  for (int i = 0; i < 50; i++) {
-    h1[i] = i;
-    h2[i] = 49 - i;
-    h3[i] = 7;
-    align[i] = 0;
-  }
+  std::vector<std::unique_ptr<int[]>> host_memory_arrays = allocate_host_memory(11, 50);
+
   // allocate device memory for result
   int* d1 = nullptr;
   int* d2 = nullptr;
@@ -1066,31 +983,31 @@ static void runDeviceMultipleDynamicAllocasParameterPassingSandwichedTest() {
   HIP_CHECK(hipDeviceSetLimit(hipLimitStackSize, stackSize));
 
   // function calls with parameter passing sandwiched
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d4, align.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d4, host_memory_arrays[align].get(), size, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(size_kernel, num_elements.get(), sizeof(int), hipMemcpyHostToDevice));
   hipLaunchKernelGGL(test_function_calls_parameter_passing_sandwiched, dim3(1), dim3(1), 0, 0, d1,
                      d2, d3, d4, *size_kernel);
-  HIP_CHECK(hipMemcpy(r1.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r2.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r3.get(), d3, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r4.get(), d4, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h3].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h4].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h5].get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h6].get(), d4, size, hipMemcpyDeviceToHost));
 
-  HIP_CHECK(hipMemcpy(d1, h1.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d2, h2.get(), size, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(d3, h3.get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d1, host_memory_arrays[h0].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d2, host_memory_arrays[h1].get(), size, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(d3, host_memory_arrays[h2].get(), size, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(validate_function_calls_parameter_passing_sandwiched, dim3(1), dim3(1), 0, 0,
                      d1, d2, d3);
-  HIP_CHECK(hipMemcpy(r5.get(), d1, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r6.get(), d2, size, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(r7.get(), d3, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h7].get(), d1, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h8].get(), d2, size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(host_memory_arrays[h9].get(), d3, size, hipMemcpyDeviceToHost));
 
-  REQUIRE(verifyResult(r1.get(), r5.get(), 50));
-  REQUIRE(verifyResult(r2.get(), r6.get(), 50));
-  REQUIRE(verifyResult(r3.get(), r7.get(), 50));
-  REQUIRE(verifyResult(r4.get(), align.get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h3].get(), host_memory_arrays[h7].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h4].get(), host_memory_arrays[h8].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h5].get(), host_memory_arrays[h9].get(), 50));
+  REQUIRE(verifyResult(host_memory_arrays[h6].get(), host_memory_arrays[align].get(), 50));
 
   HIP_CHECK(hipFree(d1));
   HIP_CHECK(hipFree(d2));
