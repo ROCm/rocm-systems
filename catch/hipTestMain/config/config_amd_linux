@@ -740,6 +740,10 @@
 	    "=== SWDEV-538600 : This test fails in Linux PSDB ===",
 	    "Unit_hipMemPoolMaxAlloc",
 	    "Unit_hipStreamPerThread_ChildProc",
+        "=== SWDEV-536226 : Below three tests were disabled due to hang issue ===",
+        "Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations",
+        "Unit_hipGetLastError_KernelFailure_TwoDevices",
+        "Unit_hipGetLastError_KernelFailure_TwoStreams",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
