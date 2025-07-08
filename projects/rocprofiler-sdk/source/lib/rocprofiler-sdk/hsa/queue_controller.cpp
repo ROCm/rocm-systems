@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include "lib/rocprofiler-sdk-queue/queue_registration_controller.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
 
@@ -262,6 +264,46 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     {
         core_table.hsa_queue_create_fn  = hsa::create_queue;
         core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+
+        // If queue registration is enabled, we need to retrieve those queues and add them to our controller.
+        // TODO: default to false
+        // TODO: finalize name
+        if (common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
+        {
+            for (auto qr_pair : get_queue_registration_controller()->get_all_registrations())
+            {
+                auto& qr = qr_pair.second;
+                auto agent = qr->agent();
+                for(const auto& [_, agent_info] : get_supported_agents())
+                {                
+                    if(agent_info.get_hsa_agent().handle == agent.handle)
+                    {
+                        // use lambda to bind the member function to a normal function
+                        auto set_write_interceptor = [&qr](QueueRegistration::write_interceptor_t wi, void* data)
+                        {
+                            return qr->set_write_interceptor(wi, data);
+                        };
+
+                        hsa_queue_t* queue = qr->intercept_queue();
+
+                        auto new_queue = std::make_unique<Queue>(agent_info,
+                                                                get_core_table(),
+                                                                get_ext_table(),
+                                                                queue,
+                                                                set_write_interceptor);
+
+                        
+                        serializer(new_queue.get()).wlock([&](auto& serializer) {
+
+                            serializer.add_queue(&queue, *new_queue);
+                        });
+                        add_queue(queue, std::move(new_queue));
+                        ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+                    }
+                }
+                ROCP_FATAL << "Could not find agent - " << agent.handle;
+            }
+        }
     }
 }
 

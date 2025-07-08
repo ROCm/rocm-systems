@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/common/defines.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
