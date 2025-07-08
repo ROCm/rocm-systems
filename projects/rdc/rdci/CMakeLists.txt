@@ -42,8 +42,13 @@ message("")
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
 set(INC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
-include_directories(${INC_DIR} ${PROJECT_SOURCE_DIR}/include "${GRPC_ROOT}/include"
-                    ${PROJECT_SOURCE_DIR} ${AMD_SMI_INCLUDE_DIR})
+include_directories(
+    ${INC_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+    "${GRPC_ROOT}/include"
+    ${PROJECT_SOURCE_DIR}
+    ${AMD_SMI_INCLUDE_DIR}
+)
 
 set(RDCI_SRC_LIST
     "${COMMON_DIR}/rdc_fields_supported.cc"
@@ -60,7 +65,8 @@ set(RDCI_SRC_LIST
     "${SRC_DIR}/RdciSubSystem.cc"
     "${SRC_DIR}/RdciTopologyLinkSubSystem.cc"
     "${SRC_DIR}/RdciXgmiLinkStatusSubSystem.cc"
-    "${SRC_DIR}/rdci.cc")
+    "${SRC_DIR}/rdci.cc"
+)
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
@@ -70,8 +76,10 @@ add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 target_compile_definitions(${RDCI_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})
 
 # help find librdc_bootstrap.so at runtime
-set_target_properties(${RDCI_EXE} PROPERTIES INSTALL_RPATH
-                                             "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib")
+set_target_properties(
+    ${RDCI_EXE}
+    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib"
+)
 
 target_link_libraries(${RDCI_EXE} pthread dl gRPC::grpc++ rdc_bootstrap)
 
@@ -87,7 +95,8 @@ install(
         WORLD_READ
         WORLD_EXECUTE
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT ${CLIENT_COMPONENT})
+    COMPONENT ${CLIENT_COMPONENT}
+)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake rdci                          ")

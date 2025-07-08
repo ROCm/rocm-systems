@@ -44,7 +44,6 @@
 ## the first, second and third number values in
 ## the major, minor and patch variables.
 function(parse_version VERSION_STRING)
-
     string(FIND ${VERSION_STRING} "-" STRING_INDEX)
 
     if(${STRING_INDEX} GREATER -1)
@@ -57,32 +56,23 @@ function(parse_version VERSION_STRING)
 
     if(${VERSION_COUNT} GREATER 0)
         list(GET VERSIONS 0 MAJOR)
-        set(VERSION_MAJOR
-            ${MAJOR}
-            PARENT_SCOPE)
+        set(VERSION_MAJOR ${MAJOR} PARENT_SCOPE)
         set(TEMP_VERSION_STRING "${MAJOR}")
     endif()
 
     if(${VERSION_COUNT} GREATER 1)
         list(GET VERSIONS 1 MINOR)
-        set(VERSION_MINOR
-            ${MINOR}
-            PARENT_SCOPE)
+        set(VERSION_MINOR ${MINOR} PARENT_SCOPE)
         set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${MINOR}")
     endif()
 
     if(${VERSION_COUNT} GREATER 2)
         list(GET VERSIONS 2 PATCH)
-        set(VERSION_PATCH
-            ${PATCH}
-            PARENT_SCOPE)
+        set(VERSION_PATCH ${PATCH} PARENT_SCOPE)
         set(TEMP_VERSION_STRING "${TEMP_VERSION_STRING}.${PATCH}")
     endif()
 
-    set(VERSION_STRING
-        "${TEMP_VERSION_STRING}"
-        PARENT_SCOPE)
-
+    set(VERSION_STRING "${TEMP_VERSION_STRING}" PARENT_SCOPE)
 endfunction()
 
 ## Gets the current version of the repository
@@ -98,43 +88,31 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE GIT_TAG_STRING
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
         if(${RESULT} EQUAL 0)
             parse_version(${GIT_TAG_STRING})
         endif()
-
     endif()
 
-    set(VERSION_STRING
-        "${VERSION_STRING}"
-        PARENT_SCOPE)
-    set(VERSION_MAJOR
-        "${VERSION_MAJOR}"
-        PARENT_SCOPE)
-    set(VERSION_MINOR
-        "${VERSION_MINOR}"
-        PARENT_SCOPE)
-    set(VERSION_PATCH
-        "${VERSION_PATCH}"
-        PARENT_SCOPE)
+    set(VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE)
+    set(VERSION_MAJOR "${VERSION_MAJOR}" PARENT_SCOPE)
+    set(VERSION_MINOR "${VERSION_MINOR}" PARENT_SCOPE)
+    set(VERSION_PATCH "${VERSION_PATCH}" PARENT_SCOPE)
 endfunction()
 
 function(num_change_since_prev_pkg VERSION_PREFIX)
-    find_program(
-        get_commits
-        NAMES version_util.sh
-        PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
+    find_program(get_commits NAMES version_util.sh PATHS ${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules)
     if(get_commits)
         execute_process(
             COMMAND ${get_commits} -c ${VERSION_PREFIX}
             WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
             OUTPUT_VARIABLE NUM_COMMITS
             OUTPUT_STRIP_TRAILING_WHITESPACE
-            RESULT_VARIABLE RESULT)
+            RESULT_VARIABLE RESULT
+        )
 
-        set(NUM_COMMITS
-            "${NUM_COMMITS}"
-            PARENT_SCOPE)
+        set(NUM_COMMITS "${NUM_COMMITS}" PARENT_SCOPE)
 
         if(${RESULT} EQUAL 0)
             message("${NUM_COMMITS} were found since previous release")
@@ -143,8 +121,6 @@ function(num_change_since_prev_pkg VERSION_PREFIX)
         endif()
     else()
         message("WARNING: Didn't find version_util.sh")
-        set(NUM_COMMITS
-            "unknown"
-            PARENT_SCOPE)
+        set(NUM_COMMITS "unknown" PARENT_SCOPE)
     endif()
 endfunction()
