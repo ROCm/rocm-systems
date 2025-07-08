@@ -4683,13 +4683,19 @@ class AMDSMICommands():
                 elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
                     try:
                         new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
-                                                                    AMDSMIHelpers.SI_Unit.MICRO)
+                                                                     AMDSMIHelpers.SI_Unit.MICRO)
                         amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to set power cap to {args.power_cap} on {gpu_string}") from e
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}")
+                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                    after_current_power_cap = after_power_cap_info["power_cap"]
+                    after_current_power_cap = self.helpers.convert_SI_unit(after_current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                    if args.power_cap == after_current_power_cap:
+                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
+                    else:
+                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {args.power_cap}W, current value is {after_current_power_cap}W")
                 else:
                     # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                     if min_power_cap == 0:
@@ -5192,14 +5198,20 @@ class AMDSMICommands():
                 else:
                     try:
                         default_power_cap_in_uw = self.helpers.convert_SI_unit(default_power_cap_in_w,
-                                                                                AMDSMIHelpers.SI_Unit.BASE,
-                                                                                AMDSMIHelpers.SI_Unit.MICRO)
+                                                                               AMDSMIHelpers.SI_Unit.BASE,
+                                                                               AMDSMIHelpers.SI_Unit.MICRO)
                         amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap_in_uw)
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
+                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                    after_current_power_cap_in_w = after_power_cap_info["power_cap"]
+                    after_current_power_cap_in_w = self.helpers.convert_SI_unit(after_current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                    if after_current_power_cap_in_w == default_power_cap_in_w:
+                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {after_current_power_cap_in_w}W")
+                    else:
+                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {default_power_cap_in_w}W, current value is {after_current_power_cap_in_w}W")
         else:
             result = "Device is a partition. Cannot reset on partition."
             self.logger.store_output(args.gpu, 'gpu_reset', result)
