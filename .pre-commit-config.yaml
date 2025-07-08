@@ -17,10 +17,6 @@ repos:
     hooks:
       - id: clang-format-docker
       - id: cpplint-docker
-  - repo: https://github.com/cheshirekow/cmake-format-precommit
-    rev: v0.6.13
-    hooks:
-    - id: cmake-format
   # Below is a local way of running formatters and linters
   # NOTE: clang-tidy is not used in the above tests
   #  - repo: https://github.com/pocc/pre-commit-hooks
@@ -32,3 +28,8 @@ repos:
   #        args: [-p=build, --quiet]
   #      - id: cpplint
   #        args: [--verbose=5]
+
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.19.3
+    hooks:
+    - id: gersemi

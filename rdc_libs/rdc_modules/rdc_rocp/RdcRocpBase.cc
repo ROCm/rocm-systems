@@ -51,6 +51,69 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
+static const std::map<rdc_field_t, const char*> temp_field_map_k = {
+    {RDC_FI_PROF_OCCUPANCY_PERCENT, "OccupancyPercent"},
+    {RDC_FI_PROF_ACTIVE_CYCLES, "GRBM_GUI_ACTIVE"},
+    {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
+    {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
+    {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT,
+     "MfmaUtil"},  // same as TENSOR_ACTIVE but available for more GPUs
+    {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},  // metric is divided by 100 to get percent
+    // metrics below are divided by time passed
+    {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
+    {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
+    {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
+    {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
+    {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
+    {RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "RDC_OPS_16_PER_SIMDCYCLE"},
+    {RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "RDC_OPS_32_PER_SIMDCYCLE"},
+    {RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "RDC_OPS_64_PER_SIMDCYCLE"},
+    // metrics below are not divided by time passed
+    {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
+    {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
+    {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
+    {RDC_FI_PROF_OCC_ELAPSED,
+     "GRBM_GUI_ACTIVE"},  // this metric is derived from OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
+    {RDC_FI_PROF_CPC_CPC_STAT_BUSY, "CPC_CPC_STAT_BUSY"},
+    {RDC_FI_PROF_CPC_CPC_STAT_IDLE, "CPC_CPC_STAT_IDLE"},
+    {RDC_FI_PROF_CPC_CPC_STAT_STALL, "CPC_CPC_STAT_STALL"},
+    {RDC_FI_PROF_CPC_CPC_TCIU_BUSY, "CPC_CPC_TCIU_BUSY"},
+    {RDC_FI_PROF_CPC_CPC_TCIU_IDLE, "CPC_CPC_TCIU_IDLE"},
+    {RDC_FI_PROF_CPC_CPC_UTCL2IU_BUSY, "CPC_CPC_UTCL2IU_BUSY"},
+    {RDC_FI_PROF_CPC_CPC_UTCL2IU_IDLE, "CPC_CPC_UTCL2IU_IDLE"},
+    {RDC_FI_PROF_CPC_CPC_UTCL2IU_STALL, "CPC_CPC_UTCL2IU_STALL"},
+    {RDC_FI_PROF_CPC_ME1_BUSY_FOR_PACKET_DECODE, "CPC_ME1_BUSY_FOR_PACKET_DECODE"},
+    {RDC_FI_PROF_CPC_ME1_DC0_SPI_BUSY, "CPC_ME1_DC0_SPI_BUSY"},
+    {RDC_FI_PROF_CPC_UTCL1_STALL_ON_TRANSLATION, "CPC_UTCL1_STALL_ON_TRANSLATION"},
+    {RDC_FI_PROF_CPC_ALWAYS_COUNT, "CPC_ALWAYS_COUNT"},
+    {RDC_FI_PROF_CPC_ADC_VALID_CHUNK_NOT_AVAIL, "CPC_ADC_VALID_CHUNK_NOT_AVAIL"},
+    {RDC_FI_PROF_CPC_ADC_DISPATCH_ALLOC_DONE, "CPC_ADC_DISPATCH_ALLOC_DONE"},
+    {RDC_FI_PROF_CPC_ADC_VALID_CHUNK_END, "CPC_ADC_VALID_CHUNK_END"},
+    {RDC_FI_PROF_CPC_SYNC_FIFO_FULL_LEVEL, "CPC_SYNC_FIFO_FULL_LEVEL"},
+    {RDC_FI_PROF_CPC_SYNC_FIFO_FULL, "CPC_SYNC_FIFO_FULL"},
+    {RDC_FI_PROF_CPC_GD_BUSY, "CPC_GD_BUSY"},
+    {RDC_FI_PROF_CPC_TG_SEND, "CPC_TG_SEND"},
+    {RDC_FI_PROF_CPC_WALK_NEXT_CHUNK, "CPC_WALK_NEXT_CHUNK"},
+    {RDC_FI_PROF_CPC_STALLED_BY_SE0_SPI, "CPC_STALLED_BY_SE0_SPI"},
+    {RDC_FI_PROF_CPC_STALLED_BY_SE1_SPI, "CPC_STALLED_BY_SE1_SPI"},
+    {RDC_FI_PROF_CPC_STALLED_BY_SE2_SPI, "CPC_STALLED_BY_SE2_SPI"},
+    {RDC_FI_PROF_CPC_STALLED_BY_SE3_SPI, "CPC_STALLED_BY_SE3_SPI"},
+    {RDC_FI_PROF_CPC_LTE_ALL, "CPC_LTE_ALL"},
+    {RDC_FI_PROF_CPC_SYNC_WRREQ_FIFO_BUSY, "CPC_SYNC_WRREQ_FIFO_BUSY"},
+    {RDC_FI_PROF_CPC_CANE_BUSY, "CPC_CANE_BUSY"},
+    {RDC_FI_PROF_CPC_CANE_STALL, "CPC_CANE_STALL"},
+    {RDC_FI_PROF_CPF_CMP_UTCL1_STALL_ON_TRANSLATION, "CPF_CMP_UTCL1_STALL_ON_TRANSLATION"},
+    {RDC_FI_PROF_CPF_CPF_STAT_BUSY, "CPF_CPF_STAT_BUSY"},
+    {RDC_FI_PROF_CPF_CPF_STAT_IDLE, "CPF_CPF_STAT_IDLE"},
+    {RDC_FI_PROF_CPF_CPF_STAT_STALL, "CPF_CPF_STAT_STALL"},
+    {RDC_FI_PROF_CPF_CPF_TCIU_BUSY, "CPF_CPF_TCIU_BUSY"},
+    {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
+    {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
+    {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
+    {RDC_FI_PROF_UUID, "SQ_WAVES"},    // dummy value,
+    {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
+};
+
 double RdcRocpBase::run_profiler(uint32_t agent_index, rdc_field_t field) {
   thread_local std::vector<rocprofiler_record_counter_t> records;
 
@@ -200,70 +263,13 @@ rdc_status_t RdcRocpBase::map_entity_to_profiler() {
   return RDC_ST_OK;
 }
 
-RdcRocpBase::RdcRocpBase() {
-  // all fields
-  static const std::map<rdc_field_t, const char*> temp_field_map_k = {
-      {RDC_FI_PROF_OCCUPANCY_PERCENT, "OccupancyPercent"},
-      {RDC_FI_PROF_ACTIVE_CYCLES, "GRBM_GUI_ACTIVE"},
-      {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
-      {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
-      {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT,
-       "MfmaUtil"},  // same as TENSOR_ACTIVE but available for more GPUs
-      {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},  // metric is divided by 100 to get percent
-      // metrics below are divided by time passed
-      {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
-      {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
-      {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
-      {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
-      {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
-      {RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "RDC_OPS_16_PER_SIMDCYCLE"},
-      {RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "RDC_OPS_32_PER_SIMDCYCLE"},
-      {RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "RDC_OPS_64_PER_SIMDCYCLE"},
-      // metrics below are not divided by time passed
-      {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
-      {RDC_FI_PROF_SM_ACTIVE, "VALUBusy"},
-      {RDC_FI_PROF_OCC_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
-      {RDC_FI_PROF_OCC_ELAPSED, "GRBM_GUI_ACTIVE"},  // this metric is derived from
-                                                     // OCC_PER_ACTIVE_CU and ACTIVE_CYCLES
-      {RDC_FI_PROF_CPC_CPC_STAT_BUSY, "CPC_CPC_STAT_BUSY"},
-      {RDC_FI_PROF_CPC_CPC_STAT_IDLE, "CPC_CPC_STAT_IDLE"},
-      {RDC_FI_PROF_CPC_CPC_STAT_STALL, "CPC_CPC_STAT_STALL"},
-      {RDC_FI_PROF_CPC_CPC_TCIU_BUSY, "CPC_CPC_TCIU_BUSY"},
-      {RDC_FI_PROF_CPC_CPC_TCIU_IDLE, "CPC_CPC_TCIU_IDLE"},
-      {RDC_FI_PROF_CPC_CPC_UTCL2IU_BUSY, "CPC_CPC_UTCL2IU_BUSY"},
-      {RDC_FI_PROF_CPC_CPC_UTCL2IU_IDLE, "CPC_CPC_UTCL2IU_IDLE"},
-      {RDC_FI_PROF_CPC_CPC_UTCL2IU_STALL, "CPC_CPC_UTCL2IU_STALL"},
-      {RDC_FI_PROF_CPC_ME1_BUSY_FOR_PACKET_DECODE, "CPC_ME1_BUSY_FOR_PACKET_DECODE"},
-      {RDC_FI_PROF_CPC_ME1_DC0_SPI_BUSY, "CPC_ME1_DC0_SPI_BUSY"},
-      {RDC_FI_PROF_CPC_UTCL1_STALL_ON_TRANSLATION, "CPC_UTCL1_STALL_ON_TRANSLATION"},
-      {RDC_FI_PROF_CPC_ALWAYS_COUNT, "CPC_ALWAYS_COUNT"},
-      {RDC_FI_PROF_CPC_ADC_VALID_CHUNK_NOT_AVAIL, "CPC_ADC_VALID_CHUNK_NOT_AVAIL"},
-      {RDC_FI_PROF_CPC_ADC_DISPATCH_ALLOC_DONE, "CPC_ADC_DISPATCH_ALLOC_DONE"},
-      {RDC_FI_PROF_CPC_ADC_VALID_CHUNK_END, "CPC_ADC_VALID_CHUNK_END"},
-      {RDC_FI_PROF_CPC_SYNC_FIFO_FULL_LEVEL, "CPC_SYNC_FIFO_FULL_LEVEL"},
-      {RDC_FI_PROF_CPC_SYNC_FIFO_FULL, "CPC_SYNC_FIFO_FULL"},
-      {RDC_FI_PROF_CPC_GD_BUSY, "CPC_GD_BUSY"},
-      {RDC_FI_PROF_CPC_TG_SEND, "CPC_TG_SEND"},
-      {RDC_FI_PROF_CPC_WALK_NEXT_CHUNK, "CPC_WALK_NEXT_CHUNK"},
-      {RDC_FI_PROF_CPC_STALLED_BY_SE0_SPI, "CPC_STALLED_BY_SE0_SPI"},
-      {RDC_FI_PROF_CPC_STALLED_BY_SE1_SPI, "CPC_STALLED_BY_SE1_SPI"},
-      {RDC_FI_PROF_CPC_STALLED_BY_SE2_SPI, "CPC_STALLED_BY_SE2_SPI"},
-      {RDC_FI_PROF_CPC_STALLED_BY_SE3_SPI, "CPC_STALLED_BY_SE3_SPI"},
-      {RDC_FI_PROF_CPC_LTE_ALL, "CPC_LTE_ALL"},
-      {RDC_FI_PROF_CPC_SYNC_WRREQ_FIFO_BUSY, "CPC_SYNC_WRREQ_FIFO_BUSY"},
-      {RDC_FI_PROF_CPC_CANE_BUSY, "CPC_CANE_BUSY"},
-      {RDC_FI_PROF_CPC_CANE_STALL, "CPC_CANE_STALL"},
-      {RDC_FI_PROF_CPF_CMP_UTCL1_STALL_ON_TRANSLATION, "CPF_CMP_UTCL1_STALL_ON_TRANSLATION"},
-      {RDC_FI_PROF_CPF_CPF_STAT_BUSY, "CPF_CPF_STAT_BUSY"},
-      {RDC_FI_PROF_CPF_CPF_STAT_IDLE, "CPF_CPF_STAT_IDLE"},
-      {RDC_FI_PROF_CPF_CPF_STAT_STALL, "CPF_CPF_STAT_STALL"},
-      {RDC_FI_PROF_CPF_CPF_TCIU_BUSY, "CPF_CPF_TCIU_BUSY"},
-      {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
-      {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
-      {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
-      {RDC_FI_PROF_UUID, "SQ_WAVES"},    // dummy value,
-      {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
-  };
+void RdcRocpBase::init_rocp_if_not() {
+  if (m_is_initialized) {
+    return;
+  }
+
+  // ensure initialization is attempted only once, even if it fails
+  m_is_initialized = true;
 
   hsa_status_t status = hsa_init();
   if (status != HSA_STATUS_SUCCESS) {
@@ -314,6 +320,19 @@ RdcRocpBase::RdcRocpBase() {
   RDC_LOG(RDC_DEBUG, "Profiler supports " << field_to_metric.size() << " fields");
 }
 
+RdcRocpBase::RdcRocpBase() {
+  // To verify if a field is actually supported by rocprofiler,
+  // initialization and agent querying are required.
+  // This initialization is deferred until the first call to rocp_lookup.
+  // Here, we define the potential fields that rocprofiler may support,
+  // allowing get_field_ids() to return them.
+  for (const auto& [k, v] : temp_field_map_k) {
+    field_to_metric.insert({k, v});
+  }
+
+  RDC_LOG(RDC_DEBUG, "Rocprofiler by default supports " << field_to_metric.size() << " fields");
+}
+
 RdcRocpBase::~RdcRocpBase() {
   hsa_status_t status = HSA_STATUS_SUCCESS;
   status = hsa_shut_down();
@@ -334,6 +353,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
   if (data == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
+
+  init_rocp_if_not();
 
   const bool is_eval_field = (eval_fields.find(field) != eval_fields.end());
 

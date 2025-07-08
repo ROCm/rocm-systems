@@ -83,10 +83,12 @@ RdcRVSBase::RdcRVSBase() {
 
   RDC_LOG(RDC_DEBUG, "RVS CONFIG PATH: " << config_path);
 
-  // populate configs
-  for (auto& ent : std::filesystem::directory_iterator(config_path)) {
-    if (ent.is_regular_file()) {
-      _rvs_config_list.push_back(ent.path().string());
+  if (std::filesystem::exists(config_path)  && std::filesystem::is_directory(config_path)) {
+    // populate configs
+    for (auto& ent : std::filesystem::directory_iterator(config_path)) {
+      if (ent.is_regular_file()) {
+        _rvs_config_list.push_back(ent.path().string());
+      }
     }
   }
 

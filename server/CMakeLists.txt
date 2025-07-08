@@ -40,8 +40,10 @@ message("")
 # See:
 # - https://github.com/llvm/llvm-project/issues/102443
 # - https://github.com/abseil/abseil-cpp/issues/1747
-if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL
-                                              18.0.0)
+if(
+    CMAKE_CXX_COMPILER_ID STREQUAL "Clang"
+    AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 18.0.0
+)
     message("Compiler is " ${CMAKE_CXX_COMPILER_ID} ":" ${CMAKE_CXX_COMPILER_VERSION})
     message("Applying abi patch...")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fclang-abi-compat=17")
@@ -55,13 +57,22 @@ file(GLOB PROTOBUF_GENERATED_INCLUDES "${PROTOB_OUT_DIR}/*.h")
 file(GLOB PROTOBUF_GENERATED_SRCS "${PROTOB_OUT_DIR}/*.cc")
 
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}/include "${PROJECT_SOURCE_DIR}/include" "${GRPC_ROOT}/include"
-    "${PROTOB_OUT_DIR}" "${AMD_SMI_INCLUDE_DIR}" "${PROJECT_SOURCE_DIR}")
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    "${PROJECT_SOURCE_DIR}/include"
+    "${GRPC_ROOT}/include"
+    "${PROTOB_OUT_DIR}"
+    "${AMD_SMI_INCLUDE_DIR}"
+    "${PROJECT_SOURCE_DIR}"
+)
 
 set(SERVER_SRC_LIST
-    "${COMMON_DIR}/rdc_capabilities.cc" "${COMMON_DIR}/rdc_utils.cc" "${PROTOBUF_GENERATED_SRCS}"
-    "${SRC_DIR}/rdc_admin_service.cc" "${SRC_DIR}/rdc_api_service.cc"
-    "${SRC_DIR}/rdc_server_main.cc")
+    "${COMMON_DIR}/rdc_capabilities.cc"
+    "${COMMON_DIR}/rdc_utils.cc"
+    "${PROTOBUF_GENERATED_SRCS}"
+    "${SRC_DIR}/rdc_admin_service.cc"
+    "${SRC_DIR}/rdc_api_service.cc"
+    "${SRC_DIR}/rdc_server_main.cc"
+)
 message("SERVER_SRC_LIST=${SERVER_SRC_LIST}")
 
 set(SERVER_DAEMON_EXE "rdcd")
@@ -76,8 +87,10 @@ add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 target_compile_definitions(${SERVER_DAEMON_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})
 
 # help find librdc_bootstrap.so at runtime
-set_target_properties(${SERVER_DAEMON_EXE}
-                      PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib")
+set_target_properties(
+    ${SERVER_DAEMON_EXE}
+    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib"
+)
 
 target_link_libraries(
     ${SERVER_DAEMON_EXE}
@@ -87,7 +100,8 @@ target_link_libraries(
     cap
     dl
     amd_smi
-    rdc_bootstrap)
+    rdc_bootstrap
+)
 
 install(
     TARGETS ${SERVER_DAEMON_EXE}
@@ -100,15 +114,18 @@ install(
         WORLD_READ
         WORLD_EXECUTE
     DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT ${SERVER_COMPONENT})
+    COMPONENT ${SERVER_COMPONENT}
+)
 install(
     FILES ${PROJECT_BINARY_DIR}/${SERVICE_FILE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
-    COMPONENT ${SERVER_COMPONENT})
+    COMPONENT ${SERVER_COMPONENT}
+)
 install(
     FILES ${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FILE}
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/conf
-    COMPONENT ${SERVER_COMPONENT})
+    COMPONENT ${SERVER_COMPONENT}
+)
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Server                          ")
