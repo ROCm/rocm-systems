@@ -105,6 +105,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Analysis of new workloads might require providing shader/memory clock speed using
 --specs-correction operation if `amd-smi` or `rocminfo` does not provide clock speeds.
 
+* Memory chart on CLI might look corrupted if CLI width is too narrow
+
 ### Removed
 
 * Roofline support for Ubuntu 20.04 and SLES below 15.6

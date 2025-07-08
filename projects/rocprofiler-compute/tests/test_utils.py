@@ -2620,6 +2620,8 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
         def __init__(self):
             self.gpu_model = "mi250x"
             self._l2_banks = 32
+            self.gpu_arch = "gfx90a"
+            self.compute_partition = "CPX"
 
     mspec = MockSpec()
 
@@ -2661,6 +2663,8 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2704,11 +2708,17 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
 
-    profiler_options = {"APP_CMD": ["./test_app"], "ROCPROF_OUTPUT_PATH": workload_dir}
+    profiler_options = {
+        "APP_CMD": ["./test_app"],
+        "ROCPROF_OUTPUT_PATH": workload_dir,
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    }
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
     monkeypatch.setattr(
@@ -2748,6 +2758,8 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2762,6 +2774,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}})
 
     import utils.utils as utils_mod
 
@@ -2785,7 +2798,9 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
 
     class MockSpec:
         def __init__(self):
-            self.gpu_model = "mi250x"
+            self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2831,6 +2846,8 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     class MockSpec:
         def __init__(self):
             self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2880,7 +2897,9 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
 
     class MockSpec:
         def __init__(self):
-            self.gpu_model = "mi250x"
+            self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2930,7 +2949,9 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
 
     class MockSpec:
         def __init__(self):
-            self.gpu_model = "mi250x"
+            self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -2969,7 +2990,9 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     class MockSpec:
         def __init__(self):
-            self.gpu_model = "mi250x"
+            self.gpu_model = "mi300x"
+            self.gpu_arch = "gfx942"
+            self.compute_partition = "SPX"
             self._l2_banks = 32
 
     mspec = MockSpec()
@@ -3156,169 +3179,127 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
             return mock_fname_path_obj
         return mock_fname_path_obj
-
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
-
-    original_env_var = "original_value"
-    monkeypatch.setenv("EXISTING_VAR", original_env_var)
-    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)
-
-    profiler_options = {"APP_CMD": "my_app --arg"}
-    mspec = MockMSpec(gpu_model="mi250")
-    loglevel = logging.DEBUG
-    format_rocprof_output = True
-
-    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
-    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
-    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
-    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options.copy(),
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-
-    assert (
-        capture_subprocess_called_with_env is not None
-    ), "new_env should have been created"
-    assert (
-        "EXISTING_VAR" in capture_subprocess_called_with_env
-    ), "new_env should be a copy of os.environ"
-    assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
-    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
-    assert "APP_CMD" not in capture_subprocess_called_with_env
-
-
-def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
-    """
-    Covers:
-    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options: process_hip_trace_output(...)
-    Line 4 (CLI): if "--kokkos-trace" in options: process_kokkos_trace_output(...)
-    Line 5 (CLI): elif "--hip-trace" in options: process_hip_trace_output(...)
-    """
-    fname_str = str(tmp_path / "counters.txt")
-    pathlib.Path(fname_str).touch()
-    fbase_str = "counters"
-    workload_dir_str = str(tmp_path)
-    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
-
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success")
-    )
-    monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output",
-        lambda *a, **k: [str(tmp_path / "results1.csv")],
-    )
-
-    hip_trace_called_with = None
-
-    def mock_hip_trace(wd, fb):
-        nonlocal hip_trace_called_with
-        hip_trace_called_with = (wd, fb)
-
-    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)
-
-    kokkos_trace_called_with = None
-
-    def mock_kokkos_trace(wd, fb):
-        nonlocal kokkos_trace_called_with
-        kokkos_trace_called_with = (wd, fb)
-
-    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)
-
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])
-
-    mock_fname_path_obj = mock.Mock(spec=pathlib.Path)
-    mock_fname_path_obj.stem = fbase_str
-    mock_fname_path_obj.name = "counters.txt"
-    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
-
-    mock_out_path_obj = mock.Mock(spec=pathlib.Path)
-    mock_out_path_obj.exists.return_value = True
-
-    def path_side_effect(p_arg, *args):
-        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt":
-            return mock_fname_path_obj
-        if isinstance(p_arg, str) and p_arg.endswith("/out"):
-            return mock_out_path_obj
-        if isinstance(p_arg, str) and p_arg.endswith("counters.txt"):
-            return mock_fname_path_obj
-        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
-            return mock_fname_path_obj
-        return mock_fname_path_obj
-
-    monkeypatch.setattr("utils.utils.path", path_side_effect)
-
-    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
-    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
-    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
-    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)
-    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)
-
-    mspec = MockMSpec()
-    loglevel = logging.INFO
-    format_rocprof_output = True
-
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
-
-    profiler_options_sdk_hip = {"APP_CMD": "my_app", "ROCPROF_HIP_RUNTIME_API_TRACE": "1"}
-    hip_trace_called_with = None
-    kokkos_trace_called_with = None
-
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options_sdk_hip.copy(),
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)
-    assert kokkos_trace_called_with is None
-
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")
-
-    profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]
-    hip_trace_called_with = None
-    kokkos_trace_called_with = None
-
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options_cli_kokkos,
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-    assert kokkos_trace_called_with == (workload_dir_str, fbase_str)
-    assert hip_trace_called_with is None
-
-    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]
-    hip_trace_called_with = None
-    kokkos_trace_called_with = None
-
-    utils_mod.run_prof(
-        fname_str,
-        profiler_options_cli_hip,
-        workload_dir_str,
-        mspec,
-        loglevel,
-        format_rocprof_output,
-    )
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)
-    assert kokkos_trace_called_with is None
-
+    monkeypatch.setattr("utils.utils.path", path_side_effect)  
+  
+  
+    original_env_var = "original_value"  
+    monkeypatch.setenv("EXISTING_VAR", original_env_var)  
+    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)  
+  
+    profiler_options = {"APP_CMD": "my_app --arg"}  
+    mspec = MockMSpec(gpu_model="mi250")   
+    loglevel = logging.DEBUG  
+    format_rocprof_output = True  
+      
+    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})  
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)   
+  
+    utils_mod.run_prof(fname_str, profiler_options.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
+  
+    assert capture_subprocess_called_with_env is not None, "new_env should have been created"  
+    assert "EXISTING_VAR" in capture_subprocess_called_with_env, "new_env should be a copy of os.environ"  
+    assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var  
+    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env   
+    assert "APP_CMD" not in capture_subprocess_called_with_env  
+    
+def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):  
+    """  
+    Covers:  
+    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options: process_hip_trace_output(...)  
+    Line 4 (CLI): if "--kokkos-trace" in options: process_kokkos_trace_output(...)  
+    Line 5 (CLI): elif "--hip-trace" in options: process_hip_trace_output(...)  
+    """  
+    fname_str = str(tmp_path / "counters.txt")  
+    pathlib.Path(fname_str).touch()  
+    fbase_str = "counters"  
+    workload_dir_str = str(tmp_path)  
+    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)  
+  
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success"))  
+    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [str(tmp_path / "results1.csv")])  
+      
+    hip_trace_called_with = None  
+    def mock_hip_trace(wd, fb):  
+        nonlocal hip_trace_called_with  
+        hip_trace_called_with = (wd, fb)  
+    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)  
+  
+    kokkos_trace_called_with = None  
+    def mock_kokkos_trace(wd, fb):  
+        nonlocal kokkos_trace_called_with  
+        kokkos_trace_called_with = (wd, fb)  
+    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)  
+      
+    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)  
+    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])  
+  
+    mock_fname_path_obj = mock.MagicMock(spec=pathlib.Path)  
+    mock_fname_path_obj.stem = fbase_str  
+    mock_fname_path_obj.name = "counters.txt"  
+    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False  
+    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=pathlib.Path)  
+      
+    mock_out_path_obj = mock.MagicMock(spec=pathlib.Path)  
+    mock_out_path_obj.exists.return_value = True  
+  
+    def path_side_effect(p_arg, *args):  
+        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt": return mock_fname_path_obj  
+        if isinstance(p_arg, str) and p_arg.endswith("/out"): return mock_out_path_obj  
+        if isinstance(p_arg, str) and p_arg.endswith("counters.txt"): return mock_fname_path_obj  
+        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, 'with_suffix'): return mock_fname_path_obj  
+        return mock_fname_path_obj   
+    monkeypatch.setattr("utils.utils.path", path_side_effect)  
+  
+    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})   
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
+    monkeypatch.setattr('builtins.open', lambda *a, **k: io.StringIO(""))
+    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)  
+    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)  
+  
+    mspec = MockMSpec()  
+    loglevel = logging.INFO  
+    format_rocprof_output = True  
+  
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")  
+    monkeypatch.setattr("utils.utils.using_v3", lambda: True)  
+      
+    profiler_options_sdk_hip = {  
+        "APP_CMD": "my_app",  
+        "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+    }  
+    hip_trace_called_with = None   
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_sdk_hip.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
+    assert kokkos_trace_called_with is None  
+  
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")   
+      
+    profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]  
+    hip_trace_called_with = None   
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_cli_kokkos, workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert kokkos_trace_called_with == (workload_dir_str, fbase_str)  
+    assert hip_trace_called_with is None  
+        
+    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]  
+    hip_trace_called_with = None  
+    kokkos_trace_called_with = None  
+  
+    utils_mod.run_prof(fname_str, profiler_options_cli_hip, workload_dir_str, mspec, loglevel, format_rocprof_output)  
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
+    assert kokkos_trace_called_with is None  
 
 # =============================================================================
 # ROCPROFV3 OUTPUT PROCESSING TESTS
@@ -8783,285 +8764,6 @@ def test_extract_counter_info_returns_counter_when_found():
     assert extracted_counter2 is not None
     assert extracted_counter2 == counter2_details
 
-
-# =============================================================================
-# Test add_counter_from_source_to_target_extra_config_input_yaml valueError cases
-# =============================================================================
-
-
-def test_add_counter_from_source_value_error_counter_not_found():
-    """
-    Test that add_counter_from_source_to_target_extra_config_input_yaml
-    raises ValueError if the counter_name is not found in source_data.
-    """
-    source_data_empty = {}
-    source_data_with_other_counters = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {
-                    "name": "OTHER_COUNTER",
-                    "description": "desc",
-                    "definitions": [{"architectures": ["gfx900"], "expression": "expr"}],
-                }
-            ]
-        }
-    }
-    target_data = {}
-    counter_name_to_find = "MISSING_COUNTER"
-
-    with pytest.raises(
-        ValueError, match=f"Counter '{counter_name_to_find}' not found in source data"
-    ):
-        utils.add_counter_from_source_to_target_extra_config_input_yaml(
-            source_data_empty, target_data, counter_name_to_find
-        )
-
-    with pytest.raises(
-        ValueError, match=f"Counter '{counter_name_to_find}' not found in source data"
-    ):
-        utils.add_counter_from_source_to_target_extra_config_input_yaml(
-            source_data_with_other_counters, target_data, counter_name_to_find
-        )
-
-
-def test_add_counter_from_source_value_error_no_definitions():
-    """
-    Test that add_counter_from_source_to_target_extra_config_input_yaml
-    raises ValueError if the found counter has no 'definitions'.
-    """
-    counter_name_no_defs = "COUNTER_NO_DEFS"
-    source_data_no_defs = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {
-                    "name": counter_name_no_defs,
-                    "description": "A counter without definitions",
-                    "properties": ["prop1"],
-                }
-            ]
-        }
-    }
-    source_data_empty_defs_list = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {
-                    "name": counter_name_no_defs,
-                    "description": "A counter with empty definitions list",
-                    "properties": ["prop1"],
-                    "definitions": [],
-                }
-            ]
-        }
-    }
-    target_data = {}
-
-    with pytest.raises(
-        ValueError, match=f"Counter '{counter_name_no_defs}' has no definitions"
-    ):
-        utils.add_counter_from_source_to_target_extra_config_input_yaml(
-            source_data_no_defs, target_data, counter_name_no_defs
-        )
-
-    with pytest.raises(
-        ValueError, match=f"Counter '{counter_name_no_defs}' has no definitions"
-    ):
-        utils.add_counter_from_source_to_target_extra_config_input_yaml(
-            source_data_empty_defs_list, target_data, counter_name_no_defs
-        )
-
-
-def test_add_counter_from_source_success():
-    """
-    Test successful addition of a counter from source to target.
-    """
-    counter_name = "MY_VALID_COUNTER"
-    source_data = {
-        "rocprofiler-sdk": {
-            "counters": [
-                {
-                    "name": counter_name,
-                    "description": "Valid Counter Description",
-                    "properties": ["propA", "propB"],
-                    "definitions": [
-                        {
-                            "architectures": ["gfx900", "gfx906"],
-                            "expression": "SOME_EXPRESSION",
-                        }
-                    ],
-                }
-            ]
-        }
-    }
-    target_data_initial = {}
-
-    updated_target_data = utils.add_counter_from_source_to_target_extra_config_input_yaml(
-        source_data, target_data_initial, counter_name
-    )
-
-    assert "rocprofiler-sdk" in updated_target_data
-    assert "counters" in updated_target_data["rocprofiler-sdk"]
-    assert len(updated_target_data["rocprofiler-sdk"]["counters"]) == 1
-
-    added_counter = updated_target_data["rocprofiler-sdk"]["counters"][0]
-    assert added_counter["name"] == counter_name
-    assert added_counter["description"] == "Valid Counter Description"
-    assert added_counter["properties"] == ["propA", "propB"]
-    assert len(added_counter["definitions"]) == 1
-    assert added_counter["definitions"][0]["architectures"] == ["gfx900", "gfx906"]
-    assert added_counter["definitions"][0]["expression"] == "SOME_EXPRESSION"
-
-    target_data_existing = {
-        "rocprofiler-sdk": {
-            "counters-schema-version": 1,
-            "counters": [
-                {
-                    "name": "EXISTING_ONE",
-                    "description": "desc",
-                    "properties": [],
-                    "definitions": [{"architectures": [], "expression": ""}],
-                }
-            ],
-        }
-    }
-    updated_target_data_existing = (
-        utils.add_counter_from_source_to_target_extra_config_input_yaml(
-            source_data, target_data_existing, counter_name
-        )
-    )
-    assert len(updated_target_data_existing["rocprofiler-sdk"]["counters"]) == 2
-    found_newly_added = False
-    for c in updated_target_data_existing["rocprofiler-sdk"]["counters"]:
-        if c["name"] == counter_name:
-            found_newly_added = True
-            assert c["description"] == "Valid Counter Description"
-            break
-    assert found_newly_added
-
-
-def test_is_spi_pipe_counter_returns_true_when_a_pattern_matches(monkeypatch):
-    """
-    Tests that is_spi_pipe_counter returns True if the counter name
-    matches at least one regex in spi_pipe_counter_regexs.
-    """
-    sample_regexs = [r"SQ_WAVE_CYCLES", r"TA_DATA_STALL_([A-Z_]+)", r"TCP_BUSY"]
-
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", sample_regexs)
-
-    counter_matches_first = "SQ_WAVE_CYCLES"
-    assert (
-        utils.is_spi_pipe_counter(counter_matches_first) is True
-    ), f"Expected True for '{counter_matches_first}'"
-
-    counter_matches_second = "TA_DATA_STALL_SPI_BUSY"
-    assert (
-        utils.is_spi_pipe_counter(counter_matches_second) is True
-    ), f"Expected True for '{counter_matches_second}'"
-
-    counter_matches_third = "TCP_BUSY_STATE"  # "TCP_BUSY" is a prefix
-    assert (
-        utils.is_spi_pipe_counter(counter_matches_third) is True
-    ), f"Expected True for '{counter_matches_third}'"
-
-    non_matching_counter = "SOME_OTHER_COUNTER"
-    assert (
-        utils.is_spi_pipe_counter(non_matching_counter) is False
-    ), f"Expected False for '{non_matching_counter}' with the test regexes"
-
-
-# =============================================================================
-# test get_base_spi_pipe_counter
-# =============================================================================
-
-
-def test_get_base_spi_counter_match_found_returns_group1(monkeypatch):
-    """
-    Covers:
-    - for pattern in spi_pipe_counter_regexs: (iterates)
-    - match = re.match(pattern, counter) (gets a match object)
-    - if match: (condition is True)
-    - return match.group(1) (executes and returns)
-    """
-    sample_regexs = [
-        r"UNRELATED_PATTERN_([A-Z]+)",
-        r"PREFIX_([A-Z0-9_]+)_SUFFIX",
-        r"ANOTHER_PATTERN_(.*)",
-    ]
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", sample_regexs)
-
-    counter_name = "PREFIX_MY_BASE_COUNTER_SUFFIX"
-    expected_base = "MY_BASE_COUNTER"
-
-    result = utils.get_base_spi_pipe_counter(counter_name)
-    assert result == expected_base, f"Expected '{expected_base}', got '{result}'"
-
-
-def test_get_base_spi_counter_no_match_returns_empty_string(monkeypatch):
-    """
-    Covers:
-    - for pattern in spi_pipe_counter_regexs: (iterates through all)
-    - match = re.match(pattern, counter) (match is None for all patterns)
-    - if match: (condition is always False)
-    - return "" (executes after loop finishes)
-    """
-    sample_regexs = [r"PATTERN_A_([A-Z]+)", r"PATTERN_B_([0-9]+)"]
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", sample_regexs)
-
-    counter_name = "UNRELATED_COUNTER_NAME"
-    expected_base = ""
-
-    result = utils.get_base_spi_pipe_counter(counter_name)
-    assert result == expected_base, f"Expected empty string, got '{result}'"
-
-
-def test_get_base_spi_counter_empty_regex_list_returns_empty_string(monkeypatch):
-    """
-    Covers:
-    - for pattern in spi_pipe_counter_regexs: (loop does not run)
-    - return "" (executes immediately after non-loop)
-    """
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", [])
-
-    counter_name = "ANY_COUNTER_NAME"
-    expected_base = ""
-
-    result = utils.get_base_spi_pipe_counter(counter_name)
-    assert (
-        result == expected_base
-    ), f"Expected empty string for empty regex list, got '{result}'"
-
-
-def test_get_base_spi_counter_match_but_no_group1_raises_indexerror(monkeypatch):
-    """
-    Covers:
-    - for pattern in spi_pipe_counter_regexs: (iterates)
-    - match = re.match(pattern, counter) (gets a match object)
-    - if match: (condition is True)
-    - return match.group(1) (this line will be attempted and raise IndexError)
-    This test verifies the behavior of the code as written when a pattern matches
-    but doesn't have a capturing group 1.
-    """
-    sample_regexs = [r"SIMPLE_MATCH_PATTERN"]
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", sample_regexs)
-
-    counter_name = "SIMPLE_MATCH_PATTERN_EXTRA"
-
-    with pytest.raises(IndexError, match="no such group"):
-        utils.get_base_spi_pipe_counter(counter_name)
-
-
-def test_get_base_spi_counter_match_with_group0_only_raises_indexerror(monkeypatch):
-    """
-    Similar to the above, but explicitly tests a regex that produces a match object
-    where group(0) exists but group(1) does not.
-    Covers the same lines as test_get_base_spi_counter_match_but_no_group1_raises_indexerror.
-    """
-    sample_regexs = [r"MY_WHOLE_MATCH_STRING"]
-    monkeypatch.setattr(utils, "spi_pipe_counter_regexs", sample_regexs)
-
-    counter_name = "MY_WHOLE_MATCH_STRING"
-
-    with pytest.raises(IndexError, match="no such group"):
-        utils.get_base_spi_pipe_counter(counter_name)
 
 
 # =============================================================================

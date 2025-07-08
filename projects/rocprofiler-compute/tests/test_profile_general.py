@@ -1621,11 +1621,6 @@ def test_block_SPI(binary_handler_profile_rocprof_compute):
             "pmc_perf_0.csv",
             "pmc_perf_1.csv",
             "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
             "sysinfo.csv",
         ]
 
