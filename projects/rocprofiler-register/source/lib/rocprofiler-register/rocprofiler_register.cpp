@@ -47,6 +47,7 @@
 extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
+#pragma weak rocprofiler_queue_set_api_table
 #pragma weak rocprofiler_register_import_hip
 #pragma weak rocprofiler_register_import_hip_static
 #pragma weak rocprofiler_register_import_hip_compiler
@@ -82,6 +83,9 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 
 extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
+
+extern int
+rocprofiler_queue_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern void
 rocprofv3_attach(void);
@@ -121,6 +125,7 @@ using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
 using rocp_set_api_table_data_t   = std::tuple<void*, rocprofiler_set_api_table_t>;
 using rocprofv3_attach_t = decltype(::rocprofv3_attach)*;
 using rocprofv3_detach_t = decltype(::rocprofv3_detach)*;
+using rocprofiler_queue_set_api_table_t = decltype(::rocprofiler_queue_set_api_table)*;
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
 static_assert(sizeof(bitset_t) ==
@@ -129,8 +134,14 @@ static_assert(sizeof(bitset_t) ==
 
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
-constexpr auto rocprofiler_lib_register_attach_entrypoint = "rocprofv3_attach";
-constexpr auto rocprofiler_lib_register_detach_entrypoint = "rocprofv3_detach";
+
+constexpr auto rocprofiler_queue_lib_name                = "librocprofiler-sdk-queue.so";
+constexpr auto rocprofiler_queue_lib_register_entrypoint = "rocprofiler_queue_set_api_table";
+
+constexpr auto rocprofiler_tool_lib_name              = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
+constexpr auto rocprofiler_tool_lib_attach_entrypoint = "rocprofv3_attach";
+constexpr auto rocprofiler_tool_lib_detach_entrypoint = "rocprofv3_detach";
+
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
 
@@ -661,8 +672,40 @@ rocprofiler_register_library_api_table(
 
         if(reginfo) (*reginfo)->propagated = true;
     }
-    else
+    else if(
+        _import_match->library_idx == ROCP_REG_HSA &&
+        // TODO: default to false for release
+        // TODO: finalize envvar name
+        common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
     {
+        void* queuelibrary = rocp_load_rocprofiler_other_lib(rocprofiler_queue_lib_name);
+        if (!queuelibrary)
+        {
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but the queue library was not found or able to be loaded. The attaching profiler will not be able to profile anything that requires proxy queues.";
+            return ROCP_REG_NO_TOOLS;
+        }
+        rocprofiler_queue_set_api_table_t rocprofiler_queue_set_api_table_fn;
+        *(void**) (&rocprofiler_queue_set_api_table_fn) =
+            dlsym(queuelibrary, rocprofiler_queue_lib_register_entrypoint);
+        
+        if (!rocprofiler_queue_set_api_table_fn)
+        {
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but the queue library's entry point was not found. The attaching profiler will not be able to profile anything that requires proxy queues.";
+            return ROCP_REG_NO_TOOLS;
+        }
+
+        auto _ret = rocprofiler_queue_set_api_table_fn(
+            common_name, lib_version, _instance_val, api_tables, api_table_length);
+        if (_ret != 0)
+        {
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but queue library registration returned an error: " << _ret << ". The attaching profiler may not be able to profile anything that requires proxy queues.";
+            return ROCP_REG_ROCPROFILER_ERROR;
+        }
+
+        LOG(INFO) << "Successfully registered for proxy queue creation";
+
+        return ROCP_REG_NO_TOOLS;
+    } else {
         return ROCP_REG_NO_TOOLS;
     }
 
@@ -752,7 +795,7 @@ rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer)
 {
     LOG(INFO) << "rocprofiler_register_attach started";
-    void* toollibrary = rocp_load_rocprofiler_other_lib("rocprofiler-sdk/librocprofiler-sdk-tool.so");
+    void* toollibrary = rocp_load_rocprofiler_other_lib(rocprofiler_tool_lib_name);
 
     if (!toollibrary)
     {
@@ -764,7 +807,7 @@ rocprofiler_register_attach(const char* environment_buffer)
 
     rocprofv3_attach_t rocprofv3_attach_fn;
     *(void**) (&rocprofv3_attach_fn) =
-        dlsym(toollibrary, rocprofiler_lib_register_attach_entrypoint);
+        dlsym(toollibrary, rocprofiler_tool_lib_attach_entrypoint);
     
     if (rocprofv3_attach_fn)
     {
@@ -788,7 +831,7 @@ rocprofiler_register_error_code_t
 rocprofiler_register_detach()
 {
     LOG(INFO) << "rocprofiler_register_detach started";
-    void* toollibrary = rocp_load_rocprofiler_other_lib("rocprofiler-sdk/librocprofiler-sdk-tool.so");
+    void* toollibrary = rocp_load_rocprofiler_other_lib(rocprofiler_tool_lib_name);
 
     if (!toollibrary)
     {
@@ -797,7 +840,7 @@ rocprofiler_register_detach()
 
     rocprofv3_detach_t rocprofv3_detach_fn;
     *(void**) (&rocprofv3_detach_fn) =
-        dlsym(toollibrary, rocprofiler_lib_register_detach_entrypoint);
+        dlsym(toollibrary, rocprofiler_tool_lib_detach_entrypoint);
     
     if (rocprofv3_detach_fn)
     {
