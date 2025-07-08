@@ -1196,7 +1196,7 @@ def load_pc_sampling_data_per_kernel(
             next_index = i + 1
             if next_index < len(filtered_sorted_list):  # Ensure the next item exists
                 next_item = filtered_sorted_list[next_index]
-                kernel_info["potential_end_offset"] = item[
+                kernel_info["potential_end_offset"] = next_item[
                     "kernel_code_entry_byte_offset"
                 ]
             else:

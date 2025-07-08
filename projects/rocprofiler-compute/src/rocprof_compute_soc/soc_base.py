@@ -513,6 +513,7 @@ class OmniSoC_Base:
                 )
             )
             from rocprofv3_avail_module import avail
+
             avail.loadLibrary.libname = str(
                 Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
                 / "libexec"
