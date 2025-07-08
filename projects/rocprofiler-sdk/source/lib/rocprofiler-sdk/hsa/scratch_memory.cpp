@@ -474,7 +474,7 @@ impl(Args... args)
                 }
             });
 
-        ROCP_FATAL_IF(!found_agent) << fmt::format(
+        ROCP_DFATAL_IF(!found_agent) << fmt::format(
             "Scratch memory tracing: Could not find a valid agent for queue id {}", hsa_queue->id);
         return _agent_id;
     };
