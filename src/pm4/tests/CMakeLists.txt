@@ -77,3 +77,77 @@ gtest_add_tests(
 set_tests_properties(
     ${gfx9-command-builder-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add a SPM builder test
+add_executable(spm-builder-test)
+SET(AQLPROFILE_SPM_BUILDER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/spm_builder_test.cpp
+)
+target_sources(spm-builder-test PRIVATE ${AQLPROFILE_SPM_BUILDER_SOURCES})
+target_include_directories(spm-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    spm-builder-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)
+
+gtest_add_tests(
+    TARGET spm-builder-test
+    SOURCES ${AQLPROFILE_SPM_BUILDER_SOURCES}
+    TEST_LIST spm-builder-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${spm-builder-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add a test for trace config
+add_executable(trace-config-test)
+SET(AQLPROFILE_TRACE_CONFIG_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/trace_config_test.cpp
+)
+target_sources(trace-config-test PRIVATE ${AQLPROFILE_TRACE_CONFIG_SOURCES})
+target_include_directories(trace-config-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    trace-config-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)
+
+gtest_add_tests(
+    TARGET trace-config-test
+    SOURCES ${AQLPROFILE_TRACE_CONFIG_SOURCES}
+    TEST_LIST trace-config-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${trace-config-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add a test for sqtt builder
+add_executable(sqtt-builder-test)
+SET(AQLPROFILE_SQTT_BUILDER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/sqtt_builder_tests.cpp
+)
+target_sources(sqtt-builder-test PRIVATE ${AQLPROFILE_SQTT_BUILDER_SOURCES})
+target_include_directories(sqtt-builder-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    sqtt-builder-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)  
+gtest_add_tests(
+    TARGET sqtt-builder-test
+    SOURCES ${AQLPROFILE_SQTT_BUILDER_SOURCES}
+    TEST_LIST sqtt-builder-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${sqtt-builder-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
