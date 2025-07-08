@@ -107,6 +107,16 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.5"
             rocm-version: "6.4"
+          # RHEL 9.6
+          - os-distro: "rhel"
+            os-version: "9.6"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.6"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.6"
+            rocm-version: "6.4"
 
     steps:
       - name: Free Disk Space
