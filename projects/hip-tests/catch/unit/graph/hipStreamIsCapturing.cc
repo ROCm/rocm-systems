@@ -53,15 +53,64 @@ TEST_CASE("Unit_hipStreamIsCapturing_Negative_Parameters") {
     HIP_CHECK_ERROR(hipStreamIsCapturing(stream, nullptr), hipErrorInvalidValue);
   }
 
-  SECTION("Check capture status when checked on null stream") {
+  SECTION("Check capture status when checked on different streams") {
     hipStreamCaptureStatus cStatus;
     hipGraph_t graph{nullptr};
-
-    HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-    HIP_CHECK_ERROR(hipStreamIsCapturing(nullptr, &cStatus), hipErrorStreamCaptureImplicit);
+    hipStreamCaptureMode flags = GENERATE(
+        hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+    HIP_CHECK(hipStreamBeginCapture(stream, flags));
+    SECTION("Check capture status with null stream") {
+      HIP_CHECK_ERROR(hipStreamIsCapturing(nullptr, &cStatus), hipErrorStreamCaptureImplicit);
+    }
+    SECTION("Check capture status with hipStreamLegacy") {
+      HIP_CHECK_ERROR(hipStreamIsCapturing(hipStreamLegacy, &cStatus), hipErrorStreamCaptureImplicit);
+    }
+    SECTION("Check capture status with hipStreamPerThread") {
+      HIP_CHECK_ERROR(hipStreamIsCapturing(hipStreamPerThread, &cStatus), hipSuccess);
+    }
     HIP_CHECK(hipStreamEndCapture(stream, &graph));
     HIP_CHECK(hipGraphDestroy(graph));
   }
+}
+TEST_CASE("Unit_hipStreamIsCapturing_NegTst_NonBlockingStream") {
+  hipStreamCaptureStatus cStatus;
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  hipGraph_t graph{nullptr};
+  hipStreamCaptureMode flags = GENERATE(
+        hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+    HIP_CHECK(hipStreamBeginCapture(stream, flags));
+    SECTION("Check capture status with null stream") {
+      HIP_CHECK_ERROR(hipStreamIsCapturing(nullptr, &cStatus), hipSuccess);
+    }
+    SECTION("Check capture status with hipStreamLegacy") {
+      HIP_CHECK_ERROR(hipStreamIsCapturing(hipStreamLegacy, &cStatus), hipSuccess);
+    }
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamIsCapturing(stream, &cStatus));
+  REQUIRE(hipStreamCaptureStatusNone == cStatus);
+}
+TEST_CASE("Unit_hipStreamIsCapturing_NegTst_UnsupportedApi") {
+  hipStream_t stream{nullptr};
+  hipGraph_t graph{nullptr};
+  hipError_t err;
+  HIP_CHECK(hipStreamCreate(&stream));
+  unsigned int *A_mem{nullptr};
+  hipStreamCaptureMode flags = GENERATE(
+        hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream, flags));
+  hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone},
+                         captureStatus1{hipStreamCaptureStatusNone};
+  // Check the capture status of the stream
+  HIP_CHECK(hipStreamIsCapturing(stream, &captureStatus));
+  assert(captureStatus == hipStreamCaptureStatusActive);
+  err = hipMalloc(&A_mem, 1024);
+  REQUIRE(err == hipErrorStreamCaptureUnsupported);
+  HIP_CHECK(hipStreamIsCapturing(stream, &captureStatus1));
+  assert(captureStatus1 == hipStreamCaptureStatusInvalidated);
+  // End the capture
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
