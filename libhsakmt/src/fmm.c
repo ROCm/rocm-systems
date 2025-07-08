@@ -1986,7 +1986,8 @@ void *hsakmt_fmm_allocate_host(uint32_t gpu_id, uint32_t node_id, void *address,
 static int __fmm_release(vm_object_t *object, manageable_aperture_t *aperture)
 {
 	struct kfd_ioctl_free_memory_of_gpu_args args = {0};
-	int ret = 0, i;
+	int ret = 0;
+	uint32_t i;
 
 	if (!object)
 		return -EINVAL;
@@ -3100,7 +3101,8 @@ static HSAKMT_STATUS _fmm_map_to_gpu(manageable_aperture_t *aperture,
 	struct kfd_ioctl_map_memory_to_gpu_args args = {0};
 	vm_object_t *object;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-	int ret_ioctl, i;
+	int ret_ioctl;
+	uint32_t i;
 
 	if (!obj)
 		pthread_mutex_lock(&aperture->fmm_mutex);
@@ -3357,7 +3359,8 @@ static int _fmm_unmap_from_gpu(manageable_aperture_t *aperture, void *address,
 		vm_object_t *obj)
 {
 	vm_object_t *object;
-	int ret = 0, tmp_ret, i;
+	int ret = 0, tmp_ret;
+	uint32_t i;
 	struct kfd_ioctl_unmap_memory_from_gpu_args args = {0};
 	HSAuint32 page_offset = (HSAint64)address & (PAGE_SIZE - 1);
 
