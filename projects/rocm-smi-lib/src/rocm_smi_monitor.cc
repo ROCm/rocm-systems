@@ -109,7 +109,7 @@ static const char *kTempSensorTypeJunctionName = "junction";
 static const char *kTempSensorTypeEdgeName = "edge";
 
 static const char *kTempSensorTypeVddgfxName = "vddgfx";
-
+static const char *kTempSensorTypeVddboardName = "vddboard";
 
 static const std::map<std::string, rsmi_temperature_type_t>
                                                         kTempSensorNameMap = {
@@ -121,6 +121,7 @@ static const std::map<std::string, rsmi_temperature_type_t>
 static const std::map<std::string, rsmi_voltage_type_t>
                                                         kVoltSensorNameMap = {
     {kTempSensorTypeVddgfxName, RSMI_VOLT_TYPE_VDDGFX},
+    {kTempSensorTypeVddboardName, RSMI_VOLT_TYPE_VDDBOARD},
 };
 
 static const std::map<MonitorTypes, const char *> kMonitorNameMap = {
@@ -399,7 +400,13 @@ Monitor::setVoltSensorLabelMap(void) {
   };
 
   for (uint32_t i = 0; i < RSMI_VOLT_TYPE_LAST + 1; ++i) {
-    ret = add_volt_sensor_entry(i);
+    // VDDGFX -> 0, VDDNB -> 1, VDDBOARD -> 2
+    // Here the VDDNB will be skipped as it is not defined in the enum and not supported by AMD.
+    auto file_index = i;
+    if (i >= RSMI_VOLT_TYPE_VDDBOARD) {
+      file_index = i + 1;
+    }
+    ret = add_volt_sensor_entry(file_index);
     if (ret) {
       return ret;
     }
