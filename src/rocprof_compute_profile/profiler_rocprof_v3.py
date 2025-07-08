@@ -44,6 +44,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         app_cmd = shlex.split(self.get_args().remaining)
         trace_option = "--kernel-trace"
         rocprof_out_format = "json"
+        pid = ""
 
         if self.get_args().format_rocprof_output == "csv":
             rocprof_out_format = "csv"
@@ -57,6 +58,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if self.get_args().hip_trace:
             trace_option = "--hip-trace"
 
+        if self.get_args().pid:
+            pid = "--pid {}".format(str(self.get_args().pid))
+
         args = [
             # v3 requires output directory argument
             "-d",
@@ -64,6 +68,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             trace_option,
             "--output-format",
             rocprof_out_format,
+            pid,
         ]
         # Kernel filtering
         if self.get_args().kernel:
@@ -82,8 +87,11 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
             args.extend(["--kernel-iteration-range", f"[{','.join(dispatch)}]"])
-        args.append("--")
-        args.extend(app_cmd)
+
+        if not self.get_args().pid:
+            args.append("--")
+            args.extend(app_cmd)
+
         return args
 
     # -----------------------

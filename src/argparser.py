@@ -119,6 +119,15 @@ Examples:
     )
     profile_group.add_argument("--target", type=str, default=None, help=argparse.SUPPRESS)
     profile_group.add_argument(
+        "--pid",
+        type=str,
+        dest="pid",
+        metavar="",
+        default=None,
+        required=False,
+        help="\t\t\tenable attach/detach mode and set its process id.",
+    )
+    profile_group.add_argument(
         "-p",
         "--path",
         metavar="",

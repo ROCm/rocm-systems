@@ -444,6 +444,11 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
+
+            # TODO: change way of handling muliple input files
+            if "--pid" in options:
+                break
+
         if self.__pc_sampling == True and self.__profiler in (
             "rocprofv3",
             "rocprofiler-sdk",
