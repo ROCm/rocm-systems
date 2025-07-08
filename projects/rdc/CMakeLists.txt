@@ -23,57 +23,63 @@
 #
 cmake_minimum_required(VERSION 3.15)
 
-set(RDC
-    "rdc"
-    CACHE INTERNAL "")
-set(RDC_PACKAGE
-    ${RDC}
-    CACHE STRING "")
+set(RDC "rdc" CACHE INTERNAL "")
+set(RDC_PACKAGE ${RDC} CACHE STRING "")
 
 # ROCM_DIR should be passed in via command line
-set(ROCM_DIR
-    "/opt/rocm"
-    CACHE PATH "ROCm directory.")
+set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
 if(DEFINED ROCM_PATH)
     message(
-        WARNING "ROCM_PATH is not used by the build process! Did you mean to set ROCM_DIR instead?")
+        WARNING
+        "ROCM_PATH is not used by the build process! Did you mean to set ROCM_DIR instead?"
+    )
 endif()
 
 # Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
-set(CMAKE_INSTALL_LIBDIR
-    "lib"
-    CACHE STRING "Library install directory")
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
 # Usually ROCM tools are installed into /opt/rocm
-set(CMAKE_INSTALL_PREFIX
-    ${ROCM_DIR}
-    CACHE PATH "Default installation directory.")
+set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE PATH "Default installation directory.")
 
 set(CMAKE_BUILD_TYPE
     "RelWithDebInfo"
-    CACHE STRING "Choose the type of build to perform: Debug, Release, RelWithDebInfo, MinSizeRel")
+    CACHE STRING
+    "Choose the type of build to perform: Debug, Release, RelWithDebInfo, MinSizeRel"
+)
 # Set the possible values of build type
-set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo"
-                                             "MinSizeRel")
+set_property(
+    CACHE CMAKE_BUILD_TYPE
+    PROPERTY STRINGS "Debug" "Release" "RelWithDebInfo" "MinSizeRel"
+)
 
 # Set compile flags
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
-    CACHE STRING "Flags for Debug builds")
+    CACHE STRING
+    "Flags for Debug builds"
+)
 set(CMAKE_CXX_FLAGS_RELEASE
     "${CMAKE_CXX_FLAGS_RELEASE} -O2 -s -DNDEBUG"
-    CACHE STRING "Flags for Release builds")
+    CACHE STRING
+    "Flags for Release builds"
+)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
     "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG"
-    CACHE STRING "Flags for RelWithDebInfo builds")
+    CACHE STRING
+    "Flags for RelWithDebInfo builds"
+)
 set(CMAKE_CXX_FLAGS_MINSIZEREL
     "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG"
-    CACHE STRING "Flags for MinSizeRel builds")
+    CACHE STRING
+    "Flags for MinSizeRel builds"
+)
 
 set(CMAKE_MODULE_PATH
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/"
-    CACHE INTERNAL "Default module path.")
+    CACHE INTERNAL
+    "Default module path."
+)
 # Include common cmake modules
 include(utils)
 # Setup the package version based on git tags
@@ -124,18 +130,18 @@ execute_process(
     COMMAND ${GIT} rev-parse --short HEAD
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
     OUTPUT_VARIABLE GIT_HASH
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
-message("The HASH value of the current HEAD submission in this RDC code repository is : "
-        ${GIT_HASH})
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+message(
+    "The HASH value of the current HEAD submission in this RDC code repository is : "
+    ${GIT_HASH}
+)
 
 # Don't print 'Up-to-date' when installing
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
 # this must go after some CMAKE_* variables
-project(
-    ${RDC}
-    VERSION "${VERSION_STRING}"
-    HOMEPAGE_URL "https://github.com/RadeonOpenCompute/rdc")
+project(${RDC} VERSION "${VERSION_STRING}" HOMEPAGE_URL "https://github.com/RadeonOpenCompute/rdc")
 
 # Include CMAKE_INSTALL_* variables
 # this must go after project()
@@ -144,12 +150,8 @@ include(GNUInstallDirs)
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
-set(GRPC_ROOT
-    ${GRPC_ROOT_DEFAULT}
-    CACHE PATH "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION
-    1.67.1
-    CACHE STRING "GRPC desired package version.")
+set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
+set(GRPC_DESIRED_VERSION 1.67.1 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
@@ -157,61 +159,50 @@ set(CMAKE_LIBRARY_PATH ${CMAKE_LIBRARY_PATH} /usr/lib64 /usr/lib/x86_64-linux-gn
 
 # configure packaging
 # cpack version is populated with CMAKE_PROJECT_VERSION implicitly
-set(CPACK_PACKAGE_NAME
-    ${RDC_PACKAGE}
-    CACHE INTERNAL "")
-set(CPACK_PACKAGE_VENDOR
-    "Advanced Micro Devices, Inc."
-    CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT
-    "RDC Support <rdc.support@amd.com>"
-    CACHE STRING "")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
-    "Radeon Data Center Tools"
-    CACHE STRING "")
+set(CPACK_PACKAGE_NAME ${RDC_PACKAGE} CACHE INTERNAL "")
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
+set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>" CACHE STRING "")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Data Center Tools" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION
     "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}."
-    CACHE STRING "")
-set(CPACK_PACKAGING_INSTALL_PREFIX
-    "${CMAKE_INSTALL_PREFIX}"
-    CACHE PATH "Default packaging prefix.")
-set(CPACK_RESOURCE_FILE_LICENSE
-    "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
-    CACHE INTERNAL "")
-set(CPACK_RPM_PACKAGE_LICENSE
-    "MIT"
-    CACHE INTERNAL "")
-set(CPACK_GENERATOR
-    "DEB;RPM"
-    CACHE STRING "Default packaging generators.")
+    CACHE STRING
+    ""
+)
+set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Default packaging prefix.")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE INTERNAL "")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE INTERNAL "")
+set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
 set(CPACK_DEB_COMPONENT_INSTALL ON)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
-mark_as_advanced(CPACK_PACKAGE_VENDOR CPACK_PACKAGE_CONTACT CPACK_PACKAGE_DESCRIPTION_SUMMARY
-                 CPACK_PACKAGE_DESCRIPTION CPACK_GENERATOR)
+mark_as_advanced(
+    CPACK_PACKAGE_VENDOR
+    CPACK_PACKAGE_CONTACT
+    CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    CPACK_PACKAGE_DESCRIPTION
+    CPACK_GENERATOR
+)
 
 # check if libcap exists
 # needed for sys/capabilities.h
 find_library(LIB_CAP NAMES cap REQUIRED)
 
 if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
-    message(WARNING "GRPC_ROOT is left default. Cannot install gRPC from default root!
+    message(
+        WARNING
+        "GRPC_ROOT is left default. Cannot install gRPC from default root!
     Please specify -DGRPC_ROOT=<gRPC installation directory>
-    Continuing without gRPC install")
+    Continuing without gRPC install"
+    )
 endif()
 
-find_package(
-    amd_smi
-    26.0.0
-    NAMES
-    amd_smi
-    HINTS
-    ${ROCM_DIR}/lib/cmake
-    CONFIG
-    REQUIRED)
+find_package(amd_smi 26.0.0 NAMES amd_smi HINTS ${ROCM_DIR}/lib/cmake CONFIG REQUIRED)
 
 if(NOT EXISTS "${AMD_SMI_INCLUDE_DIR}" OR NOT EXISTS "${AMD_SMI_LIB_DIR}")
-    message(FATAL_ERROR "amd_smi not found in ${AMD_SMI_INCLUDE_DIR}. Please
-    make sure amd_smi is installed and present in ${AMD_SMI_INCLUDE_DIR}.")
+    message(
+        FATAL_ERROR
+        "amd_smi not found in ${AMD_SMI_INCLUDE_DIR}. Please
+    make sure amd_smi is installed and present in ${AMD_SMI_INCLUDE_DIR}."
+    )
 endif()
 
 set(${RDC}_VERSION_MAJOR "${VERSION_MAJOR}")
@@ -220,9 +211,7 @@ set(${RDC}_VERSION_PATCH "0")
 set(${RDC}_VERSION_BUILD "0")
 set(CPACK_PACKAGE_VERSION ${VERSION_STRING})
 
-set(CMAKE_CXX_STANDARD
-    17
-    CACHE STRING "The C++ standard to use")
+set(CMAKE_CXX_STANDARD 17 CACHE STRING "The C++ standard to use")
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -241,12 +230,8 @@ message("-----------ROCM_DIR : " ${ROCM_DIR})
 # this is needed for INSTALL_RPATH "\$ORIGIN" property to work correctly
 # please note that because of --enable-new-dtags - this actually sets RUNPATH and not RPATH.
 # this means LD_LIBRARY_PATH can override the library locations
-set(CMAKE_BUILD_RPATH_USE_ORIGIN
-    TRUE
-    CACHE BOOL "Set all RPATH to be ORIGIN-based")
-set(CMAKE_INSTALL_RPATH_USE_LINK_PATH
-    TRUE
-    CACHE BOOL "Use link path for RPATH")
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE CACHE BOOL "Set all RPATH to be ORIGIN-based")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Use link path for RPATH")
 
 ## Add address sanitizer
 if(${ADDRESS_SANITIZER})
@@ -265,8 +250,10 @@ if(${ADDRESS_SANITIZER})
 endif()
 
 # Create a configure file to get version info from within library
-configure_file("${PROJECT_SOURCE_DIR}/src/${RDC}64Config.in"
-               "${PROJECT_SOURCE_DIR}/include/rdc/${RDC}64Config.h")
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/${RDC}64Config.in"
+    "${PROJECT_SOURCE_DIR}/include/rdc/${RDC}64Config.h"
+)
 
 if(BUILD_STANDALONE)
     # Compile .proto files
@@ -284,7 +271,9 @@ if(BUILD_STANDALONE)
             COMMAND ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --cpp_out=${PROTOB_OUT_DIR} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
-            OUTPUT_VARIABLE PROTOB_OUT_VAR COMMAND_ERROR_IS_FATAL ANY)
+            OUTPUT_VARIABLE PROTOB_OUT_VAR
+            COMMAND_ERROR_IS_FATAL ANY
+        )
         message("protoc command returned: ${PROTOB_RESULT}")
 
         message("GRPC_PLUGIN=${GRPC_PLUGIN})")
@@ -294,13 +283,14 @@ if(BUILD_STANDALONE)
         message("....--plugin=protoc-gen-grpc=\"${GRPC_PLUGIN}\" ${file}")
 
         execute_process(
-            COMMAND ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
-                    --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
+            COMMAND
+                ${PROTOB_CMD} --proto_path=${PROTOB_SRC_DIR} --grpc_out=${PROTOB_OUT_DIR}
+                --plugin=protoc-gen-grpc=${GRPC_PLUGIN} ${file}
             WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
             RESULT_VARIABLE PROTOB_RESULT
-            OUTPUT_VARIABLE PROTOB_OUT_VAR)
+            OUTPUT_VARIABLE PROTOB_OUT_VAR
+        )
         message("protoc command returned: ${PROTOB_RESULT}")
-
     endforeach()
 endif()
 
@@ -324,15 +314,19 @@ if(BUILD_STANDALONE)
     # This is needed because it's very difficult to track all gRPC dependencies
     if(NOT GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
         install(
-            DIRECTORY ${GRPC_ROOT}/lib USE_SOURCE_PERMISSIONS
+            DIRECTORY ${GRPC_ROOT}/lib
+            USE_SOURCE_PERMISSIONS
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
-            COMPONENT ${SERVER_COMPONENT})
+            COMPONENT ${SERVER_COMPONENT}
+        )
         # In SLES, The libprotobuf is created under lib64 folder, install it as well
         if(EXISTS ${GRPC_ROOT}/lib64)
             install(
-                DIRECTORY ${GRPC_ROOT}/lib64/ USE_SOURCE_PERMISSIONS
+                DIRECTORY ${GRPC_ROOT}/lib64/
+                USE_SOURCE_PERMISSIONS
                 DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/lib
-                COMPONENT ${SERVER_COMPONENT})
+                COMPONENT ${SERVER_COMPONENT}
+            )
         endif()
         # Also include dev setup for people do not want to build grpc
         file(GLOB install_bin_files "${GRPC_ROOT}/bin/*")
@@ -342,12 +336,15 @@ if(BUILD_STANDALONE)
         install(
             FILES ${bin_files}
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/bin
-            COMPONENT ${SERVER_COMPONENT})
+            COMPONENT ${SERVER_COMPONENT}
+        )
 
         install(
-            DIRECTORY ${GRPC_ROOT}/include USE_SOURCE_PERMISSIONS
+            DIRECTORY ${GRPC_ROOT}/include
+            USE_SOURCE_PERMISSIONS
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
-            COMPONENT ${SERVER_COMPONENT})
+            COMPONENT ${SERVER_COMPONENT}
+        )
     endif()
     # Restore printing verbosity
     set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
@@ -376,55 +373,59 @@ set(CONF_LIBS "librdc_bootstrap.so")
 set(CONF_LIB_DIR "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}")
 
 # Create the rdc-config.cmake and rdc-config-version files
-configure_file(cmake_modules/rdc-config-version.cmake.in
-               "${PROJECT_BINARY_DIR}/rdc-config-version.cmake" @ONLY)
+configure_file(
+    cmake_modules/rdc-config-version.cmake.in
+    "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
+    @ONLY
+)
 
 include(CMakePackageConfigHelpers)
 set(CONFIG_PACKAGE_INSTALL_DIR ${CONF_LIB_DIR}/cmake/${RDC})
 configure_package_config_file(
-    cmake_modules/rdc-config.cmake.in ${CMAKE_CURRENT_BINARY_DIR}/rdc-config.cmake
-    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR})
+    cmake_modules/rdc-config.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/rdc-config.cmake
+    INSTALL_DESTINATION ${CONFIG_PACKAGE_INSTALL_DIR}
+)
 
 # Install the rdc-config.cmake and rdc-config-version.cmake
 install(
     FILES "${PROJECT_BINARY_DIR}/rdc-config.cmake" "${PROJECT_BINARY_DIR}/rdc-config-version.cmake"
     DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}"
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 # Install the export set for use with the install-tree
-install(
-    EXPORT rdcTargets
-    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}"
-    COMPONENT dev)
+install(EXPORT rdcTargets DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/${RDC}" COMPONENT dev)
 
 # License file
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}
     DESTINATION ${CMAKE_INSTALL_DOCDIR}
     RENAME LICENSE.txt
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 # Python binding
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/python_binding
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
+    COMPONENT ${CLIENT_COMPONENT}
+)
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
+    COMPONENT ${CLIENT_COMPONENT}
+)
 install(
     DIRECTORY ${PROJECT_SOURCE_DIR}/example
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}
-    COMPONENT dev)
+    COMPONENT dev
+)
 
 #Identify between SLES and Centos for setting symlink for rdc.service
 #SLES need serice file in /usr/lib/systemd/system/rdc.service
 #CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
-file(
-    STRINGS /etc/os-release LINUX_DISTRO
-    LIMIT_COUNT 1
-    REGEX "NAME=")
+file(STRINGS /etc/os-release LINUX_DISTRO LIMIT_COUNT 1 REGEX "NAME=")
 message("Using Linux Distro: ${LINUX_DISTRO}")
 if(LINUX_DISTRO MATCHES "SLES")
     set(DISTRO_ROOT "/usr/lib/systemd/system")
@@ -440,17 +441,38 @@ set(INST_SCR_PERM
     GROUP_READ
     GROUP_EXECUTE
     WORLD_READ
-    WORLD_EXECUTE)
-configure_file("${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
-               "${PROJECT_SOURCE_DIR}/DEBIAN/postinst" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/src/DEBIAN_prerm.in" "${PROJECT_SOURCE_DIR}/DEBIAN/prerm"
-               FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in" "${PROJECT_SOURCE_DIR}/RPM/rpm_post"
-               FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/src/RPM_preun.in" "${PROJECT_SOURCE_DIR}/RPM/rpm_preun"
-               FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
-configure_file("${PROJECT_SOURCE_DIR}/src/RPM_postun.in" "${PROJECT_SOURCE_DIR}/RPM/rpm_postun"
-               FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
+    WORLD_EXECUTE
+)
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
+    "${PROJECT_SOURCE_DIR}/DEBIAN/postinst"
+    FILE_PERMISSIONS ${INST_SCR_PERM}
+    @ONLY
+)
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/DEBIAN_prerm.in"
+    "${PROJECT_SOURCE_DIR}/DEBIAN/prerm"
+    FILE_PERMISSIONS ${INST_SCR_PERM}
+    @ONLY
+)
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_post"
+    FILE_PERMISSIONS ${INST_SCR_PERM}
+    @ONLY
+)
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/RPM_preun.in"
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_preun"
+    FILE_PERMISSIONS ${INST_SCR_PERM}
+    @ONLY
+)
+configure_file(
+    "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_postun"
+    FILE_PERMISSIONS ${INST_SCR_PERM}
+    @ONLY
+)
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
     message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")
@@ -470,8 +492,10 @@ set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 # Only add extras to RUNTIME package (not tests)
 # It makes no sense to modify RDCD service when installing tests
 # https://cmake.org/cmake/help/latest/cpack_gen/deb.html#variable:CPACK_DEBIAN_%3CCOMPONENT%3E_PACKAGE_CONTROL_EXTRA
-set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst"
-                                               "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm")
+set(CPACK_DEBIAN_RUNTIME_PACKAGE_CONTROL_EXTRA
+    "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/postinst"
+    "${CMAKE_CURRENT_SOURCE_DIR}/DEBIAN/prerm"
+)
 
 option(ROCM_DEP_ROCMCORE "Add debian dependency on rocm-core" OFF)
 mark_as_advanced(ROCM_DEP_ROCMCORE)
@@ -496,7 +520,8 @@ execute_process(
     COMMAND rpm --eval %{?dist}
     RESULT_VARIABLE PROC_RESULT
     OUTPUT_VARIABLE EVAL_RESULT
-    OUTPUT_STRIP_TRAILING_WHITESPACE)
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 if(PROC_RESULT EQUAL "0" AND NOT EVAL_RESULT STREQUAL "")
     string(APPEND CPACK_RPM_PACKAGE_RELEASE "%{?dist}")
 endif()
@@ -514,7 +539,8 @@ list(
     "/lib/systemd"
     "/lib/systemd/system"
     "/usr"
-    "/opt")
+    "/opt"
+)
 
 # Only add extras to RUNTIME package (not tests)
 # It makes no sense to modify RDCD service when installing tests

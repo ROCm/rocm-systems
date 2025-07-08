@@ -30,7 +30,8 @@ set(RDC_LIB_SRC_LIST
     "${SRC_DIR}/RdcTelemetryModule.cc"
     "${SRC_DIR}/RdcWatchTableImpl.cc"
     "${SRC_DIR}/RdcPartitionImpl.cc"
-    "${SRC_DIR}/SmiUtils.cc")
+    "${SRC_DIR}/SmiUtils.cc"
+)
 
 # TODO: remove all headers? Will just dir be ok after install?
 set(RDC_LIB_INC_LIST
@@ -64,15 +65,17 @@ set(RDC_LIB_INC_LIST
     "${INC_DIR}/impl/RdcTelemetryModule.h"
     "${INC_DIR}/impl/RdcWatchTableImpl.h"
     "${INC_DIR}/impl/RdcPartitionImpl.h"
-    "${INC_DIR}/impl/SmiUtils.h")
+    "${INC_DIR}/impl/SmiUtils.h"
+)
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
 target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi cap)
 target_include_directories(
-    ${RDC_LIB} PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include"
-                       "${AMD_SMI_INCLUDE_DIR}")
+    ${RDC_LIB}
+    PRIVATE "${PROJECT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/include" "${AMD_SMI_INCLUDE_DIR}"
+)
 
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${RDC_LIB} PROPERTY SOVERSION "${VERSION_MAJOR}")
@@ -81,10 +84,7 @@ set_target_properties(${RDC_LIB} PROPERTIES INSTALL_RPATH "\$ORIGIN")
 
 # If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
-    add_custom_command(
-        TARGET ${RDC_LIB}
-        POST_BUILD
-        COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
+    add_custom_command(TARGET ${RDC_LIB} POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
 endif()
 
 # pass ROCM_DIR to compiler
