@@ -93,8 +93,8 @@ namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
-                   uint32_t index)
-    : GpuAgentInt(node),
+                   uint32_t index, core::DriverType driver_type)
+    : GpuAgentInt(node, driver_type),
       properties_(node_props),
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),

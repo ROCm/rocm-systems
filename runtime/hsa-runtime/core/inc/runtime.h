@@ -510,6 +510,14 @@ class Runtime {
 
   std::vector<std::unique_ptr<Driver>>& AgentDrivers() { return agent_drivers_; }
 
+  static bool IsGPUDriver(DriverType driver_type) {
+    return driver_type == core::DriverType::KFD
+#ifdef HSAKMT_VIRTIO_ENABLED
+        || driver_type == core::DriverType::KFD_VIRTIO
+#endif
+        ;
+  }
+
  protected:
   static void AsyncEventsLoop(void*);
   static void AsyncIPCSockServerConnLoop(void*);
