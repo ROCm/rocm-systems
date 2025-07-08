@@ -76,6 +76,7 @@ set(COMPONENT_NAME_docs "rocprofiler-sdk-docs")
 set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 set(COMPONENT_NAME_rocpd "rocprofiler-sdk-rocpd")
+set(COMPONENT_NAME_queue "rocprofiler-sdk-queue")
 
 set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})"
                        "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
@@ -86,14 +87,16 @@ set(COMPONENT_DEP_tests
     "rocprofiler-sdk-rocpd (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "rocprofiler-register")
 set(COMPONENT_DEP_rocpd "")
+set(COMPONENT_DEP_queue "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
 set(COMPONENT_DESC_docs "rocprofiler-sdk documentation")
 set(COMPONENT_DESC_tests "rocprofiler-sdk tests")
 set(COMPONENT_DESC_roctx "ROCm Tools Extension library and headers")
 set(COMPONENT_DESC_rocpd "ROCm Profiling Data library and headers")
+set(COMPONENT_DESC_queue "rocprofiler-sdk Proxy Queue library")
 
-set(EXPECTED_PACKAGING_COMPONENTS 7)
+set(EXPECTED_PACKAGING_COMPONENTS 8)
 if(ROCPROFILER_BUILD_DOCS)
     math(EXPR EXPECTED_PACKAGING_COMPONENTS "${EXPECTED_PACKAGING_COMPONENTS} + 1")
 endif()
@@ -104,7 +107,7 @@ endif()
 if(NOT NUM_ROCPROFILER_PACKAGING_COMPONENTS EQUAL EXPECTED_PACKAGING_COMPONENTS)
     message(
         FATAL_ERROR
-            "Error new install component needs COMPONENT_NAME_* and COMPONENT_SEP_* entries: ${ROCPROFILER_PACKAGING_COMPONENTS}"
+            "Error new install component needs COMPONENT_NAME_* , COMPONENT_DEP_* , and COMPONENT_DESC_* entries: ${ROCPROFILER_PACKAGING_COMPONENTS}"
         )
 endif()
 
