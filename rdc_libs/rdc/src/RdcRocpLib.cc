@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <fstream>
 #include <string>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 
@@ -41,14 +42,10 @@ RdcRocpLib::RdcRocpLib()
       telemetry_fields_unwatch_(nullptr),
       rdc_module_init_(nullptr),
       rdc_module_destroy_(nullptr) {
-  rdc_status_t status = set_rocprofiler_path();
-  if (status != RDC_ST_OK) {
-    RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
-    throw RdcException(RDC_ST_FAIL_LOAD_MODULE, "rocprofiler path could not be set");
-    return;
-  }
+  // must happen before library is loaded
+  rdc_unset_hsa_tools_lib();
 
-  status = lib_loader_.load("librdc_rocp.so");
+  rdc_status_t status = lib_loader_.load("librdc_rocp.so");
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
     return;
@@ -152,68 +149,11 @@ rdc_status_t RdcRocpLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
   return telemetry_fields_unwatch_(fields, fields_count);
 }
 
-std::string RdcRocpLib::get_rocm_path() {
-  // set default rocm path in case lookup fails
-  std::string rocm_path(ROCM_DIR);
-  const char* rocm_path_env = getenv("ROCM_PATH");
-  if (rocm_path_env != nullptr) {
-    rocm_path = rocm_path_env;
+void RdcRocpLib::rdc_unset_hsa_tools_lib() {
+  int status = unsetenv("HSA_TOOLS_LIB");
+  if (status != 0) {
+    RDC_LOG(RDC_ERROR, "Failed to unset HSA_TOOLS_LIB environment variable.");
   }
-
-  std::ifstream file("/proc/self/maps");
-
-  if (!file.is_open()) {
-    return rocm_path;
-  }
-
-  std::string line;
-  while (getline(file, line)) {
-    size_t index_end = line.find("librocprofiler-register.so");
-    size_t index_start = index_end;
-    if (index_end == std::string::npos) {
-      // no library on this line
-      continue;
-    }
-    // walk index backwards until it reaches a space
-    while ((index_start > 0) && (line[index_start - 1] != ' ')) {
-      index_start--;
-    }
-    // extract library path, drop library name
-    rocm_path = line.substr(index_start, index_end - index_start);
-    // appending "../" should result in "/opt/rocm/lib/.." or similar
-    rocm_path += "..";
-    return rocm_path;
-  }
-
-  return rocm_path;
-}
-
-rdc_status_t RdcRocpLib::set_rocprofiler_path() {
-  // rocprofiler requires ROCPROFILER_METRICS_PATH to be set
-  std::string rocprofiler_metrics_path = get_rocm_path() + "/share/rocprofiler-sdk/";
-
-  // set rocm prefix
-  int result = setenv("ROCPROFILER_METRICS_PATH", rocprofiler_metrics_path.c_str(), 0);
-  if (result != 0) {
-    RDC_LOG(RDC_ERROR, "setenv ROCPROFILER_METRICS_PATH failed! " << result);
-    return RDC_ST_PERM_ERROR;
-  }
-
-  // check that env exists
-  const char* rocprofiler_metrics_env = getenv("ROCPROFILER_METRICS_PATH");
-  if (rocprofiler_metrics_env == nullptr) {
-    RDC_LOG(RDC_ERROR, "ROCPROFILER_METRICS_PATH is not set!");
-    return RDC_ST_NO_DATA;
-  }
-
-  // check that file can be accessed
-  std::ifstream test_file(rocprofiler_metrics_env);
-  if (!test_file.good()) {
-    RDC_LOG(RDC_ERROR, "failed to open ROCPROFILER_METRICS_PATH: " << rocprofiler_metrics_env);
-    return RDC_ST_FILE_ERROR;
-  }
-
-  return RDC_ST_OK;
 }
 
 }  // namespace rdc

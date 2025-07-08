@@ -47,7 +47,8 @@ include(FetchContent)
 FetchContent_Declare(
     googletest
     GIT_REPOSITORY https://github.com/google/googletest.git
-    GIT_TAG v1.14.0)
+    GIT_TAG v1.14.0
+)
 FetchContent_MakeAvailable(googletest)
 
 # Source files
@@ -66,7 +67,8 @@ target_include_directories(
     ${RDCTST}
     PUBLIC ${PROJECT_SOURCE_DIR}/include
     PUBLIC ${AMD_SMI_INCLUDE_DIR}
-    PUBLIC ${SRC_DIR}/..)
+    PUBLIC ${SRC_DIR}/..
+)
 
 target_link_libraries(
     ${RDCTST}
@@ -75,14 +77,17 @@ target_link_libraries(
     PUBLIC GTest::gtest_main
     PUBLIC c
     PUBLIC stdc++
-    PUBLIC pthread)
+    PUBLIC pthread
+)
 
 install(
     TARGETS ${RDCTST} gtest gtest_main
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
-    COMPONENT ${TESTS_COMPONENT})
+    COMPONENT ${TESTS_COMPONENT}
+)
 
 install(
     FILES ${RDCTST}.exclude
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
-    COMPONENT ${TESTS_COMPONENT})
+    COMPONENT ${TESTS_COMPONENT}
+)

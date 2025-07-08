@@ -26,17 +26,25 @@ message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -m64 -msse -msse2")
 set(CMAKE_CXX_FLAGS_DEBUG
     "${CMAKE_CXX_FLAGS_DEBUG} -O0 -ggdb -DDEBUG"
-    CACHE STRING "Flags for Debug builds")
+    CACHE STRING
+    "Flags for Debug builds"
+)
 # note: no '-s' here unlike other CMakeLists.txt
 set(CMAKE_CXX_FLAGS_RELEASE
     "${CMAKE_CXX_FLAGS_RELEASE} -O2 -DNDEBUG"
-    CACHE STRING "Flags for Release builds")
+    CACHE STRING
+    "Flags for Release builds"
+)
 set(CMAKE_CXX_FLAGS_RELWITHDEBINFO
     "${CMAKE_CXX_FLAGS_RELWITHDEBINFO} -O2 -g -DNDEBUG"
-    CACHE STRING "Flags for RelWithDebInfo builds")
+    CACHE STRING
+    "Flags for RelWithDebInfo builds"
+)
 set(CMAKE_CXX_FLAGS_MINSIZEREL
     "${CMAKE_CXX_FLAGS_MINSIZEREL} -Os -DNDEBUG"
-    CACHE STRING "Flags for MinSizeRel builds")
+    CACHE STRING
+    "Flags for MinSizeRel builds"
+)
 
 # Required Defines first:
 
@@ -72,8 +80,9 @@ set(TEST_CLIENT_EXE "rdc_test_client")
 add_executable(${TEST_CLIENT_EXE} "${EXAMPLE_SRC_LIST}")
 
 target_include_directories(
-    ${TEST_CLIENT_EXE} PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include"
-                               "${AMD_SMI_INCLUDE_DIR}")
+    ${TEST_CLIENT_EXE}
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../../client/include" "${AMD_SMI_INCLUDE_DIR}"
+)
 
 target_link_libraries(${TEST_CLIENT_EXE} rdc_client)
 
