@@ -404,13 +404,27 @@ class AMDSMICommands():
         if args.clock == []:
             args.clock = True
 
-        # Store args that are applicable to the current platform
+        # Store args that are applicable to the current platform (default arguments)
         current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
                                  "vram", "cache", "board", "process_isolation",
-                                 "clock", "partition"]
+                                 "clock"]
         current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation,
-                                   args.clock, args.partition]
+                                   args.clock]
+
+        # amd-smi static default arguments:
+        # Exclude args that are not applicable to the current platform,
+        # but allow output if argument is passed.
+        # 
+        # Note: Partition is a special case, it is no longer an amd-smi static 
+        # default argument.
+        # Reason: Reading current_compute_partition may momentarily wake the
+        #         GPU up. This is due to reading XCD registers, which is expected
+        #         behavior. Changing partitions is not a trivial operation, 
+        #         current_compute_partition SYSFS controls this action.
+        if args.partition:
+            current_platform_args += ["partition"]
+            current_platform_values += [args.partition]
 
         if not self.group_check_printed:
             self.helpers.check_required_groups()
@@ -453,9 +467,12 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
+        logging.debug("=====================================================================")
         logging.debug(f"Static Arg information for GPU {gpu_id} on {self.helpers.os_info()}")
-        logging.debug(f"Applicable Args: {current_platform_args}")
-        logging.debug(f"Arg Values:      {current_platform_values}")
+        logging.debug(f"Function args:           {args}")
+        logging.debug(f"Current platform args:   {current_platform_args}")
+        logging.debug(f"Current platform values: {current_platform_values}")
+        logging.debug("=====================================================================")
 
         # Populate static dictionary for each enabled argument
         static_dict = {}
@@ -757,30 +774,26 @@ class AMDSMICommands():
                     logging.debug("Failed to get ras block features for gpu %s | %s", gpu_id, e.get_error_info())
 
                 static_dict["ras"] = ras_dict
-        if 'partition' in current_platform_args:
-            if args.partition:
-                try:
-                    compute_partition = amdsmi_interface.amdsmi_get_gpu_compute_partition(args.gpu)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    compute_partition = "N/A"
-                    logging.debug("Failed to get compute partition info for gpu %s | %s", gpu_id, e.get_error_info())
-
-                try:
-                    memory_partition = amdsmi_interface.amdsmi_get_gpu_memory_partition(args.gpu)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    memory_partition = "N/A"
-                    logging.debug("Failed to get memory partition info for gpu %s | %s", gpu_id, e.get_error_info())
-
-                try:
-                    kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
-                    partition_id = kfd_info['current_partition_id']
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    partition_id = "N/A"
-                    logging.debug("Failed to get partition ID for gpu %s | %s", gpu_id, e.get_error_info())
-
-                static_dict['partition'] = {"accelerator_partition": compute_partition,
-                                            "memory_partition": memory_partition,
-                                            "partition_id": partition_id}
+        if args.partition:
+            try:
+                compute_partition = amdsmi_interface.amdsmi_get_gpu_compute_partition(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                compute_partition = "N/A"
+                logging.debug("Failed to get compute partition info for gpu %s | %s", gpu_id, e.get_error_info())
+            try:
+                memory_partition = amdsmi_interface.amdsmi_get_gpu_memory_partition(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                memory_partition = "N/A"
+                logging.debug("Failed to get memory partition info for gpu %s | %s", gpu_id, e.get_error_info())
+            try:
+                kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
+                partition_id = kfd_info['current_partition_id']
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                partition_id = "N/A"
+                logging.debug("Failed to get partition ID for gpu %s | %s", gpu_id, e.get_error_info())
+            static_dict['partition'] = {"accelerator_partition": compute_partition,
+                                        "memory_partition": memory_partition,
+                                        "partition_id": partition_id}
         if 'soc_pstate' in current_platform_args:
             if args.soc_pstate:
                 try:
@@ -3914,7 +3927,7 @@ class AMDSMICommands():
                     try:
                         link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
                         if isinstance(link_type, int):
-                            if link_type != 2:
+                            if link_type != amdsmi_interface.amdsmi_wrapper.AMDSMI_LINK_TYPE_XGMI:
                                 # non_xgmi = True
                                 src_gpu_link_type[dest_gpu_key] = "N/A"
                                 continue
@@ -5053,7 +5066,15 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
-        if self.helpers.is_baremetal():
+        # if device is actually a partition, stop because partitions cannot reset anything
+        try:
+            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
+            partition_id = kfd_info['current_partition_id']
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            # assume that device is not partition on fail
+            partition_id = 0
+
+        if self.helpers.is_baremetal() and partition_id == 0:
             if args.gpureset:
                 if self.helpers.is_amd_device(args.gpu):
                     try:
@@ -5179,6 +5200,9 @@ class AMDSMICommands():
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
                     self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
+        else:
+            result = "Device is a partition. Cannot reset on partition."
+            self.logger.store_output(args.gpu, 'gpu_reset', result)
 
         if args.clean_local_data:
             try:

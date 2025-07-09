@@ -6816,18 +6816,9 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
     return RSMI_STATUS_INVALID_ARGS;
   }
   DEVICE_MUTEX
-  std::string strCompPartition = "UNKNOWN";
-  const uint32_t PARTITION_LEN = 10;
-  char compute_partition[PARTITION_LEN];
-  compute_partition[0] = '\0';
-  rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, compute_partition, PARTITION_LEN);
-  if (ret == RSMI_STATUS_SUCCESS) {
-    strCompPartition.clear();
-    strCompPartition = compute_partition;
-  }
   uint64_t pci_id = UINT64_MAX;
   *partition_id = UINT32_MAX;
-  ret = rsmi_dev_pci_id_get(dv_ind, &pci_id);
+  rsmi_status_t ret = rsmi_dev_pci_id_get(dv_ind, &pci_id);
   if (ret == RSMI_STATUS_SUCCESS) {
     *partition_id = static_cast<uint32_t>((pci_id >> 28) & 0xf);
   }
@@ -6869,7 +6860,6 @@ rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
      << " | ======= end ======= "
      << " | Success"
      << " | Device #: " << dv_ind
-     << " | Compute Partition: " << strCompPartition
      << " | Type: partition_id"
      << " | Data: " << static_cast<int>(*partition_id)
      << " | Returning = "

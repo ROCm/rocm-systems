@@ -4178,21 +4178,6 @@ amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handl
                                          uint64_t clk_value);
 
 /**
- *  @brief Frees heap memory allocated by reg_table and pm_metrics
- *
- *  @ingroup tagClkPowerPerfQuery
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Frees heap memory.
- *
- *  @param[in] p a pointer to the memory to free.
- *
- *  @return ::void
- */
-void amdsmi_free_name_value_pairs(void *p);
-
-/**
  *  @brief This function sets the clock frequency information. It is not supported on
  *  virtual machine guest
  *

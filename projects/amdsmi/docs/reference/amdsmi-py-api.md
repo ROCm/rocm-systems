@@ -1279,7 +1279,7 @@ Input parameters:
 * `buffer_size`      pointer to a variable that specifies the size of the cper_data
 * `cursor`           pointer to a variable that will contain the  cursor  for the next call
 
-Output: Dictionary with fields, updated cursor, and a dictionary of the cper_data
+Output: Dictionary with fields, updated cursor, a dictionary of the cper_data, and API status_code
 
 Field | Description
 ---|---
@@ -1297,16 +1297,22 @@ Field | Description
 `flags`            | Reserved flags related to the CPER entry. |
 `persistence_info` | Reserved information related to persistence. |
 
+* `status_code` | Upon successful retrieval of data, status_code will be AMDSMI_STATUS_SUCCESS (0) or AMDSMI_STATUS_MORE_DATA (39) if more data can be retrieve by subsequent call to the `amdsmi_get_gpu_cper_entries` function. In the later case, the input parameter `cursor` should be set to the updated `cursor` that was returned from the previous call.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_cper_entries` function:
 
-* `AmdSmiLibraryException`
+* `AmdSmiLibraryException` with these possible error codes:
+    AMDSMI_STATUS_INVAL
+    AMDSMI_STATUS_UNEXPECTED_SIZE
+    AMDSMI_STATUS_UNEXPECTED_DATA
+    AMDSMI_STATUS_NOT_SUPPORTED
 * `AmdSmiParameterException`
 
 Example:
 
 ```python
 for device in devices:
-    entries, new_cursor, cper_data = amdsmi_get_gpu_cper_entries(device, severity_mask, buffer_size, initial_cursor)
+    entries, new_cursor, cper_data, status_code = amdsmi_get_gpu_cper_entries(device, severity_mask, buffer_size, initial_cursor)
     print("CPER entries for device", device)
     for key, entry in entries.items():
         print("Entry", key)
