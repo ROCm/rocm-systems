@@ -95,6 +95,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCDECODE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(ROCJPEG_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_STREAM)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_RANGE_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -294,6 +295,12 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hip::stream::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>(
+                operation);
+            break;
+        }
     };
 
     if(!val)
@@ -438,6 +445,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::hip::stream::get_ids();
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange>();
+            break;
+        }
     };
 
     for(const auto& itr : ops)
@@ -513,6 +525,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API:
         case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
         {
             rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(

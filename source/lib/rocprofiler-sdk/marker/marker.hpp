@@ -63,6 +63,12 @@ struct roctx_api_impl : roctx_domain_info<TableIdx>
 
     template <typename RetT, typename... Args>
     static RetT functor(Args... args);
+
+    template <typename RetT, typename... Args>
+    static RetT push_functor(Args... args);
+
+    template <typename RetT, typename... Args>
+    static RetT pop_functor(Args... args);
 };
 
 template <size_t TableIdx>
@@ -96,5 +102,12 @@ copy_table(TableT* _orig, uint64_t _tbl_instance);
 template <typename TableT>
 void
 update_table(TableT* _orig);
+
+namespace range
+{
+template <typename TableT>
+void
+update_table(TableT* _orig, uint64_t _tbl_instance);
+}
 }  // namespace marker
 }  // namespace rocprofiler

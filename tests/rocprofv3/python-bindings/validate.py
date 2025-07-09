@@ -69,6 +69,7 @@ def test_marker_api_trace(marker_input_data):
     for row in marker_input_data:
         assert row["Domain"] in [
             "MARKER_CORE_API",
+            "MARKER_CORE_RANGE_API",
             "MARKER_CONTROL_API",
             "MARKER_NAME_API",
         ]
@@ -89,7 +90,12 @@ def test_marker_api_trace_json(json_data):
     def get_kind_name(kind_id):
         return data.strings.buffer_records[kind_id]["kind"]
 
-    valid_domain = ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API")
+    valid_domain = (
+        "MARKER_CORE_API",
+        "MARKER_CONTROL_API",
+        "MARKER_NAME_API",
+        "MARKER_CORE_RANGE_API",
+    )
 
     marker_data = data.buffer_records.marker_api
 
