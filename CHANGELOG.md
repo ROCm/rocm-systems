@@ -191,6 +191,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - See [using thread trace with rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
   - Requires the ROCprof Trace Decoder plugin installed (see above).
 - Added `rocpd` output format documentation
+  - Requires the ROCprof Trace Decoder plugin installed (see above)
+- Added perfetto support for scratch memory.
 
 ### Changed
 

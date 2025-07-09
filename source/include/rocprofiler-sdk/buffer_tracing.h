@@ -509,6 +509,7 @@ typedef struct rocprofiler_buffer_tracing_scratch_memory_record_t
     rocprofiler_timestamp_t                start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t                end_timestamp;    ///< end time in nanoseconds
     rocprofiler_scratch_alloc_flag_t       flags;
+    uint64_t allocation_size;  ///< size of scratch memory allocation in bytes
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
 /**
