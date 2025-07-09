@@ -19,7 +19,8 @@ jobs:
     #   - https://gh.io/supported-runners-and-hardware-resources
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    runs-on: rocprof-azure-gpuless-emu-runner-set
+    runs-on: AMD-ROCm-Internal-dev1
+    container: rocm/dev-ubuntu-22.04:latest
     permissions:
       # required for all workflows
       security-events: write
@@ -43,6 +44,16 @@ jobs:
           build-mode: none
     
     steps:
+    - name: Install OS requirements
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        sudo apt update
+        sudo apt install -y software-properties-common
+        sudo apt-add-repository ppa:git-core/ppa
+        sudo apt-get update
+        sudo apt install -y git
+        
     - name: Checkout repository
       uses: actions/checkout@v4
 
