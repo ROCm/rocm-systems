@@ -41,7 +41,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        app_cmd = shlex.split(self.get_args().remaining)
+        app_cmd = (
+            shlex.split(self.get_args().remaining) if not self.get_args().pid else None
+        )
         trace_option = "--kernel-trace"
         rocprof_out_format = "json"
         pid = ""
@@ -58,9 +60,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if self.get_args().hip_trace:
             trace_option = "--hip-trace"
 
-        if self.get_args().pid:
-            pid = "--pid {}".format(str(self.get_args().pid))
-
         args = [
             # v3 requires output directory argument
             "-d",
@@ -68,7 +67,8 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             trace_option,
             "--output-format",
             rocprof_out_format,
-            pid,
+            "--pid",
+            self.get_args().pid,
         ]
         # Kernel filtering
         if self.get_args().kernel:

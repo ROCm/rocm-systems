@@ -303,9 +303,10 @@ class RocProfCompute_Base:
                 )
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
-            console_error(
-                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
-            )
+            if not self.__args.pid:
+                console_error(
+                    "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
+                )
 
         gen_sysinfo(
             workload_name=self.__args.name,
@@ -315,7 +316,7 @@ class RocProfCompute_Base:
                 for name, type in self.__args.filter_blocks.items()
                 if type == "hardware_block"
             ],
-            app_cmd=self.__args.remaining,
+            app_cmd=self.__args.remaining if self.__args.remaining else None,
             skip_roof=self.__args.no_roof,
             roof_only=self.__args.roof_only,
             mspec=self._soc._mspec,
