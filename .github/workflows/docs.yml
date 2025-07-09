@@ -121,6 +121,7 @@ jobs:
         timeout-minutes: 60
         shell: bash
         run:
+          git config --global --add safe.directory '*';
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
           cmake -B build
             -DROCPROFILER_DEP_ROCMCORE=ON
