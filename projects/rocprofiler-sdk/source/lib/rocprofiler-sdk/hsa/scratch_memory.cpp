@@ -522,6 +522,7 @@ impl(Args... args)
             tls.buffered_data.queue_id        = {event_data.scratch_alloc_start->queue->id};
             tls.buffered_data.thread_id       = thr_id;
             tls.buffered_data.start_timestamp = common::timestamp_ns();
+            tls.buffered_data.allocation_size = 0;
         }
     }
     else if constexpr(OpPhase == ROCPROFILER_CALLBACK_PHASE_EXIT)
@@ -530,6 +531,14 @@ impl(Args... args)
         {
             tls.buffered_data.flags         = get_flags(event_data);
             tls.buffered_data.end_timestamp = common::timestamp_ns();
+            if constexpr(OpIdx == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
+            {
+                tls.buffered_data.allocation_size = event_data.scratch_alloc_end->size;
+            }
+            else if constexpr(OpIdx == ROCPROFILER_SCRATCH_MEMORY_FREE)
+            {
+                tls.buffered_data.allocation_size = 0;
+            }
         }
 
         if(!tls.callback_contexts.empty())

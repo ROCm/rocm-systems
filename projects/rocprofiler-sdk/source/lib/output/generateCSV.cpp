@@ -472,11 +472,11 @@ generate_csv(const output_config&                                               
                                      {"Kind",
                                       "Operation",
                                       "Agent_Id",
-                                      "Allocation_Size",
                                       "Address",
                                       "Correlation_Id",
                                       "Start_Timestamp",
-                                      "End_Timestamp"}};
+                                      "End_Timestamp",
+                                      "Allocation_Size"}};
     for(auto ditr : data)
     {
         for(auto record : data.get(ditr))
@@ -677,6 +677,7 @@ generate_csv(const output_config&                                               
                                          "Alloc_Flags",
                                          "Start_Timestamp",
                                          "End_Timestamp",
+                                         "Allocation_Size",
                                      }};
 
     for(auto ditr : data)
@@ -696,7 +697,8 @@ generate_csv(const output_config&                                               
                 record.thread_id,
                 record.flags,
                 record.start_timestamp,
-                record.end_timestamp);
+                record.end_timestamp,
+                record.allocation_size);
 
             ofs << row_ss.str();
         }

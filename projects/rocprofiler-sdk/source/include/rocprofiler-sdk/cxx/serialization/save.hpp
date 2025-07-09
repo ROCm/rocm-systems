@@ -848,6 +848,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_scratch_memory_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
     ROCP_SDK_SAVE_DATA_FIELD(flags);
+    ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 
 template <typename ArchiveT>

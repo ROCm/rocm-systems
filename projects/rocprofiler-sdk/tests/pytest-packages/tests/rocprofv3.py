@@ -36,6 +36,7 @@ def test_perfetto_data(
         "rocdecode_api",
         "rocjpeg_api",
         "counter_collection",
+        "scratch_memory",
     ),
 ):
 
@@ -49,6 +50,7 @@ def test_perfetto_data(
         "rocdecode_api": ("rocdecode_api", "rocdecode_api"),
         "rocjpeg_api": ("rocjpeg_api", "rocjpeg_api"),
         "counter_collection": ("counter_collection", "counter_collection"),
+        "scratch_memory": ("scratch_memory", "scratch_memory"),
     }
 
     # make sure they specified valid categories

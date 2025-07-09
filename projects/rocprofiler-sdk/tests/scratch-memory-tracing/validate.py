@@ -232,6 +232,8 @@ def test_scratch_memory_tracking(input_data):
         assert "operation" in node
         assert "handle" in node["queue_id"]
 
+        assert "allocation_size" in node
+
         assert node["start_timestamp"] > 0
         assert node["start_timestamp"] < node["end_timestamp"]
 

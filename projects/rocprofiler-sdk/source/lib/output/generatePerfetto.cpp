@@ -65,16 +65,16 @@ get_hash_id(Tp&& _val)
 
 void
 write_perfetto(
-    const output_config&                                               ocfg,
-    const metadata&                                                    tool_metadata,
-    std::vector<agent_info>                                            agent_data,
-    const generator<tool_buffer_tracing_hip_api_ext_record_t>&         hip_api_gen,
-    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&      hsa_api_gen,
-    const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>& kernel_dispatch_gen,
-    const generator<tool_buffer_tracing_memory_copy_ext_record_t>&     memory_copy_gen,
-    const generator<tool_counter_record_t>&                            counter_collection_gen,
-    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&   marker_api_gen,
-    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& /*scratch_memory_gen*/,
+    const output_config&                                                    ocfg,
+    const metadata&                                                         tool_metadata,
+    std::vector<agent_info>                                                 agent_data,
+    const generator<tool_buffer_tracing_hip_api_ext_record_t>&              hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&           hsa_api_gen,
+    const generator<tool_buffer_tracing_kernel_dispatch_ext_record_t>&      kernel_dispatch_gen,
+    const generator<tool_buffer_tracing_memory_copy_ext_record_t>&          memory_copy_gen,
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
+    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
@@ -1008,6 +1008,95 @@ write_perfetto(
                               itr.first,
                               itr.second.alloc_size / bytes_multiplier);
                 tracing_session->FlushBlocking();
+            }
+        }
+
+        // scratch memory counter track
+        auto scratch_mem_endpoints =
+            std::unordered_map<rocprofiler_agent_id_t,
+                               std::map<rocprofiler_timestamp_t, uint64_t>>{};
+        auto scratch_mem_extremes = std::pair<uint64_t, uint64_t>{
+            std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
+
+        // Load scratch memory usage endpoints
+        for(auto ditr : scratch_memory_gen)
+            for(auto itr : scratch_memory_gen.get(ditr))
+            {
+                // Track start and end timestamps for this scratch memory record
+                scratch_mem_endpoints[itr.agent_id].emplace(itr.start_timestamp, 0);
+                scratch_mem_endpoints[itr.agent_id].emplace(itr.end_timestamp, 0);
+
+                // Update overall time range
+                scratch_mem_extremes =
+                    std::make_pair(std::min(scratch_mem_extremes.first, itr.start_timestamp),
+                                   std::max(scratch_mem_extremes.second, itr.end_timestamp));
+            }
+
+        // Load values at each endpoint
+        for(auto ditr : scratch_memory_gen)
+            for(auto itr : scratch_memory_gen.get(ditr))
+            {
+                // For each timestamp in the range of this record
+                auto begin =
+                    scratch_mem_endpoints.at(itr.agent_id).lower_bound(itr.start_timestamp);
+                auto end = scratch_mem_endpoints.at(itr.agent_id).upper_bound(itr.end_timestamp);
+
+                for(auto mitr = begin; mitr != end; ++mitr)
+                {
+                    // Add scratch memory size to the counter value at this timestamp
+                    if(itr.operation == ROCPROFILER_SCRATCH_MEMORY_ALLOC)
+                        mitr->second = itr.allocation_size;
+                    else if(itr.operation == ROCPROFILER_SCRATCH_MEMORY_FREE)
+                        mitr->second = 0;  // For all free events current allocation drops to 0.
+                }
+            }
+
+        // Create counter tracks for visualization
+        auto scratch_mem_tracks =
+            std::unordered_map<rocprofiler_agent_id_t, ::perfetto::CounterTrack>{};
+        auto scratch_mem_names = std::vector<std::string>{};
+        scratch_mem_names.reserve(scratch_mem_endpoints.size());
+
+        for(auto& mitr : scratch_mem_endpoints)
+        {
+            // Add buffer timestamps for better visualization
+            if(!mitr.second.empty())
+            {
+                scratch_mem_endpoints[mitr.first].emplace(
+                    scratch_mem_extremes.first - extremes_endpoint_buffer, 0);
+                scratch_mem_endpoints[mitr.first].emplace(
+                    scratch_mem_extremes.second + extremes_endpoint_buffer, 0);
+
+                auto        _track_name = std::stringstream{};
+                const auto* _agent      = _get_agent(mitr.first);
+                auto        agent_index_info =
+                    tool_metadata.get_agent_index(_agent->id, ocfg.agent_index_value);
+                _track_name << "SCRATCH MEMORY on " << agent_index_info.label << " ["
+                            << agent_index_info.index << "] (" << agent_index_info.type << ")";
+
+                constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+                auto&          _name = scratch_mem_names.emplace_back(_track_name.str());
+                scratch_mem_tracks.emplace(mitr.first,
+                                           ::perfetto::CounterTrack{_name.c_str()}
+                                               .set_unit(_unit)
+                                               .set_unit_multiplier(bytes_multiplier)
+                                               .set_is_incremental(false));
+            }
+        }
+
+        // Write counter values to perfetto trace
+        for(auto& mitr : scratch_mem_endpoints)
+        {
+            if(scratch_mem_tracks.count(mitr.first) > 0)
+            {
+                for(auto itr : mitr.second)
+                {
+                    TRACE_COUNTER(sdk::perfetto_category<sdk::category::scratch_memory>::name,
+                                  scratch_mem_tracks.at(mitr.first),
+                                  itr.first,
+                                  itr.second / bytes_multiplier);
+                    tracing_session->FlushBlocking();
+                }
             }
         }
     }

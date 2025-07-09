@@ -1066,6 +1066,36 @@ You can also combine this with the system trace option to get a more comprehensi
    :width: 100%
    :align: center
 
+Scratch Memory Visualization in Perfetto
++++++++++++++++++++++++++++++++++++++++++++++
+
+When using the ``--scratch-memory-trace`` option with Perfetto output format, ROCProfiler SDK creates visualization tracks for scratch memory usage. Scratch memory operations are displayed as counter tracks organized by agent (GPU), allowing you to monitor the scratch memory allocation patterns during kernel execution.
+
+To generate a Perfetto trace file that includes scratch memory visualization:
+
+.. code-block:: bash
+
+  rocprofv3 --scratch-memory-trace --output-format pftrace -- <application_path>
+
+In the Perfetto UI, scratch memory appears as counter tracks that show:
+
+- **Allocation peaks**: Each peak represents scratch memory allocation for a kernel execution
+- **Memory usage over time**: The height of each peak indicates the amount of memory allocated (typically in KB)
+- **Allocation/deallocation pattern**: You can observe when memory is allocated at kernel start and freed at kernel end
+
+For applications with multiple kernel iterations, you'll see multiple peaks in the scratch memory track, with each peak corresponding to a kernel execution. This visualization helps identify scratch memory usage patterns and potential optimization opportunities.
+
+.. image:: /data/perfetto_scratch_memory.png
+   :width: 100%
+   :align: center
+
+For comprehensive GPU execution insights, combine scratch memory tracing with kernel tracing:
+
+.. code-block:: bash
+
+  rocprofv3 --kernel-trace --scratch-memory-trace --output-format pftrace -- <application_path>
+
+This allows you to correlate scratch memory allocation patterns with specific kernel executions in the Perfetto visualization.
 
 Agent info
 -----------
