@@ -1995,23 +1995,22 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         start_context(counter_collection_ctx, "counter collection");
     }
 
-
-        auto rename_ctx            = rocprofiler_context_id_t{0};
-        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
-            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
-        };
+    auto rename_ctx            = rocprofiler_context_id_t{0};
+    auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+    };
 
     ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-                             rename_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-                             marker_core_api_kinds.data(),
-                             marker_core_api_kinds.size(),
-                             callbacks.kernel_rename,
-                             nullptr),
-                         "callback tracing service failed to configure");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         rename_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                         marker_core_api_kinds.data(),
+                         marker_core_api_kinds.size(),
+                         callbacks.kernel_rename,
+                         nullptr),
+                     "callback tracing service failed to configure");
 
     start_context(rename_ctx, "kernel rename");
 
