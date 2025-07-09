@@ -220,7 +220,12 @@ try:
     #print(f"found smi lib in [", location, "]")
 except OSError as e:
     print(e)
-    print("Unable to find {library_name} library try installing amd-smi-lib from your package manager")"""
+    print("Unable to find {library_name} library try installing amd-smi-lib from your package manager")
+
+#Add support for amdsmi_free_name_value_pairs
+amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
+amdsmi_free_name_value_pairs.restype = None
+amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]"""
     else:
         print("Unknown operating system. It is only supporing Linux and Windows.")
         return

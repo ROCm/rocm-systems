@@ -1074,6 +1074,7 @@ class AMDSMILogger():
         print("| Processes:                                                                   |")
         print("|  GPU        PID  Process Name          GTT_MEM  VRAM_MEM  MEM_USAGE     CU % |")
         print(default_line_5)
+        elevated_permission_error = False
         if len(output['processes']) != 0:
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
@@ -1088,6 +1089,10 @@ class AMDSMILogger():
                     cu_occupancy = "N/A"
                 print("| {0:4.4s}  {1:9.9s}  {2:19.19s}  {3:8.8s}  {4:8.8s}  {5:9.9s}  {6:7.7s} |".format(
                          gpu_id, pid, process_name, gtt_mem, vram_mem, mem_usage, cu_occupancy))
+                if process['name'] == "N/A":
+                    elevated_permission_error = True
         else:
             print("|  No running processes found                                                  |")
         print(default_line_1)
+        if elevated_permission_error:
+            print("Process Name may require elevated permissions.")
