@@ -957,7 +957,7 @@ static manageable_aperture_t *fmm_get_aperture(HsaApertureInfo info)
 	}
 }
 
-static manageable_aperture_t *fmm_is_scratch_aperture(const void *address)
+static gpu_mem_t *fmm_is_scratch_aperture(const void *address)
 {
 	uint32_t i;
 
@@ -967,7 +967,7 @@ static manageable_aperture_t *fmm_is_scratch_aperture(const void *address)
 
 		if ((address >= gpu_mem[i].scratch_physical.base) &&
 			(address <= gpu_mem[i].scratch_physical.limit))
-			return &gpu_mem[i].scratch_physical;
+			return &gpu_mem[i];
 
 	}
 	return NULL;
@@ -979,6 +979,7 @@ static manageable_aperture_t *fmm_find_aperture(const void *address,
 	manageable_aperture_t *aperture = NULL;
 	uint32_t i;
 	HsaApertureInfo _info = { .type = HSA_APERTURE_UNSUPPORTED, .idx = 0};
+	gpu_mem_t *gpu_mem_ptr = NULL;
 
 	if ((address >= mem_handle_aperture.base) &&
 		(address <= mem_handle_aperture.limit)){
@@ -990,8 +991,10 @@ static manageable_aperture_t *fmm_find_aperture(const void *address,
 		if (address >= svm.dgpu_aperture->base &&
 			address <= svm.dgpu_aperture->limit) {
 
-			aperture = fmm_is_scratch_aperture(address);
-			if (!aperture) {
+			gpu_mem_ptr = fmm_is_scratch_aperture(address);
+			if (gpu_mem_ptr) {
+				aperture = &gpu_mem_ptr->scratch_physical;
+			} else {
 				aperture = svm.dgpu_aperture;
 				_info.type = HSA_APERTURE_DGPU;
 			}
@@ -2030,16 +2033,14 @@ HSAKMT_STATUS hsakmt_fmm_release(void *address)
 {
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object = NULL;
-	uint32_t i;
+	gpu_mem_t *gpu_mem_ptr = NULL;
 
 	/* Special handling for scratch memory */
-	for (i = 0; i < gpu_mem_count; i++)
-		if (gpu_mem[i].gpu_id != NON_VALID_GPU_ID &&
-		    address >= gpu_mem[i].scratch_physical.base &&
-		    address <= gpu_mem[i].scratch_physical.limit) {
-			fmm_release_scratch(gpu_mem[i].gpu_id);
-			return HSAKMT_STATUS_SUCCESS;
-		}
+	gpu_mem_ptr = fmm_is_scratch_aperture(address);
+	if (gpu_mem_ptr) {
+		fmm_release_scratch(gpu_mem_ptr->gpu_id);
+		return HSAKMT_STATUS_SUCCESS;
+	}
 
 	object = vm_find_object(address, 0, &aperture);
 
@@ -2061,9 +2062,6 @@ HSAKMT_STATUS hsakmt_fmm_release(void *address)
 
 		if (__fmm_release(object, aperture))
 			return HSAKMT_STATUS_ERROR;
-
-		if (!aperture->is_cpu_accessible)
-			hsakmt_fmm_print(gpu_mem[i].gpu_id);
 	}
 
 	return HSAKMT_STATUS_SUCCESS;
@@ -3286,17 +3284,16 @@ HSAKMT_STATUS hsakmt_fmm_map_to_gpu(void *address, uint64_t size, uint64_t *gpuv
 {
 	manageable_aperture_t *aperture = NULL;
 	vm_object_t *object;
-	uint32_t i;
 	HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+	gpu_mem_t *gpu_mem_ptr = NULL;
 
 	/* Special handling for scratch memory */
-	for (i = 0; i < gpu_mem_count; i++)
-		if (gpu_mem[i].gpu_id != NON_VALID_GPU_ID &&
-		    address >= gpu_mem[i].scratch_physical.base &&
-		    address <= gpu_mem[i].scratch_physical.limit)
-			return _fmm_map_to_gpu_scratch(gpu_mem[i].gpu_id,
-							&gpu_mem[i].scratch_physical,
+	gpu_mem_ptr = fmm_is_scratch_aperture(address);
+	if (gpu_mem_ptr) {
+		return _fmm_map_to_gpu_scratch(gpu_mem_ptr->gpu_id,
+							&gpu_mem_ptr->scratch_physical,
 							address, size);
+	}
 
 	object = vm_find_object(address, size, &aperture);
 	if (!object && !hsakmt_is_svm_api_supported) {
@@ -3497,17 +3494,16 @@ int hsakmt_fmm_unmap_from_gpu(void *address)
 {
 	manageable_aperture_t *aperture;
 	vm_object_t *object;
-	uint32_t i;
 	int ret;
+	gpu_mem_t *gpu_mem_ptr = NULL;
 
 	/* Special handling for scratch memory */
-	for (i = 0; i < gpu_mem_count; i++)
-		if (gpu_mem[i].gpu_id != NON_VALID_GPU_ID &&
-		    address >= gpu_mem[i].scratch_physical.base &&
-		    address <= gpu_mem[i].scratch_physical.limit)
-			return _fmm_unmap_from_gpu_scratch(gpu_mem[i].gpu_id,
-							&gpu_mem[i].scratch_physical,
+	gpu_mem_ptr = fmm_is_scratch_aperture(address);
+	if (gpu_mem_ptr) {
+		return _fmm_unmap_from_gpu_scratch(gpu_mem_ptr->gpu_id,
+							&gpu_mem_ptr->scratch_physical,
 							address);
+	}
 
 	object = vm_find_object(address, 0, &aperture);
 	if (!object)
