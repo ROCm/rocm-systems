@@ -1226,7 +1226,10 @@ write_rocpd(
                     auto _node_id = std::optional<uint64_t>{};
                     if(_type == "ALLOC")
                     {
-                        _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
+                        // Some agents for scratch memory may be unkown due to rocprofiler
+                        // attachment feature
+                        auto* agent = tool_metadata.get_agent(itr.agent_id);
+                        _node_id    = agent != nullptr ? agent->node_id : 0;
                     }
 
                     auto _stream_id       = get_stream_id(extract_stream_field(itr));
