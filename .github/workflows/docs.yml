@@ -29,7 +29,7 @@ env:
 
 jobs:
   build-docs:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    runs-on: AMD-ROCm-Internal-dev1
     container: continuumio/miniconda3
     permissions:
       contents: read
@@ -70,7 +70,7 @@ jobs:
 
   deploy-docs:
     if: github.ref == 'refs/heads/amd-mainline'
-    runs-on: ubuntu-latest
+    runs-on: AMD-ROCm-Internal-dev1
     needs: build-docs
     permissions:
       contents: read
@@ -85,8 +85,18 @@ jobs:
         uses: actions/deploy-pages@v4
 
   build-docs-from-source:
-    runs-on: rocprof-azure-gpuless-emu-runner-set
+    runs-on: AMD-ROCm-Internal-dev1
+    container: rocm/dev-ubuntu-22.04:latest
     steps:
+      - name: Install os essentials
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y software-properties-common
+          sudo apt-add-repository ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y git
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -100,8 +110,8 @@ jobs:
         shell: bash
         run: |
           git config --global --add safe.directory '*'
-          apt-get update
-          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
 
       - name: Configure, Build, Install, and Package
@@ -119,5 +129,5 @@ jobs:
             . &&
           cmake --build build --target docs --parallel 4 &&
           cmake --build build --target all --parallel 12 &&
-          cmake --build build --target install --parallel 12 &&
+          sudo cmake --build build --target install --parallel 12 &&
           cmake --build build --target package --parallel 12

@@ -34,12 +34,9 @@ jobs:
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: rocprof-azure-docker-emu-runner-set
-    container: 
-        image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-${{ matrix.rocm-release }}-${{ matrix.os }}-public-release:latest
-        credentials:
-            username: ${{ secrets.DOCKER_USERNAME }}
-            password: ${{ secrets.DOCKER_PASSWORD }}
+    runs-on: AMD-ROCm-Internal-dev1
+    container:
+        image: rocm/dev-${{ matrix.os }}:${{ matrix.rocm-release }}
 
     # define this for containers
     env:
