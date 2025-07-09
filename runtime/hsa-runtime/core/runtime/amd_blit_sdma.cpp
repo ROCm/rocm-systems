@@ -340,7 +340,9 @@ hsa_status_t BlitSdma<useGCR>::SubmitCommand(const void* cmd, size_t cmd_size, u
   // Add space for acquire or release Hdp flush command
   uint32_t flush_cmd_size = 0;
   if (core::Runtime::runtime_singleton_->flag().enable_sdma_hdp_flush()) {
-    if (hdp_flush_support_) flush_cmd_size = flush_command_size_;
+    if (hdp_flush_support_) {
+      flush_cmd_size = flush_command_size_;
+    }
   }
 
   // Add space for cache flush.
