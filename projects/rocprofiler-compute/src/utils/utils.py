@@ -1169,7 +1169,7 @@ def gen_sysinfo(
 def detect_roofline(mspec):
     from utils import specs
 
-    rocm_ver = mspec.rocm_version[:1]
+    rocm_ver = int(mspec.rocm_version[:1])
 
     target_binary = {"rocm_ver": rocm_ver, "distro": "override", "path": None}
 
@@ -1259,7 +1259,7 @@ def mibench(args, mspec):
                 + "-"
                 + distro_map[target_binary["distro"]]
                 + "-rocm"
-                + target_binary["rocm_ver"]
+                + str(target_binary["rocm_ver"])
             )
             binary_paths.append(path_to_binary)
 
