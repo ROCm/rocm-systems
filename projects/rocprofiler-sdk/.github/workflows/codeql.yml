@@ -20,7 +20,7 @@ on:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102"
+  GPU_TARGETS: "gfx900;gfx906;gfx908;gfx90a;gfx940;gfx941;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1201"
   PATH: "/usr/bin:$PATH"
   EXCLUDED_PATHS: "external /tmp/build/external"
   GLOBAL_CMAKE_OPTIONS: "-DROCPROFILER_INTERNAL_RCCL_API_TRACE=ON"
@@ -33,7 +33,9 @@ jobs:
     #   - https://gh.io/supported-runners-and-hardware-resources
     #   - https://gh.io/using-larger-runners (GitHub.com only)
     # Consider using larger runners or machines with greater resources for possible analysis time improvements.
-    runs-on: rocprof-azure-gpuless-emu-runner-set
+    runs-on: AMD-ROCm-Internal-dev1
+
+    container: rocm/dev-ubuntu-22.04:latest
     permissions:
       # required for all workflows
       security-events: write
@@ -56,18 +58,24 @@ jobs:
         - language : actions
           build-mode: none
     steps:
-    - uses: actions/checkout@v4
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
+      env:
+        DEBIAN_FRONTEND: noninteractive
       run: |
+        sudo apt update
+        sudo apt install -y software-properties-common
+        sudo apt-add-repository ppa:git-core/ppa
+        sudo apt-get update
+        sudo apt-get install -y git build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rocdecode-dev rocjpeg-dev
         git config --global --add safe.directory '*'
-        apt-get update
-        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-        python3 -m pip install -r requirements.txt
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
+    - uses: actions/checkout@v4
+      with:
+        submodules: 'true'
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
@@ -81,9 +89,10 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run: |
-         cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm ${{ env.GLOBAL_CMAKE_OPTIONS }} -DPython3_EXECUTABLE=$(which python3) .
-         cmake --build /tmp/build --target all --parallel 16
-         rm -rf ${EXCLUDED_PATHS}
+        python3 -m pip install -r requirements.txt
+        cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm ${{ env.GLOBAL_CMAKE_OPTIONS }} -DPython3_EXECUTABLE=$(which python3) .
+        cmake --build /tmp/build --target all --parallel 16
+        rm -rf ${EXCLUDED_PATHS}
 
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@v3
