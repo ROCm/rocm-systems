@@ -991,6 +991,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::marker::update_table(roctx_ctrl);
         rocprofiler::marker::update_table(roctx_name);
 
+        rocprofiler::marker::range::update_table(roctx_core, lib_instance);
+
         // Tracing notifications the runtime has initialized
         rocprofiler::runtime_init::initialize(
             ROCPROFILER_RUNTIME_INITIALIZATION_MARKER, lib_version, lib_instance);

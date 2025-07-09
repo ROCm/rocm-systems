@@ -166,7 +166,7 @@ def resolve_library_path(val, args, is_sdk_lib=True):
     return val
 
 
-def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
+def get_att_paths(args):
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
@@ -177,16 +177,22 @@ def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
 
     if args.att_library_path:
         library_paths.extend(args.att_library_path)
+    elif os.environ.get("ROCPROF_ATT_LIBRARY_PATH"):
+        return os.environ.get("ROCPROF_ATT_LIBRARY_PATH")
     else:
         default_lib_path_env = os.environ.get("LD_LIBRARY_PATH", "").split(":") + [
             f"{ROCM_DIR}/lib"
         ]
-        defined_att_path_env = os.environ.get("ROCPROF_ATT_LIBRARY_PATH", "").split(":")
-        att_paths = defined_att_path_env if defined_att_path_env else default_lib_path_env
-        for itr in att_paths:
-            # don't add duplicates
+        for itr in default_lib_path_env:
             if itr not in library_paths:
                 library_paths += [itr]
+
+    return library_paths
+
+
+def check_att_capability(args, att_lib_name="librocprof-trace-decoder.so"):
+
+    library_paths = get_att_paths(args)
 
     for path in library_paths:
         for root, dirs, files in os.walk(path, topdown=True):
@@ -1550,7 +1556,7 @@ def run(app_args, args, **kwargs):
             )
         else:
             fatal_error(
-                f"rocprof-trace-decoder library path not found in {args.att_library_path}"
+                f"rocprof-trace-decoder library path not found in {get_att_paths(args)}"
             )
 
         if args.att_perfcounters:

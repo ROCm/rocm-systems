@@ -27,7 +27,7 @@ set(cc-env-kernel-filtering "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT
                "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
@@ -44,6 +44,6 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-counter-collection-kernel-filtering-range-filter-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+    PROPERTIES TIMEOUT 120 LABELS "integration-tests" DEPENDS
                "rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

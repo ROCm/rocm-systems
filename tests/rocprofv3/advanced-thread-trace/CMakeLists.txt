@@ -109,13 +109,6 @@ add_test(
         --code-object-input ${CMAKE_CURRENT_BINARY_DIR} --output-path
         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input)
 
-set(MULTIQUEUE_CMD_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input/out_results.json)
-
-set(MULTIQUEUE_JSON_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input/pass_1/out_results.json
-    )
-
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-att-cmd-validate
     PROPERTIES TIMEOUT

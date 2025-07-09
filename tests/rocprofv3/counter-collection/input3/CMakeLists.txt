@@ -52,25 +52,11 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
     )
 
-set(JSON_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_counter_collection.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
-    )
-
 set_tests_properties(
     rocprofv3-test-counter-collection-json-pmc1-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-counter-collection-json-pmc1-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${JSON_VALIDATION_FILES}")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
     NAME rocprofv3-test-counter-collection-yaml-pmc1-validate
@@ -85,22 +71,8 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
     )
 
-set(YAML_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_counter_collection.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
-    )
-
 set_tests_properties(
     rocprofv3-test-counter-collection-yaml-pmc1-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-counter-collection-yaml-pmc1-execute
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               ATTACHED_FILES_ON_FAIL
-               "${YAML_VALIDATION_FILES}")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

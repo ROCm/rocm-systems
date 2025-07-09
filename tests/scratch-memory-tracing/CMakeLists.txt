@@ -27,9 +27,18 @@ set(scratch-memory-tracing-env
 
 set_tests_properties(
     test-scratch-memory-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${scratch-memory-tracing-env}" FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${scratch-memory-tracing-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+               FIXTURES_SETUP
+               scratch-memory-trace)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -40,6 +49,15 @@ add_test(NAME test-scratch-memory-tracing-validate
 
 set_tests_properties(
     test-scratch-memory-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               test-scratch-memory-tracing-execute FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               test-scratch-memory-tracing-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}"
+               FIXTURES_REQUIRED
+               scratch-memory-trace)

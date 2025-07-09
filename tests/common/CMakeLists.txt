@@ -9,7 +9,7 @@ set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file|failed with error code"
+    "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
 set(DEFAULT_GPU_TARGETS

@@ -85,7 +85,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   build-docs-from-source:
-    runs-on: gpuless-emu-runner-set
+    runs-on: rocprof-azure-gpuless-emu-runner-set
     steps:
       - name: Checkout
         uses: actions/checkout@v4

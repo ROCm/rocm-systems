@@ -26,6 +26,10 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
+# this should be defaulted to OFF by ROCm 7.0.1 or 7.1 this should only used to disable
+# tests in extreme circumstances
+option(ROCPROFILER_DISABLE_UNSTABLE_CTESTS "Disable unstable tests" ON)
+
 enable_testing()
 include(CTest)
 

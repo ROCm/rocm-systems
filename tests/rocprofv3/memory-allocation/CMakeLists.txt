@@ -28,7 +28,7 @@ set_tests_properties(
     rocprofv3-test-memory-allocation-tracing-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
                "${memory-allocation-tracing-env}" FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
     NAME rocprofv3-test-memory-allocation-tracing-validate

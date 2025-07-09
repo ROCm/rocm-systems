@@ -48,7 +48,10 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}") # Once stable, should be disabled
+                                                         # via IS_THREAD_SANITIZER (thread
+                                                         # sanitizer has too much
+                                                         # overhead)
 
 add_test(
     NAME rocprofv3-test-collection-period-validate
@@ -71,4 +74,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}") # Once stable, should be disabled
+                                                         # via IS_THREAD_SANITIZER (thread
+                                                         # sanitizer has too much
+                                                         # overhead)

@@ -109,7 +109,12 @@ auto
 get_stream_id(hipStream_t stream)
 {
     return get_stream_map()->rlock(
-        [](const stream_map_t& _data, hipStream_t _stream) { return _data.at(_stream); }, stream);
+        [](const stream_map_t& _data, hipStream_t _stream) {
+            ROCP_ERROR_IF(_data.count(_stream) == 0)
+                << "failed to retrieve stream ID in " << __FILE__;
+            return _data.at(_stream);
+        },
+        stream);
 }
 
 // Map rocprofiler_hip_stream_operation_t to respective name

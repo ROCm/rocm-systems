@@ -51,15 +51,7 @@ public:
            std::string dsc,
            std::string expr,
            std::string constant,
-           uint64_t    id)
-    : name_(std::move(name))
-    , block_(std::move(block))
-    , event_(std::move(event))
-    , description_(std::move(dsc))
-    , expression_(std::move(expr))
-    , constant_(std::move(constant))
-    , id_(id)
-    {}
+           uint64_t    id);
 
     const std::string& name() const { return name_; }
     const std::string& block() const { return block_; }

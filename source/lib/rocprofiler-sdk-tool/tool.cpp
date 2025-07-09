@@ -490,7 +490,8 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
         tool::get_config().kernel_rename && thread_dispatch_rename != nullptr &&
         !thread_dispatch_rename->empty();
 
-    const bool hip_stream_enabled = !tool::get_config().group_by_queue;
+    const bool hip_stream_enabled =
+        !tool::get_config().group_by_queue && rocprofiler::tool::stream::stream_stack_not_null();
 
     if(!kernel_rename_service_enabled && !hip_stream_enabled) return 1;
 
@@ -566,7 +567,7 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
 {
     if(!tool::get_config().kernel_rename || thread_dispatch_rename == nullptr) return;
 
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
         auto* marker_data =
             static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -575,22 +576,22 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
             return std::string_view{*common::get_string_entry(_hash_v)};
         };
 
-        if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA &&
+        if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA &&
            record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && marker_data->args.roctxMarkA.message)
         {
             thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
                 add_message(marker_data->args.roctxMarkA.message), record.correlation_id.internal));
         }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA &&
-                record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
-                marker_data->args.roctxRangePushA.message)
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+                marker_data->args.roctxThreadRangeA.message)
         {
             thread_dispatch_rename->emplace(tool_metadata->add_kernel_rename_val(
-                add_message(marker_data->args.roctxRangePushA.message),
+                add_message(marker_data->args.roctxThreadRangeA.message),
                 record.correlation_id.internal));
         }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop &&
-                record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
         {
             ROCP_FATAL_IF(thread_dispatch_rename->empty())
                 << "roctxRangePop invoked more times than roctxRangePush on thread "
@@ -598,6 +599,12 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
 
             thread_dispatch_rename->pop();
         }
+    }
+    else
+    {
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Unsupported operation for {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
     }
 
     common::consume_args(user_data, data);
@@ -695,12 +702,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                           rocprofiler_user_data_t*              user_data,
                           void*                                 data)
 {
-    static thread_local auto stacked_range =
-        std::vector<rocprofiler_buffer_tracing_marker_api_record_t>{};
-    static auto global_range = common::Synchronized<
-        std::unordered_map<roctx_range_id_t, rocprofiler_buffer_tracing_marker_api_record_t>>{};
-
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
         auto* marker_data =
             static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
@@ -708,7 +710,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto ts = rocprofiler_timestamp_t{};
         rocprofiler_get_timestamp(&ts);
 
-        if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA)
+        if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
         {
             if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
             {
@@ -727,83 +729,60 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 tool::write_ring_buffer(marker_record, domain_type::MARKER);
             }
         }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA)
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA)
         {
-            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
             {
-                if(marker_data->args.roctxRangePushA.message)
+                user_data->value = ts;
+
+                if(marker_data->args.roctxThreadRangeA.message)
                 {
                     CHECK_NOTNULL(tool_metadata)
                         ->add_marker_message(
                             record.correlation_id.internal,
-                            std::string{marker_data->args.roctxRangePushA.message});
-
-                    auto marker_record = rocprofiler_buffer_tracing_marker_api_record_t{};
-                    marker_record.size = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
-                    marker_record.kind = convert_marker_tracing_kind(record.kind);
-                    marker_record.operation       = record.operation;
-                    marker_record.thread_id       = record.thread_id;
-                    marker_record.correlation_id  = record.correlation_id;
-                    marker_record.start_timestamp = ts;
-                    marker_record.end_timestamp   = 0;
-
-                    stacked_range.emplace_back(marker_record);
+                            std::string{marker_data->args.roctxThreadRangeA.message});
                 }
             }
-        }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop)
-        {
-            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
             {
-                ROCP_FATAL_IF(stacked_range.empty())
-                    << "roctxRangePop invoked more times than roctxRangePush on thread "
-                    << rocprofiler::common::get_tid();
-
-                auto val = stacked_range.back();
-                stacked_range.pop_back();
-
-                val.end_timestamp = ts;
-                tool::write_ring_buffer(val, domain_type::MARKER);
-            }
-        }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA)
-        {
-            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
-               marker_data->args.roctxRangeStartA.message)
-            {
-                CHECK_NOTNULL(tool_metadata)
-                    ->add_marker_message(record.correlation_id.internal,
-                                         std::string{marker_data->args.roctxRangeStartA.message});
-
                 auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
                 marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
                 marker_record.kind      = convert_marker_tracing_kind(record.kind);
                 marker_record.operation = record.operation;
                 marker_record.thread_id = record.thread_id;
                 marker_record.correlation_id  = record.correlation_id;
-                marker_record.start_timestamp = ts;
-                marker_record.end_timestamp   = 0;
+                marker_record.start_timestamp = user_data->value;
+                marker_record.end_timestamp   = ts;
 
-                auto _id = marker_data->retval.roctx_range_id_t_retval;
-                global_range.wlock(
-                    [](auto& map, roctx_range_id_t _range_id, auto&& _record) {
-                        map.emplace(_range_id, std::move(_record));
-                    },
-                    _id,
-                    marker_record);
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
             }
         }
-        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop)
+        else if(record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxProcessRangeA)
         {
             if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
             {
-                auto   _id    = marker_data->args.roctxRangeStop.id;
-                auto&& _entry = global_range.rlock(
-                    [](const auto& map, auto _key) { return map.at(_key); }, _id);
+                user_data->value = ts;
 
-                _entry.end_timestamp = ts;
-                tool::write_ring_buffer(_entry, domain_type::MARKER);
-                global_range.wlock([](auto& map, auto _key) { return map.erase(_key); }, _id);
+                if(marker_data->args.roctxProcessRangeA.message)
+                {
+                    CHECK_NOTNULL(tool_metadata)
+                        ->add_marker_message(
+                            record.correlation_id.internal,
+                            std::string{marker_data->args.roctxProcessRangeA.message});
+                }
+            }
+            else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                auto marker_record      = rocprofiler_buffer_tracing_marker_api_record_t{};
+                marker_record.size      = sizeof(rocprofiler_buffer_tracing_marker_api_record_t);
+                marker_record.kind      = convert_marker_tracing_kind(record.kind);
+                marker_record.operation = record.operation;
+                marker_record.thread_id = record.thread_id;
+                marker_record.correlation_id  = record.correlation_id;
+                marker_record.start_timestamp = user_data->value;
+                marker_record.end_timestamp   = ts;
+
+                tool::write_ring_buffer(marker_record, domain_type::MARKER);
             }
         }
         else
@@ -825,6 +804,12 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 tool::write_ring_buffer(marker_record, domain_type::MARKER);
             }
         }
+    }
+    else
+    {
+        ROCP_CI_LOG(INFO) << fmt::format(
+            "Unsupported operation for {}",
+            tool_metadata->get_operation_name(record.kind, record.operation));
     }
 
     (void) data;
@@ -1606,7 +1591,10 @@ configure_pc_sampling_on_all_agents(uint64_t                        buffer_size,
         }
     }
     if(!config_match_found)
-        ROCP_FATAL << "Given PC sampling configuration is not supported on any of the agents";
+    {
+        ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+        std::exit(EXIT_FAILURE);
+    }
 }
 
 struct real_callbacks_t
@@ -1733,7 +1721,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     {
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                              get_client_ctx(),
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
                              nullptr,
                              0,
                              callbacks.callback_tracing,
@@ -1967,16 +1955,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().kernel_rename)
     {
         auto rename_ctx            = rocprofiler_context_id_t{0};
-        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 3>{
-            ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA,
-            ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA,
-            ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop};
+        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 2>{
+            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA,
+            ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA,
+        };
 
         ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
 
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                              rename_ctx,
-                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
                              marker_core_api_kinds.data(),
                              marker_core_api_kinds.size(),
                              callbacks.kernel_rename,
@@ -2845,9 +2833,10 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                                           this_func,
                                           signo);
                 if((_chained.action->sa_flags & SA_SIGINFO) == SA_SIGINFO &&
-                   _chained.action->sa_sigaction)
+                   _chained.action->sa_sigaction &&
+                   _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
                 {
-                    ROCP_TRACE << fmt::format(
+                    ROCP_WARNING << fmt::format(
                         "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
                         "{}... executing chained sigaction (SIGINFO)",
                         this_ppid,
@@ -2861,7 +2850,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
                         _chained.action->sa_handler &&
                         _chained.action->sa_sigaction != &rocprofv3_error_signal_handler)
                 {
-                    ROCP_TRACE << fmt::format(
+                    ROCP_WARNING << fmt::format(
                         "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
                         "{}... executing chained sigaction (HANDLER)",
                         this_ppid,
@@ -2876,7 +2865,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             {
                 if(_chained.handler)
                 {
-                    ROCP_TRACE << fmt::format(
+                    ROCP_WARNING << fmt::format(
                         "[PPID={}][PID={}][TID={}][{}] rocprofv3 found chained signal handler for "
                         "{}... executing chained handler",
                         this_ppid,

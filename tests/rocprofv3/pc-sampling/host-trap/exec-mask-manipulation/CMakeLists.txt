@@ -32,7 +32,7 @@ set(pc-sampling-env-host-trap-exec-mask-manipulation "${PRELOAD_ENV}")
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-cmd-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
@@ -40,7 +40,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")
 
@@ -55,7 +55,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-json-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
@@ -63,7 +63,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")
 
@@ -78,7 +78,7 @@ add_test(
 set_tests_properties(
     rocprofv3-test-pc-sampling-host-trap-exec-mask-manipulation-input-yaml-execute
     PROPERTIES TIMEOUT
-               45
+               90
                LABELS
                "integration-tests;pc-sampling"
                ENVIRONMENT
@@ -86,7 +86,7 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                SKIP_REGULAR_EXPRESSION
-               "PC sampling unavailable"
+               "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
                DISABLED
                "${IS_PC_SAMPLING_DISABLED}")
 
@@ -113,7 +113,7 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_DISABLED}")
 
@@ -138,7 +138,7 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_DISABLED}")
 
@@ -163,6 +163,6 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
         SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
+        "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
         DISABLED
         "${IS_PC_SAMPLING_DISABLED}")

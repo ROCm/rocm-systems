@@ -11,7 +11,9 @@ project(
 find_package(rocprofiler-sdk REQUIRED)
 
 set(PYTEST_ARGS)
-if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer" OR ROCPROFILER_BUILD_CODECOV)
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread|UndefinedBehavior)Sanitizer"
+   OR ROCPROFILER_BUILD_CODECOV
+   OR ROCPROFILER_DISABLE_UNSTABLE_CTESTS)
     set(PYTEST_ARGS -k "not test_total_runtime")
 endif()
 
@@ -32,8 +34,16 @@ set(kernel-tracing-env
 
 set_tests_properties(
     test-kernel-tracing-execute
-    PROPERTIES TIMEOUT 100 LABELS "integration-tests" ENVIRONMENT "${kernel-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               100
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${kernel-tracing-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_SETUP
+               kernel-tracing)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -45,5 +55,13 @@ add_test(
 
 set_tests_properties(
     test-kernel-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS test-kernel-tracing-execute
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               test-kernel-tracing-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               FIXTURES_REQUIRED
+               kernel-tracing)

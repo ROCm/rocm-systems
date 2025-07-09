@@ -569,15 +569,21 @@ Queue::Queue(const AgentCache&  agent,
                 counters::submitPacket(_intercept_queue, &pkt);
                 constexpr auto timeout_hint =
                     std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-                if(core_api.hsa_signal_wait_relaxed_fn(completion,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       0,
-                                                       timeout_hint.count(),
-                                                       HSA_WAIT_STATE_ACTIVE) != 0)
+                hsa_signal_value_t val;
+                for(int i = 0; i < 3; i++)
                 {
-                    ROCP_FATAL << "Could not set agent to be profiled";
+                    val = core_api.hsa_signal_wait_scacquire_fn(completion,
+                                                                HSA_SIGNAL_CONDITION_EQ,
+                                                                0,
+                                                                timeout_hint.count(),
+                                                                HSA_WAIT_STATE_ACTIVE);
+                    if(val == 0)
+                    {
+                        core_api.hsa_signal_destroy_fn(completion);
+                        return;
+                    }
                 }
-                core_api.hsa_signal_destroy_fn(completion);
+                ROCP_FATAL << "Could not set agent to be profiled - Signal Value: " << val;
             });
     }
 

@@ -30,6 +30,9 @@ namespace tool
 {
 namespace stream
 {
+bool
+stream_stack_not_null();
+
 rocprofiler_stream_id_t
 get_stream_id();
 

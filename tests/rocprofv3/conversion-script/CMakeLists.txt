@@ -29,6 +29,7 @@ project(
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
+
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py input.txt conftest.py
                                    CONFIG pytest.ini)
@@ -83,7 +84,7 @@ foreach(i RANGE 0 ${convert_test_length})
 
         add_test(NAME ${validate_test_name}
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         --input ${output} --retain-agent-prefix true)
+                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix true)
     else()
         add_test(
             NAME ${test_name}
@@ -95,7 +96,7 @@ foreach(i RANGE 0 ${convert_test_length})
 
         add_test(NAME ${validate_test_name}
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                         --input ${output} --retain-agent-prefix false)
+                         ${PYTEST_ARGS} --input ${output} --retain-agent-prefix false)
     endif()
     set_tests_properties(
         ${test_name}
@@ -104,6 +105,14 @@ foreach(i RANGE 0 ${convert_test_length})
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
     set_tests_properties(
         ${validate_test_name}
-        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS ${test_name}
-                   FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+        PROPERTIES TIMEOUT
+                   45
+                   LABELS
+                   "integration-tests"
+                   DEPENDS
+                   ${test_name}
+                   FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+                   DISABLED
+                   "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 endforeach()

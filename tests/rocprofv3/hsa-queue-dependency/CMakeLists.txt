@@ -42,20 +42,8 @@ add_test(
         --pftrace-input
         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.pftrace)
 
-set(MULTIQUEUE_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json)
-
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-validate
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               DEPENDS
-               "rocprofv3-test-hsa-multiqueue-execute"
-               FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${MULTIQUEUE_VALIDATION_FILES}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+               "rocprofv3-test-hsa-multiqueue-execute" FAIL_REGULAR_EXPRESSION
+               "AssertionError")

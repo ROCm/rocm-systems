@@ -106,19 +106,6 @@ foreach(i RANGE 0 ${validate_test_length})
             ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json)
 endforeach()
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_memory_allocation_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-absolute/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_memory_allocation_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-relative/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_allocation_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/transpose-agent-index-type-relative/out_memory_copy_trace.csv
-    )
-
 set(dependency_tests
     rocprofv3-test-agent-index-json-absolute-execute
     rocprofv3-test-agent-index-json-relative-execute;rocprofv3-test-agent-index-json-absolute-execute
@@ -132,15 +119,6 @@ foreach(i RANGE 0 ${validate_test_length})
     list(GET validate_tests ${i} test_name)
     list(GET dependency_tests ${i} dep)
     set_tests_properties(
-        ${test_name}
-        PROPERTIES TIMEOUT
-                   45
-                   LABELS
-                   "integration-tests"
-                   DEPENDS
-                   ${dep}
-                   FAIL_REGULAR_EXPRESSION
-                   "AssertionError"
-                   ATTACHED_FILES_ON_FAIL
-                   "${VALIDATION_FILES}")
+        ${test_name} PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS ${dep}
+                                FAIL_REGULAR_EXPRESSION "AssertionError")
 endforeach()

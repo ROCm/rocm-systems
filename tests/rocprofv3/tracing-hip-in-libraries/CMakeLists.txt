@@ -35,7 +35,8 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
 
     set_tests_properties(
         rocprofv3-test-trace-hip-in-libraries-${_OUTPUT_FORMAT}-execute
-        PROPERTIES TIMEOUT 100 LABELS "integration-tests" ENVIRONMENT "${tracing-env}")
+        PROPERTIES TIMEOUT 120 LABELS "integration-tests" ENVIRONMENT "${tracing-env}"
+                   FIXTURES_SETUP rocprofv3-test-trace-hip-in-libraries)
 
     list(APPEND VALIDATION_DEPENDS
          rocprofv3-test-trace-hip-in-libraries-${_OUTPUT_FORMAT}-execute)
@@ -69,19 +70,6 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace
         --otf2-input ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.otf2)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv)
-
 set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-validate
     PROPERTIES TIMEOUT
@@ -92,5 +80,5 @@ set_tests_properties(
                "${VALIDATION_DEPENDS}"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+               FIXTURES_REQUIRED
+               rocprofv3-test-trace-hip-in-libraries)
