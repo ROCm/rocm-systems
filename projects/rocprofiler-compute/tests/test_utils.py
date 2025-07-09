@@ -2717,7 +2717,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     profiler_options = {
         "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": workload_dir,
-        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
     }
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
@@ -2774,7 +2774,9 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr("yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}})
+    monkeypatch.setattr(
+        "yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}}
+    )
 
     import utils.utils as utils_mod
 
@@ -3179,127 +3181,175 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
             return mock_fname_path_obj
         return mock_fname_path_obj
-    monkeypatch.setattr("utils.utils.path", path_side_effect)  
-  
-  
-    original_env_var = "original_value"  
-    monkeypatch.setenv("EXISTING_VAR", original_env_var)  
-    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)  
-  
-    profiler_options = {"APP_CMD": "my_app --arg"}  
-    mspec = MockMSpec(gpu_model="mi250")   
-    loglevel = logging.DEBUG  
-    format_rocprof_output = True  
-      
-    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})  
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
-    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
-    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
-    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)   
-  
-    utils_mod.run_prof(fname_str, profiler_options.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
-  
-    assert capture_subprocess_called_with_env is not None, "new_env should have been created"  
-    assert "EXISTING_VAR" in capture_subprocess_called_with_env, "new_env should be a copy of os.environ"  
-    assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var  
-    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env   
-    assert "APP_CMD" not in capture_subprocess_called_with_env  
-    
-def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):  
-    """  
-    Covers:  
-    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options: process_hip_trace_output(...)  
-    Line 4 (CLI): if "--kokkos-trace" in options: process_kokkos_trace_output(...)  
-    Line 5 (CLI): elif "--hip-trace" in options: process_hip_trace_output(...)  
-    """  
-    fname_str = str(tmp_path / "counters.txt")  
-    pathlib.Path(fname_str).touch()  
-    fbase_str = "counters"  
-    workload_dir_str = str(tmp_path)  
-    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)  
-  
-    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success"))  
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [str(tmp_path / "results1.csv")])  
-      
-    hip_trace_called_with = None  
-    def mock_hip_trace(wd, fb):  
-        nonlocal hip_trace_called_with  
-        hip_trace_called_with = (wd, fb)  
-    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)  
-  
-    kokkos_trace_called_with = None  
-    def mock_kokkos_trace(wd, fb):  
-        nonlocal kokkos_trace_called_with  
-        kokkos_trace_called_with = (wd, fb)  
-    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)  
-      
-    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)  
-    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)  
-    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])  
-  
-    mock_fname_path_obj = mock.MagicMock(spec=pathlib.Path)  
-    mock_fname_path_obj.stem = fbase_str  
-    mock_fname_path_obj.name = "counters.txt"  
-    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False  
-    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=pathlib.Path)  
-      
-    mock_out_path_obj = mock.MagicMock(spec=pathlib.Path)  
-    mock_out_path_obj.exists.return_value = True  
-  
-    def path_side_effect(p_arg, *args):  
-        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt": return mock_fname_path_obj  
-        if isinstance(p_arg, str) and p_arg.endswith("/out"): return mock_out_path_obj  
-        if isinstance(p_arg, str) and p_arg.endswith("counters.txt"): return mock_fname_path_obj  
-        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, 'with_suffix'): return mock_fname_path_obj  
-        return mock_fname_path_obj   
-    monkeypatch.setattr("utils.utils.path", path_side_effect)  
-  
-    dummy_df = pd.DataFrame({'Dispatch_ID': [0], 'A': [1]})   
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())  
-    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)  
-    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)  
-    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)  
-    monkeypatch.setattr('builtins.open', lambda *a, **k: io.StringIO(""))
-    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)  
-    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)  
-  
-    mspec = MockMSpec()  
-    loglevel = logging.INFO  
-    format_rocprof_output = True  
-  
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")  
-    monkeypatch.setattr("utils.utils.using_v3", lambda: True)  
-      
-    profiler_options_sdk_hip = {  
-        "APP_CMD": "my_app",  
+
+    monkeypatch.setattr("utils.utils.path", path_side_effect)
+
+    original_env_var = "original_value"
+    monkeypatch.setenv("EXISTING_VAR", original_env_var)
+    monkeypatch.delenv("ROCPROFILER_INDIVIDUAL_XCC_MODE", raising=False)
+
+    profiler_options = {"APP_CMD": "my_app --arg"}
+    mspec = MockMSpec(gpu_model="mi250")
+    loglevel = logging.DEBUG
+    format_rocprof_output = True
+
+    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+
+    utils_mod.run_prof(
+        fname_str,
+        profiler_options.copy(),
+        workload_dir_str,
+        mspec,
+        loglevel,
+        format_rocprof_output,
+    )
+
+    assert (
+        capture_subprocess_called_with_env is not None
+    ), "new_env should have been created"
+    assert (
+        "EXISTING_VAR" in capture_subprocess_called_with_env
+    ), "new_env should be a copy of os.environ"
+    assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
+    assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
+    assert "APP_CMD" not in capture_subprocess_called_with_env
+
+
+def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
+    """
+    Covers:
+    Line 3 (SDK): if "ROCPROF_HIP_RUNTIME_API_TRACE" in options: process_hip_trace_output(...)
+    Line 4 (CLI): if "--kokkos-trace" in options: process_kokkos_trace_output(...)
+    Line 5 (CLI): elif "--hip-trace" in options: process_hip_trace_output(...)
+    """
+    fname_str = str(tmp_path / "counters.txt")
+    pathlib.Path(fname_str).touch()
+    fbase_str = "counters"
+    workload_dir_str = str(tmp_path)
+    (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(
+        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success")
+    )
+    monkeypatch.setattr(
+        "utils.utils.process_rocprofv3_output",
+        lambda *a, **k: [str(tmp_path / "results1.csv")],
+    )
+
+    hip_trace_called_with = None
+
+    def mock_hip_trace(wd, fb):
+        nonlocal hip_trace_called_with
+        hip_trace_called_with = (wd, fb)
+
+    monkeypatch.setattr("utils.utils.process_hip_trace_output", mock_hip_trace)
+
+    kokkos_trace_called_with = None
+
+    def mock_kokkos_trace(wd, fb):
+        nonlocal kokkos_trace_called_with
+        kokkos_trace_called_with = (wd, fb)
+
+    monkeypatch.setattr("utils.utils.process_kokkos_trace_output", mock_kokkos_trace)
+
+    monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
+    monkeypatch.setattr("utils.utils.parse_text", lambda *a, **k: ["C1"])
+
+    mock_fname_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_fname_path_obj.stem = fbase_str
+    mock_fname_path_obj.name = "counters.txt"
+    mock_fname_path_obj.with_suffix.return_value.exists.return_value = False
+    mock_fname_path_obj.__truediv__.return_value = mock.Mock(spec=pathlib.Path)
+
+    mock_out_path_obj = mock.MagicMock(spec=pathlib.Path)
+    mock_out_path_obj.exists.return_value = True
+
+    def path_side_effect(p_arg, *args):
+        if isinstance(p_arg, pathlib.Path) and p_arg.name == "counters.txt":
+            return mock_fname_path_obj
+        if isinstance(p_arg, str) and p_arg.endswith("/out"):
+            return mock_out_path_obj
+        if isinstance(p_arg, str) and p_arg.endswith("counters.txt"):
+            return mock_fname_path_obj
+        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
+            return mock_fname_path_obj
+        return mock_fname_path_obj
+
+    monkeypatch.setattr("utils.utils.path", path_side_effect)
+
+    dummy_df = pd.DataFrame({"Dispatch_ID": [0], "A": [1]})
+    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: dummy_df.copy())
+    monkeypatch.setattr("pandas.DataFrame.to_csv", lambda self, *a, **k: None)
+    monkeypatch.setattr("shutil.copyfile", lambda *a, **k: None)
+    monkeypatch.setattr("shutil.rmtree", lambda *a, **k: None)
+    monkeypatch.setattr("builtins.open", lambda *a, **k: io.StringIO(""))
+    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds", lambda df, *a: df)
+    monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 1)
+
+    mspec = MockMSpec()
+    loglevel = logging.INFO
+    format_rocprof_output = True
+
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
+    monkeypatch.setattr("utils.utils.using_v3", lambda: True)
+
+    profiler_options_sdk_hip = {
+        "APP_CMD": "my_app",
         "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
-        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
-    }  
-    hip_trace_called_with = None   
-    kokkos_trace_called_with = None  
-  
-    utils_mod.run_prof(fname_str, profiler_options_sdk_hip.copy(), workload_dir_str, mspec, loglevel, format_rocprof_output)  
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
-    assert kokkos_trace_called_with is None  
-  
-    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")   
-      
-    profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]  
-    hip_trace_called_with = None   
-    kokkos_trace_called_with = None  
-  
-    utils_mod.run_prof(fname_str, profiler_options_cli_kokkos, workload_dir_str, mspec, loglevel, format_rocprof_output)  
-    assert kokkos_trace_called_with == (workload_dir_str, fbase_str)  
-    assert hip_trace_called_with is None  
-        
-    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]  
-    hip_trace_called_with = None  
-    kokkos_trace_called_with = None  
-  
-    utils_mod.run_prof(fname_str, profiler_options_cli_hip, workload_dir_str, mspec, loglevel, format_rocprof_output)  
-    assert hip_trace_called_with == (workload_dir_str, fbase_str)  
-    assert kokkos_trace_called_with is None  
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+    }
+    hip_trace_called_with = None
+    kokkos_trace_called_with = None
+
+    utils_mod.run_prof(
+        fname_str,
+        profiler_options_sdk_hip.copy(),
+        workload_dir_str,
+        mspec,
+        loglevel,
+        format_rocprof_output,
+    )
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)
+    assert kokkos_trace_called_with is None
+
+    monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprof_cli_v3")
+
+    profiler_options_cli_kokkos = ["--kokkos-trace", "--other-opt"]
+    hip_trace_called_with = None
+    kokkos_trace_called_with = None
+
+    utils_mod.run_prof(
+        fname_str,
+        profiler_options_cli_kokkos,
+        workload_dir_str,
+        mspec,
+        loglevel,
+        format_rocprof_output,
+    )
+    assert kokkos_trace_called_with == (workload_dir_str, fbase_str)
+    assert hip_trace_called_with is None
+
+    profiler_options_cli_hip = ["--hip-trace", "--other-opt"]
+    hip_trace_called_with = None
+    kokkos_trace_called_with = None
+
+    utils_mod.run_prof(
+        fname_str,
+        profiler_options_cli_hip,
+        workload_dir_str,
+        mspec,
+        loglevel,
+        format_rocprof_output,
+    )
+    assert hip_trace_called_with == (workload_dir_str, fbase_str)
+    assert kokkos_trace_called_with is None
+
 
 # =============================================================================
 # ROCPROFV3 OUTPUT PROCESSING TESTS
@@ -8763,7 +8813,6 @@ def test_extract_counter_info_returns_counter_when_found():
     )
     assert extracted_counter2 is not None
     assert extracted_counter2 == counter2_details
-
 
 
 # =============================================================================
