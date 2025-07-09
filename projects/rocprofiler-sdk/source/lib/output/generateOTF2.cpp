@@ -578,8 +578,8 @@ write_otf2(const output_config&                                          cfg,
             if(!_inp) return;
             for(auto itr : *_inp)
             {
-                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
-                   itr.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA)
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+                   itr.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA)
                     continue;
 
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
@@ -589,8 +589,8 @@ write_otf2(const output_config&                                          cfg,
                                           rocprofiler_buffer_tracing_marker_api_record_t>::value)
                 {
                     paradigm = OTF2_PARADIGM_USER;
-                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
-                       itr.operation != ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId)
+                    if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+                       itr.operation != ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
                         name = tool_metadata.get_marker_message(itr.correlation_id.internal);
                 }
 

@@ -29,5 +29,6 @@ typedef enum rocprofiler_marker_table_id_t
     ROCPROFILER_MARKER_TABLE_ID_RoctxCore = 0,
     ROCPROFILER_MARKER_TABLE_ID_RoctxControl,
     ROCPROFILER_MARKER_TABLE_ID_RoctxName,
+    ROCPROFILER_MARKER_TABLE_ID_RoctxCoreRange,
     ROCPROFILER_MARKER_TABLE_ID_LAST,
 } rocprofiler_marker_table_id_t;

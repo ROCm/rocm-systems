@@ -287,6 +287,7 @@ def test_marker_api_trace(marker_input_data):
             "MARKER_CORE_API",
             "MARKER_CONTROL_API",
             "MARKER_NAME_API",
+            "MARKER_CORE_RANGE_API",
         ]
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
@@ -305,7 +306,12 @@ def test_marker_api_trace_json(json_data):
     def get_kind_name(kind_id):
         return data["strings"]["buffer_records"][kind_id]["kind"]
 
-    valid_domain = ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API")
+    valid_domain = (
+        "MARKER_CORE_API",
+        "MARKER_CONTROL_API",
+        "MARKER_NAME_API",
+        "MARKER_CORE_RANGE_API",
+    )
 
     buffer_records = data["buffer_records"]
     marker_data = buffer_records["marker_api"]

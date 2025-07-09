@@ -100,6 +100,9 @@ TEST(rocprofiler_lib, api_id_names)
         ROCPROFILER_MARKER_CONTROL_API_ID_LAST);
     EXPECT_EQ(buffered_names.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API).size(),
               ROCPROFILER_MARKER_NAME_API_ID_LAST);
+    EXPECT_EQ(
+        buffered_names.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API).size(),
+        ROCPROFILER_MARKER_CORE_RANGE_API_ID_LAST);
 
     // Code object callback
     EXPECT_EQ(callback_names.operation_names.at(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT).size(),

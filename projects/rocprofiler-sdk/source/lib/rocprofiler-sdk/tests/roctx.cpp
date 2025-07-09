@@ -226,6 +226,8 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
               ROCPROFILER_MARKER_CONTROL_API_ID_LAST);
     EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API).size(),
               ROCPROFILER_MARKER_NAME_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API).size(),
+              ROCPROFILER_MARKER_CORE_RANGE_API_ID_LAST);
 
     auto v_records = std::vector<rocprofiler_buffer_tracing_marker_api_record_t*>{};
     v_records.reserve(num_headers);
