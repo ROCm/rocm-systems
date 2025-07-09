@@ -1465,7 +1465,7 @@ class AMDSMICommands():
             guest_data (bool, optional): Value override for args.guest_data. Defaults to None.
             fb_usage (bool, optional): Value override for args.fb_usage. Defaults to None.
             xgmi (bool, optional): Value override for args.xgmi. Defaults to None.
-            throttle (bool, optional): Value override for args.throttle. Defaults to None.
+            throttle (bool, optional): Value override for args.violation. Defaults to None.
 
         Raises:
             IndexError: Index error if gpu list is empty
@@ -1527,11 +1527,11 @@ class AMDSMICommands():
             if energy:
                 args.energy = energy
             if throttle:
-                args.throttle = throttle
+                args.violation = throttle
             current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level",
                                       "xgmi_err", "energy", "throttle"]
             current_platform_values += [args.fan, args.voltage_curve, args.overdrive,
-                                        args.perf_level, args.xgmi_err, args.energy, args.throttle,
+                                        args.perf_level, args.xgmi_err, args.energy, args.violation,
                                         ]
 
         if self.helpers.is_hypervisor():
@@ -2556,7 +2556,7 @@ class AMDSMICommands():
 
                 values_dict['mem_usage'] = memory_usage
         if "throttle" in current_platform_args:
-            if args.throttle:
+            if args.violation:
                 throttle_status = {
                     # Current values - counter/accumulated
                     'accumulation_counter': "N/A",
@@ -5323,8 +5323,9 @@ class AMDSMICommands():
             args.pcie = pcie
         if process:
             args.process = process
-        if violation:
-            args.violation = violation
+        if not self.helpers.is_virtual_os():
+            if violation:
+                args.violation = violation
 
         # Handle No GPU passed
         if args.gpu == None:

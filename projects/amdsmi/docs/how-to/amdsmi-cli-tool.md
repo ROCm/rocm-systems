@@ -313,7 +313,7 @@ Metric arguments:
   -l, --perf-level             Current DPM performance level
   -x, --xgmi-err               XGMI error information since last read
   -E, --energy                 Amount of energy consumed
-  -T, --throttle               Displays throttle accumulators;
+  -v, --violation              Displays throttle accumulators;
                                    Only available for MI300 or newer ASICs
 
 Watch Arguments:
