@@ -739,8 +739,14 @@ void KFDQMTest::OverSubscribeCpQueues(int gpuNode) {
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         queues[qidx].SubmitPacket();
 
-    // Delaying for 5 seconds in order to get all the results
-    Delay(5000);
+    // Delaying in order to get all the results
+    if(g_IsEmuMode) {
+        LOG() << "Emulation mode detected, delaying for 1 min to allow all packets to be processed." << std::endl;
+        Delay(60000);
+    } else {
+        LOG() << "Delaying for 5 seconds to allow all packets to be processed." << std::endl;
+        Delay(5000);
+    }
 
     for (unsigned int qidx = 0; qidx < MAX_CP_QUEUES; ++qidx)
         EXPECT_TRUE_GPU(queues[qidx].AllPacketsSubmitted(), gpuNode)<< "QueueId=" << qidx;;
