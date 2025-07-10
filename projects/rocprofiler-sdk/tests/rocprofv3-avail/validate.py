@@ -110,8 +110,9 @@ def test_counter_set(capsys, rocm_path):
 
 def set_library(rocm_path):
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
-        f"{rocm_path}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+        f"{rocm_path}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    os.environ["ROCPROFILER_METRICS_PATH"] = f"{rocm_path}/share/rocprofiler-sdk"
     avail.loadLibrary.libname = os.environ.get(
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
