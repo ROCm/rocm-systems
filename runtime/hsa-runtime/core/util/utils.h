@@ -359,7 +359,11 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   static long cacheline_size = 0;
 
   if (!cacheline_size) {
-    long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+#ifdef _SC_LEVEL1_DCACHE_LINESIZE
+		long sz = sysconf(_SC_LEVEL1_DCACHE_LINESIZE);
+#else
+		long sz = 0;
+#endif
     if (sz <= 0) return;
     cacheline_size = sz;
   }
