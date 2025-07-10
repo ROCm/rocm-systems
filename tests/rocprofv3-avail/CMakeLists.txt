@@ -50,7 +50,7 @@ set_tests_properties(
         ENVIRONMENT
         "${test-rocprofv3-avail-env}"
         PASS_REGULAR_EXPRESSION
-        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;counter_name:\\t[a-zA-Z_]*\\n;description:\\t(.*)\\n*;expression:\\t(.)*\\n*;block:\\t[a-zA-Z]*\\n*;dimension_name:\\t([A-Z_]*)\\n*; dimension_instances:\\t([[0-9]*:[0-9]*\\])*\\n*"
+        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;Counter_Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*)\\t([[0-9]*:[0-9]*\\])*\\n*"
         DISABLED
         "${IS_DISABLED}")
 
@@ -64,7 +64,7 @@ set_tests_properties(
         ENVIRONMENT
         "${test-rocprofv3-avail-env};${enable_pc_sampling}"
         PASS_REGULAR_EXPRESSION
-        "GPU:[0-9]*\\n*;Name:\\t[a-zA-Z_]*\\n;method:(.*)\\n*;unit:(.*)\\n*;min_interval:[0-9]*\\n*;max_interval:[0-9]*\\n*;flags:(.*)\\n*"
+        "GPU[:0-9 ]+\\n*;Name[:a-zA-Z_ ]+\\n;configs[: ]+;Method:(.*)\\n*;Unit:(.*)\\n*;Min_Interval:[0-9]*\\n*;Max_Interval:[0-9]*\\n*;Flags:(.*)\\n*"
         DISABLED
         "${IS_DISABLED}")
 

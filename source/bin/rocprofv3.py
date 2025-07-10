@@ -1056,7 +1056,7 @@ def run(app_args, args, **kwargs):
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
     )
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
-        f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
 
     ROCPROF_TOOL_LIBRARY = resolve_library_path(ROCPROF_TOOL_LIBRARY, args)
