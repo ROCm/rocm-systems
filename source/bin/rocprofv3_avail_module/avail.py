@@ -36,18 +36,16 @@ def fatal_error(msg, exit_code=1):
 
 def build_counter_string(obj):
     counter_str = "\n".join(
-        ["{:20}: {}".format(key, itr) for key, itr in obj.get_as_dict().items()]
+        ["{:20}:\t{}".format(key, itr) for key, itr in obj.get_as_dict().items()]
     )
-    counter_str = counter_str + "\n"
-    for dim in obj.dimensions:
-        counter_str = counter_str + dim.__str__()
-        counter_str = counter_str + "\n"
+
+    counter_str += "\n" + "{:20}:\t".format("Dimensions")
+    counter_str += " ".join(dim.__str__() for dim in obj.dimensions)
     return counter_str
 
 
 class dimension:
-
-    columns = ["dimension_id", "dimension_name", "dimension_instances"]
+    columns = ["Dimension_Id", "Dimension_Name", "Dimension_Instances"]
 
     def __init__(self, dimension_id, dimension_name, dimension_instances):
         self.id = dimension_id
@@ -58,18 +56,16 @@ class dimension:
         return dict(zip((self.columns), [self.id, self.name, self.instances]))
 
     def __str__(self):
-        dimension = "{:20}: {}\n".format(
-            "dimension_name", self.get_as_dict()["dimension_name"]
-        )
-        dimension += "{:20}: [0:{}]".format(
-            "dimension_instances", self.get_as_dict()["dimension_instances"]
+        dimension = "{}[0:{}]".format(
+            self.get_as_dict()["Dimension_Name"],
+            self.get_as_dict()["Dimension_Instances"] - 1,
         )
         return dimension
 
 
 class counter:
 
-    columns = ["counter_name", "description"]
+    columns = ["Counter_Name", "Description"]
 
     def __init__(
         self,
@@ -90,13 +86,13 @@ class counter:
 
     def __str__(self):
         return "\n".join(
-            ["{:20}: {}".format(key, itr) for key, itr in self.get_as_dict().items()]
+            ["{:20}:\t{}".format(key, itr) for key, itr in self.get_as_dict().items()]
         )
 
 
 class derived_counter(counter):
 
-    columns = ["counter_name", "description", "expression"]
+    columns = ["Counter_Name", "Description", "Expression"]
 
     def __init__(
         self,
@@ -125,7 +121,7 @@ class derived_counter(counter):
 
 class basic_counter(counter):
 
-    columns = ["counter_name", "description", "block"]
+    columns = ["Counter_Name", "Description", "Block"]
 
     def __init__(
         self,
@@ -154,7 +150,7 @@ class basic_counter(counter):
 
 class pc_config:
 
-    columns = ["method", "unit", "min_interval", "max_interval", "flags"]
+    columns = ["Method", "Unit", "Min_Interval", "Max_Interval", "Flags"]
 
     def __init__(self, config_method, config_unit, min_interval, max_interval, flags):
 
@@ -168,9 +164,9 @@ class pc_config:
 
         return "\n".join(
             [
-                "   {:20}:{}".format(
+                "   {:20}:\t{}".format(
                     key,
-                    itr if key == "method" or key == "unit" else self.get_value(key, itr),
+                    itr if key == "Method" or key == "Unit" else self.get_value(key, itr),
                 )
                 for key, itr in self.get_as_dict().items()
             ]
@@ -178,9 +174,9 @@ class pc_config:
 
     @staticmethod
     def get_value(key, itr):
-        if key == "min_interval" or key == "max_interval":
+        if key == "Min_Interval" or key == "Max_Interval":
             return itr.value
-        elif key == "flags":
+        elif key == "Flags":
             if itr.value == 1:
                 return "interval pow2"
             else:
