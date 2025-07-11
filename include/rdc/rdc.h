@@ -427,7 +427,7 @@ typedef enum {
   /**
    * @brief RDC CPU related fields
    */
-  RDC_FI_CPU_COUNT = 10001,       //!< CPU count
+  RDC_FI_CPU_COUNT = 10000,       //!< CPU count
   RDC_FI_CPU_UTIL_TOTAL,          //!< CPU total percentage of time in use
   RDC_FI_CPU_UTIL_USER,           //!< Percent of time in use by the user
   RDC_FI_CPU_UTIL_NICE,           //!< Percent of time in use by low priority programs
