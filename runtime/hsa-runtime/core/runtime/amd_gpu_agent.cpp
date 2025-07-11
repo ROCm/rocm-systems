@@ -556,7 +556,7 @@ void GpuAgent::ReserveScratch()
     void* reserved_base = scratch_pool_.alloc(reserved_sz);
     assert(reserved_base && "Could not allocate reserved memory");
 
-    if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(reserved_base, reserved_sz, &alt_va)) == HSAKMT_STATUS_SUCCESS)
+    if (driver().MakeMemoryResident(reserved_base, reserved_sz, &alt_va) == HSA_STATUS_SUCCESS)
       scratch_cache_.reserve(reserved_sz, reserved_base);
     else
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES, "Reserve scratch memory failed.");
@@ -1887,8 +1887,8 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       if (scratch.main_queue_base != nullptr) {
         HSAuint64 alternate_va;
         if ((profile_ == HSA_PROFILE_FULL) ||
-            (HSAKMT_CALL(hsaKmtMapMemoryToGPU(scratch.main_queue_base, scratch.main_size, &alternate_va)) ==
-             HSAKMT_STATUS_SUCCESS)) {
+            (driver().MakeMemoryResident(scratch.main_queue_base, scratch.main_size,
+                                         &alternate_va) == HSA_STATUS_SUCCESS)) {
           if (scratch.large) scratch_used_large_ += scratch.main_size;
           scratch_cache_.insertMain(scratch);
           return;
@@ -1940,7 +1940,7 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       HSAuint64 alternate_va;
       if ((base != nullptr) &&
           ((profile_ == HSA_PROFILE_FULL) ||
-           (HSAKMT_CALL(hsaKmtMapMemoryToGPU(base, size, &alternate_va)) == HSAKMT_STATUS_SUCCESS))) {
+           (driver().MakeMemoryResident(base, size, &alternate_va) == HSA_STATUS_SUCCESS))) {
         // Scratch allocated and either full profile or map succeeded.
         scratch.main_queue_base = base;
         scratch.main_size = size;
@@ -2020,8 +2020,8 @@ void GpuAgent::AcquireQueueAltScratch(ScratchInfo& scratch) {
       if (scratch.alt_queue_base != nullptr) {
         HSAuint64 alternate_va;
         if ((profile_ == HSA_PROFILE_FULL) ||
-            (HSAKMT_CALL(hsaKmtMapMemoryToGPU(scratch.alt_queue_base, scratch.alt_size, &alternate_va)) ==
-             HSAKMT_STATUS_SUCCESS)) {
+            (driver().MakeMemoryResident(scratch.alt_queue_base, scratch.alt_size, &alternate_va) ==
+             HSA_STATUS_SUCCESS)) {
           scratch_cache_.insertAlt(scratch);
           return;
         }
@@ -2061,7 +2061,7 @@ void GpuAgent::ReleaseQueueAltScratch(ScratchInfo& scratch) {
 
 void GpuAgent::ReleaseScratch(void* base, size_t size, bool large) {
   if (profile_ == HSA_PROFILE_BASE) {
-    if (HSAKMT_STATUS_SUCCESS != HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(base))) {
+    if (HSA_STATUS_SUCCESS != driver().MakeMemoryUnresident(base)) {
       assert(false && "Unmap scratch subrange failed!");
     }
   }

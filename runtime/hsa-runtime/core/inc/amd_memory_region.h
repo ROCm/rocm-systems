@@ -77,13 +77,6 @@ class MemoryRegion : public core::MemoryRegion {
     return reinterpret_cast<MemoryRegion*>(region.handle);
   }
 
-  /// @brief Pin memory.
-  static bool MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
-                                    size_t size, uint64_t* alternate_va, HsaMemMapFlags map_flag);
-
-  /// @brief Unpin memory.
-  static bool MakeKfdMemoryUnresident(const void* ptr);
-
   MemoryRegion(bool fine_grain, bool kernarg, bool full_profile, bool extended_scope_fine_grain,
                bool user_visible, core::Agent* owner, const HsaMemoryProperties& mem_props);
 

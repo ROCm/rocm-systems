@@ -58,24 +58,6 @@ namespace AMD {
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
 const size_t MemoryRegion::kPageSize_ = sysconf(_SC_PAGESIZE);
 
-bool MemoryRegion::MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
-                                         size_t size, uint64_t* alternate_va,
-                                         HsaMemMapFlags map_flag) {
-  assert(num_node > 0);
-  assert(nodes != NULL);
-
-  *alternate_va = 0;
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtMapMemoryToGPUNodes(
-      const_cast<void*>(ptr), size, alternate_va, map_flag, num_node, const_cast<uint32_t*>(nodes)));
-
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
-bool MemoryRegion::MakeKfdMemoryUnresident(const void* ptr) {
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void*>(ptr)));
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
 MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
                            bool extended_scope_fine_grain, bool user_visible, core::Agent* owner,
                            const HsaMemoryProperties& mem_props)
@@ -508,7 +490,7 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
     assert(cpu_in_list);
     // This is a system region and only CPU agents in the whitelist.
     // Remove old mappings.
-    AMD::MemoryRegion::MakeKfdMemoryUnresident(ptr);
+    owner()->driver().MakeMemoryUnresident(ptr);
     return HSA_STATUS_SUCCESS;
   }
 
@@ -528,10 +510,10 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
     ScopedAcquire<KernelSharedMutex::Shared> lock(
         core::Runtime::runtime_singleton_->memory_lock_.shared());
     uint64_t alternate_va = 0;
-    if (!AMD::MemoryRegion::MakeKfdMemoryResident(
-      whitelist_nodes.size(), &whitelist_nodes[0], ptr,
-      size, &alternate_va, map_flag)) {
-        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &map_flag,
+                                             whitelist_nodes.size(),
+                                             whitelist_nodes.data()) != HSA_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
     }
   }
 
@@ -599,8 +581,9 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
   if (owner()->driver().RegisterMemory(host_ptr, size, const_cast<HsaMemFlags&>(mem_flag_)) ==
       HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
-    if (MakeKfdMemoryResident(whitelist_nodes.size(), &whitelist_nodes[0],
-                              host_ptr, size, &alternate_va, map_flag_)) {
+    if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,
+                                             whitelist_nodes.size(),
+                                             whitelist_nodes.data()) == HSA_STATUS_SUCCESS) {
       if (alternate_va != 0) {
         *agent_ptr = reinterpret_cast<void*>(alternate_va);
       } else {
@@ -625,7 +608,9 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
     return HSA_STATUS_SUCCESS;
   }
 
-  MakeKfdMemoryUnresident(host_ptr);
+  if (owner()->driver().MakeMemoryUnresident(host_ptr) != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to unmap host pointer");
+  }
   if (owner()->driver().DeregisterMemory(host_ptr) != HSA_STATUS_SUCCESS) {
     assert(false && "Failed to deregister host pointer");
   }

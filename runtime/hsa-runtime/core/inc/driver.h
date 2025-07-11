@@ -326,6 +326,24 @@ public:
   /// @return HSA_STATUS_SUCCESS if deregister memory successfully.
   virtual hsa_status_t DeregisterMemory(void* ptr) const = 0;
 
+  /// @brief Make the memory is resident and can be accessed by GPU
+  /// @param[in] mem address of memory to be made resident
+  /// @param[in] size size of memory
+  /// @param[out] alternate_va alternate virtual address
+  /// @param[in] mem_flags memory flags can be null
+  /// @param[in] num_nodes number of nodes to be used can be 0 if not used
+  /// @param[in] nodes nodes to be used can be null
+  /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
+  virtual hsa_status_t MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
+                                          const HsaMemMapFlags* mem_flags = nullptr,
+                                          uint32_t num_nodes = 0,
+                                          const uint32_t* nodes = nullptr) const = 0;
+
+  /// @brief Releases the residency of the memory
+  /// @param[in] mem address of memory to be made unresident
+  /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
+  virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

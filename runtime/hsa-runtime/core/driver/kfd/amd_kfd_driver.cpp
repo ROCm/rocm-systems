@@ -638,6 +638,31 @@ hsa_status_t KfdDriver::DeregisterMemory(void* ptr) const {
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::MakeMemoryResident(const void* mem, size_t size, uint64_t* alternate_va,
+                                           const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
+                                           const uint32_t* nodes) const {
+  if (mem_flags == nullptr && nodes == nullptr) {
+    if (HSAKMT_CALL(hsaKmtMapMemoryToGPU(const_cast<void*>(mem), size, alternate_va)) !=
+        HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+  } else if (mem_flags != nullptr && nodes != nullptr) {
+    if (!MakeKfdMemoryResident(num_nodes, nodes, mem, size, alternate_va, *mem_flags)) {
+      return HSA_STATUS_ERROR;
+    }
+  } else {
+    debug_print("Invalid memory flags ptr:%p nodes ptr:%p\n", mem_flags, nodes);
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::MakeMemoryUnresident(const void* mem) const {
+  HSAKMT_CALL(hsaKmtUnmapMemoryToGPU(const_cast<void*>(mem)));
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   // AIE does not support streaming performance monitor.
   HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;
