@@ -980,6 +980,8 @@ static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 474);
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 476);
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 12
 static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 477);
+#elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 13
+static_assert(ROCPROFILER_HIP_RUNTIME_API_ID_LAST == 477);
 #else
 #    if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) &&                                           \
         (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
