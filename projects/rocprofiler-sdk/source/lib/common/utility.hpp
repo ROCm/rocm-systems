@@ -28,6 +28,7 @@
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
@@ -269,6 +270,26 @@ yield(PredicateT&&                      predicate,
     // return the result of the last predicate query
     return result;
 }
+
+class assert_single_threaded
+{
+public:
+    assert_single_threaded(std::atomic<bool>& lock)
+    : m_is_initialized(lock)
+    {
+        bool expected = false;
+        if(!m_is_initialized.compare_exchange_strong(expected, true))
+        {
+            ROCP_FATAL << "This code must be run in a single thread!!!";
+        }
+    }
+
+    ~assert_single_threaded() { m_is_initialized.store(false, std::memory_order_release); }
+
+private:
+    std::atomic<bool>& m_is_initialized;
+};
+
 }  // namespace common
 }  // namespace rocprofiler
 

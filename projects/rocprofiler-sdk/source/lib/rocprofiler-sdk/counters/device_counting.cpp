@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
@@ -102,9 +103,29 @@ header_pkt(hsa_packet_type_t type)
     return header;
 }
 
-std::unique_ptr<hsa::CounterAQLPacket>
+/**
+ * Construct the packet or grab it from the cache.
+ * Note this function is not thread safe and is only called from
+ * init_callback_data which can only be called when the context is in the LOCKED state
+ * with only a single thread active.
+ */
+std::shared_ptr<hsa::CounterAQLPacket>
 construct_aql_pkt(std::shared_ptr<counter_config>& profile)
 {
+    static std::atomic<bool> has_thread{false};
+    static std::unordered_map<rocprofiler_profile_config_id_t,
+                              std::shared_ptr<hsa::CounterAQLPacket>>
+        pkt_cache;
+    // Asserts if there are two threads in this function at the same time.
+    auto _ = common::assert_single_threaded(has_thread);
+
+    // If we have a packet in the cache, return it.
+    if(pkt_cache.find(profile->id) != pkt_cache.end())
+    {
+        return pkt_cache[profile->id];
+    }
+
+    // If we do not have a packet in the cache, create it.
     if(counter_callback_info::setup_counter_config(profile) != ROCPROFILER_STATUS_SUCCESS)
     {
         return nullptr;
@@ -119,7 +140,9 @@ construct_aql_pkt(std::shared_ptr<counter_config>& profile)
     pkts->packets.read_packet.header  = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
 
     pkts->packets.start_packet.completion_signal.handle = 0;
-    return pkts;
+
+    pkt_cache[profile->id] = std::move(pkts);
+    return pkt_cache[profile->id];
 }
 
 bool
