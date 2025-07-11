@@ -58,16 +58,6 @@ namespace AMD {
 size_t MemoryRegion::max_sysmem_alloc_size_ = 0;
 const size_t MemoryRegion::kPageSize_ = sysconf(_SC_PAGESIZE);
 
-bool MemoryRegion::RegisterMemory(void* ptr, size_t size, const HsaMemFlags& MemFlags) {
-  assert(ptr != NULL);
-  assert(size != 0);
-
-  const HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags(ptr, size, MemFlags));
-  return (status == HSAKMT_STATUS_SUCCESS);
-}
-
-void MemoryRegion::DeregisterMemory(void* ptr) { HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)); }
-
 bool MemoryRegion::MakeKfdMemoryResident(size_t num_node, const uint32_t* nodes, const void* ptr,
                                          size_t size, uint64_t* alternate_va,
                                          HsaMemMapFlags map_flag) {
@@ -606,7 +596,8 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
   }
 
   // Call kernel driver to register and pin the memory.
-  if (RegisterMemory(host_ptr, size, mem_flag_)) {
+  if (owner()->driver().RegisterMemory(host_ptr, size, const_cast<HsaMemFlags&>(mem_flag_)) ==
+      HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
     if (MakeKfdMemoryResident(whitelist_nodes.size(), &whitelist_nodes[0],
                               host_ptr, size, &alternate_va, map_flag_)) {
@@ -618,7 +609,7 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
 
       return HSA_STATUS_SUCCESS;
     }
-    AMD::MemoryRegion::DeregisterMemory(host_ptr);
+    owner()->driver().DeregisterMemory(host_ptr);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
@@ -635,7 +626,9 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
   }
 
   MakeKfdMemoryUnresident(host_ptr);
-  DeregisterMemory(host_ptr);
+  if (owner()->driver().DeregisterMemory(host_ptr) != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to deregister host pointer");
+  }
 
   return HSA_STATUS_SUCCESS;
 }

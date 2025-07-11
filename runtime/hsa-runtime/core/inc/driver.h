@@ -314,6 +314,18 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully returns the available memory size.
   virtual hsa_status_t AvailableMemory(uint32_t node_id, uint64_t* available_size) const = 0;
 
+  /// @brief Register memory to GPU
+  /// @param[in] ptr Address of memory to be registered
+  /// @param[in] size Size of memory
+  /// @param[in] mem_flags Flags of memory registering
+  /// @return HSA_STATUS_SUCCESS if memory registered successfully.
+  virtual hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const = 0;
+
+  /// @brief Unregisters with a memory
+  /// @param[in] ptr Pointer of memory
+  /// @return HSA_STATUS_SUCCESS if deregister memory successfully.
+  virtual hsa_status_t DeregisterMemory(void* ptr) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

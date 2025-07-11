@@ -902,5 +902,11 @@ hsa_status_t XdnaDriver::AvailableMemory(uint32_t node_id, uint64_t* available_s
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t XdnaDriver::RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const {
+  return HSA_STATUS_ERROR;
+}
+
+hsa_status_t XdnaDriver::DeregisterMemory(void* ptr) const { return HSA_STATUS_ERROR; }
+
 } // namespace AMD
 } // namespace rocr

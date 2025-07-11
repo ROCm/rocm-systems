@@ -244,6 +244,8 @@ public:
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
   hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const override;
   hsa_status_t AvailableMemory(uint32_t node_id, uint64_t* available_size) const override;
+  hsa_status_t RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const override;
+  hsa_status_t DeregisterMemory(void* ptr) const override;
 
   hsa_status_t IsModelEnabled(bool* enable) const override;
 

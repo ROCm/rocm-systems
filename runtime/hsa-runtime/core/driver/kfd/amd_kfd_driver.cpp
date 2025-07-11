@@ -624,6 +624,20 @@ hsa_status_t KfdDriver::AvailableMemory(uint32_t node_id, uint64_t* available_si
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::RegisterMemory(void* ptr, uint64_t size, HsaMemFlags mem_flags) const {
+  assert(ptr);
+  assert(size > 0);
+
+  if (HSAKMT_CALL(hsaKmtRegisterMemoryWithFlags(ptr, size, mem_flags)) != HSAKMT_STATUS_SUCCESS)
+    return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::DeregisterMemory(void* ptr) const {
+  if (HSAKMT_CALL(hsaKmtDeregisterMemory(ptr)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::IsModelEnabled(bool* enable) const {
   // AIE does not support streaming performance monitor.
   HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;
