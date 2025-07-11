@@ -41,9 +41,13 @@ class AMDSMICommands():
     displaying the output to the specified format and destination.
     """
 
-    def __init__(self, format='human_readable', destination='stdout') -> None:
-        self.helpers = AMDSMIHelpers()
-        self.logger = AMDSMILogger(format=format, destination=destination)
+    def __init__(self, format='human_readable', destination='stdout', helpers=None) -> None:
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
+        self.logger = AMDSMILogger(format=format, destination=destination, helpers=self.helpers)
         self.device_handles = []
         self.cpu_handles = []
         self.core_handles = []

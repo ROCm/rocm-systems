@@ -30,7 +30,7 @@ from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
 
 class AMDSMILogger():
-    def __init__(self, format='human_readable', destination='stdout') -> None:
+    def __init__(self, format='human_readable', destination='stdout', helpers=None) -> None:
         self.output = {}
         self.multiple_device_output = []
         self.watch_output = []
@@ -41,7 +41,11 @@ class AMDSMILogger():
         self.secondary_table_title = ""
         self.secondary_table_header = ""
         self.warning_message = ""
-        self.helpers = AMDSMIHelpers()
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
         self._cper_exit_message = True
         self.store_cpu_json_output = []
         self.store_core_json_output = []

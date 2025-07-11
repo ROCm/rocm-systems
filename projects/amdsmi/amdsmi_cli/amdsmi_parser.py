@@ -69,10 +69,14 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, default, sys_argv=None):
+                 xgmi, partition, ras, default, sys_argv=None, helpers=None):
 
         # Helper variables
-        self.helpers = AMDSMIHelpers()
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
 
         # Get choices based on driver initialized
         if self.helpers.is_amdgpu_initialized():
