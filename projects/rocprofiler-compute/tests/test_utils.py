@@ -41,8 +41,8 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from unittest import mock
 from types import SimpleNamespace
+from unittest import mock
 
 import pandas as pd
 import pytest
@@ -4997,7 +4997,11 @@ def test_mibench_override_distro_success(tmp_path, monkeypatch):
     override_binary_path.chmod(0o755)
 
     def mock_detect_roofline(mspec):
-        return {"distro": "override", "path": str(override_binary_path), "rocm_ver": "0.x.x"}
+        return {
+            "distro": "override",
+            "path": str(override_binary_path),
+            "rocm_ver": "0.x.x",
+        }
 
     subprocess_calls = []
 
@@ -5451,7 +5455,11 @@ def test_mibench_subprocess_run_failure(tmp_path, monkeypatch):
     override_binary_path.chmod(0o755)
 
     def mock_detect_roofline(mspec):
-        return {"distro": "override", "path": str(override_binary_path), "rocm_ver": "0.x.x"}
+        return {
+            "distro": "override",
+            "path": str(override_binary_path),
+            "rocm_ver": "0.x.x",
+        }
 
     def mock_subprocess_run(args, check=True):
         raise subprocess.CalledProcessError(1, args)
@@ -5491,7 +5499,11 @@ def test_mibench_device_string_conversion(tmp_path, monkeypatch):
     override_binary_path.chmod(0o755)
 
     def mock_detect_roofline(mspec):
-        return {"distro": "override", "path": str(override_binary_path), "rocm_ver": "0.x.x"}
+        return {
+            "distro": "override",
+            "path": str(override_binary_path),
+            "rocm_ver": "0.x.x",
+        }
 
     subprocess_calls = []
 
@@ -5600,7 +5612,11 @@ def test_mibench_console_log_called(tmp_path, monkeypatch):
     override_binary_path.chmod(0o755)
 
     def mock_detect_roofline(mspec):
-        return {"distro": "override", "path": str(override_binary_path), "rocm_ver": "0.x.x"}
+        return {
+            "distro": "override",
+            "path": str(override_binary_path),
+            "rocm_ver": "0.x.x",
+        }
 
     console_log_calls = []
 
