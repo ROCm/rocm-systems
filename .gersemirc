@@ -1,4 +1,4 @@
-# yaml-language-server: $schema=https://raw.githubusercontent.com/BlankSpruce/gersemi/0.19.3/gersemi/configuration.schema.json
+# yaml-language-server: $schema=https://raw.githubusercontent.com/BlankSpruce/gersemi/0.20.1/gersemi/configuration.schema.json
 
 warn_about_unknown_commands: false
 indent: 4

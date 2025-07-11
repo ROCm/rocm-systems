@@ -39,7 +39,7 @@ jobs:
     - name: Install gersemi
       run: |
         python -m pip install --upgrade pip
-        pip install gersemi==0.19.3
+        pip install gersemi==0.20.1
 
     - name: Check CMake formatting
       id: check-format
@@ -89,7 +89,7 @@ jobs:
         Run this command locally to fix formatting issues:
         ```bash
         # Install gersemi
-        pip install gersemi==0.19.3
+        pip install gersemi==0.20.1
 
         # Format files
         gersemi -i <file>
