@@ -66,6 +66,7 @@ include(CheckIncludeFiles)
 include(CheckSymbolExists)
 include(cmake/Dependencies.cmake) # GTest, rocm-cmake, rocm_local_targets
 include(cmake/CheckSymbolExistsNoWarn.cmake)
+include(cmake/MSCCLPP.cmake)
 
 # Include rocSHMEM build module only if enabled
 if(ENABLE_ROCSHMEM)
@@ -1399,7 +1400,7 @@ if (HAVE_KERNARG_PRELOAD)
 endif()
 
 if(ENABLE_MSCCLPP)
-  include(cmake/MSCCLPP.cmake)
+  add_mscclpp_targets()
 endif()
 
 ## Track linking time

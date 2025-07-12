@@ -32,104 +32,118 @@
 # For downloading, building, and installing required dependencies
 include(ExternalProject)
 
-if(ENABLE_MSCCLPP)
-    # mscclpp path defaults to <repo>/ext/mscclpp but can be overridden via MSCCLPP_ROOT
-    if(NOT MSCCLPP_ROOT)
-        set(MSCCLPP_ROOT ${CMAKE_CURRENT_SOURCE_DIR}/ext/mscclpp CACHE PATH "")
-        execute_process(
-            COMMAND mkdir -p ${MSCCLPP_ROOT}
-        )
-    else()
-        message(STATUS "Attempting to use mscclpp install at ${MSCCLPP_ROOT}")
+function(add_mscclpp_targets)
+
+    if(MSCCLPP_INSTALL_DIR)
+        list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+        find_package(mscclpp_nccl_static)
     endif()
 
-    set(EXT_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/ext-src CACHE PATH "")
-
-    # Try to find the mscclpp install
-    list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
-    find_package(mscclpp_nccl_static)
     if(NOT mscclpp_nccl_static_FOUND)
-        # json source path defaults to <repo>/ext-src/json but can be overridden via JSON_SOURCE
-        if (NOT JSON_SOURCE)
-            set(JSON_SOURCE ${EXT_SOURCE}/json CACHE PATH "")
-            if(NOT EXISTS ${JSON_SOURCE}/CMakeLists.txt)
-                message(STATUS "Checking out nlohmann/json")
-                execute_process(
-                    COMMAND git submodule update --init --recursive
-                    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                )
-            endif()
-        else()
-            message(STATUS "Attempting to build json source at ${JSON_SOURCE}")
-        endif()
-
-        # mscclpp source path defaults to <repo>/ext-src/mscclpp but can be overridden via MSCCLPP_SOURCE
-        if (NOT MSCCLPP_SOURCE)
-            set(MSCCLPP_SOURCE ${EXT_SOURCE}/mscclpp CACHE PATH "")
-            add_custom_command(
-                OUTPUT ${MSCCLPP_SOURCE}/CMakeLists.txt
-                #GIT_REPOSITORY      https://github.com/microsoft/mscclpp.git
-                #GIT_TAG             4ee15b7ad085daaf74349d4c49c9b8480d28f0dc
-                COMMAND git submodule update --init --recursive
-                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-                COMMENT "Checking out microsoft/mscclpp"
-            )
-        endif()
-
-        add_custom_target(
-            mscclpp_source
-            DEPENDS ${MSCCLPP_SOURCE}/CMakeLists.txt
-            COMMENT "mscclpp source is at ${MSCCLPP_SOURCE}"
+        set(MSCCLPP_INSTALL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/ext/mscclpp)
+        set(MSCCLPP_INCLUDE_DIRS "${MSCCLPP_INSTALL_DIR}/include")
+        set(MSCCLPP_NCCL_STATIC_LIB "${MSCCLPP_INSTALL_DIR}/lib/libmscclpp_nccl_static.a")
+        execute_process(
+            COMMAND mkdir -p ${MSCCLPP_INSTALL_DIR}
         )
 
-        if (MSCCLPP_APPLY_PATCHES)
-            set(MSCCLPP_PATCHED ${CMAKE_CURRENT_BINARY_DIR}/mscclpp-patched CACHE PATH "")
-            set(MSCCLPP_PATCHED_STAMP ${MSCCLPP_PATCHED}/.patched_stamp)
-            set(MSCCLPP_COPIED_STAMP ${MSCCLPP_PATCHED}/.copied_stamp)
-            set(MSCCLPP_PATCH_FILES
-                cpx.patch
-                read-allred.patch
-                mscclpp_ibv_access_relaxed_ordering.patch
-                mem-reg.patch
-                non-multiple-128-fix.patch
-                bf16-tuning.patch
-                reg-fix.patch
-                no-cache.patch
-                device-flag.patch
-                remove-clip.patch
-                disable-executor.patch
-                disable-format-checks.patch
-            )
+        set(EXT_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/ext-src)
 
-            set(MSCCLPP_PATCH_COMMANDS "")
-            set(MSCCLPP_PATCH_DEPENDS "")
-            foreach(PATCH_FILE ${MSCCLPP_PATCH_FILES})
-                list(APPEND MSCCLPP_PATCH_DEPENDS ${EXT_SOURCE}/${PATCH_FILE})
-                list(APPEND MSCCLPP_PATCH_COMMANDS
-                    COMMAND patch -p1 --no-backup-if-mismatch < ${EXT_SOURCE}/${PATCH_FILE}
+        if ((NOT JSON_SOURCE) OR (NOT MSCCLPP_SOURCE))
+            add_custom_command(
+                OUTPUT
+                    ${EXT_SOURCE}/mscclpp/CMakeLists.txt
+                    ${EXT_SOURCE}/json/CMakeLists.txt
+                COMMAND git submodule update --init --recursive
+                WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+                COMMENT "Checking out submodules for mscclpp and json"
+            )
+            add_custom_target(
+                checkout_submodules
+                DEPENDS
+                    ${EXT_SOURCE}/mscclpp/CMakeLists.txt
+                    ${EXT_SOURCE}/json/CMakeLists.txt
+            )
+        endif()
+
+        # json source path defaults to <ext-source>/json but can be overridden via JSON_SOURCE
+        add_custom_target(json_source)
+        if (NOT JSON_SOURCE)
+            set(JSON_SOURCE ${EXT_SOURCE}/json)
+            add_dependencies(json_source checkout_submodules)
+        endif()
+
+        # mscclpp source path defaults to <ext-source>/mscclpp but can be overridden via MSCCLPP_SOURCE
+        add_custom_target(mscclpp_source)
+        if (NOT MSCCLPP_SOURCE)
+            #GIT_REPOSITORY      https://github.com/microsoft/mscclpp.git
+            #GIT_TAG             4ee15b7ad085daaf74349d4c49c9b8480d28f0dc
+            set(MSCCLPP_SOURCE ${EXT_SOURCE}/mscclpp)
+
+            add_custom_target(
+                mscclpp_patches
+                DEPENDS checkout_submodules
+            )
+            add_dependencies(mscclpp_source mscclpp_patches)
+            if (MSCCLPP_APPLY_PATCHES)
+                
+                set(MSCCLPP_PATCHED ${CMAKE_CURRENT_BINARY_DIR}/mscclpp-patched)
+                set(MSCCLPP_PATCHED_STAMP ${MSCCLPP_PATCHED}/.patched_stamp)
+                set(MSCCLPP_COPIED_STAMP ${MSCCLPP_PATCHED}/.copied_stamp)
+                set(MSCCLPP_PATCH_FILES
+                    cpx.patch
+                    read-allred.patch
+                    mscclpp_ibv_access_relaxed_ordering.patch
+                    mem-reg.patch
+                    non-multiple-128-fix.patch
+                    bf16-tuning.patch
+                    reg-fix.patch
+                    no-cache.patch
+                    device-flag.patch
+                    remove-clip.patch
+                    disable-executor.patch
+                    disable-format-checks.patch
                 )
-            endforeach()
 
-            add_custom_command(
-                OUTPUT ${MSCCLPP_COPIED_STAMP}
-                COMMAND ${CMAKE_COMMAND} -E remove_directory ${MSCCLPP_PATCHED}
-                COMMAND ${CMAKE_COMMAND} -E copy_directory ${MSCCLPP_SOURCE} ${MSCCLPP_PATCHED}
-                COMMAND ${CMAKE_COMMAND} -E touch ${MSCCLPP_COPIED_STAMP}
-                DEPENDS mscclpp_source ${MSCCLPP_PATCH_DEPENDS}
-                WORKING_DIRECTORY ${MSCCLPP_SOURCE}
-                COMMENT "Copying mscclpp source to patch directory"
-            )
+                set(MSCCLPP_PATCH_COMMANDS "")
+                set(MSCCLPP_PATCH_DEPENDS "")
+                foreach(PATCH_FILE ${MSCCLPP_PATCH_FILES})
+                    list(APPEND MSCCLPP_PATCH_DEPENDS ${EXT_SOURCE}/${PATCH_FILE})
+                    list(APPEND MSCCLPP_PATCH_COMMANDS
+                        COMMAND patch -p1 --no-backup-if-mismatch < ${EXT_SOURCE}/${PATCH_FILE}
+                    )
+                endforeach()
 
-            add_custom_command(
-                OUTPUT ${MSCCLPP_PATCHED_STAMP}
-                ${MSCCLPP_PATCH_COMMANDS}
-                COMMAND ${CMAKE_COMMAND} -E touch ${MSCCLPP_PATCHED_STAMP}
-                DEPENDS ${MSCCLPP_COPIED_STAMP} ${MSCCLPP_PATCH_DEPENDS}
-                WORKING_DIRECTORY ${MSCCLPP_PATCHED}
-                COMMENT "Applying patches to mscclpp"
-            )
+                add_custom_command(
+                    OUTPUT ${MSCCLPP_COPIED_STAMP}
+                    COMMAND ${CMAKE_COMMAND} -E remove_directory ${MSCCLPP_PATCHED}
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory ${MSCCLPP_SOURCE} ${MSCCLPP_PATCHED}
+                    COMMAND ${CMAKE_COMMAND} -E touch ${MSCCLPP_COPIED_STAMP}
+                    DEPENDS
+                        checkout_submodules
+                        ${MSCCLPP_PATCH_DEPENDS}
+                    WORKING_DIRECTORY ${MSCCLPP_SOURCE}
+                    COMMENT "Copying mscclpp source to patch directory"
+                )
 
-            add_custom_target(patch_mscclpp ALL DEPENDS ${MSCCLPP_PATCHED_STAMP})
+                add_custom_command(
+                    OUTPUT ${MSCCLPP_PATCHED_STAMP}
+                    ${MSCCLPP_PATCH_COMMANDS}
+                    COMMAND ${CMAKE_COMMAND} -E touch ${MSCCLPP_PATCHED_STAMP}
+                    DEPENDS
+                        ${MSCCLPP_COPIED_STAMP}
+                        ${MSCCLPP_PATCH_DEPENDS}
+                    WORKING_DIRECTORY ${MSCCLPP_PATCHED}
+                    COMMENT "Applying patches to mscclpp"
+                )
+                add_custom_target(
+                    mscclpp_patch_step
+                    DEPENDS ${MSCCLPP_PATCHED_STAMP}
+                )
+
+                set(MSCCLPP_SOURCE ${MSCCLPP_PATCHED})
+                add_dependencies(mscclpp_patches mscclpp_patch_step)
+            endif()
         endif()
 
         set(CMAKE_INHERITED_ARGS "")
@@ -146,7 +160,6 @@ if(ENABLE_MSCCLPP)
                 string(APPEND CMAKE_INHERITED_ARGS "-D${arg}=\"${ARG_VALUE}\" ")
             endif()
         endforeach()
-        message(STATUS "CMAKE_INHERITED_ARGS = ${CMAKE_INHERITED_ARGS}")
 
         if(NOT DEFINED CACHE{MSCCLPP_GPU_TARGETS})
             message(STATUS "Building MSCCL++ only for supported variants: gfx942;gfx950")
@@ -160,8 +173,9 @@ if(ENABLE_MSCCLPP)
 
         string(REPLACE ";" "%" MSCCLPP_GPU_TARGETS "${MSCCLPP_GPU_TARGETS}")
 
-        ExternalProject_Add(mscclpp
-            INSTALL_DIR         ${MSCCLPP_ROOT}
+        ExternalProject_Add(
+            mscclpp
+            INSTALL_DIR         ${MSCCLPP_INSTALL_DIR}
             LIST_SEPARATOR      %
             CMAKE_ARGS          "-DGPU_TARGETS=${MSCCLPP_GPU_TARGETS}" -DMSCCLPP_BYPASS_GPU_CHECK=ON -DMSCCLPP_USE_ROCM=ON -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} -DMSCCLPP_BUILD_APPS_NCCL=ON -DMSCCLPP_BUILD_PYTHON_BINDINGS=OFF -DMSCCLPP_BUILD_TESTS=OFF -DMSCCLPP_CLIP_ENABLED=${ENABLE_MSCCLPP_CLIP} -DMSCCLPP_ENABLE_EXECUTOR=${ENABLE_MSCCLPP_EXECUTOR} -DMSCCLPP_ENABLE_FORMAT_CHECKS=${ENABLE_MSCCLPP_FORMAT_CHECKS} -DCMAKE_INSTALL_PREFIX=<INSTALL_DIR> -DCMAKE_VERBOSE_MAKEFILE=1 "${CMAKE_INHERITED_ARGS}" -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER} -DFETCHCONTENT_SOURCE_DIR_JSON=${JSON_SOURCE} -DEXT_SOURCE=${EXT_SOURCE}
             LOG_DOWNLOAD        FALSE
@@ -169,20 +183,21 @@ if(ENABLE_MSCCLPP)
             LOG_BUILD           FALSE
             LOG_INSTALL         FALSE
             UPDATE_DISCONNECTED TRUE
-            SOURCE_DIR          ${MSCCLPP_PATCHED}
+            SOURCE_DIR          ${MSCCLPP_SOURCE}
             BUILD_IN_SOURCE     TRUE
             TEST_COMMAND        ""
             DOWNLOAD_COMMAND    ""
-            DEPENDS             patch_mscclpp
+            DEPENDS
+                mscclpp_source
+                json_source
         )
-
-        #find_package(mscclpp_nccl_static REQUIRED)
-        set(MSCCLPP_NCCL_STATIC_LIB "${MSCCLPP_ROOT}/lib/libmscclpp_nccl_static.a")
-        add_library(mscclpp_nccl_static STATIC IMPORTED)
-        set_target_properties(mscclpp_nccl_static PROPERTIES IMPORTED_LOCATION ${MSCCLPP_NCCL_STATIC_LIB})
-        add_dependencies(mscclpp_nccl_static mscclpp)
+        add_custom_target(
+            mscclpp_nccl_static
+            DEPENDS mscclpp
+        )
     endif()
 
+    # LIBRARY TARGET mscclpp_nccl
     set(MSCCLPP_NCCL_LIB "${PROJECT_BINARY_DIR}/libmscclpp_nccl.a")
     add_custom_command(
         OUTPUT ${MSCCLPP_NCCL_LIB}
@@ -194,10 +209,12 @@ if(ENABLE_MSCCLPP)
         COMMENT "Renaming mscclpp NCCL API functions"
         VERBATIM
     )
-    add_custom_target(mscclpp_nccl_redefine_syms ALL DEPENDS ${MSCCLPP_NCCL_LIB})
-    
+    add_custom_target(
+        mscclpp_nccl_redefine_syms
+        DEPENDS ${MSCCLPP_NCCL_LIB}
+    )
     add_library(mscclpp_nccl STATIC IMPORTED)
     set_target_properties(mscclpp_nccl PROPERTIES IMPORTED_LOCATION ${MSCCLPP_NCCL_LIB})
     add_dependencies(mscclpp_nccl mscclpp_nccl_redefine_syms)
 
-endif()
+endfunction()
