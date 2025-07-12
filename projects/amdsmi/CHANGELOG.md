@@ -87,6 +87,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Modified `amd-smi` CLI `monitor` and `metric` for violations**.  
+  - Disabled `amd-smi monitor --violation` on guests.  
+  - Modified `amd-smi metric -T/--throttle` to alias to `amd-smi metric -v/--violation`.
+
 - **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
   - The `clk_deep_sleep` field now returns the sleep integer value.  
 

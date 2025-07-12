@@ -41,9 +41,13 @@ class AMDSMICommands():
     displaying the output to the specified format and destination.
     """
 
-    def __init__(self, format='human_readable', destination='stdout') -> None:
-        self.helpers = AMDSMIHelpers()
-        self.logger = AMDSMILogger(format=format, destination=destination)
+    def __init__(self, format='human_readable', destination='stdout', helpers=None) -> None:
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
+        self.logger = AMDSMILogger(format=format, destination=destination, helpers=self.helpers)
         self.device_handles = []
         self.cpu_handles = []
         self.core_handles = []
@@ -198,10 +202,20 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
-
-        if not self.group_check_printed:
-            self.helpers.check_required_groups()
-            self.group_check_printed = True
+            
+        # Perform one-time group check. If it fails, record that fact
+        # but do NOT abort—just mark that UUID should be "N/A" later.
+        _group_check_done = False
+        _group_in_groups = False
+        if not _group_check_done:
+           try:
+               self.helpers.check_required_groups()
+               _group_in_groups = True
+           except Exception as e:
+               _group_in_groups = False
+               # print the helper's error message exactly once:
+               print(f"{e}")
+           _group_check_done = True
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.list)
@@ -213,14 +227,20 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
-        try:
-            bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            bdf = e.get_error_info()
-        try:
-            uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            uuid = e.get_error_info()
+        # Only fetch data if group check passed; otherwise force "N/A"
+        if  _group_in_groups:
+            try:
+                bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                bdf = "N/A"
+            try:
+                uuid = amdsmi_interface.amdsmi_get_gpu_device_uuid(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException:
+                uuid = "N/A"
+        else:
+            # user not in render/video → everything is N/A
+            bdf = "N/A"
+            uuid = "N/A"
 
         try:
             kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
@@ -246,23 +266,33 @@ class AMDSMICommands():
         if args.e:
             try:
                 enumeration_info = amdsmi_interface.amdsmi_get_gpu_enumeration_info(args.gpu)
-            except:
-                enumeration_info = {"drm_render": "N/A",
-                                    "drm_card": "N/A",
-                                    "hip_id": "N/A",
-                                    "hip_uuid": "N/A",
-                                    "hsa_id": "N/A"}
+            except amdsmi_exception.AmdSmiLibraryException:
+                enumeration_info = {
+                    "drm_render": "N/A",
+                    "drm_card":   "N/A",
+                    "hsa_id":     "N/A",
+                    "hip_id":     "N/A",
+                    "hip_uuid":   "N/A",
+                }
+
+            # __Override__ hip_uuid if the group check failed
+            if not _group_in_groups:
+               enumeration_info["hip_uuid"] = "N/A"
+            # now store all the fields exactly once:
             if enumeration_info['drm_render'] == "N/A":
                 self.logger.store_output(args.gpu, 'render', enumeration_info['drm_render'])
             else:
-                self.logger.store_output(args.gpu, 'render', f"renderD{enumeration_info['drm_render']}")
+                self.logger.store_output(args.gpu, 'render',
+                                         f"renderD{enumeration_info['drm_render']}")
             if enumeration_info['drm_card'] == "N/A":
                 self.logger.store_output(args.gpu, 'card', enumeration_info['drm_card'])
             else:
-                self.logger.store_output(args.gpu, 'card', f"card{enumeration_info['drm_card']}")
+                self.logger.store_output(args.gpu, 'card',
+                                         f"card{enumeration_info['drm_card']}")
             self.logger.store_output(args.gpu, 'hsa_id', enumeration_info['hsa_id'])
             self.logger.store_output(args.gpu, 'hip_id', enumeration_info['hip_id'])
             self.logger.store_output(args.gpu, 'hip_uuid', enumeration_info['hip_uuid'])
+            
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -1439,7 +1469,7 @@ class AMDSMICommands():
             guest_data (bool, optional): Value override for args.guest_data. Defaults to None.
             fb_usage (bool, optional): Value override for args.fb_usage. Defaults to None.
             xgmi (bool, optional): Value override for args.xgmi. Defaults to None.
-            throttle (bool, optional): Value override for args.throttle. Defaults to None.
+            throttle (bool, optional): Value override for args.violation. Defaults to None.
 
         Raises:
             IndexError: Index error if gpu list is empty
@@ -1501,11 +1531,11 @@ class AMDSMICommands():
             if energy:
                 args.energy = energy
             if throttle:
-                args.throttle = throttle
+                args.violation = throttle
             current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level",
                                       "xgmi_err", "energy", "throttle"]
             current_platform_values += [args.fan, args.voltage_curve, args.overdrive,
-                                        args.perf_level, args.xgmi_err, args.energy, args.throttle,
+                                        args.perf_level, args.xgmi_err, args.energy, args.violation,
                                         ]
 
         if self.helpers.is_hypervisor():
@@ -2530,7 +2560,7 @@ class AMDSMICommands():
 
                 values_dict['mem_usage'] = memory_usage
         if "throttle" in current_platform_args:
-            if args.throttle:
+            if args.violation:
                 throttle_status = {
                     # Current values - counter/accumulated
                     'accumulation_counter': "N/A",
@@ -4683,13 +4713,19 @@ class AMDSMICommands():
                 elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
                     try:
                         new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
-                                                                    AMDSMIHelpers.SI_Unit.MICRO)
+                                                                     AMDSMIHelpers.SI_Unit.MICRO)
                         amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to set power cap to {args.power_cap} on {gpu_string}") from e
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}")
+                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                    after_current_power_cap = after_power_cap_info["power_cap"]
+                    after_current_power_cap = self.helpers.convert_SI_unit(after_current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                    if args.power_cap == after_current_power_cap:
+                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
+                    else:
+                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {args.power_cap}W, current value is {after_current_power_cap}W")
                 else:
                     # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                     if min_power_cap == 0:
@@ -5192,14 +5228,20 @@ class AMDSMICommands():
                 else:
                     try:
                         default_power_cap_in_uw = self.helpers.convert_SI_unit(default_power_cap_in_w,
-                                                                                AMDSMIHelpers.SI_Unit.BASE,
-                                                                                AMDSMIHelpers.SI_Unit.MICRO)
+                                                                               AMDSMIHelpers.SI_Unit.BASE,
+                                                                               AMDSMIHelpers.SI_Unit.MICRO)
                         amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap_in_uw)
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
+                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                    after_current_power_cap_in_w = after_power_cap_info["power_cap"]
+                    after_current_power_cap_in_w = self.helpers.convert_SI_unit(after_current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                    if after_current_power_cap_in_w == default_power_cap_in_w:
+                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {after_current_power_cap_in_w}W")
+                    else:
+                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {default_power_cap_in_w}W, current value is {after_current_power_cap_in_w}W")
         else:
             result = "Device is a partition. Cannot reset on partition."
             self.logger.store_output(args.gpu, 'gpu_reset', result)
@@ -5285,8 +5327,9 @@ class AMDSMICommands():
             args.pcie = pcie
         if process:
             args.process = process
-        if violation:
-            args.violation = violation
+        if not self.helpers.is_virtual_os():
+            if violation:
+                args.violation = violation
 
         # Handle No GPU passed
         if args.gpu == None:

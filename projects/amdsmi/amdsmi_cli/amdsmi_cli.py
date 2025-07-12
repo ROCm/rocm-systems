@@ -43,6 +43,7 @@ except ImportError as e:
 
 try:
     from amdsmi_init import *
+    from amdsmi_helpers import AMDSMIHelpers
     from amdsmi_commands import AMDSMICommands
     from amdsmi_parser import AMDSMIParser
     from amdsmi_logger import AMDSMILogger
@@ -53,6 +54,7 @@ except ImportError:
     sys.path.append(cli_files_path)
     try:
         from amdsmi_init import *
+        from amdsmi_helpers import AMDSMIHelpers
         from amdsmi_commands import AMDSMICommands
         from amdsmi_parser import AMDSMIParser
         from amdsmi_logger import AMDSMILogger
@@ -79,7 +81,8 @@ if __name__ == "__main__":
     else:
         sys.tracebacklimit = -1
 
-    amd_smi_commands = AMDSMICommands()
+    amd_smi_helpers = AMDSMIHelpers()
+    amd_smi_commands = AMDSMICommands(helpers=amd_smi_helpers)
     amd_smi_parser = AMDSMIParser(amd_smi_commands.version,
                                     amd_smi_commands.list,
                                     amd_smi_commands.static,
@@ -97,7 +100,8 @@ if __name__ == "__main__":
                                     amd_smi_commands.partition,
                                     amd_smi_commands.ras,
                                     amd_smi_commands.default,
-                                    sys_argv=sys.argv)
+                                    sys_argv=sys.argv,
+                                    helpers=amd_smi_helpers)
     try:
         try:
             argcomplete.autocomplete(amd_smi_parser)

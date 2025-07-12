@@ -126,7 +126,7 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
            static_cast<uint32_t>(bdf.function_number & 0x7));
 
   std::string path = "/proc/" + std::to_string(pid) + "/fdinfo/";
-  std::string name_path = "/proc/" + std::to_string(pid) + "/comm";
+  std::string name_path = "/proc/" + std::to_string(pid) + "/exe";
   std::string cgroup_path = "/proc/" + std::to_string(pid) + "/cgroup";
 
   if (gpuvsmi_pid_is_gpu(path.c_str(), bdf_str)) {
@@ -189,10 +189,9 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 
   //  Note: If possible at all, try to get the name of the process/container.
   //        In case the other info fail, get at least something.
-  std::ifstream filename(name_path.c_str());
-  std::string name;
-
-  getline(filename, name);
+  char exe_realpath[PATH_MAX] = {0};
+  ssize_t len = readlink(name_path.c_str(), exe_realpath, sizeof(exe_realpath) - 1);
+  std::string name = (len > 0) ? std::string(exe_realpath, len) : "N/A";
 
   if (name.empty()) return AMDSMI_STATUS_API_FAILED;
 
