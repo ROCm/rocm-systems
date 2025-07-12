@@ -69,10 +69,14 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 xgmi, partition, ras, default, sys_argv=None):
+                 xgmi, partition, ras, default, sys_argv=None, helpers=None):
 
         # Helper variables
-        self.helpers = AMDSMIHelpers()
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
 
         # Get choices based on driver initialized
         if self.helpers.is_amdgpu_initialized():
@@ -994,7 +998,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-l', '--perf-level', action='store_true', required=False, help=perf_level_help)
                 metric_parser.add_argument('-x', '--xgmi-err', action='store_true', required=False, help=xgmi_err_help)
                 metric_parser.add_argument('-E', '--energy', action='store_true', required=False, help=energy_help)
-                metric_parser.add_argument('-T', '--throttle', action='store_true', required=False, help=throttle_help)
+                metric_parser.add_argument('-v', '--violation', action='store_true', required=False, help=throttle_help)
+                metric_parser.add_argument('-T', '--throttle', dest='violation', action='store_true', required=False, help=argparse.SUPPRESS)
 
             # Options to only display to Hypervisors
             if self.helpers.is_hypervisor():
@@ -1377,7 +1382,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
         monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)
-        monitor_parser.add_argument('-V', '--violation', action='store_true', required=False, help=violation_help)
+        if not self.helpers.is_virtual_os():
+            monitor_parser.add_argument('-V', '--violation', action='store_true', required=False, help=violation_help)
 
         # Add Universal Arguments & Watch Args
         self._add_watch_arguments(monitor_parser)

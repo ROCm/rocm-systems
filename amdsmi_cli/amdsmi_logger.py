@@ -30,7 +30,7 @@ from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
 
 class AMDSMILogger():
-    def __init__(self, format='human_readable', destination='stdout') -> None:
+    def __init__(self, format='human_readable', destination='stdout', helpers=None) -> None:
         self.output = {}
         self.multiple_device_output = []
         self.watch_output = []
@@ -41,7 +41,11 @@ class AMDSMILogger():
         self.secondary_table_title = ""
         self.secondary_table_header = ""
         self.warning_message = ""
-        self.helpers = AMDSMIHelpers()
+        if helpers is None:
+            # If helpers is not provided, create a new instance
+            self.helpers = AMDSMIHelpers()
+        else:
+            self.helpers = helpers
         self._cper_exit_message = True
         self.store_cpu_json_output = []
         self.store_core_json_output = []
@@ -228,7 +232,7 @@ class AMDSMILogger():
                             string_process_value = str(process_value)
                             if process_key == "name":
                                 # Truncate name if too long
-                                process_name = string_process_value[:17]
+                                process_name = string_process_value.split('/')[-1][:17]
                                 if process_name == "":
                                     process_name = "N/A"
                                 table_values += process_name.rjust(17)
@@ -1079,7 +1083,7 @@ class AMDSMILogger():
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
                 pid = str(process['pid']).rjust(9)
-                process_name = str(process['name']).ljust(19)
+                process_name = str(process['name']).split('/')[-1].ljust(19)
                 gtt_mem = str(process['gtt']).rjust(8)
                 vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
