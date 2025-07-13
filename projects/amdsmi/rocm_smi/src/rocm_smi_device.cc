@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <fstream>
@@ -34,6 +35,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <string>
 #include <type_traits>
@@ -1080,10 +1082,65 @@ const char* Device::get_type_string(DevInfoTypes type) {
   return "Unknown";
 }
 
+namespace {
+
+  static int read_env_ms(const char* name, int def) {
+    if (const char* s = std::getenv(name)) {
+      try {
+        return std::max(0, std::stoi(s));
+      } catch (...) {
+        // Ignore error, fallback on 100 ms default
+      }
+    }
+    return def;
+  }
+
+  struct GpuMetricsCache {
+    std::vector<uint8_t> data;
+    std::chrono::steady_clock::time_point last_read;
+    std::mutex mtx;
+  };
+
+  GpuMetricsCache g_gpu_metrics_cache;
+  // Keep 1 cache map, with an entry for each gpu
+  std::unordered_map<std::string, GpuMetricsCache> g_gpu_metrics_cache_map;
+  static const std::chrono::milliseconds kGpuMetricsCacheDuration(
+    read_env_ms("AMDSMI_GPU_METRICS_CACHE_MS", 100)
+  );
+}
+
+
 int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
                                 void *p_binary_data) {
   auto sysfs_path = path_;
   std::ostringstream ss;
+
+  // Size will either be 4, or 3872. When 4, it's only reading from the header.
+  // If this header read is inconsequential, we could only cache full read.
+  // However, it seems reading the sysfs in any capacity is the issue, so should remain.
+  const std::string key = path_ + "/device/" + kDevAttribNameMap.at(type) + "#" + std::to_string(b_size);
+  auto& cache = g_gpu_metrics_cache_map[key];
+
+  // Only cache for kDevGpuMetrics
+  if (type == DevInfoTypes::kDevGpuMetrics) {
+    std::lock_guard<std::mutex> lock(cache.mtx);
+    auto now = std::chrono::steady_clock::now();
+
+    if (!cache.data.empty() &&
+        std::chrono::duration_cast<std::chrono::milliseconds>(now - cache.last_read) < kGpuMetricsCacheDuration &&
+        cache.data.size() == b_size) {
+
+      std::memcpy(p_binary_data, cache.data.data(), b_size);
+
+      if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
+        ss << "Returned cached DevInfoBinary for DevInfoType ("
+           << get_type_string(type) << ")";
+        LOG_INFO(ss);
+      }
+
+      return 0;
+    }
+  }
 
   FILE *ptr;
   sysfs_path += "/device/";
@@ -1128,6 +1185,18 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
     logHexDump(metricDescription.c_str(), p_binary_data, b_size, 16);
     LOG_INFO(ss);
   }
+
+  // Cache metric data
+   if (type == DevInfoTypes::kDevGpuMetrics) {
+     auto now = std::chrono::steady_clock::now();
+     auto& cache = g_gpu_metrics_cache_map[key];
+     std::lock_guard<std::mutex> lock(cache.mtx);
+     cache.data.assign(
+       reinterpret_cast<uint8_t*>(p_binary_data),
+       reinterpret_cast<uint8_t*>(p_binary_data) + b_size);
+     cache.last_read = now;
+   }
+
   return 0;
 }
 
