@@ -39,27 +39,19 @@ rocprofiler_systems_add_test(
 )
 set(ROCTX_LABEL
     roctxMark_GPU_workload
-    roctxRangePushA
-    roctxRangePushA
-    roctxRangeStartA
-    roctxRangeStartA
-    roctxRangePush_HIP_Kernel
-    roctxRangePush_HIP_Kernel
+    roctxRangePush_run_profiling
     roctxRangeStart_GPU_Compute
     roctxRangeStart_GPU_Compute
+    roctxRangePush_HIP_Kernel
+    roctxRangePush_HIP_Kernel
     roctxGetThreadId
     roctxMark_RoctxProfilerPause_End
     roctxMark_Thread_Start
     roctxMark_End
-    roctxRangePush_run_profiling
     roctxMark_Finished_GPU
 )
 
 set(ROCTX_COUNT
-    1
-    2
-    1
-    1
     1
     1
     1
@@ -76,18 +68,14 @@ set(ROCTX_COUNT
 set(ROCTX_DEPTH
     1
     1
+    2
     0
+    3
     1
-    0
-    1
-    0
-    1
-    0
-    1
-    1
+    2
+    2
     0
     0
-    1
     1
 )
 
