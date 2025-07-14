@@ -13,7 +13,7 @@ Prerequisites
 
 Before you begin, ensure these tools and dependencies are installed:
 
-* `ROCm stack <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/> _`
+* ROCm stack
 * ``rocm-llvm-dev`` (required to build tests)
 
 
