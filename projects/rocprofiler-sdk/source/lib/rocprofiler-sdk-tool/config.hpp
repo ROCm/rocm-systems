@@ -127,6 +127,7 @@ struct config : output_config
     bool   advanced_thread_trace       = get_env("ROCPROF_ADVANCED_THREAD_TRACE", false);
     bool   att_serialize_all           = get_env("ROCPROF_ATT_PARAM_SERIALIZE_ALL", false);
     bool   enable_signal_handlers      = get_env("ROCPROF_SIGNAL_HANDLERS", true);
+    bool   enable_process_sync         = get_env("ROCPROF_PROCESS_SYNC", true);
     bool   selected_regions            = get_env("ROCPROF_SELECTED_REGIONS", false);
     bool   output_config_file          = get_env("ROCPROF_OUTPUT_CONFIG_FILE", false);
     bool   pc_sampling_host_trap       = false;
@@ -227,6 +228,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(truncate);
     CFG_SERIALIZE_MEMBER(minimum_output_bytes);
     CFG_SERIALIZE_MEMBER(enable_signal_handlers);
+    CFG_SERIALIZE_MEMBER(enable_process_sync);
     CFG_SERIALIZE_MEMBER(selected_regions);
 
     CFG_SERIALIZE_MEMBER(counter_groups_random_seed);
