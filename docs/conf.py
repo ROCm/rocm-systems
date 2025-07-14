@@ -21,16 +21,16 @@ all_article_info_os = ["linux"]
 all_article_info_author = ""
 
 # Dynamically extract component version
-with open('../CMakeLists.txt', encoding='utf-8') as f:
-    pattern = r'.*\brocm_setup_version\(VERSION\s+([0-9.]+)[^0-9.]+' # Update according to each component's CMakeLists.txt
-    match = re.search(pattern,
-                      f.read())
-    if not match:
-        raise ValueError("VERSION not found!")
-    version_number = match[1]
+#with open('../CMakeLists.txt', encoding='utf-8') as f:
+#    pattern = r'.*\brocm_setup_version\(VERSION\s+([0-9.]+)[^0-9.]+' # Update according to each component's CMakeLists.txt
+#    match = re.search(pattern,
+#                      f.read())
+#    if not match:
+#        raise ValueError("VERSION not found!")
+version_number = "1.0"
 
 # for PDF output on Read the Docs
-project = "PROJECT NAME"
+project = "AQLprofile"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
@@ -43,19 +43,19 @@ Doxygen Settings
 Ensure Doxyfile is located at docs/doxygen.
 If the component does not need doxygen, delete this section for optimal build time
 '''
-doxygen_root = "doxygen"
-doxysphinx_enabled = True
-doxygen_project = {
-    "name": "doxygen",
-    "path": "doxygen/xml",
-}
+#doxygen_root = "doxygen"
+#doxysphinx_enabled = False
+# doxygen_project = {
+#    "name": "doxygen",
+#    "path": "doxygen/xml",
+#}
 
 # Add more addtional package accordingly
 extensions = [
     "rocm_docs", 
-    "rocm_docs.doxygen",
+#    "rocm_docs.doxygen",
 ] 
 
 html_title = f"{project} {version_number} documentation"
 
-external_projects_current_project = "PROJECT NAME"
+external_projects_current_project = "AQLprofile"
