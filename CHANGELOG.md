@@ -24,6 +24,7 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Fixed a build issue with CMake 4.
 - Fixed incorrect kernel names shown for kernel dispatch tracks in Perfetto.
 - Fixed formatting of some output logs.
+- Fixed an issue where ROC-TX ranges were displayed as two separate events instead of a single spanning event.
 
 ## ROCm Systems Profiler 1.0.2 for ROCm 6.4.2
 
