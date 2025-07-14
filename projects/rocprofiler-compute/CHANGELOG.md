@@ -82,6 +82,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Rebuild using latest ROCm stack
   * OS distribution support minimum for roofline feature is now Ubuntu22.04, RHEL9, and SLES15SP6
 
+### Optimized
+
+* ROCm Compute Profiler CLI has been improved to better display the GPU architecture analytics
+
 ### Resolved issues
 
 * Fixed MI 100 counters not being collected when rocprofv3 is used
