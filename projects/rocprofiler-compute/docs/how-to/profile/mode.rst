@@ -198,7 +198,7 @@ an Instinct MI210 vs an Instinct MI250.
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
    results are stored in ``roofline.csv`` and roofline plots are outputted into PDFs as
    ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].pdf`` where datatypes requested through
-    --roofline-data-type option are listed in the file name.
+   ``--roofline-data-type`` option are listed in the file name.
 
 .. code-block:: shell-session
 
@@ -479,6 +479,10 @@ Roofline options
 ``--roofline-data-type <datatype>``
    Allows you to specify datatypes that you want plotted in the roofline PDF output(s). Selecting more than one datatype will overlay the results onto the same plot. Default: FP32
 
+.. note::
+
+  For more information on datatypes supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
+
 To distinguish different kernels in your ``.pdf`` roofline plot use
 ``--kernel-names``. This will give each kernel a unique marker identifiable from
 the plot's key.
@@ -521,7 +525,8 @@ successfully.
 
 .. note::
 
-   ROCm Compute Profiler currently captures roofline profiling for all data types, but has the ability to reduce clutter in the PDF outputs by selecting datatype(s). Selecting multiple datatypes will overlay the results into the same PDF. If the user would like separate PDFs for each datatype off of the same workload run, the user can run the profiling command again with the single datatype as long as the roofline.csv still exists in the workload folder.
+   * ROCm Compute Profiler currently captures roofline profiling for all data types, but has the ability to reduce clutter in the PDF outputs by selecting datatype(s). Selecting multiple datatypes will overlay the results into the same PDF. If the user would like separate PDFs for each datatype off of the same workload run, the user can run the profiling command again with the single datatype as long as the roofline.csv still exists in the workload folder.
+   * Roofline feature is currently not enabled on AMD Instinct MI350.
 
 The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.
