@@ -46,6 +46,20 @@ std::string string_format(const std::string& format, Args... args) {
   return std::string(buf.get(), buf.get() + size - 1);  // We don't want the '\0' inside
 }
 
+// TODO: This is copied from ./src/pm4/spm_builder.h
+// Will find its permanent home later.
+typedef struct SpmBufferDesc_ {
+  uint32_t version{1};
+  uint32_t global_num_line{0};
+  uint32_t se_num_line{0};
+  uint32_t num_se{0};
+  uint32_t num_sa{0};
+  uint32_t num_xcc{0};
+  size_t num_events{0};
+
+  uint16_t* get_counter_map() { return (uint16_t*)(this + 1); }
+} SpmBufferDesc;
+
 hsa_status_t TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                                  hsa_ven_amd_aqlprofile_info_data_t* info_data,
                                  void* callback_data) {
@@ -188,6 +202,90 @@ class TestPGenSpm : public TestPGen {
     return true;
   }
 
+  void ProcessOutput() {
+    SpmBufferDesc* desc = (SpmBufferDesc*)profile_.output_buffer.ptr;
+    uint32_t seg_size = (desc->global_num_line + desc->se_num_line * desc->num_se) * 32;
+    uint16_t* buffer = (uint16_t*)malloc(seg_size);
+    uint64_t* counter = (uint64_t*)malloc(profile_.event_count * sizeof(uint64_t));
+    uint64_t* counter_total = (uint64_t*)calloc(profile_.event_count, sizeof(uint64_t));
+    if (!buffer || !counter) {
+      if (buffer) free(buffer);
+      if (counter) free(counter);
+      return;
+    }
+    std::clog << string_format("Segment Size = %d bytes\n", seg_size);
+#if 0
+    for (int i = 0; i < profile_.event_count; i++) {
+      auto it = &profile_.events[i];
+      std::clog << string_format("block (%d_%d) id (%2d) at index %2d (%s)\n", it->block_name,
+                                 it->block_index, it->counter_id, desc->counter_map[i] & 0x3FFF,
+                                 desc->counter_map[i] & 0x8000 ? "GLOBAL" : "SE");
+    }
+#endif
+    for (int i = 0; i < num_xcc_; i++) {
+      char name[64];
+      sprintf(name, "spm_buffer_%d.bin", i);
+      FILE* stream = fopen(name, "rb");
+      if (!stream) continue;
+
+      if (num_xcc_ > 1) std::cout << "XCC" << i << ":\n";
+
+      uint64_t timestamp_last = 0;
+      uint64_t timestamp_this;
+      memset(counter, 0, profile_.event_count * sizeof(uint64_t));
+      while (!feof(stream)) {
+        size_t nr = fread(buffer, 1, seg_size, stream);
+        if (!nr) break;
+        if (nr != seg_size) {
+          std::cerr << string_format("Incomplete segment %ld < %d\n", nr, seg_size);
+          break;
+        }
+        timestamp_this = *(uint64_t*)&buffer[0];
+        if (timestamp_this < timestamp_last) {
+          std::cerr << string_format("Invalid timestamp %ld (last timestamp %ld\n", timestamp_this,
+                                     timestamp_last);
+          break;
+        }
+        timestamp_last = timestamp_this;
+        for (int i = 0; i < profile_.event_count; i++) {
+          uint16_t index = desc->get_counter_map()[i] & 0x7FFF;
+          uint16_t index_j;
+          bool is_global = (desc->get_counter_map()[i] & 0x8000) ? true : false;
+          if (is_global) {
+            if (buffer[index] && buffer[index] != 0xFFFF) counter[i] += buffer[index];
+          } else {
+            uint16_t se_base = desc->global_num_line * 16;
+            uint16_t se_step = desc->se_num_line * 16;
+            for (int j = 0; j < desc->num_se; j++) {
+              index_j = index + se_base + se_step * j;
+              if (buffer[index_j] && buffer[index_j] != 0xFFFF) counter[i] += buffer[index_j];
+            }
+          }
+        }
+      }
+      fclose(stream);
+
+      for (int i = 0; i < profile_.event_count; i++) {
+        auto it = &profile_.events[i];
+        std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n", it->block_name,
+                                   it->block_index, it->counter_id, counter[i]);
+        counter_total[i] += counter[i];
+      }
+    }
+
+    if (num_xcc_ > 1) {
+      std::cout << "SUM(XCC0:XCC" << num_xcc_ - 1 << "):\n";
+      for (int i = 0; i < profile_.event_count; i++) {
+        auto it = &profile_.events[i];
+        std::cout << string_format("block %d-index %d counter %3d = 0x%lX\n", it->block_name,
+                                   it->block_index, it->counter_id, counter_total[i]);
+      }
+    }
+
+    free(buffer);
+    free(counter);
+  }
+
   bool Cleanup() {
     api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, NULL);
     for (int i; i < num_xcc_; i++) {
@@ -195,6 +293,7 @@ class TestPGenSpm : public TestPGen {
         streams_[i].close();
       }
     }
+    ProcessOutput();
     return TestAql::Cleanup();
   }
 

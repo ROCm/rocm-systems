@@ -26,6 +26,9 @@
 
 namespace aql_profile {
 
+const size_t SPM_GLOBAL_BLOCK_NUMBER = 8;
+const size_t SPM_SE_BLOCK_NUMBER = 11;
+
 // Gfx9 factory class
 class Gfx9Factory : public Pm4Factory {
  public:
@@ -45,6 +48,9 @@ class Gfx9Factory : public Pm4Factory {
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 
   static void Print(const GpuBlockInfo* block_info);
+  const uint32_t* spm_block_delay_global[SPM_GLOBAL_BLOCK_NUMBER];
+  const uint32_t* spm_block_delay_se[SPM_SE_BLOCK_NUMBER];
+  void InitSpmBlockDelay(GpuBlockInfo* block_info);
 };
 
 // Mi100 factory class
@@ -60,6 +66,9 @@ class Mi100Factory : public Gfx9Factory {
 
  protected:
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
+
+ private:
+  void InitSpmBlockDelayTable();
 };
 
 }  // namespace aql_profile
