@@ -24,8 +24,8 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
     zypper --non-interactive install -y binutils-gold chrpath cmake curl dpkg-devel \
-        gcc-c++ git libdrm-devel libnuma-devel openmpi3-devel python3-pip rpm-build \
-        wget iproute2 && \
+        gcc-c++ git iproute2 libdrm-devel libnuma-devel openmpi3-devel python3-pip rpm-build \
+        sqlite3-devel wget  && \
     python3 -m pip install 'cmake==3.21'
 
 ARG ROCM_VERSION=0.0
