@@ -60,7 +60,7 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     endif()
 endif()
 
-find_package(ROCJPEG QUIET)
+find_package(rocjpeg QUIET)
 find_package(rocprofiler-register QUIET)
 
 # Copy image files to build directory
@@ -95,7 +95,7 @@ endfunction()
 # threads
 find_package(Threads REQUIRED)
 
-if(HIP_FOUND AND ROCJPEG_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
+if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
     # threads
@@ -107,9 +107,9 @@ if(HIP_FOUND AND ROCJPEG_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
 
     # rocJPEG
-    message(STATUS "RocJPEG library found: ${ROCJPEG_LIBRARY}")
-    include_directories(${ROCJPEG_INCLUDE_DIR})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCJPEG_LIBRARY})
+    message(STATUS "RocJPEG library found: ${rocjpeg_LIBRARIES}")
+    include_directories(${rocjpeg_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocjpeg::rocjpeg)
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} jpegdecodeperf.cpp)
     add_executable(jpegdecode ${SOURCES})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=gnu++17")
@@ -132,7 +132,7 @@ else()
     if(NOT HIP_FOUND)
         message(FATAL_ERROR "-- ERROR!: HIP Not Found! - please install ROCm and HIP!")
     endif()
-    if(NOT ROCJPEG_FOUND)
+    if(NOT rocjpeg_FOUND)
         message(WARNING "-- ERROR!: rocJPEG Not Found! - please install rocJPEG!")
     endif()
     if(NOT Threads_FOUND)
