@@ -6034,8 +6034,8 @@ class AMDSMICommands():
 
                 try:
                     xgmi_metrics_info = amdsmi_interface.amdsmi_get_link_metrics(src_gpu)
-                    bitrate = xgmi_metrics_info['bit_rate']
-                    max_bandwidth = xgmi_metrics_info['max_bandwidth']
+                    bitrate = xgmi_metrics_info['links'][0]['bit_rate']
+                    max_bandwidth = xgmi_metrics_info['links'][0]['max_bandwidth']
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     bitrate = "N/A"
                     max_bandwidth = "N/A"
