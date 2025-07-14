@@ -390,7 +390,9 @@ def capture_subprocess_output(
             if not line:
                 return
             buf.write(line)
-            if enable_logging:
+            if "attach" in buf or "detach" in buf:
+                console_log(line.strip())
+            elif enable_logging:
                 if profileMode:
                     console_log(rocprof_cmd, line.strip(), indent_level=1)
                 else:
@@ -421,7 +423,8 @@ def capture_subprocess_output(
     input_thread.start()
 
     while process.poll() is None:
-        events = selector.select(timeout=0.1)
+        # Wait for events and handle them with their registered callbacks
+        events = selector.select()
         for key, mask in events:
             callback = key.data
             callback(key.fileobj, mask)

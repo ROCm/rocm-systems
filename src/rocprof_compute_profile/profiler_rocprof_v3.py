@@ -46,7 +46,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         )
         trace_option = "--kernel-trace"
         rocprof_out_format = "json"
-        pid = ""
 
         if self.get_args().format_rocprof_output == "csv":
             rocprof_out_format = "csv"
