@@ -2962,7 +2962,7 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
             signo);
 
         finalize_rocprofv3(this_func);
-        wait_peer_finished(this_pid, this_ppid);
+        if(tool::get_config().enable_process_sync) wait_peer_finished(this_pid, this_ppid);
 
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}][TID={}][{}] rocprofv3 finalizing after signal {}... complete",
