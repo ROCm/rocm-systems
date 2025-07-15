@@ -1,6 +1,7 @@
 [submodule "external/timemory"]
 	path = external/timemory
 	url = https://github.com/ROCm/timemory.git
+	branch = rocprofiler-systems
 [submodule "external/perfetto"]
 	path = external/perfetto
 	url = https://github.com/google/perfetto.git
