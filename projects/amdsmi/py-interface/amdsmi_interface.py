@@ -3126,6 +3126,8 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle):
         link = link_metrics.links[i]
         links.append({
             "bdf": _format_bdf(link.bdf),
+            "bit_rate": link.bit_rate,
+            "max_bandwidth": link.max_bandwidth,
             "link_type": link.link_type,
             "read": link.read,
             "write": link.write,
@@ -3133,8 +3135,6 @@ def amdsmi_get_link_metrics(processor_handle: processor_handle):
 
     return {
         "num_links": link_metrics.num_links,
-        "bit_rate": link_metrics.bit_rate,
-        "max_bandwidth": link_metrics.max_bandwidth,
         "links": links
     }
 
