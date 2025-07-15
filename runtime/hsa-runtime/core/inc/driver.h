@@ -58,7 +58,7 @@ class Queue;
 
 enum class DriverQuery { GET_DRIVER_VERSION };
 
-enum class DriverType { XDNA = 0, KFD, NUM_DRIVER_TYPES };
+enum class DriverType { XDNA = 0, KFD, KFD_VIRTIO, NUM_DRIVER_TYPES };
 
 /// @brief Handle for exported / imported memory.
 struct ShareableHandle {

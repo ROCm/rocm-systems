@@ -68,6 +68,9 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/util/utils.h"
+#ifdef HSAKMT_VIRTIO_ENABLED
+#include "core/inc/amd_virtio_driver.h"
+#endif
 
 extern r_debug _amdgpu_r_debug;
 
@@ -78,13 +81,21 @@ namespace {
 #if _WIN32
 constexpr size_t num_drivers = 0;
 #elif __linux__
-constexpr size_t num_drivers = 2;
+constexpr size_t num_drivers = 2
+#ifdef HSAKMT_VIRTIO_ENABLED
+    + 1
+#endif
+    ;
 #endif
 
 const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>, num_drivers>
     discover_driver_funcs = {
 #ifdef __linux__
-        KfdDriver::DiscoverDriver, XdnaDriver::DiscoverDriver
+        KfdDriver::DiscoverDriver,
+        XdnaDriver::DiscoverDriver,
+#ifdef HSAKMT_VIRTIO_ENABLED
+        KfdVirtioDriver::DiscoverDriver,
+#endif
 #endif
 };
 
