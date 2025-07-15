@@ -211,21 +211,15 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         COMPONENT rocpd)
 endfunction()
 
-function(rocprofiler_rocprofv3_python _VERSION)
-    message(
-        STATUS "Creating rocprofiler-sdk rocprofv3 python package for python ${_VERSION}")
-    if(NOT "${_VERSION}" MATCHES "^([0-9]+)\\.([0-9]+)$")
-        message(
-            STATUS
-                "Bad rocprofiler-sdk rocprofv3 python version ${_VERSION}. Requires <MAJOR>.<MINOR>"
-            )
-    endif()
+function(rocprofiler_rocprofv3_python)
     set(rocprofv3_PYTHON_INSTALL_DIRECTORY
-        ${CMAKE_INSTALL_LIBDIR}/python${_VERSION}/site-packages/rocprofv3)
+        ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
     set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
         ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
-    set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
-
+    set(rocprofv3_PYTHON_SOURCES ${ARGN})
+    if(NOT rocprofv3_PYTHON_SOURCES)
+        message(FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")
+    endif()
     foreach(_SOURCE ${rocprofv3_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
                        ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)

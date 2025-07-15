@@ -20,12 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(ROCPROFV3_PYTHON_VERSION_CANDIDATES
-    "3.12;3.11;3.10;3.9;3.8;3.7;3.6"
-    CACHE STRING "Python versions to search for, newest first")
-
-foreach(_PYTHON_VERSION IN LISTS ROCPROFV3_PYTHON_VERSION_CANDIDATES)
-    rocprofiler_rocprofv3_python(${_PYTHON_VERSION})
-endforeach()
+set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
+rocprofiler_rocprofv3_python(${rocprofv3_PYTHON_SOURCES})
 
 rocprofiler_reset_python3_cache()

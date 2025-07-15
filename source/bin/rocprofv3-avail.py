@@ -481,7 +481,7 @@ def main(argv=None):
         from rocprofv3 import avail
     except (ImportError, ModuleNotFoundError):
         # if failed, find the python package for this python version
-        ROCPROFV3_AVAIL_PACKAGE = f"{ROCM_DIR}/lib/python{sys.version_info[0]}.{sys.version_info[1]}/site-packages"
+        ROCPROFV3_AVAIL_PACKAGE = f"{ROCM_DIR}/lib/python{sys.version_info[0]}/site-packages"
         sys.path.append(ROCPROFV3_AVAIL_PACKAGE)
 
         from rocprofv3 import avail
