@@ -811,6 +811,7 @@ write_rocpd(
         auto command = fmt::format(
             "{}",
             fmt::join(tool_metadata.command_line.begin(), tool_metadata.command_line.end(), " "));
+        auto _command = sanitize_sql_string(command);
 
         auto stmt = get_insert_statement("rocpd_info_process{{uuid}}",
                                          {
@@ -822,7 +823,7 @@ write_rocpd(
                                              insert_value("fini", tool_metadata.process_end_ns),
                                              insert_value("start", tool_metadata.process_start_ns),
                                              insert_value("end", tool_metadata.process_end_ns),
-                                             insert_value("command", command),
+                                             insert_value("command", _command),
                                              insert_value("environment", json_env),
                                              insert_value("extdata", json_cfg),
                                          });
