@@ -1,0 +1,36 @@
+name: Collect Labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      repoListFile:
+        description: 'Path to JSON file with repo list'
+        required: true
+        default: '.github/repos-config.json'
+
+jobs:
+  collect-labels:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout monorepo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Install dependencies
+        run: pip install PyYAML requests
+
+      - name: Collect labels from source repos
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/collect-labels.py "${{ github.event.inputs.repoListFile }}"
+
+      - name: Print generated labels.yml
+        run: |
+          echo "Contents of labels.yml:"
+          cat .github/labels.yml
