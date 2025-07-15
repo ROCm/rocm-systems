@@ -29,6 +29,7 @@
 #include "Assemble.hpp"
 
 #define KFD_TEST_DEFAULT_TIMEOUT 60000
+#define MAX_GPU 64
 
 std::ostream& operator << (std::ostream& out, TESTPROFILE profile) {
     switch (profile) {
@@ -58,6 +59,8 @@ bool g_IsChildProcess;
 bool g_IsEmuMode;
 unsigned int g_SleepTime;
 unsigned int g_TestGPUFamilyId;
+std::string g_ConcurrentNodes;
+std::vector<int> g_SelectedNodes;
 class KFDBaseComponentTest *g_baseTest;
 
 GTEST_API_ int main(int argc, char **argv) {
@@ -69,7 +72,6 @@ GTEST_API_ int main(int argc, char **argv) {
     testing::InitGoogleTest(&argc, argv);
 
     CommandLineArguments args;
-    memset(&args, 0, sizeof(args));
 
     bool success = GetCommandLineArguments(argc, argv, args);
 
@@ -93,6 +95,38 @@ GTEST_API_ int main(int argc, char **argv) {
         // If --node is not specified, then args.NodeId == -1
         g_TestNodeId = args.NodeId;
         g_TestDstNodeId = args.DstNodeId;
+        g_ConcurrentNodes = args.ConcurrentNodes;
+        g_TestGPUsNum = args.TestNodeNum;
+
+        if (g_TestNodeId < 0 && !g_ConcurrentNodes.empty()) {
+            std::set<int> uniqueIndices;
+            size_t start = 0, end = 0;
+
+            while ((end = g_ConcurrentNodes.find(',', start)) != std::string::npos) {
+                std::string token = g_ConcurrentNodes.substr(start, end - start);
+                if (!token.empty()) uniqueIndices.insert(std::stoi(token));
+                start = end + 1;
+            }
+            if (start < g_ConcurrentNodes.size()) {
+                uniqueIndices.insert(std::stoi(g_ConcurrentNodes.substr(start)));
+            }
+
+            g_SelectedNodes.assign(uniqueIndices.begin(), uniqueIndices.end());
+            g_TestGPUsNum = static_cast<unsigned int>(g_SelectedNodes.size());
+
+            if (g_TestGPUsNum > MAX_GPU) {
+                g_SelectedNodes.resize(MAX_GPU);
+                g_TestGPUsNum = MAX_GPU;
+            }
+
+            g_ConcurrentNodes.clear();
+            for (size_t i = 0; i < g_SelectedNodes.size(); ++i) {
+                g_ConcurrentNodes += std::to_string(g_SelectedNodes[i]);
+                if (i != g_SelectedNodes.size() - 1) {
+                    g_ConcurrentNodes += ",";
+                }
+            }
+        }
 
         g_IsEmuMode = CheckEmuModeEnabled();
 
@@ -106,14 +140,6 @@ GTEST_API_ int main(int argc, char **argv) {
         if (g_SleepTime > 0) {
             LOG() << "Sleep time in seconds as specified by user: " << std::dec << g_SleepTime << std::endl;
         }
-
-        char *testGPUsNum = NULL;
-        /* if HSA_TEST_GPUS_NUM is defined use it, otherwise test on 1 gpu */
-        testGPUsNum = getenv("HSA_TEST_GPUS_NUM");
-        if (testGPUsNum)
-            g_TestGPUsNum = std::max(1, atoi(testGPUsNum));
-        else
-            g_TestGPUsNum = 1;
 
         /* init LLVM one time*/
         Init_LLVM();

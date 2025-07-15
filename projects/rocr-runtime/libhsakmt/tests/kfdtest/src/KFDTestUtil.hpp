@@ -238,6 +238,10 @@ class HsaNodeInfo {
     // @param nodeProperties HsaNodeProperties returned
     const HsaNodeProperties* GetNodeProperties(int NodeNum) const;
 
+    /*Support node selection for multi-GPU*/
+    std::vector<int> 
+            GetSelectedGpuNodes(const std::vector<int>& selectedIndices) const;
+
     void PrintNodeInfo() const;
     const bool IsGPUNodeLargeBar(int node) const;
     const bool IsAppAPU(int node) const;

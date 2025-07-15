@@ -632,6 +632,29 @@ const HsaNodeProperties* HsaNodeInfo::GetNodeProperties(int NodeNum) const {
     return m_HsaNodeProps.at(NodeNum);
 }
 
+std::vector<int> HsaNodeInfo::GetSelectedGpuNodes
+                            (const std::vector<int>& selectedIndices) const {
+    std::vector<int> selectedNodes;
+    HsaNodeProperties *nodeProperties;
+    _HSAKMT_STATUS status;
+
+    for (int idx : selectedIndices) {
+        nodeProperties = new HsaNodeProperties();
+        status = hsaKmtGetNodeProperties(idx, nodeProperties);
+
+        EXPECT_SUCCESS(status) << "Node index: " << idx << 
+                        " hsaKmtGetNodeProperties returned status " << status;
+
+        if (status == HSAKMT_STATUS_SUCCESS) {
+            if (nodeProperties->NumFComputeCores > 0) {
+                selectedNodes.push_back(idx);
+            }
+        }
+        delete nodeProperties;
+    }
+    return selectedNodes;
+}
+
 const int HsaNodeInfo::HsaGPUindexFromGpuNode(int gpuNodeId) const {
     if (m_NodesWithGPU.size() == 0)
         return -1;

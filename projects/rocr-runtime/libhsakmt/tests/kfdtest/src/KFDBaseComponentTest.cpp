@@ -27,6 +27,8 @@
 #include "KFDTestUtil.hpp"
 
 extern unsigned int g_TestGPUsNum;
+extern int g_TestNodeId;
+extern std::vector<int> g_SelectedNodes;
 
 void KFDBaseComponentTest::SetUpTestCase() {
 }
@@ -96,16 +98,18 @@ void KFDBaseComponentTest::SetUp() {
                 ::testing::UnitTest::GetInstance()->current_test_info();
 
     openlog("KFDTEST", LOG_CONS , LOG_USER);
-    if (g_TestGPUsNum == 1)
+
+    if (g_TestNodeId >= 0) {
         syslog(LOG_INFO, "[Test on Node#%03d] "
                     "STARTED ========== %s.%s ==========",
                     m_NodeInfo.HsaDefaultGPUNode(),
                     curr_test_info->test_case_name(), curr_test_info->name());
-    else
+    } else {    
         syslog(LOG_INFO, "[Test on %03d Node(s)] "
                     "STARTED ========== %s.%s ==========",
                     g_TestGPUsNum,
                     curr_test_info->test_case_name(), curr_test_info->name());
+    }
 
     ROUTINE_END
 }
@@ -141,7 +145,7 @@ void KFDBaseComponentTest::TearDown() {
                 ::testing::UnitTest::GetInstance()->current_test_info();
 
     if (curr_test_info->result()->Passed())
-        if (g_TestGPUsNum == 1)
+        if (g_TestNodeId >= 0)
             syslog(LOG_INFO, "[Test on Node#%03d] PASSED"
                              "  ========== %s.%s ==========",
                 m_NodeInfo.HsaDefaultGPUNode(),
@@ -153,13 +157,13 @@ void KFDBaseComponentTest::TearDown() {
                 curr_test_info->test_case_name(), curr_test_info->name());
 
     else
-        if (g_TestGPUsNum == 1)
-             syslog(LOG_WARNING, "[Test on Node#%03d] FAILED"
+        if (g_TestNodeId >= 0)
+            syslog(LOG_WARNING, "[Test on Node#%03d] FAILED"
                                  "  ========== %s.%s ==========",
                 m_NodeInfo.HsaDefaultGPUNode(),
                 curr_test_info->test_case_name(), curr_test_info->name());
         else
-             syslog(LOG_WARNING, "[Test on %03d Node(s)] FAILED"
+            syslog(LOG_WARNING, "[Test on %03d Node(s)] FAILED"
                                  "  ========== %s.%s ==========",
                 g_TestGPUsNum,
                 curr_test_info->test_case_name(), curr_test_info->name());
@@ -336,18 +340,23 @@ static void* KFDTest_GPU(void* ptr) {
 }
 
 HSAKMT_STATUS KFDBaseComponentTest::KFDTestMultiGPU(Test_Function test_function,
-                                                     unsigned int gpu_num) {
-
+                                        const std::vector<int>& gpu_indices,
+                                        unsigned int gpu_num) {
     HSAKMT_STATUS r = HSAKMT_STATUS_SUCCESS;
     int gpu_node;
     int err = 0;
     int i, j;
+    std::vector<int> gpuNodes;
+
+    if (!gpu_indices.empty()) {
+        gpuNodes = m_NodeInfo.GetSelectedGpuNodes(gpu_indices);
+    } else {
+        gpuNodes = m_NodeInfo.GetNodesWithGPU();
+    }
 
     KFDTEST_GPUPARAMETERS kfdtest_GpuParameters[gpu_num];
     KFDTEST_PARAMETERS kfdTest_Parameters[gpu_num];
     pthread_t pThreadGPU[gpu_num];
-
-    const std::vector<int> gpuNodes = m_NodeInfo.GetNodesWithGPU();
 
     for (i = 0; i < gpu_num; i++) {
 
@@ -386,7 +395,7 @@ err_out:
 HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) {
 
     /* test on default GPU only */
-    if (g_TestGPUsNum == 1) {
+    if (g_TestNodeId >= 0) {
         int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
         if (defaultGPUNode < 0) {
             LOG() << "defaultGPUNode is invalid." << defaultGPUNode <<std::endl;
@@ -405,9 +414,9 @@ HSAKMT_STATUS KFDBaseComponentTest::KFDTest_Launch(Test_Function test_function) 
         return HSAKMT_STATUS_SUCCESS;
     }
 
-    /* run test_function on all available GPUs */
+    /* run test_function on all selected GPUs */
     HSAKMT_STATUS err = HSAKMT_STATUS_SUCCESS;
-    err = KFDTestMultiGPU(test_function, g_TestGPUsNum);
+    err = KFDTestMultiGPU(test_function, g_SelectedNodes, g_TestGPUsNum);
 
     return err;
 }
