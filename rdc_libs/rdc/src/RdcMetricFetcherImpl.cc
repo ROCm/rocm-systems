@@ -612,14 +612,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     } break;
     case RDC_FI_POWER_USAGE: {
       amdsmi_power_info_t power_info = {};
-// Handle API breaking change in amdsmi commit dc4a16da6fb45d581a6e23c78d340172989418a0
-// Breaking change is only in rocm 6.4.0 (amdsmi 25.2)
-// It is reverted to old signature in 6.4.1 (amdsmi 25.3)
-#if (((AMDSMI_LIB_VERSION_MAJOR) == 25) && ((AMDSMI_LIB_VERSION_MINOR) == 2))
-      value->status = amdsmi_get_power_info(processor_handle, 0, &power_info);
-#else
       value->status = amdsmi_get_power_info(processor_handle, &power_info);
-#endif
       value->type = INTEGER;
       if (value->status != AMDSMI_STATUS_SUCCESS) {
         RDC_LOG(RDC_ERROR, "amdsmi_get_power_info failed!");
@@ -873,12 +866,12 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       break;
 
     case RDC_HEALTH_XGMI_ERROR: {
-      amdsmi_xgmi_status_t status;
-      ret = amdsmi_gpu_xgmi_error_status(processor_handle, &status);
+      amdsmi_xgmi_status_t xgmi_status = AMDSMI_XGMI_STATUS_NO_ERRORS;
+      ret = amdsmi_gpu_xgmi_error_status(processor_handle, &xgmi_status);
       value->status = Smi2RdcError(ret);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(status);
+        value->value.l_int = static_cast<int64_t>(xgmi_status);
       }
       break;
     }
@@ -981,6 +974,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
     default:
       break;
   }
+  return Smi2RdcError(static_cast<amdsmi_status_t>(value->status));
 }
 
 rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index,
@@ -1176,7 +1170,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   }
 
   if (status != RDC_ST_OK) {
-    return status;
+    RDC_LOG(RDC_ERROR, "Fetch status is not ok error: " << status);
   }
 
   int64_t latency = now() - value->ts;
