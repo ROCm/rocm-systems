@@ -13,7 +13,7 @@ behind the tool and its components.
 
 If you're new to AQLprofile, see :doc:`What is AQLprofile? <what-is-aqlprofile>`.
 
-AQLprofile is open source and hosted at `<https://github.com/ROCm/rocprofiler-compute>`__.
+AQLprofile is open source and hosted at .
 
 .. grid:: 2
   :gutter: 3

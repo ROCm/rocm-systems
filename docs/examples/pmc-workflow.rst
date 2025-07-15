@@ -76,7 +76,7 @@ Generate command packets
 
 
 Submit packets and run the kernel
------------------------------
+---------------------------------
 
 .. code:: cpp
 
