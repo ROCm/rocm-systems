@@ -61,6 +61,8 @@ void SDMAWriteDataPacket::InitPacket(void* destAddr, unsigned int ndw,
              packetData->DST_ADDR_HI_UNION.DW_2_DATA);  // dst_addr_63_32
 
     packetData->DW_3_UNION.count = SDMA_COUNT(ndw);
+    if (m_FamilyId >= FAMILY_GFX125X)
+        packetData->DW_3_UNION.scope = SDMA_SCOPE_SYS;
     memcpy(&packetData->DATA0_UNION.DW_4_DATA, data, ndw*sizeof(unsigned int));
 }
 
@@ -96,6 +98,11 @@ SDMACopyDataPacket::SDMACopyDataPacket(unsigned int familyId,
         pSDMA->HEADER_UNION.sub_op       = SDMA_SUBOP_COPY_LINEAR;
         pSDMA->HEADER_UNION.broadcast       = n > 1 ? 1 : 0;
         pSDMA->COUNT_UNION.count             = SDMA_COUNT(size);
+        if (m_FamilyId >= FAMILY_GFX125X) {
+            packetData->PARAMETER_UNION.src_scope = SDMA_SCOPE_SYS;
+            packetData->PARAMETER_UNION.dst_scope = SDMA_SCOPE_SYS;
+        }
+
         SplitU64(reinterpret_cast<HSAuint64>(src),
                  pSDMA->SRC_ADDR_LO_UNION.DW_3_DATA,  // src_addr_31_0
                  pSDMA->SRC_ADDR_HI_UNION.DW_4_DATA);  // src_addr_63_32
@@ -136,6 +143,8 @@ SDMAFillDataPacket::SDMAFillDataPacket(unsigned int familyId, void *dst, unsigne
 
         pSDMA->HEADER_UNION.op = SDMA_OP_CONST_FILL;
         pSDMA->HEADER_UNION.sub_op = 0;
+        if (m_FamilyId >= FAMILY_GFX125X)
+            pSDMA->HEADER_UNION.scope = SDMA_SCOPE_SYS;
 
         /* If both size and address are DW aligned, then use DW fill */
         if (!(copy_size & 0x3) && !((HSAuint64)dst & 0x3))
@@ -195,6 +204,8 @@ void SDMAFencePacket::InitPacketNV(void * destAddr,unsigned int data) {
      * mtype = uncached, for the purpose of CPU coherent, L2 policy doesn't matter in this case
      */
     packetData.HEADER_UNION.DW_0_DATA = (0 << 23) | (1 << 22) | (1 << 20) | (3 << 16) | SDMA_OP_FENCE;
+    if (m_FamilyId >= FAMILY_GFX125X)
+        packetData.HEADER_UNION.scope = SDMA_SCOPE_SYS;
 
     SplitU64(reinterpret_cast<unsigned long long>(destAddr),
              packetData.ADDR_LO_UNION.DW_1_DATA, /*dst_addr_31_0*/
