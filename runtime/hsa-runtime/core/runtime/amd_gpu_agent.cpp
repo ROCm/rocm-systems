@@ -491,11 +491,6 @@ void GpuAgent::InitRegionList() {
 }
 
 void GpuAgent::InitScratchPool() {
-  HsaMemFlags flags;
-  flags.Value = 0;
-  flags.ui32.Scratch = 1;
-  flags.ui32.HostAccess = 1;
-
   scratch_per_thread_ =
       core::Runtime::runtime_singleton_->flag().scratch_mem_size();
   if (scratch_per_thread_ == 0)
@@ -516,14 +511,13 @@ void GpuAgent::InitScratchPool() {
 #endif
 
   void* scratch_base = nullptr;
-  HSAKMT_STATUS err =
-      HSAKMT_CALL(hsaKmtAllocMemory(node_id(), max_scratch_len, flags, &scratch_base));
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtAllocMemory(Scratch) failed");
+  hsa_status_t err = driver().AllocateScratchMemory(node_id(), max_scratch_len, &scratch_base);
+  assert(err == HSA_STATUS_SUCCESS && "AllocateScratchMemory failed");
   assert(IsMultipleOf(scratch_base, 0x1000) &&
          "Scratch base is not page aligned!");
 
   scratch_pool_. ~SmallHeap();
-  if (HSAKMT_STATUS_SUCCESS == err) {
+  if (HSA_STATUS_SUCCESS == err) {
     new (&scratch_pool_) SmallHeap(scratch_base, max_scratch_len);
   } else {
     new (&scratch_pool_) SmallHeap();

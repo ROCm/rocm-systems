@@ -301,6 +301,13 @@ public:
   /// code.
   virtual hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const = 0;
 
+  /// @brief Allocates scratch memory for the agent.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] size Size of the scratch memory
+  /// @param[out] mem Pointer to the scratch memory
+  /// @return HSA_STATUS_SUCCESS if scratch memory allocated successfully.
+  virtual hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

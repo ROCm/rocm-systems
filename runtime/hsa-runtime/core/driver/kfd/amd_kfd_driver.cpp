@@ -574,6 +574,21 @@ hsa_status_t KfdDriver::SetTrapHandler(uint32_t node_id, const void* base, uint6
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const {
+  assert(mem);
+  assert(size > 0);
+
+  HsaMemFlags flags = {};
+  flags.ui32.Scratch = 1;
+  flags.ui32.HostAccess = 1;
+
+  void* ptr = AllocateKfdMemory(flags, node_id, size);
+  if (ptr == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+  *mem = ptr;
+  return HSA_STATUS_SUCCESS;
+}
+
 hsa_status_t KfdDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) const {
   assert(device_handle);
 

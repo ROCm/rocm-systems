@@ -877,6 +877,10 @@ hsa_status_t XdnaDriver::SetTrapHandler(uint32_t node_id, const void* base, uint
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t XdnaDriver::AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const {
+  return HSA_STATUS_ERROR;
+}
+
 hsa_status_t XdnaDriver::GetDeviceHandle(uint32_t node_id, void** device_handle) const {
   return HSA_STATUS_ERROR;
 }

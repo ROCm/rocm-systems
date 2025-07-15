@@ -128,6 +128,7 @@ public:
   hsa_status_t GetClockCounters(uint32_t node_id, HsaClockCounters* clock_counter) const override;
   hsa_status_t GetTileConfig(uint32_t node_id, HsaGpuTileConfig* config) const override;
   hsa_status_t GetWallclockFrequency(uint32_t node_id, uint64_t* frequency) const override;
+  hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 
