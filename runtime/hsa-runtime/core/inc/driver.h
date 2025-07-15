@@ -308,6 +308,12 @@ public:
   /// @return HSA_STATUS_SUCCESS if scratch memory allocated successfully.
   virtual hsa_status_t AllocateScratchMemory(uint32_t node_id, uint64_t size, void** mem) const = 0;
 
+  /// @brief Inquires memory available for allocation as a memory buffer
+  /// @param[in] node_id Node ID of the agent
+  /// @param[out] available_size Available memory size in bytes
+  /// @return HSA_STATUS_SUCCESS if the driver successfully returns the available memory size.
+  virtual hsa_status_t AvailableMemory(uint32_t node_id, uint64_t* available_size) const = 0;
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

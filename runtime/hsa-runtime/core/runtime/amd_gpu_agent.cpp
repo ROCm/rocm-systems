@@ -548,8 +548,8 @@ void GpuAgent::ReserveScratch()
   }
 
   size_t available;
-  HSAKMT_STATUS err = HSAKMT_CALL(hsaKmtAvailableMemory(node_id(), &available));
-  assert(err == HSAKMT_STATUS_SUCCESS && "hsaKmtAvailableMemory failed");
+  hsa_status_t err = driver().AvailableMemory(node_id(), &available);
+  assert(err == HSA_STATUS_SUCCESS && "AvailableMemory failed");
   ScopedAcquire<KernelMutex> lock(&scratch_lock_);
   if (!scratch_cache_.reserved_bytes() && reserved_sz && available > 8 * reserved_sz) {
     HSAuint64 alt_va;
@@ -1606,11 +1606,11 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       return GetInfo((hsa_agent_info_t)HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT, value);
     case HSA_AMD_AGENT_INFO_MEMORY_AVAIL: {
       HSAuint64 availableBytes;
-      HSAKMT_STATUS status;
+      hsa_status_t status;
 
-      status = HSAKMT_CALL(hsaKmtAvailableMemory(node_id(), &availableBytes));
+      status = driver().AvailableMemory(node_id(), &availableBytes);
 
-      if (status != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+      if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
       for (auto r : regions()) availableBytes += ((AMD::MemoryRegion*)r)->GetCacheSize();
 

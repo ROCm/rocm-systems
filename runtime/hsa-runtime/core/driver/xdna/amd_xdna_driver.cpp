@@ -898,5 +898,9 @@ hsa_status_t XdnaDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* frequ
   return HSA_STATUS_ERROR;
 }
 
+hsa_status_t XdnaDriver::AvailableMemory(uint32_t node_id, uint64_t* available_size) const {
+  return HSA_STATUS_ERROR;
+}
+
 } // namespace AMD
 } // namespace rocr
