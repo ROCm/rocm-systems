@@ -740,9 +740,6 @@ def _check_res(ret_code) -> None:
     Returns:
         `None`.
     """
-    if ret_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
-        raise AmdSmiRetryException()
-
     if ret_code == amdsmi_wrapper.AMDSMI_STATUS_TIMEOUT:
         raise AmdSmiTimeoutException()
 
@@ -1719,7 +1716,7 @@ def amdsmi_get_cpu_current_io_bandwidth(
     if not isinstance(encoding, int):
         raise AmdSmiParameterException(encoding, int)
     if not isinstance(link_name, str):
-        raise AmdSmiParameterException(link_name: str)
+        raise AmdSmiParameterException(link_name)
 
     link = amdsmi_wrapper.amdsmi_link_id_bw_type_t()
     link.bw_type = ctypes.c_uint32(encoding)
@@ -1745,7 +1742,7 @@ def amdsmi_get_cpu_current_xgmi_bw(
     if not isinstance(encoding, int):
         raise AmdSmiParameterException(encoding, int)
     if not isinstance(link_name, str):
-        raise AmdSmiParameterException(link_name: str)
+        raise AmdSmiParameterException(link_name)
 
     link = amdsmi_wrapper.amdsmi_link_id_bw_type_t()
     link.bw_type = ctypes.c_uint32(encoding)
