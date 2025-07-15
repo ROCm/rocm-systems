@@ -1119,7 +1119,25 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
 }
 
 rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id,
-                                                    rdc_field_value* value) {}
+                                                    rdc_field_value* value) {
+  rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
+
+  amdsmi_processor_handle processor_handle = {};
+  amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
+
+  switch (field_id) {
+    case RDC_FI_CPU_MODEL: {
+      amdsmi_cpu_info_t cpu_info = {};
+      value->status = amdsmi_get_cpu_model_name(processor_handle, &cpu_info);
+      memcpy(value->value.str, cpu_info.model_name, sizeof(cpu_info.model_name));
+      value->type = STRING;
+      break;
+    }
+    default:
+      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  return Smi2RdcError(static_cast<amdsmi_status_t>(value->status));
+}
 
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                                    rdc_field_value* value) {
