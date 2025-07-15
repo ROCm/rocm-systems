@@ -115,9 +115,7 @@ def test_counter_set(capsys, rocm_path):
 
 
 def set_library(rocm_path):
-    ROCPROFV3_AVAIL_PACKAGE = (
-        f"{rocm_path}/lib/python{sys.version_info[0]}/site-packages"
-    )
+    ROCPROFV3_AVAIL_PACKAGE = f"{rocm_path}/lib/python{sys.version_info[0]}/site-packages"
     sys.path.append(ROCPROFV3_AVAIL_PACKAGE)
 
     from rocprofv3 import avail

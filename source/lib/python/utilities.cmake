@@ -218,7 +218,8 @@ function(rocprofiler_rocprofv3_python)
         ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
     set(rocprofv3_PYTHON_SOURCES ${ARGN})
     if(NOT rocprofv3_PYTHON_SOURCES)
-        message(FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")
+        message(
+            FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")
     endif()
     foreach(_SOURCE ${rocprofv3_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}

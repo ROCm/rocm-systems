@@ -196,7 +196,7 @@ def get_number_columns(max_name_len):
 
 def list_basic_agent(args, list_counters):
     from rocprofv3 import avail
-    
+
     def print_agent_counter(counters):
         names_len = [len(counter.name) for counter in counters]
         names = [
@@ -273,7 +273,7 @@ def info_pc_sampling(args):
 
 def listing(args):
     from rocprofv3 import avail
-    
+
     def print_agent_counter(counters):
         names_len = [len(counter.name) for counter in counters]
         names = [
@@ -480,7 +480,9 @@ def main(argv=None):
         from rocprofv3 import avail
     except (ImportError, ModuleNotFoundError):
         # if failed, find the python package for this python version
-        ROCPROFV3_AVAIL_PACKAGE = f"{ROCM_DIR}/lib/python{sys.version_info[0]}/site-packages"
+        ROCPROFV3_AVAIL_PACKAGE = (
+            f"{ROCM_DIR}/lib/python{sys.version_info[0]}/site-packages"
+        )
         sys.path.append(ROCPROFV3_AVAIL_PACKAGE)
 
         from rocprofv3 import avail
