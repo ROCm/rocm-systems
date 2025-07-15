@@ -181,13 +181,6 @@ void RdciDmonSubSystem::parse_cmd_opts(int argc, char** argv) {
     }
   }
 
-  if (options_.find(OPTIONS_GROUP_ID) == options_.end()) {
-    if (gpu_indexes == "") {
-      show_help();
-      throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify the GPUs or group id");
-    }
-  }
-
   // Group and GPU index cannot co-exist
   if (gpu_indexes != "" && options_.find(OPTIONS_GROUP_ID) != options_.end()) {
     show_help();
@@ -319,6 +312,12 @@ void RdciDmonSubSystem::resolve_gpu_indexes() {
   rdc_status_t res = rdc_device_get_all(rdc_handle_, device_list, &count);
   if (res != RDC_ST_OK) {
     throw RdcException(res, "Failed to get all devices");
+  }
+
+  // If neither group or gpu_index was specified, default to all
+  if (raw_gpu_indexes_.empty()) {
+    gpu_indexes_.assign(device_list, device_list + count);
+    return;
   }
 
   std::vector<std::string> vec_ids = split_string(raw_gpu_indexes_, ',');
