@@ -498,11 +498,11 @@ generate_csv(const output_config&                                               
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
                 agent_info,
-                record.allocation_size,
                 rocprofiler::sdk::utility::as_hex(record.address.handle, 16),
                 record.correlation_id.internal,
                 record.start_timestamp,
-                record.end_timestamp);
+                record.end_timestamp,
+                record.allocation_size);
 
             ofs << row_ss.str();
         }
