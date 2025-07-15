@@ -1160,6 +1160,8 @@ class struct__links(Structure):
 struct__links._pack_ = 1 # source:False
 struct__links._fields_ = [
     ('bdf', amdsmi_bdf_t),
+    ('bit_rate', ctypes.c_uint32),
+    ('max_bandwidth', ctypes.c_uint32),
     ('link_type', amdsmi_link_type_t),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('read', ctypes.c_uint64),
@@ -1170,8 +1172,6 @@ struct__links._fields_ = [
 struct_amdsmi_link_metrics_t._pack_ = 1 # source:False
 struct_amdsmi_link_metrics_t._fields_ = [
     ('num_links', ctypes.c_uint32),
-    ('bit_rate', ctypes.c_uint32),
-    ('max_bandwidth', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('links', struct__links * 64),
     ('reserved', ctypes.c_uint64 * 7),

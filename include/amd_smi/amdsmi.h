@@ -974,10 +974,10 @@ typedef struct {
  */
 typedef struct {
     uint32_t num_links;     //!< number of links
-    uint32_t bit_rate;      //!< current link speed in Gb/s
-    uint32_t max_bandwidth; //!< max bandwidth of the link in Gb/s
     struct _links {
         amdsmi_bdf_t bdf;               //!< bdf of the destination gpu
+        uint32_t bit_rate;              //!< current link speed in Gb/s
+        uint32_t max_bandwidth;         //!< max bandwidth of the link in Gb/s
         amdsmi_link_type_t link_type;   //!< type of the link
         uint64_t read;                  //!< total data received for each link in KB
         uint64_t write;                 //!< total data transfered for each link in KB
