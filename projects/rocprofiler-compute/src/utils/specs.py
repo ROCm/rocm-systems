@@ -158,30 +158,11 @@ def generate_machine_specs(args, sysinfo: dict = None):
     accelerator_partition_pattern = r"ACCELERATOR_PARTITION:\s*(\S+)"
     memory_partition_pattern = r"MEMORY_PARTITION:\s*(\S+)"
 
-    rocm_smi_compute_partition_output = run(
-        ["rocm-smi", "--showcomputepartition"], exit_on_error=True
-    )
-    rocm_smi_compute_partition_pattern = r"Compute Partition:\s*(\S+)"
-
     vbios = search(vbios_pattern, amd_smi_output)
 
     # Non-high-frequency System Patterns
-    # Option 1. Try amd-smi (default)
     compute_partition = search(compute_partition_pattern, amd_smi_output)
     console_debug(f"amd-smi compute partition: {compute_partition}")
-    # Option 2. Try rocm-smi (DEPRECATION NOTE: rocm-smi removal in ROCm 7.1)
-    if compute_partition is None:
-        compute_partition = search(
-            rocm_smi_compute_partition_pattern, rocm_smi_compute_partition_output
-        )
-        if compute_partition:
-            console_warning(
-                "DEPRECATION WARNING: rocm-smi is deprecated in ROCm 7.0 and will be "
-                "removed from rocprof-compute in ROCm 7.1. Please migrate to amd-smi "
-                "for compute partition parsing. For migration help, see https://github.com/ROCm/amdsmi"
-            )
-
-        console_debug(f"rocm-smi compute partition: {compute_partition}")
 
     # High-frequency System Pattern using keyword accelerator
     if compute_partition is None:
@@ -190,9 +171,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Apply default compute partition is above fails
     if compute_partition is None:
-        console_warning(
-            f"Can not detect compute/accelerator partition from amd-smi and rocm-smi."
-        )
+        console_warning(f"Can not detect compute/accelerator partition from amd-smi.")
         console_warning(f"Applying default compute partition: SPX")
         compute_partition = "SPX"
 

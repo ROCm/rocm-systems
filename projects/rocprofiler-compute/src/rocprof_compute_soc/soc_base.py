@@ -166,7 +166,7 @@ class OmniSoC_Base:
             )
         )
 
-        # we get the max mclk from rocm-smi --showmclkrange
+        # we get the max mclk from amd-smi --showmclkrange
         # Regular expression to extract the max memory clock (third frequency level in MEM)
         memory_clock_pattern = (
             r"MEM:\s*[^:]*FREQUENCY_LEVELS:\s*(?:\d+: \d+ MHz\s*){2}(\d+)\s*MHz"
