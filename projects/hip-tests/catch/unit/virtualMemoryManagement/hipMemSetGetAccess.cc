@@ -1320,43 +1320,61 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemSetAccess_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipMemSetGetAccess_StreamCaptureBehavior") {
   CTX_CREATE();
-  size_t granularity = 0;
-  constexpr int N = DATA_SIZE;
-  size_t buffer_size = N * sizeof(int);
-  int deviceId = 0;
+
+  constexpr int num_elements = DATA_SIZE;
+  const size_t buffer_bytes = num_elements * sizeof(int);
+  const int device_id = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  HIP_CHECK(hipDeviceGet(&device, device_id));
   checkVMMSupported(device);
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device;
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+
+  hipMemAllocationProp alloc_prop{};
+  alloc_prop.type = hipMemAllocationTypePinned;
+  alloc_prop.location.type = hipMemLocationTypeDevice;
+  alloc_prop.location.id = device;
+
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop, hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
-  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
-  hipMemGenericAllocationHandle_t handle;
-  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
-  hipDeviceptr_t ptrA;
-  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
-  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
-  HIP_CHECK(hipMemRelease(handle));
-  hipMemAccessDesc accessDesc = {};
-  accessDesc.location.type = hipMemLocationTypeDevice;
-  accessDesc.location.id = device;
-  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+
+  const size_t vmm_bytes = ((granularity + buffer_bytes - 1) / granularity) * granularity;
+
+  hipMemGenericAllocationHandle_t mem_handle;
+  HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0));
+
+  hipDeviceptr_t vmm_ptr;
+  HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0));
+  HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0));
+  HIP_CHECK(hipMemRelease(mem_handle));
+
+  hipMemAccessDesc access_desc{};
+  access_desc.location.type = hipMemLocationTypeDevice;
+  access_desc.location.id = device;
+  access_desc.flags = hipMemAccessFlagsProtReadWrite;
+
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
   GENERATE_CAPTURE();
+  // Test hipMemSetAccess inside stream capture
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  HIP_CHECK(hipMemSetAccess(vmm_ptr, vmm_bytes, &access_desc, 1));
   END_CAPTURE(stream);
 
-  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
-  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  // Test hipMemGetAccess inside stream capture
+  BEGIN_CAPTURE(stream);
+  hipMemLocation mem_location{};
+  mem_location.type = hipMemLocationTypeDevice;
+  mem_location.id = device;
+  unsigned long long access_flags = 0;
+  HIP_CHECK(hipMemGetAccess(&access_flags, &mem_location, vmm_ptr));
+  END_CAPTURE(stream);
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipMemUnmap(vmm_ptr, vmm_bytes));
+  HIP_CHECK(hipMemAddressFree(vmm_ptr, vmm_bytes));
   CTX_DESTROY();
 }
 
