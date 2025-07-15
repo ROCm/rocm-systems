@@ -20,13 +20,13 @@ setting_all_article_info = True
 all_article_info_os = ["linux"]
 all_article_info_author = ""
 
-# Dynamically extract component version
-#with open('../CMakeLists.txt', encoding='utf-8') as f:
-#    pattern = r'.*\brocm_setup_version\(VERSION\s+([0-9.]+)[^0-9.]+' # Update according to each component's CMakeLists.txt
-#    match = re.search(pattern,
-#                      f.read())
-#    if not match:
-#        raise ValueError("VERSION not found!")
+Dynamically extract component version
+with open('../CMakeLists.txt', encoding='utf-8') as f:
+    pattern = r'.*\brocm_setup_version\(VERSION\s+([0-9.]+)[^0-9.]+' # Update according to each component's CMakeLists.txt
+    match = re.search(pattern,
+                      f.read())
+    if not match:
+        raise ValueError("VERSION not found!")
 version_number = "1.0"
 
 # for PDF output on Read the Docs
