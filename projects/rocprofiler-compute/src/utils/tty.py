@@ -30,7 +30,7 @@ from tabulate import tabulate
 
 from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
 from utils import mem_chart, parser
-from utils.logger import console_log, console_warning
+from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_idx
 
 
@@ -75,14 +75,10 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
     comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
-        # show roofline
-        if panel_id == 400 and roof_plot:
-            show_roof_plot(roof_plot)
-
         # Skip panels that don't support baseline comparison
-        if panel_id in HIDDEN_SECTIONS:
+        if len(args.path) > 1 and panel_id in HIDDEN_SECTIONS:
             continue
-        ss = ""  # store content of all data_source from one pannel
+        ss = ""  # store content of all data_source from one panel
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
@@ -107,6 +103,16 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         f"Not showing table not selected during profiling: {table_id_str} {table_config['title']}"
                     )
                     continue
+
+                # Show roofline
+                # Check if we have filter_metrics for analyze stage:
+                # no filter_metrics = show all, filter_metrics containing "4" = user requesting roofline chart
+                if panel_id == 400 and (
+                    not args.filter_metrics or "4" in args.filter_metrics
+                ):
+                    show_roof_plot(roof_plot)
+                    continue
+
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]
@@ -331,7 +337,13 @@ def show_roof_plot(roof_plot):
     print("\n" + "-" * 80)
     print("4. Roofline")
     print("4.1 Roofline")
-    print(roof_plot)
+    if roof_plot:
+        print(roof_plot)
+    else:
+        console_error(
+            "Cannot create roofline plot for CLI with incomplete/missing roofline profiling data.",
+            exit=False,
+        )
 
 
 def show_kernel_stats(args, runs, archConfigs, output):
