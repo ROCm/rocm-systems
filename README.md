@@ -23,6 +23,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rccl`                 | Public          | Pending          |                                       |                                       |
 | `rdc`                  | EMU             | Pending          |                                       |                                       |
 | `rocal`                | Public          | Pending          |                                       |                                       |
+| `roccv`                | Public          | Pending          |                                       |                                       |
 | `rocdecode`            | Public          | Pending          |                                       |                                       |
 | `rocjpeg`              | Public          | Pending          |                                       |                                       |
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
@@ -45,6 +46,7 @@ This table provides the current status of the migration of specific ROCm systems
 |------------------------|----------------|
 | `mivisionx`            | 7/31           |
 | `rocal`                | 7/31           |
+| `roccv`                | 7/31           |
 | `rocdecode`            | 7/31           |
 | `rocjpeg`              | 7/31           |
 | `rocpydecode`          | 7/31           |
