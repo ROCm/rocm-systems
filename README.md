@@ -14,6 +14,7 @@ This table provides the current status of the migration of specific ROCm systems
 | Component              | Source of Truth | Migration Status | Azure CI Status                       | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
+| `aqlprofile`           | Public          | Pending          |                                       |                                       |
 | `clr`                  | EMU             | Pending          |                                       |                                       |
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
@@ -48,6 +49,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocjpeg`              | 7/31           |
 | `rocpydecode`          | 7/31           |
 | `rpp`                  | 7/31           |
+| `aqlprofile`           | 8/5            |
 | `rocprofiler`          | 8/5            |
 | `rocprofiler-compute`  | 8/5            |
 | `rocprofiler-register` | 8/5            |
