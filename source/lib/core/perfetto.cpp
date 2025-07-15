@@ -279,11 +279,11 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         auto _script_dir    = get_env("ROCPROFSYS_SCRIPT_PATH", std::string{}, false);
 
         // Validate path - only allow absolute paths within expected directories
-        if (_script_dir.empty() || _script_dir[0] != '/' || 
-            _script_dir.find("..") != std::string::npos ||
-            _script_dir.find("libexec/rocprofiler-systems") == std::string::npos) 
+        if(_script_dir.empty() || _script_dir[0] != '/' ||
+           _script_dir.find("..") != std::string::npos ||
+           _script_dir.find("libexec/rocprofiler-systems") == std::string::npos)
         {
-            _script_dir.clear(); // Invalid path, set to empty string
+            _script_dir.clear();  // Invalid path, set to empty string
         }
 
         if(!_script_dir.empty())
