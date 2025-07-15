@@ -386,7 +386,7 @@ TEST_CASE("Unit_hipHostAlloc_ArgValidation") {
 }
 
 TEST_CASE("Unit_hipHostAlloc_StreamCaptureBehavior") {
-  int *host_memory = nullptr;
+  int* host_memory = nullptr;
   int flags = get_flags();
 
   hipError_t err = hipSuccess;

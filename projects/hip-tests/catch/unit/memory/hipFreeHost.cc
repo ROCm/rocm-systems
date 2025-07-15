@@ -104,3 +104,16 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   }
   HIP_CHECK_THREAD_FINALIZE();
 }
+
+TEST_CASE("Unit_hipFreeHost_StreamCaptureBehavior") {
+  void* ptr = nullptr;
+  size_t ptr_size = 1024;
+
+  HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
+
+  hipError_t err = hipSuccess;
+  bool rlx_mode_allowed = true;
+  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
+  HIP_CHECK_ERROR(hipFreeHost(ptr), err);
+  END_CAPTURE_SYNC(err);
+}
