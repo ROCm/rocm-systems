@@ -33,8 +33,7 @@ static void HostFunctionAddOne_spt(void* arg) {
   int* test_number = reinterpret_cast<int*>(arg);
   (*test_number) += 1;
 }
-static void CreateTestExecutableGraph_spt(hipGraphExec_t* graph_exec,
-                                          int* number) {
+static void CreateTestExecutableGraph_spt(hipGraphExec_t* graph_exec, int* number) {
   hipGraph_t graph;
   hipGraphNode_t node_error;
   hipGraphNode_t node_set_zero;
@@ -42,10 +41,8 @@ static void CreateTestExecutableGraph_spt(hipGraphExec_t* graph_exec,
   hipGraphNode_t node_add_one;
   hipHostNodeParams params_set_add_one = {HostFunctionAddOne_spt, number};
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddHostNode(&node_set_zero, graph, nullptr, 0,
-                                &params_set_to_zero));
-  HIP_CHECK(hipGraphAddHostNode(&node_add_one, graph, &node_set_zero, 1,
-                                &params_set_add_one));
+  HIP_CHECK(hipGraphAddHostNode(&node_set_zero, graph, nullptr, 0, &params_set_to_zero));
+  HIP_CHECK(hipGraphAddHostNode(&node_add_one, graph, &node_set_zero, 1, &params_set_add_one));
   HIP_CHECK(hipGraphInstantiate(graph_exec, graph, &node_error, nullptr, 0));
   HIP_CHECK(hipGraphDestroy(graph));
 }
@@ -107,13 +104,11 @@ TEST_CASE("Unit_hipGraphLaunch_spt_Negative_Parameters") {
     REQUIRE(ret == hipErrorInvalidValue);
   }
   SECTION("graphExec is nullptr and stream is hipStreamPerThread") {
-    HIP_CHECK_ERROR(hipGraphLaunch_spt(nullptr, hipStreamPerThread),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphLaunch_spt(nullptr, hipStreamPerThread), hipErrorInvalidValue);
   }
   SECTION("graphExec is an empty object") {
     hipGraphExec_t graph_exec{};
-    HIP_CHECK_ERROR(hipGraphLaunch_spt(graph_exec, hipStreamPerThread),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphLaunch_spt(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
   }
   SECTION("graphExec is destroyed") {
     int number = 5;
@@ -123,12 +118,10 @@ TEST_CASE("Unit_hipGraphLaunch_spt_Negative_Parameters") {
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
     REQUIRE(number == 1);
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
-    HIP_CHECK_ERROR(hipGraphLaunch_spt(graph_exec, hipStreamPerThread),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphLaunch_spt(graph_exec, hipStreamPerThread), hipErrorInvalidValue);
   }
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

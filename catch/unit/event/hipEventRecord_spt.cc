@@ -59,15 +59,12 @@ TEST_CASE("Unit_hipEventRecord_spt_BasicTst") {
     WithoutFlags
   };
 #if HT_AMD
-  auto flags = GENERATE(WithFlags_Default, WithFlags_Blocking,
-                        WithFlags_DisableTiming,
-                        WithFlags_ReleaseToDevice,
-                        WithFlags_ReleaseToSystem, WithoutFlags);
+  auto flags = GENERATE(WithFlags_Default, WithFlags_Blocking, WithFlags_DisableTiming,
+                        WithFlags_ReleaseToDevice, WithFlags_ReleaseToSystem, WithoutFlags);
 #endif
 #if HT_NVIDIA
   auto flags =
-      GENERATE(WithFlags_Default, WithFlags_Blocking,
-               WithFlags_DisableTiming, WithoutFlags);
+      GENERATE(WithFlags_Default, WithFlags_Blocking, WithFlags_DisableTiming, WithoutFlags);
 #endif
   hipEvent_t start{}, stop{};
   if (flags == WithoutFlags) {
@@ -81,9 +78,8 @@ TEST_CASE("Unit_hipEventRecord_spt_BasicTst") {
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
   // Warmup
   HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
-                                 static_cast<const float*>(A_d),
-                                 static_cast<const float*>(B_d),
-                                 C_d, N);
+                               static_cast<const float*>(A_d), static_cast<const float*>(B_d), C_d,
+                               N);
   HIP_CHECK(hipDeviceSynchronize());
   for (int i = 0; i < iterations; i++) {
     //--- START TIMED REGION
@@ -91,8 +87,7 @@ TEST_CASE("Unit_hipEventRecord_spt_BasicTst") {
     // Record the start event
     HIP_CHECK(hipEventRecord_spt(start, NULL));
     HipTest::launchKernel<float>(HipTest::vectorADD<float>, blocks, 1, 0, 0,
-                                 static_cast<const float*>(A_d),
-                                 static_cast<const float*>(B_d),
+                                 static_cast<const float*>(A_d), static_cast<const float*>(B_d),
                                  C_d, N);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipEventRecord_spt(stop, NULL));
@@ -133,8 +128,7 @@ TEST_CASE("Unit_hipEventRecord_spt_BasicTst") {
  */
 TEST_CASE("Unit_hipEventRecord_spt_Negative") {
   SECTION("Nullptr event") {
-    HIP_CHECK_ERROR(hipEventRecord_spt(nullptr, nullptr),
-                                       hipErrorInvalidResourceHandle);
+    HIP_CHECK_ERROR(hipEventRecord_spt(nullptr, nullptr), hipErrorInvalidResourceHandle);
   }
   SECTION("Different devices") {
     int devCount = 0;
@@ -146,14 +140,12 @@ TEST_CASE("Unit_hipEventRecord_spt_Negative") {
       HIP_CHECK(hipEventCreate(&start));
       // start on device 0 but null stream on device 1
       HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK_ERROR(hipEventRecord_spt(start, nullptr),
-                                         hipErrorInvalidHandle);
+      HIP_CHECK_ERROR(hipEventRecord_spt(start, nullptr), hipErrorInvalidHandle);
       HIP_CHECK(hipEventDestroy(start));
     }
   }
 }
 /**
-* End doxygen group EventTest.
-* @}
-*/
-
+ * End doxygen group EventTest.
+ * @}
+ */

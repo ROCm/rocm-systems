@@ -27,7 +27,7 @@ THE SOFTWARE.
  *                                    unsigned int flags __dparm(0))` -
  * Make the specified compute stream wait for an event
  */
- /**
+/**
  * Test Description
  * ------------------------
  *  - Test unsuccessful hipStreamWaitEvent_spt when either event or flags are invalid
@@ -40,8 +40,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipStreamWaitEvent_spt_Negative") {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };
-  auto streamType = GENERATE(StreamTestType::NullStream,
-                             StreamTestType::StreamPerThread,
+  auto streamType = GENERATE(StreamTestType::NullStream, StreamTestType::StreamPerThread,
                              StreamTestType::CreatedStream);
   hipStream_t stream{nullptr};
   hipEvent_t event{nullptr};
@@ -55,22 +54,20 @@ TEST_CASE("Unit_hipStreamWaitEvent_spt_Negative") {
   REQUIRE(event != nullptr);
   SECTION("Invalid Event") {
     INFO("Running against Invalid Event");
-    HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, nullptr, 0),
-                                           hipErrorInvalidResourceHandle);
+    HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, nullptr, 0), hipErrorInvalidResourceHandle);
   }
   SECTION("Invalid Flags") {
     INFO("Running against Invalid Flags");
     constexpr unsigned flag = ~0u;
     REQUIRE(flag != 0);
-    HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, event, flag),
-                                           hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, event, flag), hipErrorInvalidValue);
   }
   HIP_CHECK(hipEventDestroy(event));
   if (streamType == StreamTestType::CreatedStream) {
     HIP_CHECK(hipStreamDestroy(stream));
   }
 }
- /**
+/**
  * Test Description
  * ------------------------
  *  - Test unsuccessful hipStreamWaitEvent_spt when stream is uninitialized
@@ -85,8 +82,7 @@ TEST_CASE("Unit_hipStreamWaitEvent_spt_UninitializedStream_Negative") {
   hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
   hipEvent_t event{nullptr};
   HIP_CHECK(hipEventCreate(&event));
-  HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, event, 0),
-                                         hipErrorInvalidHandle);
+  HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, event, 0), hipErrorInvalidHandle);
   HIP_CHECK(hipEventDestroy(event));
 }
 /**
@@ -128,8 +124,7 @@ TEST_CASE("Unit_hipStreamWaitEvent_spt_Default") {
  *  - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipStreamWaitEvent_spt_DifferentStreams") {
-  hipStream_t blockedStreamA{nullptr}, streamBlockedOnStreamA{nullptr},
-  unblockingStream{nullptr};
+  hipStream_t blockedStreamA{nullptr}, streamBlockedOnStreamA{nullptr}, unblockingStream{nullptr};
   hipEvent_t waitEvent{nullptr};
   HIP_CHECK(hipStreamCreate(&blockedStreamA));
   HIP_CHECK(hipStreamCreate(&streamBlockedOnStreamA));
@@ -158,7 +153,6 @@ TEST_CASE("Unit_hipStreamWaitEvent_spt_DifferentStreams") {
   HIP_CHECK(hipEventDestroy(waitEvent));
 }
 /**
-* End doxygen group StreamTest.
-* @}
-*/
-
+ * End doxygen group StreamTest.
+ * @}
+ */

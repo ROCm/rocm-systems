@@ -21,7 +21,10 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <chrono>
 #include <thread>
-#define UNUSED(expr) do { (void)(expr); } while (0)
+#define UNUSED(expr)                                                                               \
+  do {                                                                                             \
+    (void)(expr);                                                                                  \
+  } while (0)
 #ifdef __HIP_PLATFORM_AMD__
 #define HIPRT_CB
 #endif
@@ -41,11 +44,10 @@ size_t NSize = 4 * 1024 * 1024;
 float *A_h, *C_h;
 bool gcbDone = false;
 bool gPassed = true;
-void *ptr0xff = reinterpret_cast<void *>(0xffffffff);
-void *gusrptr;
+void* ptr0xff = reinterpret_cast<void*>(0xffffffff);
+void* gusrptr;
 hipStream_t gstream;
-void HIPRT_CB Callback(hipStream_t stream, hipError_t status,
-                       void* userData) {
+void HIPRT_CB Callback(hipStream_t stream, hipError_t status, void* userData) {
   UNUSED(stream);
   HIP_CHECK(status);
   REQUIRE(userData == NULL);
@@ -74,31 +76,27 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   HIP_CHECK(hipMalloc(&C_d, Nbytes));
   if (isDefault) {
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice,
-                            0));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, 0));
     const unsigned blocks = 512;
     const unsigned threadsPerBlock = 256;
-    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks),
-                        dim3(threadsPerBlock), 0, 0, A_d, C_d, NSize);
+    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d,
+                       C_d, NSize);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost,
-                            0));
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, 0));
     HIP_CHECK(hipStreamAddCallback_spt(0, Callback, nullptr, 0));
     while (!gcbDone)
-     // Sleep for 100 ms
-     std::this_thread::sleep_for(std::chrono::microseconds(100000));
+      // Sleep for 100 ms
+      std::this_thread::sleep_for(std::chrono::microseconds(100000));
   } else {
     hipStream_t mystream;
     HIP_CHECK(hipStreamCreateWithFlags(&mystream, hipStreamNonBlocking));
-    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice,
-                            mystream));
+    HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, mystream));
     const unsigned blocks = 512;
     const unsigned threadsPerBlock = 256;
-    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks),
-                      dim3(threadsPerBlock), 0, mystream, A_d, C_d, NSize);
+    hipLaunchKernelGGL((HipTest::vector_square), dim3(blocks), dim3(threadsPerBlock), 0, mystream,
+                       A_d, C_d, NSize);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost,
-                            mystream));
+    HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mystream));
     HIP_CHECK(hipStreamAddCallback_spt(mystream, Callback, nullptr, 0));
     while (!gcbDone)
       // Sleep for 100 ms
@@ -111,8 +109,7 @@ bool testStreamCallbackFunctionality(bool isDefault) {
   free(A_h);
   return gPassed;
 }
-void Callback_ChkUsrdataPtr(hipStream_t stream, hipError_t status,
-                            void* userData) {
+void Callback_ChkUsrdataPtr(hipStream_t stream, hipError_t status, void* userData) {
   REQUIRE(stream == gstream);
   HIP_CHECK(status);
   gPassed = true;
@@ -121,8 +118,7 @@ void Callback_ChkUsrdataPtr(hipStream_t stream, hipError_t status,
   }
   gcbDone = true;
 }
-void Callback_ChkStreamValue(hipStream_t stream, hipError_t status,
-                             void* userData) {
+void Callback_ChkStreamValue(hipStream_t stream, hipError_t status, void* userData) {
   REQUIRE(userData == nullptr);
   HIP_CHECK(status);
   gPassed = true;
@@ -132,15 +128,15 @@ void Callback_ChkStreamValue(hipStream_t stream, hipError_t status,
   gcbDone = true;
 }
 }  // namespace hipStreamAddCallbackTest_spt
+using hipStreamAddCallbackTest_spt::Callback;
+using hipStreamAddCallbackTest_spt::Callback_ChkStreamValue;
+using hipStreamAddCallbackTest_spt::Callback_ChkUsrdataPtr;
 using hipStreamAddCallbackTest_spt::gcbDone;
 using hipStreamAddCallbackTest_spt::gPassed;
-using hipStreamAddCallbackTest_spt::ptr0xff;
-using hipStreamAddCallbackTest_spt::gusrptr;
 using hipStreamAddCallbackTest_spt::gstream;
+using hipStreamAddCallbackTest_spt::gusrptr;
+using hipStreamAddCallbackTest_spt::ptr0xff;
 using hipStreamAddCallbackTest_spt::testStreamCallbackFunctionality;
-using hipStreamAddCallbackTest_spt::Callback;
-using hipStreamAddCallbackTest_spt::Callback_ChkUsrdataPtr;
-using hipStreamAddCallbackTest_spt::Callback_ChkStreamValue;
 /**
  * Test Description
  * ------------------------
@@ -161,8 +157,7 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_ParamTst_Positive") {
     gusrptr = ptr0xff;
     gPassed = true;
     gcbDone = false;
-    HIP_CHECK(hipStreamAddCallback_spt(mystream, Callback_ChkUsrdataPtr,
-                                  gusrptr, 0));
+    HIP_CHECK(hipStreamAddCallback_spt(mystream, Callback_ChkUsrdataPtr, gusrptr, 0));
     while (!gcbDone) {
       // Sleep for 100 ms
       std::this_thread::sleep_for(std::chrono::microseconds(100000));
@@ -173,8 +168,7 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_ParamTst_Positive") {
     gstream = mystream;
     gPassed = true;
     gcbDone = false;
-    HIP_CHECK(hipStreamAddCallback_spt(mystream, Callback_ChkStreamValue,
-                                  nullptr, 0));
+    HIP_CHECK(hipStreamAddCallback_spt(mystream, Callback_ChkStreamValue, nullptr, 0));
     while (!gcbDone) {
       // Sleep for 100 ms
       std::this_thread::sleep_for(std::chrono::microseconds(100000));
@@ -183,7 +177,7 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_ParamTst_Positive") {
   }
   HIP_CHECK(hipStreamDestroy(mystream));
 }
- /**
+/**
  * Test Description
  * ------------------------
  *  - Basic test to validate Negative cases of hipStreamAddCallback_spt.
@@ -198,20 +192,16 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_ParamTst_Negative") {
   hipStream_t mystream;
   HIP_CHECK(hipStreamCreate(&mystream));
   SECTION("callback is nullptr for non-default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(mystream, nullptr,
-                                         nullptr, 0));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(mystream, nullptr, nullptr, 0));
   }
   SECTION("callback is nullptr for default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(0, nullptr,
-                                         nullptr, 0));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(0, nullptr, nullptr, 0));
   }
   SECTION("flag is nonzero for non-default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(mystream, Callback,
-                                         nullptr, 10));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(mystream, Callback, nullptr, 10));
   }
   SECTION("flag is nonzero for default stream") {
-    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(0, Callback,
-                                         nullptr, 10));
+    REQUIRE_FALSE(hipSuccess == hipStreamAddCallback_spt(0, Callback, nullptr, 10));
   }
   HIP_CHECK(hipStreamDestroy(mystream));
 }
@@ -231,7 +221,7 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_WithDefaultStream") {
   TestPassed = testStreamCallbackFunctionality(true);
   REQUIRE(TestPassed);
 }
- /**
+/**
  * Test Description
  * ------------------------
  *  - Validates hipStreamAddCallback_spt functionality with defined stream.
@@ -248,7 +238,6 @@ TEST_CASE("Unit_hipStreamAddCallback_spt_WithCreatedStream") {
   REQUIRE(TestPassed);
 }
 /**
-* End doxygen group StreamTest.
-* @}
-*/
-
+ * End doxygen group StreamTest.
+ * @}
+ */

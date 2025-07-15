@@ -31,7 +31,7 @@ THE SOFTWARE.
  * launches kernel f with launch parameters and shared memory on stream with arguments passed
  * to kernelparams or extra, where thread blocks can cooperate and synchronize as they execute.
  */
- /**
+/**
  * Test Description
  * ------------------------
  * - Basic test to check the functionality of hipLaunchCooperativeKernel_spt.
@@ -48,9 +48,8 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_spt_Positive_Basic") {
     return;
   }
   SECTION("Cooperative kernel with no arguments") {
-    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(coop_kernel),
-                                             dim3{2, 2, 1}, dim3{1, 1, 1},
-                                             nullptr, 0, nullptr));
+    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(coop_kernel), dim3{2, 2, 1},
+                                             dim3{1, 1, 1}, nullptr, 0, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
   }
   SECTION("Kernel with arguments using kernelParams") {
@@ -58,16 +57,14 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_spt_Positive_Basic") {
     HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
     int* result_ptr = result_dev.ptr();
     void* kernel_args[1] = {&result_ptr};
-    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel_42),
-                                             dim3{1, 1, 1}, dim3{1, 1, 1},
-                                             kernel_args, 0, nullptr));
+    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel_42), dim3{1, 1, 1},
+                                             dim3{1, 1, 1}, kernel_args, 0, nullptr));
     int result = 0;
-    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result),
-                        hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
     REQUIRE(result == 42);
   }
 }
- /**
+/**
  * Test Description
  * ------------------------
  * - Basic test to check the functionality of hipLaunchCooperativeKernel_spt
@@ -85,28 +82,22 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_spt_Positive_Parameters") {
     return;
   }
   SECTION("blockDim.x == maxBlockDimX") {
-    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX,
-                                              0);
-    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                             dim3{1, 1, 1}, dim3{x, 1, 1},
-                                             nullptr, 0, nullptr));
+    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
+    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                             dim3{x, 1, 1}, nullptr, 0, nullptr));
   }
   SECTION("blockDim.y == maxBlockDimY") {
-    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY,
-                                              0);
-    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                             dim3{1, 1, 1}, dim3{y, 1, 1},
-                                             nullptr, 0, nullptr));
+    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0);
+    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                             dim3{y, 1, 1}, nullptr, 0, nullptr));
   }
   SECTION("blockDim.z == maxBlockDimZ") {
-    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ,
-                                              0);
-    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                             dim3{1, 1, 1}, dim3{z, 1, 1},
-                                             nullptr, 0, nullptr));
+    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0);
+    HIP_CHECK(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                             dim3{z, 1, 1}, nullptr, 0, nullptr));
   }
 }
- /**
+/**
  * Test Description
  * ------------------------
  * - Basic test to check the functionality of hipLaunchCooperativeKernel_spt
@@ -124,89 +115,63 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_spt_Negative_Parameters") {
     return;
   }
   SECTION("f == nullptr") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(static_cast<void*>(nullptr),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, 1, 1},
-                                                   nullptr, 0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(static_cast<void*>(nullptr), dim3{1, 1, 1},
+                                                   dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidDeviceFunction);
   }
   SECTION("gridDim.x == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                               dim3{0, 1, 1},
-                                               dim3{1, 1, 1}, nullptr,
-                                               0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{0, 1, 1},
+                                                   dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("gridDim.y == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 0, 1},
-                                                   dim3{1, 1, 1}, nullptr,
-                                                   0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 0, 1},
+                                                   dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("gridDim.z == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 0},
-                                                   dim3{1, 1, 1}, nullptr,
-                                                   0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 0},
+                                                   dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.x == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{0, 1, 1}, nullptr,
-                                                   0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{0, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.y == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, 0, 1}, nullptr,
-                                                   0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{1, 0, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.z == 0") {
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, 1, 0}, nullptr,
-                                                   0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{1, 1, 0}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.x > maxBlockDimX") {
-    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX,
-                                              0) + 1u;
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{x, 1, 1}, nullptr,
-                                                   0, nullptr),
+    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0) + 1u;
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{x, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.y > maxBlockDimY") {
-    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY,
-                                              0) + 1u;
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, y, 1}, nullptr,
-                                                   0, nullptr),
+    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0) + 1u;
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{1, y, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.z > maxBlockDimZ") {
-    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ,
-                                              0) + 1u;
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, 1, z}, nullptr,
-                                                   0, nullptr),
+    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0) + 1u;
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{1, 1, z}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION("blockDim.x * blockDim.y * blockDim.z > maxThreadsPerBlock") {
-    const unsigned int max =
-    GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0);
+    const unsigned int max = GetDeviceAttribute(hipDeviceAttributeMaxThreadsPerBlock, 0);
     const unsigned int dim = std::ceil(std::cbrt(max));
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{dim, dim, dim},
-                                                   nullptr, 0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{dim, dim, dim}, nullptr, 0, nullptr),
                     hipErrorInvalidConfiguration);
   }
   SECTION(
@@ -214,29 +179,23 @@ TEST_CASE("Unit_hipLaunchCooperativeKernel_spt_Negative_Parameters") {
       "multiProcessorCount") {
     int max_blocks;
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks,
-              reinterpret_cast<void*>(kernel), 1, 0));
+                                                           reinterpret_cast<void*>(kernel), 1, 0));
     const unsigned int multiproc_count =
         GetDeviceAttribute(hipDeviceAttributeMultiprocessorCount, 0);
-    const unsigned int dim = std::ceil(std::cbrt(max_blocks *
-                                                 multiproc_count));
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{dim, dim, dim},
-                                                   dim3{1, 1, 1}, nullptr, 0,
-                                                   nullptr),
-                    hipErrorCooperativeLaunchTooLarge);
+    const unsigned int dim = std::ceil(std::cbrt(max_blocks * multiproc_count));
+    HIP_CHECK_ERROR(
+        hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{dim, dim, dim},
+                                       dim3{1, 1, 1}, nullptr, 0, nullptr),
+        hipErrorCooperativeLaunchTooLarge);
   }
   SECTION("sharedMemBytes > maxSharedMemoryPerBlock") {
-    const unsigned int max =
-    GetDeviceAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock, 0) + 1u;
-    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel),
-                                                   dim3{1, 1, 1},
-                                                   dim3{1, 1, 1}, nullptr, max,
-                                                   nullptr),
+    const unsigned int max = GetDeviceAttribute(hipDeviceAttributeMaxSharedMemoryPerBlock, 0) + 1u;
+    HIP_CHECK_ERROR(hipLaunchCooperativeKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                                   dim3{1, 1, 1}, nullptr, max, nullptr),
                     hipErrorCooperativeLaunchTooLarge);
   }
 }
 /**
-* End doxygen group ExecutionTest.
-* @}
-*/
-
+ * End doxygen group ExecutionTest.
+ * @}
+ */

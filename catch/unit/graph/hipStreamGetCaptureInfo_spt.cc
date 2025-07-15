@@ -27,8 +27,7 @@ THE SOFTWARE.
  * *pCaptureStatus, unsigned long long *pId)` -
  * Get capture status of a stream
  */
-void checkStreamCaptureInfo_spt(hipStreamCaptureMode mode,
-                                hipStream_t stream) {
+void checkStreamCaptureInfo_spt(hipStreamCaptureMode mode, hipStream_t stream) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
   hipStreamCaptureStatus captureStatus{hipStreamCaptureStatusNone};
@@ -41,8 +40,7 @@ void checkStreamCaptureInfo_spt(hipStreamCaptureMode mode,
   HIP_CHECK(hipStreamBeginCapture(stream, mode));
   captureSequenceSimple(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), N, stream);
   // Capture status is active and sequence id is valid
-  HIP_CHECK(hipStreamGetCaptureInfo_spt(stream, &captureStatus,
-                                        &capSequenceID));
+  HIP_CHECK(hipStreamGetCaptureInfo_spt(stream, &captureStatus, &capSequenceID));
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
   REQUIRE(capSequenceID > 0);
   // End capture and verify graph is returned
@@ -50,8 +48,7 @@ void checkStreamCaptureInfo_spt(hipStreamCaptureMode mode,
   REQUIRE(graph != nullptr);
   // verify capture status is inactive and sequence id is not updated
   capSequenceID = 0;
-  HIP_CHECK(hipStreamGetCaptureInfo_spt(stream, &captureStatus,
-                                        &capSequenceID));
+  HIP_CHECK(hipStreamGetCaptureInfo_spt(stream, &captureStatus, &capSequenceID));
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
   REQUIRE(capSequenceID == 0);
   // Verify api still returns capture status when capture ID is nullptr
@@ -88,8 +85,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_spt_Positive_Functional") {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   const hipStreamCaptureMode captureMode = GENERATE(
-      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
-      hipStreamCaptureModeRelaxed);
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   checkStreamCaptureInfo_spt(captureMode, stream);
 }
 /**
@@ -113,8 +109,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_spt_Positive_UniqueID") {
   StreamsGuard streams(numStreams);
   for (int i = 0; i < numStreams; i++) {
     HIP_CHECK(hipStreamBeginCapture(streams[i], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipStreamGetCaptureInfo_spt(streams[i], &captureStatus,
-                                          &capSequenceID));
+    HIP_CHECK(hipStreamGetCaptureInfo_spt(streams[i], &captureStatus, &capSequenceID));
     REQUIRE(captureStatus == hipStreamCaptureStatusActive);
     REQUIRE(capSequenceID > 0);
     idlist.push_back(capSequenceID);
@@ -151,13 +146,11 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_spt_Negative_Parameters") {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   SECTION("Capture Status location as nullptr") {
-    HIP_CHECK_ERROR(hipStreamGetCaptureInfo_spt(stream, nullptr,
-                                                &capSequenceID),
-                                                hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamGetCaptureInfo_spt(stream, nullptr, &capSequenceID),
+                    hipErrorInvalidValue);
   }
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

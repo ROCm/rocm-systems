@@ -44,9 +44,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_spt_BasicFntl") {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   const hipStreamCaptureMode captureMode = GENERATE(
-        hipStreamCaptureModeGlobal,
-        hipStreamCaptureModeThreadLocal,
-        hipStreamCaptureModeRelaxed);
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   constexpr size_t N = 1000000;
   hipStreamCaptureStatus cStatus;
   size_t Nbytes = N * sizeof(float);
@@ -99,8 +97,7 @@ TEST_CASE("Unit_hipStreamIsCapturing_spt_Negative_Parameters") {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   SECTION("Check capture status with null pCaptureStatus.") {
-    HIP_CHECK_ERROR(hipStreamIsCapturing_spt(stream, nullptr),
-                                             hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamIsCapturing_spt(stream, nullptr), hipErrorInvalidValue);
   }
   SECTION("Check capture status when checked on null stream") {
     hipStreamCaptureStatus cStatus;
@@ -121,8 +118,8 @@ TEST_CASE("Unit_hipStreamIsCapturing_spt_Negative_Parameters") {
       StreamGuard sg(Streams::created);
       return sg.stream();
     };
-  HIP_CHECK_ERROR(hipStreamIsCapturing_spt(InvalidStream(), &cStatus),
-                                           hipErrorContextIsDestroyed);
+    HIP_CHECK_ERROR(hipStreamIsCapturing_spt(InvalidStream(), &cStatus),
+                    hipErrorContextIsDestroyed);
   }
 }
 static void thread_func(hipStream_t stream) {
@@ -161,7 +158,6 @@ TEST_CASE("Unit_hipStreamIsCapturing_spt_Positive_Thread") {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

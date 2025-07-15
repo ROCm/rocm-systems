@@ -43,21 +43,17 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipStreamEndCapture_spt_Negative_Parameters") {
   hipGraph_t graph{nullptr};
-  const auto stream_type = GENERATE(Streams::perThread,
-                                    Streams::created);
+  const auto stream_type = GENERATE(Streams::perThread, Streams::created);
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   SECTION("Pass stream as nullptr") {
-    HIP_CHECK_ERROR(hipStreamEndCapture_spt(nullptr, &graph),
-                                            hipErrorIllegalState);
+    HIP_CHECK_ERROR(hipStreamEndCapture_spt(nullptr, &graph), hipErrorIllegalState);
   }
   SECTION("Pass graph as nullptr") {
-    HIP_CHECK_ERROR(hipStreamEndCapture_spt(stream, nullptr),
-                                            hipErrorIllegalState);
+    HIP_CHECK_ERROR(hipStreamEndCapture_spt(stream, nullptr), hipErrorIllegalState);
   }
   SECTION("End capture on stream where capture has not yet started") {
-    HIP_CHECK_ERROR(hipStreamEndCapture_spt(stream, &graph),
-                                            hipErrorIllegalState);
+    HIP_CHECK_ERROR(hipStreamEndCapture_spt(stream, &graph), hipErrorIllegalState);
   }
 }
 /**
@@ -89,8 +85,7 @@ TEST_CASE("Unit_hipStreamEndCapture_spt_Positive_GraphDestroy") {
   HIP_CHECK(hipStreamEndCapture_spt(stream, &graph));
 }
 static void thread_func_neg(hipStream_t stream, hipGraph_t graph) {
-  HIP_ASSERT(hipErrorStreamCaptureWrongThread ==
-             hipStreamEndCapture_spt(stream, &graph));
+  HIP_ASSERT(hipErrorStreamCaptureWrongThread == hipStreamEndCapture_spt(stream, &graph));
 }
 /**
  * Test Description
@@ -170,7 +165,6 @@ TEST_CASE("Unit_hipStreamEndCapture_spt_Positive_Thread") {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

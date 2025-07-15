@@ -31,8 +31,7 @@ THE SOFTWARE.
  * Get stream's capture state
  */
 
-void checkStreamCaptureInfo_v2_spt(hipStreamCaptureMode mode,
-                                   hipStream_t stream) {
+void checkStreamCaptureInfo_v2_spt(hipStreamCaptureMode mode, hipStream_t stream) {
   constexpr size_t N = 1000000;
   size_t Nbytes = N * sizeof(float);
   hipGraph_t graph{nullptr}, capInfoGraph{nullptr};
@@ -51,26 +50,21 @@ void checkStreamCaptureInfo_v2_spt(hipStreamCaptureMode mode,
   StreamsGuard streams_guard(2);
   SECTION("Linear sequence graph") {
     HIP_CHECK(hipStreamBeginCapture(stream, mode));
-    captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(),
-                          N, stream);
-    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus,
-                                             &capSequenceID, &capInfoGraph,
+    captureSequenceLinear(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream);
+    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus, &capSequenceID, &capInfoGraph,
                                              &nodelist, &numDependencies));
     numDepsCreated = 1;
     HIP_CHECK(hipGraphNodeGetType(nodelist[0], &type));
-    if ((type != hipGraphNodeTypeMemset) &&
-        (type != hipGraphNodeTypeMemcpy)) {
+    if ((type != hipGraphNodeTypeMemset) && (type != hipGraphNodeTypeMemcpy)) {
       INFO("Type0 returned as " << type);
       REQUIRE(false);
     }
   }
   SECTION("Branched sequence graph") {
     HIP_CHECK(hipStreamBeginCapture(stream, mode));
-    captureSequenceBranched(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(),
-                            B_d.ptr(), N, stream, streams_guard.stream_list(),
-                            events_guard.event_list());
-    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus,
-                                             &capSequenceID, &capInfoGraph,
+    captureSequenceBranched(A_h.host_ptr(), A_d.ptr(), B_h.host_ptr(), B_d.ptr(), N, stream,
+                            streams_guard.stream_list(), events_guard.event_list());
+    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus, &capSequenceID, &capInfoGraph,
                                              &nodelist, &numDependencies));
     numDepsCreated = 2;
     HIP_CHECK(hipGraphNodeGetType(nodelist[0], &type));
@@ -98,8 +92,7 @@ void checkStreamCaptureInfo_v2_spt(hipStreamCaptureMode mode,
   capInfoGraph = nullptr;
   numDependencies = 0;
   nodelist = nullptr;
-  HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus,
-                                           &capSequenceID, &capInfoGraph,
+  HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(stream, &captureStatus, &capSequenceID, &capInfoGraph,
                                            &nodelist, &numDependencies));
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
   REQUIRE(capSequenceID == 0);
@@ -119,8 +112,7 @@ void checkStreamCaptureInfo_v2_spt(hipStreamCaptureMode mode,
     std::fill_n(A_h.host_ptr(), N, static_cast<float>(i));
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
-    ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i) *
-                   static_cast<float>(i), N);
+    ArrayFindIfNot(B_h.host_ptr(), static_cast<float>(i) * static_cast<float>(i), N);
   }
   HIP_CHECK(hipGraphExecDestroy(graphExec))
   HIP_CHECK(hipGraphDestroy(graph));
@@ -150,8 +142,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_spt_Positive_Functional") {
   hipStream_t stream = stream_guard.stream();
 
   const hipStreamCaptureMode captureMode = GENERATE(
-      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
-      hipStreamCaptureModeRelaxed);
+      hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal, hipStreamCaptureModeRelaxed);
   checkStreamCaptureInfo_v2_spt(captureMode, stream);
 }
 /**
@@ -177,8 +168,7 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_spt_Positive_UniqueID") {
 
   for (int i = 0; i < numStreams; i++) {
     HIP_CHECK(hipStreamBeginCapture(streams[i], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(streams[i], &captureStatus,
-                                             &capSequenceID, nullptr,
+    HIP_CHECK(hipStreamGetCaptureInfo_v2_spt(streams[i], &captureStatus, &capSequenceID, nullptr,
                                              nullptr, nullptr));
     REQUIRE(captureStatus == hipStreamCaptureStatusActive);
     REQUIRE(capSequenceID > 0);
@@ -223,15 +213,12 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_spt_Negative_Parameters") {
   StreamGuard stream_guard(stream_type);
   hipStream_t stream = stream_guard.stream();
   SECTION("Capture Status location as nullptr") {
-    HIP_CHECK_ERROR(hipStreamGetCaptureInfo_v2_spt(stream, nullptr,
-                                                   &capSequenceID,
-                                                   &capInfoGraph,
-                                                   &nodelist,
-                                                   &numDependencies),
-                                                   hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamGetCaptureInfo_v2_spt(stream, nullptr, &capSequenceID, &capInfoGraph,
+                                                   &nodelist, &numDependencies),
+                    hipErrorInvalidValue);
   }
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */
