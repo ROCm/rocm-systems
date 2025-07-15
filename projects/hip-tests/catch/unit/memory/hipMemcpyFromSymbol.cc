@@ -212,49 +212,46 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
 }
 
 /**
- * Test Description
- * ------------------------
- *  - Basic functional testcase to trigger capturehipMemcpyToSymbolAsync
- *  and capturehipMemcpyFromSymbolAsync internal apis to improve
- *  code coverage.
- * Test source
- * ------------------------
- *  - unit/memory/hipMemcpyFromSymbol.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.0
- */
-TEST_CASE("Unit_hipMemcpyToFromSymbol_capturehipMemcpyToFromSymbolAsync") {
-  hipGraph_t graph{nullptr};
-  hipGraphExec_t graphExec{nullptr};
-  hipStream_t stream;
+* Test Description
+* ------------------------
+*  - Basic functional testcase to trigger capturehipMemcpyToSymbolAsync
+*  and capturehipMemcpyFromSymbolAsync internal apis to improve
+*  code coverage.
+* Test source
+* ------------------------
+*  - unit/memory/hipMemcpyFromSymbol.cc
+* Test requirements
+* ------------------------
+*  - HIP_VERSION >= 6.0
+*/
+TEST_CASE("Unit_hipMemcpyToFromSymbol_Capture") {
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
-  int A_h = 0, B_h = 42;
 
-  // Start Capturing
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  SECTION("__constant__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &B_h, sizeof(int), 0,
+  constexpr int kExpectedValue = 42;
+  int host_value = 0;
+
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
+  SECTION("ConstantSymbolTransfer") {
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &kExpectedValue, sizeof(int), 0,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(&A_h, HIP_SYMBOL(constSymbol), sizeof(int), 0,
+    HIP_CHECK(hipMemcpyFromSymbolAsync(&host_value, HIP_SYMBOL(constSymbol), sizeof(int), 0,
                                        hipMemcpyDeviceToHost, stream));
   }
-  SECTION("__device__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &B_h, sizeof(int), 0,
+
+  SECTION("DeviceSymbolTransfer") {
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &kExpectedValue, sizeof(int), 0,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(&A_h, HIP_SYMBOL(devSymbol), sizeof(int), 0,
+    HIP_CHECK(hipMemcpyFromSymbolAsync(&host_value, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                        hipMemcpyDeviceToHost, stream));
   }
-  // End Capture
-  HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  // Create and Launch Executable Graphs
-  HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
-  HIP_CHECK(hipGraphLaunch(graphExec, stream));
+  END_CAPTURE(stream);
+
   HIP_CHECK(hipStreamSynchronize(stream));
+  REQUIRE(host_value == kExpectedValue);
 
-  REQUIRE(A_h == B_h);
-  HIP_CHECK(hipGraphExecDestroy(graphExec))
-  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream));
 }

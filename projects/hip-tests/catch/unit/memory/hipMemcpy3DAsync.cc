@@ -247,21 +247,21 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
 TEST_CASE("Unit_hipMemcpy3DAsync_Capture") {
   CHECK_IMAGE_SUPPORT
 
-  constexpr hipExtent extent{128 * sizeof(int), 128, 8};
+  constexpr hipExtent kExtent{128 * sizeof(int), 128, 8};
 
-  LinearAllocGuard3D<int> src_alloc(extent);
-  LinearAllocGuard3D<int> dst_alloc(extent);
+  LinearAllocGuard3D<int> src_alloc(kExtent);
+  LinearAllocGuard3D<int> dst_alloc(kExtent);
 
-  auto params = GetMemcpy3DParms(
-      dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
-      make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
+  auto memcpy_params =
+      GetMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
+                       make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpy3DAsync(&params, stream));
+  HIP_CHECK(hipMemcpy3DAsync(&memcpy_params, stream));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));

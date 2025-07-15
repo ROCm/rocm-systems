@@ -277,27 +277,28 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Negative_Parameters") {
   }
 }
 
-static constexpr auto NUM_W{10};
-static constexpr auto NUM_H{10};
+static constexpr int kNumWidth = 10;
+static constexpr int kNumHeight = 10;
 
 TEST_CASE("Unit_hipMemcpy2DToArrayAsync_Capture") {
   CHECK_IMAGE_SUPPORT
-  hipArray_t A_d{nullptr};
-  size_t width{sizeof(float) * NUM_W};
-  float* hData = (float*)malloc(width * NUM_H);
 
-  hipStream_t stream;
+  constexpr size_t kHostRowBytes = sizeof(float) * kNumWidth;
+  auto host_data = std::make_unique<float[]>(kNumWidth * kNumHeight);
+
+  hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-  HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
+  hipArray_t device_array = nullptr;
+  const hipChannelFormatDesc channel_desc = hipCreateChannelDesc<float>();
+  HIP_CHECK(hipMallocArray(&device_array, &channel_desc, kNumWidth, kNumHeight, hipArrayDefault));
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpy2DToArrayAsync(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice,
-                                    stream));
+  HIP_CHECK(hipMemcpy2DToArrayAsync(device_array, 0, 0, host_data.get(), kHostRowBytes,
+                                    kHostRowBytes, kNumHeight, hipMemcpyHostToDevice, stream));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
-  free(hData);
+  HIP_CHECK(hipFreeArray(device_array));
 }

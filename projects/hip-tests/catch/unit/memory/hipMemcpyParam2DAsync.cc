@@ -214,32 +214,35 @@ static constexpr size_t NUM_W{10};
 static constexpr size_t NUM_H{10};
 
 TEST_CASE("Unit_hipMemcpyParam2DAsync_Capture") {
-  void *A_d{nullptr};
-  void *B_d{nullptr};
-  size_t pitch_A, pitch_B;
-  size_t width{NUM_W * sizeof(int)};
-  HIP_CHECK(hipMallocPitch(&A_d, &pitch_A, width, NUM_H));
-  HIP_CHECK(hipMallocPitch(&B_d, &pitch_B, width, NUM_H));
+  void* device_a = nullptr;
+  void* device_b = nullptr;
+  size_t pitch_a = 0;
+  size_t pitch_b = 0;
+  constexpr size_t kWidthInBytes = NUM_W * sizeof(int);
+  constexpr size_t kHeight = NUM_H;
+
+  HIP_CHECK(hipMallocPitch(&device_a, &pitch_a, kWidthInBytes, kHeight));
+  HIP_CHECK(hipMallocPitch(&device_b, &pitch_b, kWidthInBytes, kHeight));
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  hip_Memcpy2D desc = {};
-  desc.srcMemoryType = hipMemoryTypeDevice;
-  desc.srcDevice = hipDeviceptr_t(A_d);
-  desc.srcPitch = pitch_A;
-  desc.dstMemoryType = hipMemoryTypeDevice;
-  desc.dstDevice = hipDeviceptr_t(B_d);
-  desc.dstPitch = pitch_B;
-  desc.WidthInBytes = NUM_W * sizeof(int);
-  desc.Height = NUM_H;
+  hip_Memcpy2D memcpy_desc{};
+  memcpy_desc.srcMemoryType = hipMemoryTypeDevice;
+  memcpy_desc.srcDevice = reinterpret_cast<hipDeviceptr_t>(device_a);
+  memcpy_desc.srcPitch = pitch_a;
+  memcpy_desc.dstMemoryType = hipMemoryTypeDevice;
+  memcpy_desc.dstDevice = reinterpret_cast<hipDeviceptr_t>(device_b);
+  memcpy_desc.dstPitch = pitch_b;
+  memcpy_desc.WidthInBytes = kWidthInBytes;
+  memcpy_desc.Height = kHeight;
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpyParam2DAsync(&desc, stream));
+  HIP_CHECK(hipMemcpyParam2DAsync(&memcpy_desc, stream));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
+  HIP_CHECK(hipFree(device_a));
+  HIP_CHECK(hipFree(device_b));
 }
