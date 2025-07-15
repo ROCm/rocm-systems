@@ -738,7 +738,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   rec_eng = uses_rec_sdma_eng_id_mask_ || !use_xgmi ? rec_eng : -1;
 
   if (sdma->Initialize(*this, use_xgmi, copy_size_override, rec_eng) != HSA_STATUS_SUCCESS) {
-    sdma->Destroy(*this);
+    sdma->Destroy();
     delete sdma;
     sdma = nullptr;
   }
@@ -750,7 +750,7 @@ core::Blit* GpuAgent::CreateBlitKernel(core::Queue* queue) {
   AMD::BlitKernel* kernl = new AMD::BlitKernel(queue);
 
   if (kernl->Initialize(*this) != HSA_STATUS_SUCCESS) {
-    kernl->Destroy(*this);
+    kernl->Destroy();
     delete kernl;
     kernl = NULL;
   }
@@ -912,7 +912,7 @@ void GpuAgent::ReleaseResources() {
     this->Disable();
     for (auto& blit : blits_) {
       if (!blit.empty()) {
-        hsa_status_t status = blit->Destroy(*this);
+        hsa_status_t status = blit->Destroy();
         assert(status == HSA_STATUS_SUCCESS);
       }
     }
