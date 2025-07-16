@@ -184,6 +184,7 @@ if(ROCPROFSYS_USE_PYTHON)
     find_package(pybind11 REQUIRED)
     include(ConfigPython)
     include(PyBind11Tools)
+    rocprofiler_systems_find_python(_PY REQUIRED)
+    set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
+    set(ROCPROFSYS_PYTHON_VERSIONS "${_PY_VERSION}" CACHE INTERNAL "" FORCE)
 endif()
-
-# CMAKE_INSTALL_PYTHONDIR is unset
