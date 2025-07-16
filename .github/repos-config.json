@@ -1,172 +1,68 @@
 {
   "repositories": [
     {
-      "name": "miopen",
-      "url": "ROCm/MIOpen",
+      "name": "mivisionx",
+      "url": "ROCm/MIVisionX",
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
     {
-      "name": "tensile",
-      "url": "ROCm/Tensile",
+      "name": "rocal",
+      "url": "ROCm/rocAL",
       "branch": "develop",
       "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
     },
     {
-      "name": "mxdatagenerator",
-      "url": "ROCm/mxDataGenerator",
+      "name": "rocdecode",
+      "url": "ROCm/rocDecode",
       "branch": "develop",
       "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
     },
     {
-      "name": "composablekernel",
-      "url": "ROCm/composable_kernel",
+      "name": "rocjpeg",
+      "url": "ROCm/rocJPEG",
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
     {
-      "name": "hipblas",
-      "url": "ROCm/hipBLAS",
+      "name": "rocpydecode",
+      "url": "ROCm/rocPyDecode",
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
     {
-      "name": "hipblas-common",
-      "url": "ROCm/hipBLAS-common",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "hipblaslt",
-      "url": "ROCm/hipBLASLt",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "hipcub",
-      "url": "ROCm/hipCUB",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "hipfft",
-      "url": "ROCm/hipFFT",
+      "name": "rpp",
+      "url": "ROCm/rpp",
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
     {
-      "name": "hiprand",
-      "url": "ROCm/hipRAND",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "hipsolver",
-      "url": "ROCm/hipSOLVER",
+      "name": "rocprofiler-compute",
+      "url": "ROCm/rocprofiler-compute",
       "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
     {
-      "name": "hipsparse",
-      "url": "ROCm/hipSPARSE",
-      "branch": "develop",
+      "name": "rocprofiler-systems",
+      "url": "ROCm/rocprofiler-systems",
+      "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
-    },
-    {
-      "name": "hipsparselt",
-      "url": "ROCm/hipSPARSELt",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocblas",
-      "url": "ROCm/rocBLAS",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocfft",
-      "url": "ROCm/rocFFT",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocprim",
-      "url": "ROCm/rocPRIM",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocrand",
-      "url": "ROCm/rocRAND",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocroller",
-      "url": "ROCm/rocRoller",
-      "branch": "develop",
-      "category": "shared",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocsolver",
-      "url": "ROCm/rocSOLVER",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocsparse",
-      "url": "ROCm/rocSPARSE",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
-    },
-    {
-      "name": "rocthrust",
-      "url": "ROCm/rocThrust",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": false,
-      "auto_subtree_push": true
     }
   ]
 }
