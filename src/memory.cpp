@@ -212,6 +212,9 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   create_info.flags.physical_contiguous = MemFlags.ui32.Contiguous;
   create_info.flags.locked = MemFlags.ui32.NoSubstitute;//AllocatePinned
   create_info.flags.virtual_alloc = MemFlags.ui32.OnlyAddress;
+  create_info.flags.blit_kernel_object =
+      (MemFlags.ui32.ExecuteBlit && MemFlags.ui32.ExecuteAccess &&
+      (create_info.domain == thunk_proxy::AllocDomain::kSystem));
   /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
   if (create_info.flags.virtual_alloc || create_info.flags.physical_only
         || create_info.flags.physical_contiguous) {

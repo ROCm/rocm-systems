@@ -65,7 +65,8 @@ union GpuMemoryCreateFlags {
     uint64_t sysmem_ipc_sig_importer         : 1; // allocate system memory for IPC signal
     uint64_t sysmem_ipc_sig_exporter            : 1; // allocate system memory for IPC signal, prepare to export
     uint64_t alloc_va                   : 1; // allocate va. 0 for vmem import
-    uint64_t unused                     : 56;
+    uint64_t blit_kernel_object         : 1; // allocate executable blit kernel object
+    uint64_t unused                     : 55;
   };
   uint64_t reserved;
 };
@@ -85,7 +86,8 @@ union GpuMemoryDescFlags {
     uint32_t is_imported_vram_vmem	:1;
     uint32_t is_imported_vram_ipc	:1;
     uint32_t is_imported_from_same_process : 3; // imported from same process, record shared cnt
-    uint32_t unused : 17;
+    uint32_t is_blit_kernel_object : 1; // blit kernel object
+    uint32_t unused : 16;
   };
 
   uint32_t reserved;
@@ -179,6 +181,7 @@ public:
   inline bool IsShared() const { return desc_.flags.is_shared; }
   inline bool IsExternal() const { return desc_.flags.is_external; }
   inline bool IsVaAllocated() const { return desc_.flags.is_va_required; }
+  inline bool IsBlitKernelObject() const { return desc_.flags.is_blit_kernel_object; }
 
   inline uint32_t Flags() const { return desc_.flags.reserved; }
   inline int GetAllocInfo() const { return desc_.mem_flags; }

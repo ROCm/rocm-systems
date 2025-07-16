@@ -521,15 +521,20 @@ uint32_t ComputeQueue::UpdateIndexStride(uint32_t srd, bool wave32) {
 }
 
 uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
-//TODO: convert dev_addr to host_addr
+  /* convert dev_addr to host_addr */
+  auto code = get_gpu_mem((void*)addr);
+  if (code && code->IsBlitKernelObject()) {
+    return code->GpuAddress();
+  }
+
   uint64_t host_addr = 0;
   auto ret = hsakmt_hsa_ven_amd_loader_query_host_address(reinterpret_cast<const void *>(addr),
                                            reinterpret_cast<const void **>(&host_addr));
-  if (ret == HSA_STATUS_ERROR_INVALID_ARGUMENT) {
-    return 0;
+  if (ret == HSA_STATUS_SUCCESS) {
+    return host_addr;
   }
-
-  return host_addr;
+  pr_err("failed to query host address for kernel object %p, ret=%d\n", (void*)addr, ret);
+  return 0;
 }
 
 void ComputeQueue::RingDoorbell() {

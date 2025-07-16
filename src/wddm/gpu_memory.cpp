@@ -65,6 +65,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   desc_.flags.is_imported_sys_memfd = create_info.flags.sysmem_ipc_sig_importer;
   desc_.flags.is_sysmem_exporter = create_info.flags.sysmem_ipc_sig_exporter;
   desc_.flags.is_va_required = create_info.flags.alloc_va;
+  desc_.flags.is_blit_kernel_object = create_info.flags.blit_kernel_object;
 
   /* we can't tell the allocation is regular vmm or ipc mem at creation stage,
      they share same creation parameters, so forcing all vram allocations to
