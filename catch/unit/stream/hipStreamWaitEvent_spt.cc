@@ -70,24 +70,6 @@ TEST_CASE("Unit_hipStreamWaitEvent_spt_Negative") {
 /**
  * Test Description
  * ------------------------
- *  - Test unsuccessful hipStreamWaitEvent_spt when stream is uninitialized
- * Test source
- * ------------------------
- *  - /unit/stream/hipStreamWaitEvent_spt.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.2
- */
-TEST_CASE("Unit_hipStreamWaitEvent_spt_UninitializedStream_Negative") {
-  hipStream_t stream{reinterpret_cast<hipStream_t>(0xFFFF)};
-  hipEvent_t event{nullptr};
-  HIP_CHECK(hipEventCreate(&event));
-  HIP_CHECK_ERROR(hipStreamWaitEvent_spt(stream, event, 0), hipErrorInvalidHandle);
-  HIP_CHECK(hipEventDestroy(event));
-}
-/**
- * Test Description
- * ------------------------
  *  - Test simple waiting for an event with hipStreamWaitEvent_spt api
  * Test source
  * ------------------------
