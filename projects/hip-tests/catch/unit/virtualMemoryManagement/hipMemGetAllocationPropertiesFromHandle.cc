@@ -137,7 +137,8 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Capture") {
   size_t granularity = 0;
   size_t buffer_size = DATA_SIZE * sizeof(int);
 
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
 
   size_t mem_size = ((granularity + buffer_size - 1) / granularity) * granularity;

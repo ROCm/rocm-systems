@@ -194,8 +194,8 @@ TEST_CASE("Unit_hipMemGetAllocationGranularity_Capture") {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &allocation_prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));

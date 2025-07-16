@@ -619,7 +619,8 @@ TEST_CASE("Unit_hipMemMap_Capture") {
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
   HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0));
   HIP_CHECK(hipMemAddressReserve(&device_ptr, granularity, kAlignment, 0, 0));
 

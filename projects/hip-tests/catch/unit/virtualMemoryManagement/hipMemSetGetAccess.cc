@@ -1335,7 +1335,8 @@ TEST_CASE("Unit_hipMemSetGetAccess_Capture") {
   alloc_prop.location.id = device;
 
   size_t granularity = 0;
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop,
+                                           hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
 
   const size_t vmm_bytes = ((granularity + kBufferBytes - 1) / granularity) * granularity;

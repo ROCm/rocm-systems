@@ -154,8 +154,8 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_Capture") {
   allocation_prop.location.type = hipMemLocationTypeDevice;
   allocation_prop.location.id = device;
 
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &allocation_prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
 
   size_t allocation_size = ((granularity + buffer_size - 1) / granularity) * granularity;
