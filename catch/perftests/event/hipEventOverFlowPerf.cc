@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);
   HIP_CHECK_PERF(hipSetDeviceFlags(hipDeviceScheduleSpin));
-  std::vector<uint8_t *> memory_buffers[mgpu];
+  std::vector<uint8_t*> memory_buffers[mgpu];
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
     stream_pool[i].resize(12);
@@ -162,8 +162,7 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
   }
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
-    for (int j = 0; j < 128; j++)
-      HIP_CHECK_PERF(hipFree(memory_buffers[i][j]));
+    for (int j = 0; j < 128; j++) HIP_CHECK_PERF(hipFree(memory_buffers[i][j]));
   }
 }
 /**
