@@ -14,7 +14,7 @@ This table provides the current status of the migration of specific ROCm systems
 | Component              | Source of Truth | Migration Status | Azure CI Status                       | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
-| `aqlprofile`           | Public          | Pending          |                                       |                                       |
+| `aqlprofile`           | EMU             | Pending          |                                       |                                       |
 | `clr`                  | EMU             | Pending          |                                       |                                       |
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
@@ -23,7 +23,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rccl`                 | Public          | Pending          |                                       |                                       |
 | `rdc`                  | EMU             | Pending          |                                       |                                       |
 | `rocal`                | Public          | Pending          |                                       |                                       |
-| `roccv`                | Public          | Pending          |                                       |                                       |
+| `roccv`                | Private         | Pending          |                                       |                                       |
 | `rocdecode`            | Public          | Pending          |                                       |                                       |
 | `rocjpeg`              | Public          | Pending          |                                       |                                       |
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
@@ -46,7 +46,6 @@ This table provides the current status of the migration of specific ROCm systems
 |------------------------|----------------|
 | `mivisionx`            | 7/31           |
 | `rocal`                | 7/31           |
-| `roccv`                | 7/31           |
 | `rocdecode`            | 7/31           |
 | `rocjpeg`              | 7/31           |
 | `rocpydecode`          | 7/31           |
@@ -68,6 +67,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `hip`                  | 8/13           |
 | `hipother`             | 8/13           |
 | `hip-tests`            | 8/13           |
+| `roccv`                | when public    |
 
 *Remaining schedule to be determined.
 
