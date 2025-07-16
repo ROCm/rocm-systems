@@ -49,28 +49,29 @@ TEST_CASE("Unit_hipMemRelease_negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemRelease_StreamCaptureBehavior") {
-  hipMemGenericAllocationHandle_t handle;
-  size_t granularity = 0;
-  int deviceId = 0;
-  hipDevice_t device;
+TEST_CASE("Unit_hipMemRelease_Capture") {
   CTX_CREATE();
-  HIP_CHECK(hipDeviceGet(&device, deviceId));
 
-  hipMemAllocationProp prop{};
-  prop.type = hipMemAllocationTypePinned;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device;  // Current Devices
+  hipMemGenericAllocationHandle_t allocation_handle;
+  size_t allocation_granularity = 0;
+  int device_id = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, device_id));
 
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
-  HIP_CHECK(hipMemCreate(&handle, granularity, &prop, 0));
+  hipMemAllocationProp allocation_prop{};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
+
+  HIP_CHECK(hipMemGetAllocationGranularity(&allocation_granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
+  HIP_CHECK(hipMemCreate(&allocation_handle, allocation_granularity, &allocation_prop, 0));
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(allocation_handle));
   END_CAPTURE(stream);
   HIP_CHECK(hipStreamDestroy(stream));
 }

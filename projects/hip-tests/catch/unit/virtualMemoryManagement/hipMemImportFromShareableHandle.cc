@@ -547,27 +547,27 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
   }
 }
 
-TEST_CASE("Unit_hipMemImportFromShareableHandle_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipMemImportFromShareableHandle_Capture") {
   CTX_CREATE();
 
   hipDevice_t device;
   HIP_CHECK(hipDeviceGet(&device, 0));
   checkVMMSupported(device);
 
-  hipMemAllocationProp prop = {};
-  prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
-  prop.location.type = hipMemLocationTypeDevice;
-  prop.location.id = device;
+  hipMemAllocationProp allocation_prop = {};
+  allocation_prop.type = hipMemAllocationTypePinned;
+  allocation_prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  allocation_prop.location.type = hipMemLocationTypeDevice;
+  allocation_prop.location.id = device;
 
-  size_t granularity;
-  HIP_CHECK(
-      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  size_t granularity = 0;
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &allocation_prop,
+                                           hipMemAllocationGranularityMinimum));
 
-  hipMemGenericAllocationHandle_t handle;
-  HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
+  hipMemGenericAllocationHandle_t allocation_handle;
+  HIP_CHECK(hipMemCreate(&allocation_handle, granularity * 2, &allocation_prop, 0));
   ShareableHandle shareable_handle;
-  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, handle,
+  HIP_CHECK(hipMemExportToShareableHandle(&shareable_handle, allocation_handle,
                                           hipMemHandleTypePosixFileDescriptor, 0));
   hipMemGenericAllocationHandle_t imported_handle;
   hipStream_t stream = nullptr;
@@ -580,7 +580,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_StreamCaptureBehavior") {
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
-  HIP_CHECK(hipMemRelease(handle));
+  HIP_CHECK(hipMemRelease(allocation_handle));
   CTX_DESTROY();
 }
 /**

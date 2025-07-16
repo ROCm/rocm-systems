@@ -1320,14 +1320,13 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
   CTX_DESTROY();
 }
 
-TEST_CASE("Unit_hipMemSetGetAccess_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipMemSetGetAccess_Capture") {
   CTX_CREATE();
 
-  constexpr int num_elements = DATA_SIZE;
-  const size_t buffer_bytes = num_elements * sizeof(int);
-  const int device_id = 0;
+  const size_t kBufferBytes = DATA_SIZE * sizeof(int);
+  const int kDeviceId = 0;
   hipDevice_t device;
-  HIP_CHECK(hipDeviceGet(&device, device_id));
+  HIP_CHECK(hipDeviceGet(&device, kDeviceId));
   checkVMMSupported(device);
 
   hipMemAllocationProp alloc_prop{};
@@ -1339,12 +1338,12 @@ TEST_CASE("Unit_hipMemSetGetAccess_StreamCaptureBehavior") {
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &alloc_prop, hipMemAllocationGranularityMinimum));
   REQUIRE(granularity > 0);
 
-  const size_t vmm_bytes = ((granularity + buffer_bytes - 1) / granularity) * granularity;
+  const size_t vmm_bytes = ((granularity + kBufferBytes - 1) / granularity) * granularity;
 
   hipMemGenericAllocationHandle_t mem_handle;
   HIP_CHECK(hipMemCreate(&mem_handle, vmm_bytes, &alloc_prop, 0));
 
-  hipDeviceptr_t vmm_ptr;
+  hipDeviceptr_t vmm_ptr = nullptr;
   HIP_CHECK(hipMemAddressReserve(&vmm_ptr, vmm_bytes, 0, 0, 0));
   HIP_CHECK(hipMemMap(vmm_ptr, vmm_bytes, 0, mem_handle, 0));
   HIP_CHECK(hipMemRelease(mem_handle));
@@ -1358,6 +1357,7 @@ TEST_CASE("Unit_hipMemSetGetAccess_StreamCaptureBehavior") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   GENERATE_CAPTURE();
+
   // Test hipMemSetAccess inside stream capture
   BEGIN_CAPTURE(stream);
   HIP_CHECK(hipMemSetAccess(vmm_ptr, vmm_bytes, &access_desc, 1));
