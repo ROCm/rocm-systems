@@ -12,7 +12,7 @@
       "name": "rocal",
       "url": "ROCm/rocAL",
       "branch": "develop",
-      "category": "shared",
+      "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
@@ -20,7 +20,7 @@
       "name": "rocdecode",
       "url": "ROCm/rocDecode",
       "branch": "develop",
-      "category": "shared",
+      "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
     },
