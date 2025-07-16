@@ -1323,17 +1323,18 @@ extern "C" hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlag
       numBlocks, f, blockSize, dynSharedMemPerBlk, flags);
 }
 extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize,
-                                                              hipFunction_t f,
+                                                              hipFunction_t f, hipOccupancyB2DSize_t
+                                                              blkSizeToDynSMemSize,
                                                               size_t dynSharedMemPerBlk,
                                                               int blockSizeLimit) {
   return hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSize_fn(
-      gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit);
+      gridSize, blockSize, f, blkSizeToDynSMemSize, dynSharedMemPerBlk, blockSizeLimit);
 }
 extern "C" hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
-    int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
-    unsigned int flags) {
+    int* gridSize, int* blockSize, hipFunction_t f, hipOccupancyB2DSize_t blkSizeToDynSMemSize,
+    size_t dynSharedMemPerBlk, int blockSizeLimit, unsigned int flags) {
   return hip::GetHipDispatchTable()->hipModuleOccupancyMaxPotentialBlockSizeWithFlags_fn(
-      gridSize, blockSize, f, dynSharedMemPerBlk, blockSizeLimit, flags);
+      gridSize, blockSize, f, blkSizeToDynSMemSize, dynSharedMemPerBlk, blockSizeLimit, flags);
 }
 hipError_t hipModuleUnload(hipModule_t module) {
   return hip::GetHipDispatchTable()->hipModuleUnload_fn(module);

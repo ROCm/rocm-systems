@@ -677,12 +677,14 @@ typedef hipError_t (*t_hipModuleOccupancyMaxActiveBlocksPerMultiprocessor)(
 typedef hipError_t (*t_hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags)(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags);
 typedef hipError_t (*t_hipModuleOccupancyMaxPotentialBlockSize)(int* gridSize, int* blockSize,
-                                                                hipFunction_t f,
+                                                                hipFunction_t f, 
+                                                                hipOccupancyB2DSize_t
+                                                                blkSizeToDynSMemSize,
                                                                 size_t dynSharedMemPerBlk,
                                                                 int blockSizeLimit);
 typedef hipError_t (*t_hipModuleOccupancyMaxPotentialBlockSizeWithFlags)(
-    int* gridSize, int* blockSize, hipFunction_t f, size_t dynSharedMemPerBlk, int blockSizeLimit,
-    unsigned int flags);
+    int* gridSize, int* blockSize, hipFunction_t f, hipOccupancyB2DSize_t blkSizeToDynSMemSize,
+    size_t dynSharedMemPerBlk, int blockSizeLimit, unsigned int flags);
 typedef hipError_t (*t_hipModuleUnload)(hipModule_t module);
 typedef hipError_t (*t_hipOccupancyMaxActiveBlocksPerMultiprocessor)(int* numBlocks, const void* f,
                                                                      int blockSize,

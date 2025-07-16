@@ -563,11 +563,13 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
 hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, hipFunction_t f, int blockSize, size_t dynSharedMemPerBlk, unsigned int flags);
 hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
+                                                   hipOccupancyB2DSize_t blkSizeToDynSMemSize,
                                                    size_t dynSharedMemPerBlk, int blockSizeLimit);
 hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
-                                                            hipFunction_t f,
-                                                            size_t dynSharedMemPerBlk,
-                                                            int blockSizeLimit, unsigned int flags);
+                                                            hipFunction_t f, hipOccupancyB2DSize_t 
+                                                            blkSizeToDynSMemSize, size_t 
+                                                            dynSharedMemPerBlk, int blockSizeLimit,
+                                                            unsigned int flags);
 hipError_t hipModuleUnload(hipModule_t module);
 hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const void* f,
                                                         int blockSize, size_t dynSharedMemPerBlk);

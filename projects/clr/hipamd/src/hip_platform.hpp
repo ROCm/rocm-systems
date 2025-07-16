@@ -28,7 +28,8 @@ namespace hip_impl {
 
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
-    hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz);
+    hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz, 
+    hipOccupancyB2DSize_t blockSizeToDynamicSMemSize);
 }  // namespace hip_impl
 
 // Unique file descriptor class

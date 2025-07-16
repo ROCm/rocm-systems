@@ -330,7 +330,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     int block_size = launch_params.local_.product();
     hipError_t err = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
         &num_blocks, &max_blocks_per_grid, &best_block_size, *device, f, block_size,
-        launch_params.sharedMemBytes_, true);
+        launch_params.sharedMemBytes_, true, nullptr);
     if (err != hipSuccess) {
       return err;
     }

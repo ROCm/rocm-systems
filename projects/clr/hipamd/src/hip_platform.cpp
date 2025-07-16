@@ -367,7 +367,8 @@ hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memor
 namespace hip_impl {
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
     int* maxBlocksPerCU, int* numBlocksPerGrid, int* bestBlockSize, const amd::Device& device,
-    hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz) {
+    hipFunction_t func, int inputBlockSize, size_t dynamicSMemSize, bool bCalcPotentialBlkSz,
+    hipOccupancyB2DSize_t blockSizeToDynamicSMemSize) {
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(func);
   const amd::Kernel& kernel = *function->kernel();
 
@@ -438,7 +439,11 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   const int alu_limited_threads = alu_occupancy * wrkGrpInfo->wavefrontSize_;
 
   int lds_occupancy_wgs = INT_MAX;
-  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSize;
+  size_t dynamicSMemSizeFinal = dynamicSMemSize;
+  if (blockSizeToDynamicSMemSize != nullptr) {
+    dynamicSMemSizeFinal = (*blockSizeToDynamicSMemSize)(inputBlockSize);
+  }
+  const size_t total_used_lds = wrkGrpInfo->usedLDSSize_ + dynamicSMemSizeFinal;
   if (total_used_lds != 0) {
     lds_occupancy_wgs = static_cast<int>(device.info().localMemSize_ / total_used_lds);
   }
@@ -493,7 +498,7 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, func, blockSizeLimit,
-      dynSharedMemPerBlk, true);
+      dynSharedMemPerBlk, true, nullptr);
   if (ret == hipSuccess) {
     *blockSize = best_block_size;
     *gridSize = max_blocks_per_grid;
@@ -502,6 +507,7 @@ hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, cons
 }
 
 hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize, hipFunction_t f,
+                                                   hipOccupancyB2DSize_t blockSizeToDynamicSMemSize,
                                                    size_t dynSharedMemPerBlk, int blockSizeLimit) {
   HIP_INIT_API(hipModuleOccupancyMaxPotentialBlockSize, f, dynSharedMemPerBlk, blockSizeLimit);
   if ((gridSize == nullptr) || (blockSize == nullptr) || (f == nullptr)) {
@@ -513,7 +519,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
-      dynSharedMemPerBlk, true);
+      dynSharedMemPerBlk, true, blockSizeToDynamicSMemSize);
   if (ret == hipSuccess) {
     *blockSize = best_block_size;
     *gridSize = max_blocks_per_grid;
@@ -522,7 +528,8 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSize
 }
 
 hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
-                                                            hipFunction_t f,
+                                                            hipFunction_t f, hipOccupancyB2DSize_t 
+                                                            blockSizeToDynamicSMemSize,
                                                             size_t dynSharedMemPerBlk,
                                                             int blockSizeLimit,
                                                             unsigned int flags) {
@@ -540,7 +547,7 @@ hipError_t hipModuleOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* 
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSizeLimit,
-      dynSharedMemPerBlk, true);
+      dynSharedMemPerBlk, true, blockSizeToDynamicSMemSize);
   if (ret == hipSuccess) {
     *blockSize = best_block_size;
     *gridSize = max_blocks_per_grid;
@@ -563,7 +570,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hi
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
-      false);
+      false, nullptr);
   *numBlocks = num_blocks;
   HIP_RETURN(ret);
 }
@@ -585,7 +592,7 @@ hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, f, blockSize, dynSharedMemPerBlk,
-      false);
+      false, nullptr);
   *numBlocks = num_blocks;
   HIP_RETURN(ret);
 }
@@ -610,7 +617,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, const vo
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
-      false);
+      false, nullptr);
   *numBlocks = num_blocks;
   HIP_RETURN(ret);
 }
@@ -640,7 +647,7 @@ hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(int* numBlocks,
   int best_block_size = 0;
   hipError_t ret = hip_impl::ihipOccupancyMaxActiveBlocksPerMultiprocessor(
       &num_blocks, &max_blocks_per_grid, &best_block_size, device, func, blockSize, dynamicSMemSize,
-      false);
+      false, nullptr);
   *numBlocks = num_blocks;
   HIP_RETURN(ret);
 }
