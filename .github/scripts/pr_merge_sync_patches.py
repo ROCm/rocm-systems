@@ -23,7 +23,7 @@ Arguments:
     --debug     : If set, enables detailed debug logging.
 
 Example Usage:
-    python pr_merge_sync_patches.py --repo ROCm/rocm-libraries --pr 123 --subtrees "$(printf 'projects/rocBLAS\nprojects/hipBLASLt\nshared/rocSPARSE')" --dry-run --debug
+    python pr_merge_sync_patches.py --repo ROCm/rocm-systems --pr 123 --subtrees "$(printf 'projects/rocBLAS\nprojects/hipBLASLt\nshared/rocSPARSE')" --dry-run --debug
 """
 
 import argparse
@@ -256,7 +256,7 @@ def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: i
             _apply_patch(subrepo_path, patch_path, Path(rel_path), Path.cwd(), prefix)
 
         # Final squash
-        commit_msg = f"[rocm-libraries] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + \
+        commit_msg = f"[rocm-systems] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + \
                      _run_git(["log", "-1", "--pretty=%B", merge_sha])
         _run_git(["reset", "--soft", base_commit], cwd=subrepo_path)
         _run_git(["commit", "-m", commit_msg, "--author", f"{author_name} <{author_email}>"], cwd=subrepo_path)

@@ -6,7 +6,7 @@ on:
     - cron: '0 * * * *'
 
 env:
-  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
+  MONOREPO_URL: github.com/ROCm/rocm-systems.git
   MONOREPO_BRANCH: release-staging/rocm-rel-7.0
 
 concurrency:

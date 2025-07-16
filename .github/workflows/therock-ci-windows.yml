@@ -33,7 +33,7 @@ jobs:
       # To get a fast signal of windows building for TheRock, adding gfx110X
       AMDGPU_FAMILIES: "gfx110X-dgpu"
     steps:
-      - name: Generate a token for rocm-libraries
+      - name: Generate a token for rocm-systems
         id: generate-token
         uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         with:
@@ -41,14 +41,14 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: "Checking out repository for rocm-libraries"
+      - name: "Checking out repository for rocm-systems"
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           sparse-checkout: |
             .github
             ${{ inputs.subtree_checkout }}
           token: ${{ steps.generate-token.outputs.token }}
-      
+
       - name: Checkout TheRock repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

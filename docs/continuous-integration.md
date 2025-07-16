@@ -3,7 +3,7 @@
 > [!IMPORTANT]
 > This document is currently in **draft** and may be subject to change.
 
-This document is to detail the various continuous integration (CI) systems that are run on the rocm-libraries monorepo.
+This document is to detail the various continuous integration (CI) systems that are run on the rocm-systems monorepo.
 
 ## Table of Contents
 1. [Azure Pipelines](#azure-pipelines)

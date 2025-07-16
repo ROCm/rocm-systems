@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 env:
-  MONOREPO_URL: github.com/ROCm/rocm-libraries.git
+  MONOREPO_URL: github.com/ROCm/rocm-systems.git
   MONOREPO_BRANCH: develop
 
 jobs:

@@ -62,7 +62,7 @@ jobs:
     #   - name: Patch monorepo
     #     run: |
     #       python TheRock/build_tools/github_actions/patch_monorepo.py \
-    #         --repo rocm-libraries
+    #         --repo rocm-systems
 
       - name: Detect changed subtrees
         id: detect

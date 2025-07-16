@@ -28,7 +28,7 @@ Outputs:
 
 Example Usage:
     To run in auto-push situations in debug mode and perform a dry-run (no changes made):
-        python pr_detect_changed_subtrees.py --repo ROCm/rocm-libraries --pr 123 --require-auto-push --debug --dry-run
+        python pr_detect_changed_subtrees.py --repo ROCm/rocm-systems --pr 123 --require-auto-push --debug --dry-run
 """
 
 import argparse
