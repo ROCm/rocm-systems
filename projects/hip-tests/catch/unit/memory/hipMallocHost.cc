@@ -79,7 +79,8 @@ TEST_CASE("Unit_hipMallocHost_Capture") {
   constexpr bool kRelaxedModeAllowed = true;
 
   BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
-  HIP_CHECK_ERROR(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)), capture_error);
+  HIP_CHECK_ERROR(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)),
+                  capture_error);
   END_CAPTURE_SYNC(capture_error);
 
   if (capture_error == hipSuccess) {
