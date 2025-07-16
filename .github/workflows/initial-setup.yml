@@ -26,8 +26,8 @@ jobs:
 
       - name: Set up Git user and Git LFS
         run: |
-          git config user.name "assistant-librarian[bot]"
-          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
 
       - name: Add Repositories to the Monorepo
         run: |

@@ -81,8 +81,8 @@ jobs:
 
       - name: Set up Git user
         run: |
-          git config user.name "assistant-librarian[bot]"
-          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
 
       - name: Fetch subrepo PR info using gh
         id: prdata

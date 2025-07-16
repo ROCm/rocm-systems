@@ -37,8 +37,8 @@ jobs:
 
       - name: Configure Git
         run: |
-          git config user.name "assistant-librarian[bot]"
-          git config user.email "assistant-librarian[bot]@users.noreply.github.com"
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
 
       - name: Detect changed subtrees
         id: detect
@@ -80,8 +80,8 @@ jobs:
 
       - name: Run and auto-commit pre-commit fixes
         env:
-          GIT_AUTHOR_NAME: "assistant-librarian[bot]"
-          GIT_AUTHOR_EMAIL: "assistant-librarian[bot]@users.noreply.github.com"
+          GIT_AUTHOR_NAME: "systems-assistant[bot]"
+          GIT_AUTHOR_EMAIL: "systems-assistant[bot]@users.noreply.github.com"
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           var="${{ steps.changed-files.outputs.all_modified_files }}"

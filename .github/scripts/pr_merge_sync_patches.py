@@ -93,8 +93,8 @@ def _clone_subrepo(repo_url: str, branch: str, destination: Path) -> None:
 
 def _configure_git_user(repo_path: Path) -> None:
     """Configure git user.name and user.email for the given repository directory."""
-    _run_git(["config", "user.name", "assistant-librarian[bot]"], cwd=repo_path)
-    _run_git(["config", "user.email", "assistant-librarian[bot]@users.noreply.github.com"], cwd=repo_path)
+    _run_git(["config", "user.name", "systems-assistant[bot]"], cwd=repo_path)
+    _run_git(["config", "user.email", "systems-assistant[bot]@users.noreply.github.com"], cwd=repo_path)
 
 def _apply_patch(repo_path: Path, patch_path: Path, rel_file_path: Path, monorepo_path: Path, prefix: str) -> None:
     """Try to apply a patch; if it fails, fallback to full file replacement."""
