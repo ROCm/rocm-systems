@@ -25,11 +25,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * -b option in profile mode also accept hardware IP block for filtering, however, this support will be deprecated soon
   * --list-metrics option added in profile mode to list possible metric id(s), similar to analyze mode
 
-* Datatype selection option for roofline profiling
-  * --roofline-data-type / -R option added to specify which datatypes the user wants to capture in the roofline PDF plot outputs
+* Data type selection option for roofline profiling
+  * --roofline-data-type / -R option added to specify which data types the user wants to capture in the roofline PDF plot outputs
   * Default is FP32, but user can specify as many types as desired to overlay on the same plot output
 
-* Additional datatypes for roofline profiling
+* Additional data types for roofline profiling
   * Now supports FP4, FP6, FP8, FP16, BF16, FP32, FP64, I8, I32, I64 (dependent on gpu architecture)
 
 * Support host-trap PC Sampling on CLI (beta version)
@@ -40,7 +40,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scheduler-Pipe Wave Utilization
   * Scheduler FIFO Full Rate
   * CPC ADC Utilization
-  * F6F4 datatype metrics
+  * F6F4 data type metrics
   * Update formula for total FLOPs while taking into account F6F4 ops
   * LDS STORE, LDS LOAD, LDS ATOMIC instruction count metrics
   * LDS STORE, LDS LOAD, LDS ATOMIC bandwidth metrics
