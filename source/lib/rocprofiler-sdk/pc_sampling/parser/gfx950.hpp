@@ -23,4 +23,8 @@
 #pragma once
 
 class GFX950 : public GFX9
-{};
+{
+public:
+    // Overriding the minor ip version
+    static constexpr uint32_t gfx_ip_minor = 5;
+};

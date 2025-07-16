@@ -497,19 +497,34 @@ kernel3(const float c)
 void
 run_kernel()
 {
-    for(int i = 1; i <= 64; i++)
+    int wave_size = 0;
+    HIP_API_CALL(hipDeviceGetAttribute(&wave_size, hipDeviceAttributeWarpSize, 0));
+
+    // Get device properties to retrieve GFXIP version
+    uint32_t num_blocks = BLOCK_SIZE;
+
+    hipDeviceProp_t prop{};
+    HIP_API_CALL(hipGetDeviceProperties(&prop, 0));
+    std::string_view gfxip(prop.gcnArchName);
+    if(gfxip.find("gfx120") == 0)
+    {
+        // reduce the number of blocks on Navi4x.
+        num_blocks /= 4;
+    }
+
+    for(int i = 1; i <= wave_size; i++)
     {
         if(i % 2 == 1)
-            kernel1<<<BLOCK_SIZE, i>>>(i);
+            kernel1<<<num_blocks, i>>>(i);
         else
-            kernel2<<<BLOCK_SIZE, i>>>(i);
+            kernel2<<<num_blocks, i>>>(i);
 
         check_hip_error();
         HIP_API_CALL(hipDeviceSynchronize());
     }
 
     float arg = 0;
-    kernel3<<<BLOCK_SIZE, 4 * 64>>>(arg);
+    kernel3<<<num_blocks, 4 * wave_size>>>(arg);
     check_hip_error();
     HIP_API_CALL(hipDeviceSynchronize());
 }

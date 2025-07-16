@@ -140,6 +140,13 @@ matrix_multiply_tile(float* A, float* B, float* Out, int m, int n, int k)
 void
 run_hip_app()
 {
+    hipDeviceProp_t prop{};
+    HIP_API_CALL(hipGetDeviceProperties(&prop, 0));
+    std::string_view gfxip(prop.gcnArchName);
+    // We run at full scale on all architectures except on Navi4x
+    // that requires reduced workload due to LDS contention.
+    bool full_scale_run = gfxip.find("gfx120") == std::string_view::npos;
+
     std::vector<float> A(M * K);
     std::vector<float> B(K * N);
     std::vector<float> Out(M * N);
@@ -170,8 +177,13 @@ run_hip_app()
     dim3 grid_size((M + block_size.x - 1) / block_size.x, (N + block_size.y - 1) / block_size.y);
     matrix_multiply<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
     check_hip_error();
-    matrix_multiply_tile<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
-    check_hip_error();
+
+    // Check whether it's safe to launch additional matmul kernel that utilizes LDS.
+    if(full_scale_run)
+    {
+        matrix_multiply_tile<<<grid_size, block_size>>>(d_A, d_B, d_Out, M, N, K);
+        check_hip_error();
+    }
 
     // Copy data back to CPU
     HIP_API_CALL(hipMemcpy(Out.data(), d_Out, sizeof(float) * M * N, hipMemcpyDeviceToHost));
