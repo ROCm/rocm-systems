@@ -383,21 +383,21 @@ __host__ __device__ void check_alignment()
     static_assert(std::alignment_of_v<long1> == long_size);
     static_assert(std::alignment_of_v<long2> == 2*long_size);
     static_assert(std::alignment_of_v<long3> == long_size);
-    static_assert(std::alignment_of_v<long4> == 16);
+    static_assert(std::alignment_of_v<long4> == 4*long_size);
     static_assert(std::alignment_of_v<ulong1> == long_size);
     static_assert(std::alignment_of_v<ulong2> == 2*long_size);
     static_assert(std::alignment_of_v<ulong3> == long_size);
-    static_assert(std::alignment_of_v<ulong4> == 16);
+    static_assert(std::alignment_of_v<ulong4> == 4*long_size);
 
     // longlong/ulonglong
     static_assert(std::alignment_of_v<longlong1> == 8);
     static_assert(std::alignment_of_v<longlong2> == 16);
     static_assert(std::alignment_of_v<longlong3> == 8);
-    static_assert(std::alignment_of_v<longlong4> == 16);
+    static_assert(std::alignment_of_v<longlong4> == 32);
     static_assert(std::alignment_of_v<ulonglong1> == 8);
     static_assert(std::alignment_of_v<ulonglong2> == 16);
     static_assert(std::alignment_of_v<ulonglong3> == 8);
-    static_assert(std::alignment_of_v<ulonglong4> == 16);
+    static_assert(std::alignment_of_v<ulonglong4> == 32);
 
     // float
     static_assert(std::alignment_of_v<float1> == 4);
@@ -409,7 +409,7 @@ __host__ __device__ void check_alignment()
     static_assert(std::alignment_of_v<double1> == 8);
     static_assert(std::alignment_of_v<double2> == 16);
     static_assert(std::alignment_of_v<double3> == 8);
-    static_assert(std::alignment_of_v<double4> == 16);
+    static_assert(std::alignment_of_v<double4> == 32);
 }
 
 __global__ void check_alignment_device()
