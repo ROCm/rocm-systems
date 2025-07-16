@@ -980,20 +980,19 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_Negative", "", int, float, double) {
   }
 }
 
-TEST_CASE("Unit_hipHostRegister_StreamCaptureBehavior") {
-  hipError_t err = hipSuccess;
-  bool rlx_mode_allowed = true;
-  size_t size = 1024;
-  int *ptr = (int*)malloc(size);
-  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
-  HIP_CHECK_ERROR(hipHostRegister(ptr, size, 0), err);
-  END_CAPTURE_SYNC(err);
+TEST_CASE("Unit_hipHostRegister_Capture") {
+  constexpr size_t kBufferSize = 1024;
+  auto buffer = std::make_unique<int[]>(kBufferSize);
+  hipError_t capture_error = hipSuccess;
 
-  if (err == hipSuccess) {
-    HIP_CHECK(hipHostUnregister(ptr));
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostRegister(buffer.get(), kBufferSize, 0), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
+    HIP_CHECK(hipHostUnregister(buffer.get()));
   }
-
-  free(ptr);
 }
 
 /**

@@ -221,19 +221,21 @@ TEST_CASE("Unit_hipHostGetFlags_InvalidArgs") {
   }
 }
 
-TEST_CASE("Unit_hipHostGetFlags_StreamCaptureBehavior") {
-  unsigned int flag = 0;
-  void *ptr = nullptr;
-  size_t size = 1024;
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&ptr), size));
+TEST_CASE("Unit_hipHostGetFlags_Capture") {
+  unsigned int host_flags = 0;
+  void* host_ptr = nullptr;
+  constexpr size_t kAllocSize = 1024;
+
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), kAllocSize));
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipHostGetFlags(&flag, ptr));
+  HIP_CHECK(hipHostGetFlags(&host_flags, host_ptr));
   END_CAPTURE(stream);
 
+  HIP_CHECK(hipHostFree(host_ptr));
   HIP_CHECK(hipStreamDestroy(stream));
 }

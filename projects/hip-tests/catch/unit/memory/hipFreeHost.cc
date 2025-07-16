@@ -105,15 +105,15 @@ TEST_CASE("Unit_hipFreeHost_Multithreading") {
   HIP_CHECK_THREAD_FINALIZE();
 }
 
-TEST_CASE("Unit_hipFreeHost_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipFreeHost_Capture") {
   void* ptr = nullptr;
-  size_t ptr_size = 1024;
+  constexpr size_t kPtrSize = 1024;
 
-  HIP_CHECK(hipHostMalloc(&ptr, ptr_size));
+  HIP_CHECK(hipHostMalloc(&ptr, kPtrSize));
 
-  hipError_t err = hipSuccess;
-  bool rlx_mode_allowed = true;
-  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
-  HIP_CHECK_ERROR(hipFreeHost(ptr), err);
-  END_CAPTURE_SYNC(err);
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipFreeHost(ptr), capture_error);
+  END_CAPTURE_SYNC(capture_error);
 }

@@ -298,12 +298,16 @@ TEST_CASE("Unit_hipHostMalloc_AllocateUseMoreThanAvailGPUMemory") {
 }
 #endif
 
-TEST_CASE("Unit_hipHostMalloc_StreamCaptureBehavior") {
-  int* A = nullptr;
-  hipError_t err = hipSuccess;
+TEST_CASE("Unit_hipHostMalloc_Capture") {
+  int* host_ptr = nullptr;
+  hipError_t capture_error = hipSuccess;
 
-  bool rlx_mode_allowed = true;
-  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
-  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&A), sizeBytes), err);
-  END_CAPTURE_SYNC(err);
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipHostMalloc(reinterpret_cast<void**>(&host_ptr), sizeBytes), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (host_ptr != nullptr) {
+    HIP_CHECK(hipHostFree(host_ptr));
+  }
 }

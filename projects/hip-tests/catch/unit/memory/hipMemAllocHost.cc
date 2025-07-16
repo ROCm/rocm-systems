@@ -131,24 +131,18 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
   }
 }
 
-TEST_CASE("Unit_hipMemAllocHost_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipMemAllocHost_Capture") {
   int* host_memory = nullptr;
-  hipCtx_t ctx;
-  hipDevice_t device;
 
-  HIP_CHECK(hipGetDevice(&device));
-  HIP_CHECK(hipCtxCreate(&ctx, 0, device));
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)),
+                  capture_error);
+  END_CAPTURE_SYNC(capture_error);
 
-  hipError_t err = hipSuccess;
-  bool rlx_mode_allowed = true;
-  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
-  HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)), err);
-  END_CAPTURE_SYNC(err);
-
-  if (err == hipSuccess) {
+  if (capture_error == hipSuccess) {
     REQUIRE(host_memory != nullptr);
     HIP_CHECK(hipHostFree(host_memory));
   }
-
-  HIP_CHECK(hipCtxDestroy(ctx));
 }

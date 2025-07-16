@@ -72,16 +72,17 @@ TEST_CASE("Unit_hipMallocHost_Negative") {
   }
 }
 
-TEST_CASE("Unit_hipMallocHost_StreamCaptureBehavior") {
+TEST_CASE("Unit_hipMallocHost_Capture") {
   int* host_memory = nullptr;
 
-  hipError_t err = hipSuccess;
-  bool rlx_mode_allowed = true;
-  BEGIN_CAPTURE_SYNC(err, rlx_mode_allowed);
-  HIP_CHECK_ERROR(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)), err);
-  END_CAPTURE_SYNC(err);
+  hipError_t capture_error = hipSuccess;
+  constexpr bool kRelaxedModeAllowed = true;
 
-  if (err == hipSuccess) {
+  BEGIN_CAPTURE_SYNC(capture_error, kRelaxedModeAllowed);
+  HIP_CHECK_ERROR(hipMallocHost(reinterpret_cast<void**>(&host_memory), sizeof(int)), capture_error);
+  END_CAPTURE_SYNC(capture_error);
+
+  if (capture_error == hipSuccess) {
     REQUIRE(host_memory != nullptr);
     HIP_CHECK(hipHostFree(host_memory));
   }
