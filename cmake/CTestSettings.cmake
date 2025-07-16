@@ -24,7 +24,11 @@ rocprofiler_systems_add_option(
     ROCPROFSYS_USE_MPI_HEADERS
     "Enable wrapping MPI functions w/o enabling MPI dependency" ON
 )
-rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" OFF) # TODO: Fix back to ON
+rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" ON) # TODO: Fix back to ON
+
+rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PYTHON
+                                   "Build python bindings with internal pybind11" OFF
+)
 
 #_________________________________________________________________________
 # Code from CMakeLists.txt for ${ROCPROFSYS_MAX_THREADS}
@@ -74,28 +78,12 @@ configure_file(
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print
     COPYONLY
 )
-
 install(
     PROGRAMS ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprof-sys-causal-print
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT scripts
 )
 #__________________________________________________________________________
-# Important Python from CMakeLists.txt
-if(ROCPROFSYS_USE_PYTHON)
-    rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PYTHON
-                                   "Build python bindings with internal pybind11" ON
-    )
-elseif("$ENV{ROCPROFSYS_CI}")
-    # quiet warnings in dashboard
-    if(ROCPROFSYS_PYTHON_ENVS OR ROCPROFSYS_PYTHON_PREFIX)
-        rocprofiler_systems_message(
-            STATUS
-            "Ignoring values of ROCPROFSYS_PYTHON_ENVS and/or ROCPROFSYS_PYTHON_PREFIX"
-        )
-    endif()
-endif()
-#___________________________________________________________________________
 # CI from CMakeLists.txt
 if(NOT "$ENV{ROCPROFSYS_CI}" STREQUAL "")
     set(CI_BUILD $ENV{ROCPROFSYS_CI})
@@ -191,3 +179,11 @@ else()
     )
 endif()
 #___________________________________________________________________________
+## Python stuff from cmake/Packages.cmake
+if(ROCPROFSYS_USE_PYTHON)
+    find_package(pybind11 REQUIRED)
+    include(ConfigPython)
+    include(PyBind11Tools)
+endif()
+
+# CMAKE_INSTALL_PYTHONDIR is unset

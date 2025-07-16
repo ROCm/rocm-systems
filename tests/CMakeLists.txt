@@ -92,8 +92,24 @@ else()
     get_filename_component(SCRIPTS_D "${SCRIPTS_D}" REALPATH)
     set(CLI_CTEST_D "${PROJECT_SOURCE_DIR}/../source/bin/tests")
     get_filename_component(CLI_CTEST_D "${CLI_CTEST_D}" REALPATH)
+    set(PYTHON_FILES "${PROJECT_SOURCE_DIR}/../source/python/cmake")
+    get_filename_component(PYTHON_FILES "${PYTHON_FILES}" REALPATH)
 
-    set(CMAKE_MODULE_PATH ${CMAKE_D} ${CMAKE_D}/Modules ${CMAKE_MODULE_PATH})
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
+    elseif(ROCM_PATH)
+        message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
+    else()
+        set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
+    endif()
+
+    set(CMAKE_MODULE_PATH
+        ${CMAKE_D}
+        ${CMAKE_D}/Modules
+        ${PYTHON_FILES}
+        ${CMAKE_MODULE_PATH}
+    )
+    set(CMAKE_PREFIX_PATH ${ROCM_PATH} ${CMAKE_PREFIX_PATH})
 
     find_package(rocprofiler-systems REQUIRED) # System
     find_package(ROCmVersion REQUIRED) # Module path
@@ -105,14 +121,6 @@ else()
 
     # Store python bin for causal in this build file
     set(CMAKE_INSTALL_BINDIR "causal" CACHE PATH "Default CTest binaries install path")
-
-    if(DEFINED ENV{ROCM_PATH})
-        set(ROCM_PATH $ENV{ROCM_PATH} CACHE PATH "Default ROCm installation path")
-    elseif(ROCM_PATH)
-        message("-- INFO:ROCM_PATH Set -- ${ROCM_PATH}")
-    else()
-        set(ROCM_PATH /opt/rocm CACHE PATH "Default ROCm installation path")
-    endif()
 
     # Find the binaries used for testing
     set(ROCPROFILER_EXECUTABLES
@@ -138,11 +146,17 @@ else()
 
     # Set compile launcher
     set(ROCPROFSYS_COMPILE_LAUNCHER "${SCRIPTS_D}/rocprof-sys-launch-compiler")
-    include(MacroUtilities) #TODO: Determine if the whole thing is actually needed
+    # Only the following are needed:
+    #   - ROCPROFILER_SYSTEMS_MESSAGE
+    #   - ROCPROFILER_SYSTEMS_ADD_FEATURE
+    #   - ROCPROFILER_SYSTEMS_ADD_OPTION
+    #   - ROCPROFILER_SYSTEMS_CUSTOM_COMPILATION
+    #   - ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT
+    include(MacroUtilities)
     include(CTestSettings)
 
     # Test source code dir
-    set(ROCPROFSYS_DISABLE_EXAMPLES python CACHE STRING "Disable these examples") # Blocked for now
+    # set(ROCPROFSYS_DISABLE_EXAMPLES python CACHE STRING "Disable these examples") # Blocked for now
     add_subdirectory(${CTEST_SOURCE_D} ${CMAKE_BINARY_DIR}/examples)
 
     # CTests
@@ -179,3 +193,13 @@ endif()
 #   - Investigate how ${COMMAND_PREFIX} is used in tests (to avoid requiring MPI)
 #   - Investifate RCCL
 #   - Investigate if find_package(ROCmVersion) needs the REQUIRED flag
+
+# Needed installs
+#  - rocprofiler-systems
+#  - rocdecode (contains librocdecode.so.0)
+#  - rocdecode-dev (might also be rocm-rocdecode-dev)
+#  - perfetto (python)
+#  - pybind11-dev
+#  -
+
+# NOTE: rocprof-sys-python-console-script-test (and the generic one) are not included as these require `rocprof-sys-python` which is not available.

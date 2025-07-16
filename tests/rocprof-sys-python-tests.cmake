@@ -28,6 +28,20 @@
 
 set(_INDEX 0)
 
+if(CTEST_ONLY_BUILD)
+    set(PYTHON_TEST_FILE_PATH "${CMAKE_SOURCE_DIR}/../examples/python")
+    get_filename_component(PYTHON_TEST_FILE_PATH "${PYTHON_TEST_FILE_PATH}" REALPATH)
+    set(PYTHON_CODE_COVERAGE_FILE_PATH "${CMAKE_SOURCE_DIR}/../examples/code-coverage")
+    get_filename_component(
+        PYTHON_CODE_COVERAGE_FILE_PATH
+        "${PYTHON_CODE_COVERAGE_FILE_PATH}"
+        REALPATH
+    )
+else()
+    set(PYTHON_TEST_FILE_PATH "${CMAKE_SOURCE_DIR}/examples/python")
+    set(PYTHON_CODE_COVERAGE_FILE_PATH "${CMAKE_SOURCE_DIR}/examples/code-coverage")
+endif()
+
 foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
     if(NOT ROCPROFSYS_USE_PYTHON)
         continue()
@@ -48,7 +62,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-external
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${PYTHON_TEST_FILE_PATH}/external.py
         PROFILE_ARGS "--label" "file"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -58,7 +72,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-external-exclude-inefficient
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/external.py
+        FILE ${PYTHON_TEST_FILE_PATH}/external.py
         PROFILE_ARGS -E "^inefficient$"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -68,7 +82,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-builtin
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/builtin.py
+        FILE ${PYTHON_TEST_FILE_PATH}/builtin.py
         PROFILE_ARGS "-b" "--label" "file" "line"
         RUN_ARGS -v 10 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -78,7 +92,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-builtin-noprofile
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/noprofile.py
+        FILE ${PYTHON_TEST_FILE_PATH}/noprofile.py
         PROFILE_ARGS "-b" "--label" "file"
         RUN_ARGS -v 15 -n 5
         ENVIRONMENT "${_python_environment}"
@@ -89,7 +103,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-source
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/python/source.py
+        FILE ${PYTHON_TEST_FILE_PATH}/source.py
         RUN_ARGS -v 5 -n 5 -s 3
         ENVIRONMENT "${_python_environment}"
     )
@@ -99,7 +113,7 @@ foreach(_VERSION ${ROCPROFSYS_PYTHON_VERSIONS})
         NAME python-code-coverage
         PYTHON_EXECUTABLE ${_PYTHON_EXECUTABLE}
         PYTHON_VERSION ${_VERSION}
-        FILE ${CMAKE_SOURCE_DIR}/examples/code-coverage/code-coverage.py
+        FILE ${PYTHON_CODE_COVERAGE_FILE_PATH}/code-coverage.py
         RUN_ARGS
             -i
             ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/code-coverage-basic-blocks-binary-rewrite/coverage.json
