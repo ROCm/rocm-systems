@@ -148,8 +148,8 @@ TEST_CASE("Unit_hipMemcpyAsync_Capture") {
 
   GENERATE_CAPTURE();
   BEGIN_CAPTURE(stream);
-  HIP_CHECK(hipMemcpyAsync(dst_alloc.ptr(), src_alloc.ptr(), kPageSize, hipMemcpyDeviceToDevice,
-                           stream));
+  HIP_CHECK(
+      hipMemcpyAsync(dst_alloc.ptr(), src_alloc.ptr(), kPageSize, hipMemcpyDeviceToDevice, stream));
   END_CAPTURE(stream);
 
   HIP_CHECK(hipStreamDestroy(stream));
