@@ -550,6 +550,42 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_revision
+
+Description: Returns the GPU revision for a given processor handle.
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: string hex value
+
+Field | Description
+---|---
+`revision` | 16 bit integer value returned as hex string.
+
+Exceptions that can be thrown by `amdsmi_get_gpu_revision` function:
+
+* `AmdSmiLibraryException` If the processor handle is invalid.
+* `AmdSmiParameterException` If the underlying library call fails.
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles(handle)
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            revision = amdsmi_get_gpu_revision(device)
+            print(revision)
+except AmdSmiLibraryException as e:
+    print(e)
+except AmdSmiParameterException as e:
+    print(e)
+```
+
 ### amdsmi_get_gpu_cache_info
 
 Description: Returns a list of dictionaries containing cache information for the given GPU.
