@@ -106,6 +106,9 @@ class MemoryRegion : public Checked<0x9C961F19EE175BB3> {
     AllocateGTTAccess = (1 << 9),
     AllocateContiguous = (1 << 10), // Physically contiguous memory
     AllocateUncached = (1 << 11),   // Uncached memory
+    // this flag is ignored by Thunk and only used for emulator/dxg to track code-object
+    // allocations in AQL to PM4 conversion.
+    AllocateExecutableBlitKernelObject = (1 << 12),
   };
 
   typedef uint32_t AllocateFlags;

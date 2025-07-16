@@ -378,7 +378,8 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
       (assemble_target == AssembleTarget::AQL ? sizeof(amd_kernel_code_t) : 0);
   code_buf_size = AlignUp(header_size + asic_shader->size, 0x1000);
 
-  code_buf = system_allocator()(code_buf_size, 0x1000, core::MemoryRegion::AllocateExecutable);
+  code_buf = system_allocator()(code_buf_size, 0x1000,
+    core::MemoryRegion::AllocateExecutable | core::MemoryRegion::AllocateExecutableBlitKernelObject);
   assert(code_buf != NULL && "Code buffer allocation failed");
 
   memset(code_buf, 0, code_buf_size);

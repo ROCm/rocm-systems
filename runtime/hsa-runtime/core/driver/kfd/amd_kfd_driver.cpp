@@ -241,6 +241,9 @@ KfdDriver::AllocateMemory(const core::MemoryRegion &mem_region,
             ? 1
             : kmt_alloc_flags.ui32.Uncached);
 
+  kmt_alloc_flags.ui32.ExecuteBlit =
+    !!(alloc_flags & core::MemoryRegion::AllocateExecutableBlitKernelObject);
+
   if (m_region.IsLocalMemory()) {
     // Allocate physically contiguous memory. AllocateKfdMemory function call
     // will fail if this flag is not supported in KFD.

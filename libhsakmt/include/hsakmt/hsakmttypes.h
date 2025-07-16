@@ -586,7 +586,8 @@ typedef struct _HsaMemFlags
             unsigned int GTTAccess:     1;  // default = 0; If 1: The caller indicates this memory will be mapped to GART for MES
 					    // KFD will allocate GTT memory with the Preferred_node set as gpu_id for GART mapping
             unsigned int Contiguous:	1; // Allocate contiguous VRAM
-            unsigned int Reserved:      9;
+            unsigned int ExecuteBlit:	1; // default = 0; If 1: The caller indicates that the memory is for blit kernel object.
+            unsigned int Reserved:      8;
 
         } ui32;
         HSAuint32 Value;
