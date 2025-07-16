@@ -117,7 +117,6 @@ int execute(int rank) {
   // Warm up
   int num_kernels = 10;
   for (int i = 0; i < num_kernels; i++) {
-    // HIP_CHECK_KERNEL(hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N));
     hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N);
   }
 
@@ -130,7 +129,6 @@ int execute(int rank) {
   }
 
   for (int i = 0; i < num_kernels; i++) {
-    // HIP_CHECK_KERNEL(hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N));
     hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N);
   }
   HIPCHECK(hipEventRecord(end_warmup, stream));
@@ -184,7 +182,6 @@ int execute(int rank) {
   // kernel in stream
   if (rank == 0) printf("Launching workload\n");
   for (int i = 0; i < num_kernels; i++) {
-    // HIP_CHECK_KERNEL(hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N));
     hipLaunchKernelGGL(kernel1, 1024, 1024, 0, stream, da, N);
   }
 
