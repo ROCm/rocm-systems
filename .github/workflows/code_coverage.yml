@@ -56,7 +56,7 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['rocprof-azure']
+        runner: ['mi300a']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 

@@ -52,7 +52,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3', 'navi4', 'mi3xx']
+        runner: ['navi3', 'navi4', 'mi300a']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -255,7 +255,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi3xx']
+        runner: ['mi300']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
