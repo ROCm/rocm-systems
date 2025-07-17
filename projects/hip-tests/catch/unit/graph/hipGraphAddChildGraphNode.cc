@@ -131,12 +131,11 @@ TEST_CASE("Unit_hipGraphAddChildGraphNode_OrgGraphAsChildGraph") {
   size_t numNodes;
   hipStream_t streamForGraph;
   HIP_CHECK(hipStreamCreate(&streamForGraph));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_h, B_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
-  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph,
-                                      nullptr, 0, childGraph));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_h, B_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode1, graph, nullptr, 0, childGraph));
 
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_B, &memcpyH2D_A, 1));
 
