@@ -19,13 +19,8 @@ This table provides the current status of the migration of specific ROCm systems
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
 | `hip-tests`            | EMU             | Pending          |                                       |                                       |
-| `mivisionx`            | Public          | Pending          |                                       |                                       |
 | `rccl`                 | Public          | Pending          |                                       |                                       |
 | `rdc`                  | EMU             | Pending          |                                       |                                       |
-| `rocal`                | Public          | Pending          |                                       |                                       |
-| `roccv`                | Private         | Pending          |                                       |                                       |
-| `rocdecode`            | Public          | Pending          |                                       |                                       |
-| `rocjpeg`              | Public          | Pending          |                                       |                                       |
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
 | `rocminfo`             | EMU             | Pending          |                                       |                                       |
 | `rocmsmilib`           | EMU             | Pending          |                                       |                                       |
@@ -34,22 +29,15 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocprofiler-register` | EMU             | Pending          |                                       |                                       |
 | `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
 | `rocprofiler-systems`  | Public          | Pending          |                                       |                                       |
-| `rocpydecode`          | Public          | Pending          |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
+| `rocshmem`             | Public          | Pending          |                                       |                                       |
 | `roctracer`            | EMU             | Pending          |                                       |                                       |
-| `rpp`                  | Public          | Pending          |                                       |                                       |
 
 
 ## Tentative migration schedule
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `mivisionx`            | 7/31           |
-| `rocal`                | 7/31           |
-| `rocdecode`            | 7/31           |
-| `rocjpeg`              | 7/31           |
-| `rocpydecode`          | 7/31           |
-| `rpp`                  | 7/31           |
 | `aqlprofile`           | 8/5            |
 | `rocprofiler`          | 8/5            |
 | `rocprofiler-compute`  | 8/5            |
@@ -67,7 +55,6 @@ This table provides the current status of the migration of specific ROCm systems
 | `hip`                  | 8/13           |
 | `hipother`             | 8/13           |
 | `hip-tests`            | 8/13           |
-| `roccv`                | when public    |
 
 *Remaining schedule to be determined.
 
@@ -90,16 +77,13 @@ The repository is organized as follows:
 ```
 projects/
   amdsmi/
+  aqlprofile/
   clr/
   hip/
   hipother/
   hip-tests/
-  mivisionx/
   rccl/
   rdc/
-  rocal/
-  rocdecode/
-  rocjpeg/
   rocm-core
   rocminfo/
   rocmsmilib/
@@ -107,10 +91,10 @@ projects/
   rocprofiler-compute/
   rocprofiler-register/
   rocprofiler-sdk/
-  rocpydecode/
+  rocprofiler-systems/
   rocrruntime/
+  rocshmem/
   roctracer/
-  rpp/
 ```
 
 - Each folder under `projects/` corresponds to a ROCm systems project that was previously maintained in a standalone GitHub repository and released as distinct packages.

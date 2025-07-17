@@ -1,54 +1,6 @@
 {
   "repositories": [
     {
-      "name": "mivisionx",
-      "url": "ROCm/MIVisionX",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocal",
-      "url": "ROCm/rocAL",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocdecode",
-      "url": "ROCm/rocDecode",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocjpeg",
-      "url": "ROCm/rocJPEG",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rocpydecode",
-      "url": "ROCm/rocPyDecode",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
-      "name": "rpp",
-      "url": "ROCm/rpp",
-      "branch": "develop",
-      "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
-    },
-    {
       "name": "rocprofiler-compute",
       "url": "ROCm/rocprofiler-compute",
       "branch": "develop",
