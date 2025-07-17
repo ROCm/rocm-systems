@@ -1,0 +1,362 @@
+# --------------------------------------------------------------------------------
+#
+# This yaml file tracks MI gpu spec in a tree structure.
+#
+# *It is important to note that this file only tracks the common specs for MI GPU series.*
+# *For example, the CU #s are based on information retrieved from other tools.*
+# **
+#
+# MI GPUs
+#   |-- series: the specific MI series; mi50, mi100, mi200, mi300
+#       |-- architecture: currently, only mi300 gpus hold different architectures
+#           |-- perfmon_config, copy from ROCm/aqlprofile from gfxip/gfx9/gfx9_block_info.h
+#           |-- gpu model
+#           |-- chip_ids: chip id is specific to the environment the gpu is being used on
+#               | -- physical
+#               | -- virtual
+#           |-- partition_mode
+#               | -- compute partition mode
+#               | -- memory partition mode
+#
+# --------------------------------------------------------------------------------
+
+mi_gpu_spec:
+  - gpu_series: mi50
+    gpu_archs:
+      - gpu_arch: gfx906
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi50
+          - gpu_model: mi60
+
+  - gpu_series: mi100
+    gpu_archs:
+      - gpu_arch: gfx908
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi100
+            chip_ids:
+              physical: 29580
+
+  - gpu_series: mi200
+    gpu_archs:
+      - gpu_arch: gfx90a
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi210
+            chip_ids:
+              physical: 29711
+          - gpu_model: mi250
+            chip_ids:
+              physical: 29708
+          - gpu_model: mi250x
+            chip_ids:
+              physical: 29704
+
+  - gpu_series: mi300
+    gpu_archs:
+      - gpu_arch: gfx940
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi300a_a0
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 6
+                  tpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  tpx: 3
+                nps1:
+                  spx: 1
+                  tpx: 3
+            chip_ids:
+              physical: null
+              virtual: null
+
+      - gpu_arch: gfx941
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi300x_a0
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: null
+              virtual: null
+
+      - gpu_arch: gfx942
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi300a_a1
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 6
+                  tpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  tpx: 3
+                nps1:
+                  spx: 1
+                  tpx: 3
+                  cpx: 8
+            chip_ids:
+              physical: 29856
+              virtual: 29876
+
+          - gpu_model: mi300x_a1
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 29857
+              virtual: 29877
+
+          - gpu_model: mi300xhf
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 29865
+              virtual: 29885
+
+          - gpu_model: mi308x
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 4
+                  dpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  cpx: 8
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 29858
+              virtual: 29878
+
+          - gpu_model: mi308xhf
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 4
+                  dpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  cpx: 8
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 29864
+              virtual: 29884
+
+          - gpu_model: mi325x
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 29861
+              virtual: 29881
+
+  - gpu_series: mi350
+    gpu_archs:
+      - gpu_arch: gfx950
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+          TCC_channels: 16
+        models:
+          - gpu_model: mi350
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 30112
+              virutal: 30128
+          - gpu_model: mi355
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps2:
+                  dpx: 2
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 30115
+              virtual: 30131
+          - gpu_model: mi358
+            partition_mode:
+              compute_partition_mode:
+                num_xcds:
+                  spx: 8
+                  dpx: 4
+                  qpx: 2
+                  cpx: 1
+              memory_partition_mode:
+                nps4:
+                  qpx: 4
+                  cpx: 8
+                nps1:
+                  spx: 1
+                  qpx: 4
+                  cpx: 8
+            chip_ids:
+              physical: 30114
+              virtual: 30130

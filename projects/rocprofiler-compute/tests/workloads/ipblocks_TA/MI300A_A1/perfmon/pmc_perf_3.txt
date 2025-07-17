@@ -1,0 +1,5 @@
+pmc:  TA_BUFFER_COALESCED_READ_CYCLES_sum TA_BUFFER_COALESCED_WRITE_CYCLES_sum
+
+gpu:
+range:
+kernel:
