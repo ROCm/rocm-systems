@@ -1,0 +1,65 @@
+ARG DISTRO=opensuse/leap
+ARG VERSION=15.5
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/local/bin:${PATH}
+ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
+
+RUN set +e; \
+    zypper --non-interactive -i --gpg-auto-import-keys refresh; \
+    zypper --non-interactive -i patch; \
+    zypper --non-interactive -i patch; \
+    zypper --non-interactive -i --gpg-auto-import-keys refresh; \
+    exit 0
+
+RUN zypper --non-interactive update -y && \
+    zypper --non-interactive dist-upgrade -y && \
+    zypper --non-interactive install -y -t pattern devel_basis && \
+    zypper --non-interactive install -y binutils-gold chrpath cmake curl dpkg-devel \
+        gcc-c++ git iproute2 libdrm-devel libnuma-devel openmpi3-devel python3-pip rpm-build \
+        sqlite3-devel wget  && \
+    python3 -m pip install 'cmake==3.21'
+
+ARG ROCM_VERSION=0.0
+
+RUN ROCM_MAJOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $1}') && \
+    ROCM_MINOR=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $2}') && \
+    if [ "${ROCM_MAJOR}" != "0" ] || [ "${ROCM_MINOR}" != "0" ]; then \
+        OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
+        OS_VERSION_MAJOR=$(echo "$OS_VERSION" | cut -d'.' -f1) && \
+        OS_VERSION_MINOR=$(echo "$OS_VERSION" | cut -d'.' -f2) && \
+        ROCM_PATCH=$(echo "${ROCM_VERSION}" | sed 's/\./ /g' | awk '{print $3}') && \
+        if [ -z "${ROCM_PATCH}" ] || [ "${ROCM_PATCH}" = "0" ]; then \
+            ROCM_PATCH=0 && \
+            ROCM_VERSION=$(echo "${ROCM_VERSION}" | sed 's/\.0$//') \
+        ; fi && \
+        ROCM_VERSN=$(( ("${ROCM_MAJOR}"*10000)+("${ROCM_MINOR}"*100) + ("${ROCM_PATCH}"))) && \
+        zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.6/devel:languages:perl.repo && \
+        zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/sle/${OS_VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm && \
+        zypper --non-interactive --gpg-auto-import-keys refresh && \
+        zypper --non-interactive install -y rocm-dev rccl-devel libpciaccess0 && \
+        zypper --non-interactive clean --all; \
+    fi
+
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
+
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    bash miniforge.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c conda-forge -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
+    conda init
+
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]
