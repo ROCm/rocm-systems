@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <cstddef>
 #include <cstdint>
 #include <set>
+#include <sstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -1118,6 +1119,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
   }
 }
 
+// Switch Case Implementation for fetch_cpu_field_ function
 rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_field_t field_id,
                                                     rdc_field_value* value) {
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
@@ -1125,17 +1127,491 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
   amdsmi_processor_handle processor_handle = {};
   amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
 
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Cannot get processor handle for CPU " << gpu_index);
+    return Smi2RdcError(ret);
+  }
+
   switch (field_id) {
     case RDC_FI_CPU_MODEL: {
       amdsmi_cpu_info_t cpu_info = {};
       value->status = amdsmi_get_cpu_model_name(processor_handle, &cpu_info);
-      memcpy(value->value.str, cpu_info.model_name, sizeof(cpu_info.model_name));
       value->type = STRING;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        memcpy(value->value.str, cpu_info.model_name, sizeof(cpu_info.model_name));
+      }
       break;
     }
+
+    case RDC_FI_CPU_CORE_ENERGY: {
+      uint64_t energy = 0;
+      value->status = amdsmi_get_cpu_core_energy(processor_handle, &energy);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(energy);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_ENERGY: {
+      uint64_t energy = 0;
+      value->status = amdsmi_get_cpu_socket_energy(processor_handle, &energy);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(energy);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_THREADS_PER_CORE: {
+      uint32_t threads_per_core = 0;
+      value->status = amdsmi_get_threads_per_core(&threads_per_core);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(threads_per_core);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_HSMP_DRIVER_VERSION: {
+      amdsmi_hsmp_driver_version_t hsmp_driver_ver = {};
+      value->status = amdsmi_get_cpu_hsmp_driver_version(processor_handle, &hsmp_driver_ver);
+      value->type = STRING;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        snprintf(value->value.str, sizeof(value->value.str), "%u.%u", hsmp_driver_ver.major,
+                 hsmp_driver_ver.minor);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SMU_FW_VERSION: {
+      amdsmi_smu_fw_version_t smu_fw = {};
+      value->status = amdsmi_get_cpu_smu_fw_version(processor_handle, &smu_fw);
+      value->type = STRING;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        snprintf(value->value.str, sizeof(value->value.str), "%u.%u.%u", smu_fw.major, smu_fw.minor,
+                 smu_fw.debug);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_HSMP_PROTO_VERSION: {
+      uint32_t proto_ver = 0;
+      value->status = amdsmi_get_cpu_hsmp_proto_ver(processor_handle, &proto_ver);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(proto_ver);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_PROCHOT_STATUS: {
+      uint32_t prochot = 0;
+      value->status = amdsmi_get_cpu_prochot_status(processor_handle, &prochot);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(prochot);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_FCLK_FREQUENCY:
+    case RDC_FI_CPU_MCLK_FREQUENCY: {
+      uint32_t fclk = 0, mclk = 0;
+      value->status = amdsmi_get_cpu_fclk_mclk(processor_handle, &fclk, &mclk);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_CPU_FCLK_FREQUENCY) {
+          value->value.l_int = static_cast<int64_t>(fclk);
+        } else {
+          value->value.l_int = static_cast<int64_t>(mclk);
+        }
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_CCLK_LIMIT: {
+      uint32_t cclk = 0;
+      value->status = amdsmi_get_cpu_cclk_limit(processor_handle, &cclk);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(cclk);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_ACTIVE_FREQ_LIMIT:
+    case RDC_FI_CPU_SOCKET_FREQ_LIMIT_SRC: {
+      uint16_t freq = 0;
+      char* src_type = nullptr;
+      value->status =
+          amdsmi_get_cpu_socket_current_active_freq_limit(processor_handle, &freq, &src_type);
+      if (field_id == RDC_FI_CPU_SOCKET_ACTIVE_FREQ_LIMIT) {
+        value->type = INTEGER;
+        if (value->status == AMDSMI_STATUS_SUCCESS) {
+          value->value.l_int = static_cast<int64_t>(freq);
+        }
+      } else {
+        value->type = STRING;
+        if (value->status == AMDSMI_STATUS_SUCCESS && src_type != nullptr) {
+          strncpy(value->value.str, src_type, sizeof(value->value.str) - 1);
+          value->value.str[sizeof(value->value.str) - 1] = '\0';
+        }
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_FREQ_RANGE_MAX:
+    case RDC_FI_CPU_SOCKET_FREQ_RANGE_MIN: {
+      uint16_t fmax = 0, fmin = 0;
+      value->status = amdsmi_get_cpu_socket_freq_range(processor_handle, &fmax, &fmin);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_CPU_SOCKET_FREQ_RANGE_MAX) {
+          value->value.l_int = static_cast<int64_t>(fmax);
+        } else {
+          value->value.l_int = static_cast<int64_t>(fmin);
+        }
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_CORE_FREQ_LIMIT: {
+      uint32_t freq = 0;
+      value->status = amdsmi_get_cpu_core_current_freq_limit(processor_handle, &freq);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(freq);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_CORE_BOOST_LIMIT: {
+      uint32_t boostlimit = 0;
+      value->status = amdsmi_get_cpu_core_boostlimit(processor_handle, &boostlimit);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(boostlimit);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_C0_RESIDENCY: {
+      uint32_t c0_residency = 0;
+      value->status = amdsmi_get_cpu_socket_c0_residency(processor_handle, &c0_residency);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(c0_residency);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_DDR_BW_MAX_BW:
+    case RDC_FI_CPU_DDR_BW_UTILIZED_BW:
+    case RDC_FI_CPU_DDR_BW_UTILIZED_PCT: {
+      amdsmi_ddr_bw_metrics_t ddr_bw = {};
+      value->status = amdsmi_get_cpu_ddr_bw(processor_handle, &ddr_bw);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        switch (field_id) {
+          case RDC_FI_CPU_DDR_BW_MAX_BW:
+            value->value.l_int = static_cast<int64_t>(ddr_bw.max_bw);
+            break;
+          case RDC_FI_CPU_DDR_BW_UTILIZED_BW:
+            value->value.l_int = static_cast<int64_t>(ddr_bw.utilized_bw);
+            break;
+          case RDC_FI_CPU_DDR_BW_UTILIZED_PCT:
+            value->value.l_int = static_cast<int64_t>(ddr_bw.utilized_pct);
+            break;
+            // no default case needed, all fields handled above
+          default:
+            value->status = AMDSMI_STATUS_INVAL;
+        }
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_TEMPERATURE: {
+      uint32_t temperature = 0;
+      value->status = amdsmi_get_cpu_socket_temperature(processor_handle, &temperature);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(temperature);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_DIMM_TEMP_RANGE:
+    case RDC_FI_CPU_DIMM_REFRESH_RATE: {
+      // Note: This requires dimm_addr parameter, using 0 as default
+      uint8_t dimm_addr = 0;
+      amdsmi_temp_range_refresh_rate_t rate = {};
+      value->status =
+          amdsmi_get_cpu_dimm_temp_range_and_refresh_rate(processor_handle, dimm_addr, &rate);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        if (field_id == RDC_FI_CPU_DIMM_TEMP_RANGE) {
+          value->value.l_int = static_cast<int64_t>(rate.range);
+        } else {
+          value->value.l_int = static_cast<int64_t>(rate.ref_rate);
+        }
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_DIMM_POWER_CONSUMPTION: {
+      uint8_t dimm_addr = 0;
+      amdsmi_dimm_power_t dimm_pow = {};
+      value->status = amdsmi_get_cpu_dimm_power_consumption(processor_handle, dimm_addr, &dimm_pow);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(dimm_pow.power);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_DIMM_THERMAL_SENSOR: {
+      uint8_t dimm_addr = 0;
+      amdsmi_dimm_thermal_t dimm_temp = {};
+      value->status = amdsmi_get_cpu_dimm_thermal_sensor(processor_handle, dimm_addr, &dimm_temp);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(dimm_temp.sensor);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_LCLK_DPM_LEVEL: {
+      uint8_t nbio_id = 0;
+      amdsmi_dpm_level_t nbio = {};
+      value->status = amdsmi_get_cpu_socket_lclk_dpm_level(processor_handle, nbio_id, &nbio);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(nbio.max_dpm_level);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_IO_BANDWIDTH: {
+      amdsmi_link_id_bw_type_t link = {};
+      uint32_t io_bw = 0;
+      value->status = amdsmi_get_cpu_current_io_bandwidth(processor_handle, link, &io_bw);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(io_bw);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_XGMI_BANDWIDTH: {
+      amdsmi_link_id_bw_type_t link = {};
+      uint32_t xgmi_bw = 0;
+      value->status = amdsmi_get_cpu_current_xgmi_bw(processor_handle, link, &xgmi_bw);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(xgmi_bw);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_HSMP_METRICS_VERSION: {
+      uint32_t metrics_version = 0;
+      value->status = amdsmi_get_hsmp_metrics_table_version(processor_handle, &metrics_version);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(metrics_version);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_HSMP_METRICS_TABLE: {
+      amdsmi_hsmp_metrics_table_t metrics_table = {};
+      value->status = amdsmi_get_hsmp_metrics_table(processor_handle, &metrics_table);
+      value->type = STRING;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        std::ostringstream oss;
+
+        // Basic counters and timestamps
+        oss << "accumulation_counter:" << metrics_table.accumulation_counter << ";";
+        oss << "timestamp:" << metrics_table.timestamp << ";";
+
+        // Temperature metrics
+        oss << "max_socket_temperature:" << metrics_table.max_socket_temperature << ";";
+        oss << "max_vr_temperature:" << metrics_table.max_vr_temperature << ";";
+        oss << "max_hbm_temperature:" << metrics_table.max_hbm_temperature << ";";
+        oss << "max_socket_temperature_acc:" << metrics_table.max_socket_temperature_acc << ";";
+        oss << "max_vr_temperature_acc:" << metrics_table.max_vr_temperature_acc << ";";
+        oss << "max_hbm_temperature_acc:" << metrics_table.max_hbm_temperature_acc << ";";
+
+        // Power metrics
+        oss << "socket_power_limit:" << metrics_table.socket_power_limit << ";";
+        oss << "max_socket_power_limit:" << metrics_table.max_socket_power_limit << ";";
+        oss << "socket_power:" << metrics_table.socket_power << ";";
+
+        // Energy accumulators
+        oss << "socket_energy_acc:" << metrics_table.socket_energy_acc << ";";
+        oss << "ccd_energy_acc:" << metrics_table.ccd_energy_acc << ";";
+        oss << "xcd_energy_acc:" << metrics_table.xcd_energy_acc << ";";
+        oss << "aid_energy_acc:" << metrics_table.aid_energy_acc << ";";
+        oss << "hbm_energy_acc:" << metrics_table.hbm_energy_acc << ";";
+
+        // Frequency limits and current frequencies
+        oss << "cclk_frequency_limit:" << metrics_table.cclk_frequency_limit << ";";
+        oss << "gfxclk_frequency_limit:" << metrics_table.gfxclk_frequency_limit << ";";
+        oss << "fclk_frequency:" << metrics_table.fclk_frequency << ";";
+        oss << "uclk_frequency:" << metrics_table.uclk_frequency << ";";
+
+        // Per-AID frequencies
+        for (int i = 0; i < 4; i++) {
+          oss << "socclk_frequency[" << i << "]:" << metrics_table.socclk_frequency[i] << ";";
+          oss << "vclk_frequency[" << i << "]:" << metrics_table.vclk_frequency[i] << ";";
+          oss << "dclk_frequency[" << i << "]:" << metrics_table.dclk_frequency[i] << ";";
+          oss << "lclk_frequency[" << i << "]:" << metrics_table.lclk_frequency[i] << ";";
+        }
+
+        // Frequency accumulators
+        for (int i = 0; i < 8; i++) {
+          oss << "gfxclk_frequency_acc[" << i << "]:" << metrics_table.gfxclk_frequency_acc[i]
+              << ";";
+          oss << "gfxclk_frequency[" << i << "]:" << metrics_table.gfxclk_frequency[i] << ";";
+        }
+
+        for (int i = 0; i < 96; i++) {
+          oss << "cclk_frequency_acc[" << i << "]:" << metrics_table.cclk_frequency_acc[i] << ";";
+        }
+
+        // Min/Max frequency support
+        oss << "max_cclk_frequency:" << metrics_table.max_cclk_frequency << ";";
+        oss << "min_cclk_frequency:" << metrics_table.min_cclk_frequency << ";";
+        oss << "max_gfxclk_frequency:" << metrics_table.max_gfxclk_frequency << ";";
+        oss << "min_gfxclk_frequency:" << metrics_table.min_gfxclk_frequency << ";";
+
+        // Frequency tables
+        for (int i = 0; i < 4; i++) {
+          oss << "fclk_frequency_table[" << i << "]:" << metrics_table.fclk_frequency_table[i]
+              << ";";
+          oss << "uclk_frequency_table[" << i << "]:" << metrics_table.uclk_frequency_table[i]
+              << ";";
+          oss << "socclk_frequency_table[" << i << "]:" << metrics_table.socclk_frequency_table[i]
+              << ";";
+          oss << "vclk_frequency_table[" << i << "]:" << metrics_table.vclk_frequency_table[i]
+              << ";";
+          oss << "dclk_frequency_table[" << i << "]:" << metrics_table.dclk_frequency_table[i]
+              << ";";
+          oss << "lclk_frequency_table[" << i << "]:" << metrics_table.lclk_frequency_table[i]
+              << ";";
+        }
+
+        // DPM ranges
+        oss << "max_lclk_dpm_range:" << metrics_table.max_lclk_dpm_range << ";";
+        oss << "min_lclk_dpm_range:" << metrics_table.min_lclk_dpm_range << ";";
+
+        // XGMI metrics
+        oss << "xgmi_width:" << metrics_table.xgmi_width << ";";
+        oss << "xgmi_bitrate:" << metrics_table.xgmi_bitrate << ";";
+
+        for (int i = 0; i < 8; i++) {
+          oss << "xgmi_read_bandwidth_acc[" << i << "]:" << metrics_table.xgmi_read_bandwidth_acc[i]
+              << ";";
+          oss << "xgmi_write_bandwidth_acc[" << i
+              << "]:" << metrics_table.xgmi_write_bandwidth_acc[i] << ";";
+        }
+
+        // Utilization and bandwidth metrics
+        oss << "socket_c0_residency:" << metrics_table.socket_c0_residency << ";";
+        oss << "socket_gfx_busy:" << metrics_table.socket_gfx_busy << ";";
+        oss << "dram_bandwidth_utilization:" << metrics_table.dram_bandwidth_utilization << ";";
+        oss << "socket_c0_residency_acc:" << metrics_table.socket_c0_residency_acc << ";";
+        oss << "socket_gfx_busy_acc:" << metrics_table.socket_gfx_busy_acc << ";";
+        oss << "dram_bandwidth_acc:" << metrics_table.dram_bandwidth_acc << ";";
+        oss << "max_dram_bandwidth:" << metrics_table.max_dram_bandwidth << ";";
+        oss << "dram_bandwidth_utilization_acc:" << metrics_table.dram_bandwidth_utilization_acc
+            << ";";
+
+        // PCIe bandwidth
+        for (int i = 0; i < 4; i++) {
+          oss << "pcie_bandwidth_acc[" << i << "]:" << metrics_table.pcie_bandwidth_acc[i] << ";";
+        }
+
+        // Throttling residency accumulators
+        oss << "prochot_residency_acc:" << metrics_table.prochot_residency_acc << ";";
+        oss << "ppt_residency_acc:" << metrics_table.ppt_residency_acc << ";";
+        oss << "socket_thm_residency_acc:" << metrics_table.socket_thm_residency_acc << ";";
+        oss << "vr_thm_residency_acc:" << metrics_table.vr_thm_residency_acc << ";";
+        oss << "hbm_thm_residency_acc:" << metrics_table.hbm_thm_residency_acc << ";";
+        oss << "spare:" << metrics_table.spare;
+
+        std::string result = oss.str();
+        strncpy(value->value.str, result.c_str(), sizeof(value->value.str) - 1);
+        value->value.str[sizeof(value->value.str) - 1] = '\0';
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_FIRST_ONLINE_CORE: {
+      uint32_t core_ind = 0;
+      value->status = amdsmi_first_online_core_on_cpu_socket(processor_handle, &core_ind);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(core_ind);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_FAMILY: {
+      uint32_t cpu_family = 0;
+      value->status = amdsmi_get_cpu_family(&cpu_family);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(cpu_family);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_MODEL_ID: {
+      uint32_t cpu_model = 0;
+      value->status = amdsmi_get_cpu_model(&cpu_model);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(cpu_model);
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_CORES_PER_SOCKET: {
+      uint32_t sock_count = 0;
+      amdsmi_status_t ret_count = amdsmi_get_cpu_socket_count(&sock_count);
+      if (ret_count == AMDSMI_STATUS_SUCCESS && sock_count > 0) {
+        auto* soc_info = new amdsmi_sock_info_t[sock_count];
+        value->status = amdsmi_get_cpu_cores_per_socket(sock_count, soc_info);
+        value->type = INTEGER;
+        if (value->status == AMDSMI_STATUS_SUCCESS) {
+          // Return cores for the first socket or specific socket based on processor_handle
+          value->value.l_int = static_cast<int64_t>(soc_info[0].cores_per_socket);
+        }
+        delete[] soc_info;
+      } else {
+        value->status = ret_count;
+      }
+      break;
+    }
+
+    case RDC_FI_CPU_SOCKET_COUNT: {
+      uint32_t sock_count = 0;
+      value->status = amdsmi_get_cpu_socket_count(&sock_count);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(sock_count);
+      }
+      break;
+    }
+
     default:
       value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      RDC_LOG(RDC_DEBUG, "CPU field " << field_id << " not supported");
+      break;
   }
+
   return Smi2RdcError(static_cast<amdsmi_status_t>(value->status));
 }
 
@@ -1161,6 +1637,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     RDC_LOG(RDC_ERROR,
             "Failed to get processor handle for device " << info_str << " error: " << ret);
     return Smi2RdcError(ret);
+  }
+
+  // temporarily force cpu type
+  // TODO: Remove once entities support CPUs
+  if (field_id > RDC_FI_CPU_COUNT) {
+    info.device_type = RDC_DEVICE_TYPE_CPU;
+    RDC_LOG(RDC_ERROR, "Forcing device type to CPU for field " << field_id_string(field_id));
   }
 
   if ((field_id > RDC_FI_CPU_COUNT) && (info.device_type != RDC_DEVICE_TYPE_CPU)) {

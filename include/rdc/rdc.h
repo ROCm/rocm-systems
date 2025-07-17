@@ -439,6 +439,46 @@ typedef enum {
   RDC_FI_CPU_POWER_LIMIT,         //!< Power limit (watts)
   RDC_FI_CPU_VENDOR,              //!< Name of the vendor
   RDC_FI_CPU_MODEL,               //!< Name of the model
+
+  /** TODO: Clean up duplicates
+   * @brief Below are AI generated from functions
+   */
+  RDC_FI_CPU_CORE_ENERGY,               //!< CPU core energy consumption (microjoules)
+  RDC_FI_CPU_SOCKET_ENERGY,             //!< CPU socket energy consumption (microjoules)
+  RDC_FI_CPU_THREADS_PER_CORE,          //!< Number of threads per CPU core
+  RDC_FI_CPU_HSMP_DRIVER_VERSION,       //!< HSMP driver version
+  RDC_FI_CPU_SMU_FW_VERSION,            //!< SMU firmware version
+  RDC_FI_CPU_HSMP_PROTO_VERSION,        //!< HSMP protocol version
+  RDC_FI_CPU_PROCHOT_STATUS,            //!< CPU PROCHOT status
+  RDC_FI_CPU_FCLK_FREQUENCY,            //!< CPU fabric clock frequency (MHz)
+  RDC_FI_CPU_MCLK_FREQUENCY,            //!< CPU memory clock frequency (MHz)
+  RDC_FI_CPU_CCLK_LIMIT,                //!< CPU core clock limit (MHz)
+  RDC_FI_CPU_SOCKET_ACTIVE_FREQ_LIMIT,  //!< CPU socket active frequency limit (MHz)
+  RDC_FI_CPU_SOCKET_FREQ_LIMIT_SRC,     //!< CPU socket frequency limit source type
+  RDC_FI_CPU_SOCKET_FREQ_RANGE_MAX,     //!< CPU socket maximum frequency range (MHz)
+  RDC_FI_CPU_SOCKET_FREQ_RANGE_MIN,     //!< CPU socket minimum frequency range (MHz)
+  RDC_FI_CPU_CORE_FREQ_LIMIT,           //!< CPU core current frequency limit (MHz)
+  RDC_FI_CPU_CORE_BOOST_LIMIT,          //!< CPU core boost limit (MHz)
+  RDC_FI_CPU_SOCKET_C0_RESIDENCY,       //!< CPU socket C0 residency percentage
+  RDC_FI_CPU_DDR_BW_MAX_BW,             //!< CPU DDR maximum bandwidth (MB/s)
+  RDC_FI_CPU_DDR_BW_UTILIZED_BW,        //!< CPU DDR utilized bandwidth (MB/s)
+  RDC_FI_CPU_DDR_BW_UTILIZED_PCT,       //!< CPU DDR utilized bandwidth percentage
+  RDC_FI_CPU_SOCKET_TEMPERATURE,        //!< CPU socket temperature (millidegrees Celsius)
+  RDC_FI_CPU_DIMM_TEMP_RANGE,           //!< CPU DIMM temperature range
+  RDC_FI_CPU_DIMM_REFRESH_RATE,         //!< CPU DIMM refresh rate
+  RDC_FI_CPU_DIMM_POWER_CONSUMPTION,    //!< CPU DIMM power consumption (milliwatts)
+  RDC_FI_CPU_DIMM_THERMAL_SENSOR,       //!< CPU DIMM thermal sensor temperature (millidegrees)
+  RDC_FI_CPU_SOCKET_LCLK_DPM_LEVEL,     //!< CPU socket LCLK DPM level
+  RDC_FI_CPU_IO_BANDWIDTH,              //!< CPU I/O bandwidth (MB/s)
+  RDC_FI_CPU_XGMI_BANDWIDTH,            //!< CPU XGMI bandwidth (MB/s)
+  RDC_FI_CPU_HSMP_METRICS_VERSION,      //!< HSMP metrics table version
+  RDC_FI_CPU_HSMP_METRICS_TABLE,        //!< HSMP metrics table data
+  RDC_FI_CPU_FIRST_ONLINE_CORE,         //!< First online core on CPU socket
+  RDC_FI_CPU_FAMILY,                    //!< CPU family identifier
+  RDC_FI_CPU_MODEL_ID,                  //!< CPU model identifier
+  RDC_FI_CPU_CORES_PER_SOCKET,          //!< Number of CPU cores per socket
+  RDC_FI_CPU_SOCKET_COUNT,              //!< Number of CPU sockets
+
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
