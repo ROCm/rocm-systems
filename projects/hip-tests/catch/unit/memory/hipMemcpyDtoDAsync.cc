@@ -25,6 +25,7 @@ This testcase verifies the Basic scenario
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
+#include <numeric>
 
 static constexpr auto NUM_ELM{1024};
 
