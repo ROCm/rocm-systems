@@ -33,7 +33,6 @@ different stream with hipStreamWaitEvent api
 #include <mutex>
 
 using namespace std;
-constexpr int N = 1 << 20;
 
 TEST_CASE("Unit_hipStreamWaitEvent_Negative") {
   enum class StreamTestType { NullStream = 0, StreamPerThread, CreatedStream };
