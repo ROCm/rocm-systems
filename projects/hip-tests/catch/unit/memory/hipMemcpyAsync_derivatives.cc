@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <memcpy1d_tests_common.hh>
 #include <resource_guards.hh>
 #include <utils.hh>
+#include <numeric>
 
 TEST_CASE("Unit_hipMemcpyDtoHAsync_Positive_Basic") {
   const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
