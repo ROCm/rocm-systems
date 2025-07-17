@@ -26,6 +26,7 @@ subtrees:
       - file: how-to/analyze/cli.rst
       - file: how-to/analyze/grafana-gui.rst
       - file: how-to/analyze/standalone-gui.rst
+      - file: how-to/analyze/tui.rst
 
   - caption: Conceptual
     entries:

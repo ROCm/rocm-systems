@@ -147,7 +147,7 @@ def build_subsection(
 
         collapsible = Collapsible(*widgets, title=title, collapsed=collapsed)
     elif tui_style == "roofline":
-        if dfs["roofline"]:
+        if dfs["4. Roofline"]:
             widget = RooflinePlot(dfs)
             collapsible = Collapsible(widget, title=title, collapsed=collapsed)
         else:
@@ -172,28 +172,89 @@ def build_dynamic_kernel_sections(
 ) -> List[Collapsible]:
     children = []
 
+    def add_warning(message: str):
+        children.append(Label(message, classes="warning"))
+
+    def validate_data_structure(data, name: str, parent_name: str = None) -> bool:
+        if data is None:
+            location = f"'{parent_name}' > '{name}'" if parent_name else f"'{name}'"
+            add_warning(f"Analysis result for {location} is not available")
+            return False
+
+        if not isinstance(data, dict):
+            location = f"'{parent_name}' > '{name}'" if parent_name else f"'{name}'"
+            add_warning(
+                f"Analysis result for {location} is not a dictionary type: {type(data)}"
+            )
+            return False
+
+        return True
+
+    def create_safe_widget(subsection_name: str, data: dict, section_name: str):
+        if not (isinstance(data, dict) and "df" in data):
+            add_warning(
+                f"Invalid data structure for '{subsection_name}' in section '{section_name}'"
+            )
+            return None
+
+        try:
+            df = data["df"]
+            tui_style = data.get("tui_style")
+            widget = create_widget_from_data(df, tui_style)
+
+            if widget is None:
+                add_warning(f"Widget creation returned None for '{subsection_name}'")
+                return None
+
+            return widget
+        except Exception as e:
+            add_warning(f"Failed to create widget for '{subsection_name}': {str(e)}")
+            return None
+
+    def create_safe_collapsible(widget, title):
+        try:
+            return Collapsible(widget, title=title, collapsed=True)
+        except Exception as e:
+            add_warning(f"Failed to create collapsible for '{title}': {str(e)}")
+            return None
+
     try:
+        if not validate_data_structure(dfs, "analysis result"):
+            return children
+
         for section_name, subsections in dfs.items():
             if section_name in skip_sections:
                 continue
 
+            if not validate_data_structure(subsections, section_name):
+                continue
+
             kernel_children = []
             for subsection_name, data in subsections.items():
-                if isinstance(data, dict) and "df" in data:
-                    df = data["df"]
-                    tui_style = data.get("tui_style")
-                    widget = create_widget_from_data(df, tui_style)
-                    kernel_children.append(
-                        Collapsible(widget, title=subsection_name, collapsed=True)
+                try:
+                    widget = create_safe_widget(subsection_name, data, section_name)
+                    if widget:
+                        collapsible = create_safe_collapsible(widget, subsection_name)
+                        if collapsible:
+                            kernel_children.append(collapsible)
+                except Exception as e:
+                    add_warning(
+                        f"Error processing subsection '{subsection_name}' in section '{section_name}': {str(e)}"
                     )
 
             if kernel_children:
-                children.append(
-                    Collapsible(*kernel_children, title=section_name, collapsed=True)
-                )
+                try:
+                    section_collapsible = Collapsible(
+                        *kernel_children, title=section_name, collapsed=True
+                    )
+                    children.append(section_collapsible)
+                except Exception as e:
+                    add_warning(
+                        f"Failed to create collapsible for section '{section_name}': {str(e)}"
+                    )
 
     except Exception as e:
-        children.append(Label(f"Error in Kernel Section: {str(e)}", classes="error"))
+        add_warning(f"Unexpected error in Kernel Section processing: {str(e)}")
 
     return children
 

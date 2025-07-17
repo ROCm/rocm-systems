@@ -36,9 +36,11 @@ Users may checkout `amd-staging` to preview upcoming features.
 
 ## Testing
 
+Populate the empty variables in `Dockerfile.customrocmtest` based on latest CI build information.
+
 To quickly get the environment (bash shell) for building and testing, run the following commands:
 * `cd docker`
-* `docker compose -f docker-compose.test.yml up --force-recreate -d && docker attach docker-test-1`
+* `docker compose -f docker-compose.customrocmtest.yml up --force-recreate -d && docker attach docker-customrocmtest-1`
 
 Inside the docker container, clean, build and install the project with tests enabled:
 ```
@@ -54,7 +56,7 @@ ctest
 
 For manual testing, you can find the executable at `install/bin/rocprof-compute`
 
-NOTE: This Dockerfile uses `rocm/dev-ubuntu-22.04` as the base image
+NOTE: This Dockerfile uses `ubuntu 22.04` as the base operating system image
 
 ## Standalone binary
 

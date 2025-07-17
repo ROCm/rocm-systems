@@ -290,7 +290,7 @@ class RooflinePlot(Static):
         try:
             plot_str = ""
             try:
-                result = self.df["roofline"]
+                result = self.df["4. Roofline"]
                 if result:
                     plot_str = str(result)
             except:
