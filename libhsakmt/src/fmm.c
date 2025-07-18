@@ -23,6 +23,7 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+#define _GNU_SOURCE
 #include "libhsakmt.h"
 #include "fmm.h"
 #include "hsakmt/hsakmtmodel.h"
@@ -43,6 +44,11 @@
 #include <numaif.h>
 #include "rbtree.h"
 #include <amdgpu.h>
+
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <sys/stat.h>
+#include "hsakmt/linux/udmabuf.h"
 
 #ifndef MPOL_F_STATIC_NODES
 /* Bug in numaif.h, this should be defined in there. Definition copied
@@ -148,6 +154,10 @@ static void *reserved_aperture_allocate_aligned(manageable_aperture_t *aper,
 						uint64_t size, uint64_t align);
 static void reserved_aperture_release(manageable_aperture_t *aper,
 				      void *addr, uint64_t size);
+
+static int bind_mem_to_numa(uint32_t node_id, void *mem,
+			    uint64_t SizeInBytes, HsaMemFlags mflags);
+
 static const manageable_aperture_ops_t reserved_aperture_ops = {
 	reserved_aperture_allocate_aligned,
 	reserved_aperture_release
@@ -758,7 +768,7 @@ static void *reserved_aperture_allocate_aligned(manageable_aperture_t *app,
 }
 
 void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t align,
-			    uint64_t guard_size, void *aper_base, void *aper_limit)
+			    uint64_t guard_size, void *aper_base, void *aper_limit, int fd)
 {
 	void *addr, *aligned_addr, *aligned_end, *mapping_end;
 	uint64_t aligned_padded_size;
@@ -766,7 +776,7 @@ void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t 
 	aligned_padded_size = size + guard_size * 2 + (align - PAGE_SIZE);
 
 	/* Map memory PROT_NONE to alloc address space only */
-	addr = mmap(0, aligned_padded_size, PROT_NONE, flags, -1, 0);
+	addr = mmap(0, aligned_padded_size, PROT_NONE, flags | MAP_ANONYMOUS, -1, 0);
 	if (addr == MAP_FAILED) {
 		pr_err("mmap failed: %s\n", strerror(errno));
 		return NULL;
@@ -795,7 +805,7 @@ void *hsakmt_mmap_allocate_aligned(int prot, int flags, uint64_t size, uint64_t 
 		return aligned_addr;
 
 	/*  MAP_FIXED to the aligned address with required prot */
-	addr = mmap(aligned_addr, size, prot, flags | MAP_FIXED, -1, 0);
+	addr = mmap(aligned_addr, size, prot, flags | MAP_FIXED, fd, 0);
 	if (addr == MAP_FAILED) {
 		pr_err("mmap failed: %s\n", strerror(errno));
 		return NULL;
@@ -859,7 +869,7 @@ static void *mmap_aperture_allocate_aligned(manageable_aperture_t *aper,
 	guard_size = (uint64_t)aper->guard_pages * PAGE_SIZE;
 
 	return hsakmt_mmap_allocate_aligned(PROT_NONE, MAP_ANONYMOUS | MAP_NORESERVE | MAP_PRIVATE,
-				     size, align, guard_size, aper->base, aper->limit);
+				     size, align, guard_size, aper->base, aper->limit, -1);
 }
 
 static void mmap_aperture_release(manageable_aperture_t *aper,
@@ -1494,7 +1504,7 @@ void *hsakmt_fmm_allocate_scratch(uint32_t gpu_id, void *address, uint64_t Memor
 		mem = hsakmt_mmap_allocate_aligned(PROT_READ | PROT_WRITE,
 					    MAP_PRIVATE | MAP_ANONYMOUS,
 					    aligned_size, SCRATCH_ALIGN, 0,
-					    0, (void *)LONG_MAX);
+					    0, (void *)LONG_MAX, -1);
 	}
 
 	/* Remember scratch backing aperture for later */
@@ -1603,6 +1613,126 @@ static void *fmm_allocate_va(uint32_t gpu_id, void *address, uint64_t size,
 	return mem;
 }
 
+/* use udmabuf driver to allocate buf */
+static void* udmabuf_allocation(uint32_t gpu_id, uint32_t node_id, uint64_t size,
+                               manageable_aperture_t *aperture, uint64_t alignment,
+                               HsaMemFlags mflags, vm_object_t** vm_obj)
+{
+	struct kfd_ioctl_import_dmabuf_args importArgs = {0};
+	int memfd, dmabuf_fd;
+	long long node_size, free_size;
+	struct udmabuf_create create;
+	uint64_t alignment_size;
+	uint32_t numa_node_id;
+	uint64_t guard_size;
+	void *mem;
+	int ret;
+
+	dmabuf_fd = -1;
+	memfd = -1;
+
+	*vm_obj = NULL;
+
+	memfd = memfd_create("thunk_memfd", MFD_ALLOW_SEALING);
+	if (memfd == -1) {
+		pr_debug("running kernel does not support memfd\n");
+		return NULL;
+	}
+
+	if (ftruncate(memfd, size) == -1) {
+		pr_debug("ftruncate fail\n");
+		goto error_release_memfd;
+	}
+	pr_debug("PID: %jd; fd: %d; /proc/%jd/fd/%d\n",
+               (intmax_t) getpid(), memfd, (intmax_t) getpid(), memfd);
+
+	if (fcntl(memfd, F_ADD_SEALS, F_SEAL_SHRINK | F_SEAL_GROW) < 0) {
+		pr_debug("fcntl fail %s\n", strerror(errno));
+		goto error_release_memfd;
+	}
+
+	alignment_size = PAGE_SIZE << svm.alignment_order;
+	alignment = alignment ? alignment : aperture->align;
+	while (alignment < alignment_size && size >= (alignment << 1))
+		alignment <<= 1;
+
+	guard_size = (uint64_t)aperture->guard_pages * PAGE_SIZE;
+
+	mem = hsakmt_mmap_allocate_aligned(PROT_WRITE | PROT_READ, MAP_NORESERVE | MAP_SHARED,
+					  size, alignment, guard_size, aperture->base, aperture->limit, memfd);
+	if (!mem)
+		goto error_release_memfd;
+
+	/* set madvise flags to HUGEPAGE if allocate more than 2MB */
+	if (size >= (2 * 1024 * 1024))
+		madvise(mem, size, MADV_HUGEPAGE);
+
+	/* always bind to numa node */
+	mflags.ui32.NoSubstitute = 1;
+	/* Bind to NUMA node */
+	/* node_id is gpu id, get closed numa id */
+	numa_node_id = hsakmt_get_direct_link_cpu(node_id);
+	if (bind_mem_to_numa(numa_node_id, mem, size, mflags))
+		goto error_release_aperture;
+
+	node_size = numa_node_size(numa_node_id, &free_size);
+	pr_debug("udmabuf_allocation: numa_node_id %d, node_size %lld, free_size %lld\n",
+		numa_node_id, node_size, free_size);
+	/* compare free size at numa_node_id with size */
+	if ((uint64_t)free_size < size) {
+		pr_debug("udmabuf_allocation: has no enough ram on numa_node_id %d, node_size %lld, free_size %lld\n",
+			numa_node_id, node_size, free_size);
+		goto error_release_aperture;
+	}
+
+	create.memfd = memfd;
+	create.flags = UDMABUF_FLAGS_CLOEXEC;
+	create.offset = 0;
+	create.size = size;
+	dmabuf_fd = ioctl(hsakmt_udmabuf_dev_fd, UDMABUF_CREATE, &create);
+
+	if (dmabuf_fd < 0) {
+		pr_debug("ioctl UDMABUF_CREATE failed\n");
+		goto error_release_aperture;
+	}
+
+	importArgs.va_addr = (uint64_t)mem;
+	importArgs.gpu_id = gpu_id;
+	importArgs.dmabuf_fd = dmabuf_fd;
+
+	ret = hsakmt_ioctl(hsakmt_kfd_fd, AMDKFD_IOC_IMPORT_DMABUF, (void *)&importArgs);
+	if (ret) {
+		pr_debug("ioctl AMDKFD_IOC_IMPORT_DMABUF failed\n, ret 0x%x", ret);
+		goto error_release_dmabuf;
+	}
+
+	/* Allocate object */
+	pthread_mutex_lock(&aperture->fmm_mutex);
+	*vm_obj = aperture_allocate_object(aperture, mem, importArgs.handle,
+                                          size, mflags);
+	pthread_mutex_unlock(&aperture->fmm_mutex);
+
+	if (*vm_obj == NULL)
+		goto error_release_dmabuf;
+
+	/* after import udmabuf into kfd driver close dmabuf_fd
+	 * as kfd driver holds the dmabuf
+	 */
+	close(dmabuf_fd);
+	close(memfd);
+
+	return mem;
+
+error_release_dmabuf:
+	close(dmabuf_fd);
+error_release_aperture:
+	aperture_release_area(aperture, mem, size);
+error_release_memfd:
+	close(memfd);
+
+	return NULL;
+}
+
 void *hsakmt_fmm_allocate_device(uint32_t gpu_id, uint32_t node_id, void *address,
 			  uint64_t MemorySizeInBytes, uint64_t alignment, HsaMemFlags mflags)
 {
@@ -1653,35 +1783,51 @@ void *hsakmt_fmm_allocate_device(uint32_t gpu_id, uint32_t node_id, void *addres
 	if (mflags.ui32.Contiguous)
 		ioc_flags |= KFD_IOC_ALLOC_MEM_FLAGS_CONTIGUOUS_BEST_EFFORT;
 
-	mem = __fmm_allocate_device(gpu_id, address, size, aperture, &mmap_offset,
-				    ioc_flags, alignment, &vm_obj);
-
-	if (mem && vm_obj) {
-		pthread_mutex_lock(&aperture->fmm_mutex);
-		/* Store memory allocation flags, not ioc flags */
-		vm_obj->mflags = mflags;
-		hsakmt_gpuid_to_nodeid(gpu_id, &vm_obj->node_id);
-		pthread_mutex_unlock(&aperture->fmm_mutex);
+	mem = NULL;
+	if (hsakmt_udmabuf_dev_fd > 0 && aperture == svm.dgpu_aperture && !hsakmt_is_dgpu
+		 && aperture->ops == &mmap_aperture_ops) {
+		mem  = udmabuf_allocation(gpu_id, node_id, size, aperture, alignment,
+                                        mflags, &vm_obj);
+		pr_debug("udmabuf_allocation mem %p\n", mem);
+		if (!mem)
+			pr_debug("udmabuf_allocation allocation fail\n");
 	}
 
-	/* if alloc vram-only not mmap to cpu vm since no va */
-	if (mem && !mflags.ui32.NoAddress) {
-		void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
+	/* env HSA_USE_UDMABUF not set, or not apu, or cannot use udmabuf,
+	 * fall back to use device driver to allocate memory
+	 */
+	if (!mem) {
+		mem = __fmm_allocate_device(gpu_id, address, size, aperture, &mmap_offset,
+					   ioc_flags, alignment, &vm_obj);
+
+		/* if alloc vram-only not mmap to cpu vm since no va */
+		if (mem && !mflags.ui32.NoAddress) {
+			void *ret = fmm_map_to_cpu(mem, MemorySizeInBytes,
 					   mflags.ui32.HostAccess,
 					   gpu_mem[gpu_mem_id].drm_render_fd,
 					   mmap_offset);
 
-		if (ret == MAP_FAILED) {
-			__fmm_release(vm_obj, aperture);
-			return NULL;
-		}
+			if (ret == MAP_FAILED) {
+				__fmm_release(vm_obj, aperture);
+				return NULL;
+			}
 #ifdef SANITIZER_AMDGPU
-		if (vm_obj) {
-			vm_obj->mmap_flags = mflags.ui32.HostAccess ? PROT_READ | PROT_WRITE : PROT_NONE;
-			vm_obj->mmap_fd = gpu_mem[gpu_mem_id].drm_render_fd;
-			vm_obj->mmap_offset = mmap_offset;
-		}
+			if (vm_obj) {
+				vm_obj->mmap_flags = mflags.ui32.HostAccess ? PROT_READ | PROT_WRITE : PROT_NONE;
+				vm_obj->mmap_fd = gpu_mem[gpu_mem_id].drm_render_fd;
+				vm_obj->mmap_offset = mmap_offset;
+			}
 #endif
+		}
+	}
+
+	if (mem && vm_obj) {
+		pthread_mutex_lock(&aperture->fmm_mutex);
+		/* Store memory allocation flags, not ioc flags */
+		 vm_obj->mflags = mflags;
+		 hsakmt_gpuid_to_nodeid(gpu_id, &vm_obj->node_id);
+		 pthread_mutex_unlock(&aperture->fmm_mutex);
+
 	}
 
 	return mem;
@@ -1773,7 +1919,7 @@ static void *fmm_allocate_host_cpu(void *address, uint64_t MemorySizeInBytes,
 	return mem;
 }
 
-static int bind_mem_to_numa(uint32_t node_id, void *mem,
+static int bind_mem_to_numa(uint32_t numa_node_id, void *mem,
 			    uint64_t SizeInBytes, HsaMemFlags mflags)
 {
 	int mode = MPOL_F_STATIC_NODES;
@@ -1782,34 +1928,37 @@ static int bind_mem_to_numa(uint32_t node_id, void *mem,
 	long r;
 
 	pr_debug("%s mem %p flags 0x%x size 0x%lx node_id %d\n", __func__,
-		mem, mflags.Value, SizeInBytes, node_id);
+		mem, mflags.Value, SizeInBytes, numa_node_id);
 
-	if (mflags.ui32.NoNUMABind)
-		return 0;
-
-	if (numa_available() == -1)
-		return 0;
+	if (mflags.ui32.NoNUMABind || numa_available() == -1) {
+		/* but need bind to a numa node */
+		if (mflags.ui32.NoSubstitute)
+			return -EFAULT;
+		else
+			return 0;
+	}
 
 	num_node = numa_max_node() + 1;
 
 	/* Ignore binding requests to invalid nodes IDs */
-	if (node_id >= (unsigned)num_node) {
-		pr_warn("node_id %d >= num_node %d\n", node_id, num_node);
-		return 0;
+	if (numa_node_id >= (unsigned)num_node || numa_node_id == INVALID_NODEID || num_node <= 1) {
+		pr_warn("numa_node_id is out range: numa_node_id %d, num_node %d\n", numa_node_id, num_node);
+		if (mflags.ui32.NoSubstitute)
+			return -EFAULT;
+		else
+			return 0;
 	}
-
-	if (num_node <= 1)
-		return 0;
 
 	node_mask = numa_bitmask_alloc(num_node);
 	if (!node_mask)
 		return -ENOMEM;
 
 #ifdef __PPC64__
-	numa_bitmask_setbit(node_mask, node_id * 8);
+	numa_bitmask_setbit(node_mask, numa_node_id * 8);
 #else
-	numa_bitmask_setbit(node_mask, node_id);
+	numa_bitmask_setbit(node_mask, numa_node_id);
 #endif
+
 	mode |= mflags.ui32.NoSubstitute ? MPOL_BIND : MPOL_PREFERRED;
 	r = mbind(mem, SizeInBytes, mode, node_mask->maskp, num_node + 1, 0);
 	numa_bitmask_free(node_mask);
