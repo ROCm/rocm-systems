@@ -42,7 +42,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'rocprof-azure', 'rocprof-azure-ubuntu-24']
+        runner: ['navi4', 'navi3', 'mi300']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
@@ -105,7 +105,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: rocprof-azure-${{ matrix.os }}-emu-runner-set
+    runs-on: ${{ matrix.os }}-emu-runner-set
 
     permissions:
       contents: read
