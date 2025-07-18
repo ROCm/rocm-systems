@@ -54,9 +54,7 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <iostream>
 #include <thread>
-#include <chrono>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
@@ -3219,7 +3217,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
-  void *user_mode_driver_handle;
+  ThunkHandle user_mode_driver_handle;
   hsa_status_t status =
       region->Allocate(size, alloc_flags, &user_mode_driver_handle, 0);
   if (status == HSA_STATUS_SUCCESS) {
@@ -3236,7 +3234,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
-  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(memoryOnlyHandle.handle));
+  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
 
   if (memoryHandleIt == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
@@ -3291,7 +3289,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(memoryOnlyHandle.handle));
+  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
   if (memoryHandleIt == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3654,7 +3652,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
                                                    uint64_t flags) {
   *dmabuf_fd = -1;
-  auto memoryHandle = memory_handle_map_.find((void*)handle.handle);
+  auto memoryHandle = memory_handle_map_.find(MemoryHandle::Convert(handle));
   if (memoryHandle == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
@@ -3750,7 +3748,7 @@ hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapp
 hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_handle_t allocHandle,
                                                           const core::MemoryRegion** mem_region,
                                                           hsa_amd_memory_type_t* type) {
-  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(allocHandle.handle));
+  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(allocHandle));
   if (memoryHandleIt == memory_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   *mem_region = memoryHandleIt->second.region;

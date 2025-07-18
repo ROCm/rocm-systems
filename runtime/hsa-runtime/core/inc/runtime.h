@@ -822,7 +822,6 @@ class Runtime {
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
   struct MemoryHandle {
-    MemoryHandle() : region(NULL), size(0), ref_count(0), thunk_handle(NULL), alloc_flag(0) {}
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
                  ThunkHandle thunk_handle, MemoryRegion::AllocateFlags alloc_flag)
         : region(region),
@@ -832,10 +831,14 @@ class Runtime {
           thunk_handle(thunk_handle),
           alloc_flag(alloc_flag) {}
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(void* handle) {
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ThunkHandle handle) {
       hsa_amd_vmem_alloc_handle_t ret_handle = {
           static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle))};
       return ret_handle;
+    }
+
+    static __forceinline ThunkHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return reinterpret_cast<void*>(handle.handle);
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
@@ -844,7 +847,7 @@ class Runtime {
     size_t size;
     int ref_count;
     int use_count;
-    ThunkHandle thunk_handle;  // handle returned by hsaKmtAllocMemory(NoAddress = 1)
+    ThunkHandle thunk_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     MemoryRegion::AllocateFlags alloc_flag;
   };
   std::map<ThunkHandle, MemoryHandle> memory_handle_map_;
