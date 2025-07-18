@@ -58,7 +58,7 @@ constexpr size_t
 get_hsa_pcs_buffer_size()
 {
     // TODO: Find the minimum size of all buffers and use that.
-    return 1024 * sizeof(perf_sample_hosttrap_v1_t);
+    return 64 * 1024 * sizeof(perf_sample_hosttrap_v1_t);  // 4MB
 }
 }  // namespace utils
 }  // namespace pc_sampling
