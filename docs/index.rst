@@ -13,7 +13,7 @@ behind the tool and its components.
 
 If you're new to AQLprofile, see :doc:`What is AQLprofile? <what-is-aqlprofile>`.
 
-AQLprofile is open source and hosted at .
+AQLprofile is open source and hosted at `AQLprofile on GitHub <https://github.com/ROCm/aqlprofile>`_.
 
 .. grid:: 2
   :gutter: 3
