@@ -491,9 +491,8 @@ write_otf2(const output_config&                                          cfg,
         {
             // Free functions do not track agent information. Below handles case where
             // null rocprof agent id is passed to generate OTF2
-            constexpr auto null_rocp_agent_id =
-                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
-            const rocprofiler_agent_t* _agent = nullptr;
+            constexpr auto             null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
+            const rocprofiler_agent_t* _agent             = nullptr;
             if(agent != null_rocp_agent_id)
             {
                 _agent = _get_agent(agent);
@@ -896,9 +895,8 @@ write_otf2(const output_config&                                          cfg,
             auto _hash = get_hash_id(evt.name);
             // Using max numeric limits results in an out-of-bound runtime error for OTF2
             // and perfetto for agent ids. Setting handle to 0 for free functions.
-            constexpr auto null_rocp_agent_id =
-                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
-            auto handle = agent.handle;
+            constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
+            auto           handle             = agent.handle;
             if(agent == null_rocp_agent_id) handle = 0;
 
             add_write_string(_hash, evt.name);

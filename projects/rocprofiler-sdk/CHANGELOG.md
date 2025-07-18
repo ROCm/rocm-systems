@@ -204,6 +204,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - rocprofv3 avail tool renamed from rocprofv3_avail to rocprofv3-avail tool
 - rocprofv3 avail tool has support for command line arguments.
 - rocprofv3 tool now allows for Thread Trace + PC Sampling on the same agent
+- fixed inconsistency for what is a "null" handle in `rocprofiler_*_id_t` structs.
+  - correct answer is `.handle = 0` but some definitions used `UINT64_MAX`
 
 ### Resolved issues
 

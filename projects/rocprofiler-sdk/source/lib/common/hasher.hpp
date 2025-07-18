@@ -28,7 +28,9 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 namespace rocprofiler
@@ -53,17 +55,20 @@ struct fnv1a_hasher
 
     // Hashes a numeric value.
     template <typename Tp, typename std::enable_if_t<std::is_arithmetic<Tp>::value, bool> = true>
-    void update(Tp data);
+    fnv1a_hasher& update(Tp data);
+
+    template <typename Tp>
+    fnv1a_hasher& update(const std::optional<Tp>& data);
 
     // Using the loop instead of "update(str, strlen(str))" to avoid looping twice
-    void update(const char* str);
+    fnv1a_hasher& update(const char* str);
 
     // Hashes a byte array.
-    void update(const char* data, size_t size);
+    fnv1a_hasher& update(const char* data, size_t size);
 
-    void update(std::string_view s) { update(s.data(), s.size()); }
+    fnv1a_hasher& update(std::string_view s) { return update(s.data(), s.size()); }
 
-    void update(const std::string& s) { update(s.data(), s.size()); }
+    fnv1a_hasher& update(const std::string& s) { return update(s.data(), s.size()); }
 
     // Usage: uint64_t hashed_value = Hash::combine(33, false, "ABC", 458L, 3u, 'x');
     template <typename Tp, typename... TailT>
@@ -72,7 +77,7 @@ struct fnv1a_hasher
     // fnv1a_hasher.update_all(33, false, "ABC")` is shorthand for calling fnv1a_hasher.update(...)
     // for each value in the same order
     template <typename Tp, typename... TailT>
-    void update_all(Tp&& arg, TailT&&... args);
+    fnv1a_hasher& update_all(Tp&& arg, TailT&&... args);
 
     uint64_t digest() const { return m_result; }
 
@@ -84,13 +89,20 @@ private:
 };
 
 template <typename Tp, typename std::enable_if_t<std::is_arithmetic<Tp>::value, bool>>
-void
+fnv1a_hasher&
 fnv1a_hasher::update(Tp data)
 {
-    update(reinterpret_cast<const char*>(&data), sizeof(data));
+    return update(reinterpret_cast<const char*>(&data), sizeof(data));
 }
 
-inline void
+template <typename Tp>
+fnv1a_hasher&
+fnv1a_hasher::update(const std::optional<Tp>& data)
+{
+    return (data) ? update(*data) : *this;
+}
+
+inline fnv1a_hasher&
 fnv1a_hasher::update(const char* str)
 {
     constexpr auto max_n = 4096;
@@ -101,9 +113,10 @@ fnv1a_hasher::update(const char* str)
         update(*p);
         if(++n >= max_n) break;  // prevent infinite loop
     }
+    return *this;
 }
 
-inline void
+inline fnv1a_hasher&
 fnv1a_hasher::update(const char* data, size_t size)
 {
     for(size_t i = 0; i < size; ++i)
@@ -113,23 +126,23 @@ fnv1a_hasher::update(const char* data, size_t size)
         // signed integers.
         m_result *= kFnv1a64Prime;
     }
+    return *this;
 }
 
 template <typename Tp, typename... TailT>
 uint64_t
 fnv1a_hasher::combine(Tp&& arg, TailT&&... args)
 {
-    auto _hasher = fnv1a_hasher{};
-    _hasher.update_all(std::forward<Tp>(arg), std::forward<TailT>(args)...);
-    return _hasher.digest();
+    return fnv1a_hasher{}.update_all(std::forward<Tp>(arg), std::forward<TailT>(args)...).digest();
 }
 
 template <typename Tp, typename... TailT>
-void
+fnv1a_hasher&
 fnv1a_hasher::update_all(Tp&& arg, TailT&&... args)
 {
     update(arg);
     if constexpr(sizeof...(TailT) > 0) update_all(std::forward<TailT>(args)...);
+    return *this;
 }
 }  // namespace common
 }  // namespace rocprofiler

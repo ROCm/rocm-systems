@@ -83,9 +83,9 @@ destroy_queue(hsa_queue_t* hsa_queue)
 }
 
 constexpr rocprofiler_agent_t default_agent =
-    rocprofiler_agent_t{.size = sizeof(rocprofiler_agent_t),
-                        .id   = rocprofiler_agent_id_t{std::numeric_limits<uint64_t>::max()},
-                        .type = ROCPROFILER_AGENT_TYPE_NONE,
+    rocprofiler_agent_t{.size                       = sizeof(rocprofiler_agent_t),
+                        .id                         = rocprofiler_agent_id_t{.handle = 0},
+                        .type                       = ROCPROFILER_AGENT_TYPE_NONE,
                         .cpu_cores_count            = 0,
                         .simd_count                 = 0,
                         .mem_banks_count            = 0,
@@ -129,8 +129,8 @@ constexpr rocprofiler_agent_t default_agent =
                         .local_mem_size             = 0,
                         .hive_id                    = 0,
                         .gpu_id                     = 0,
-                        .workgroup_max_dim          = {0, 0, 0},
-                        .grid_max_dim               = {0, 0, 0},
+                        .workgroup_max_dim          = {.x = 0, .y = 0, .z = 0},
+                        .grid_max_dim               = {.x = 0, .y = 0, .z = 0},
                         .mem_banks                  = nullptr,
                         .caches                     = nullptr,
                         .io_links                   = nullptr,

@@ -159,8 +159,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
 
     if(buffer_id.handle == 0) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
-    constexpr auto invalid_buffer_id =
-        rocprofiler_buffer_id_t{std::numeric_limits<uint64_t>::max()};
+    constexpr auto invalid_buffer_id = rocprofiler_buffer_id_t{0};
 
     if(!ctx->buffered_tracer)
     {
@@ -168,7 +167,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
         ctx->buffered_tracer->buffer_data.fill(invalid_buffer_id);
     }
 
-    if(ctx->buffered_tracer->buffer_data.at(kind).handle != invalid_buffer_id.handle)
+    if(ctx->buffered_tracer->buffer_data.at(kind) != invalid_buffer_id)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
     RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain(ctx->buffered_tracer->domains, kind));

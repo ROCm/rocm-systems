@@ -462,7 +462,7 @@ impl(Args... args)
 
     [[maybe_unused]] const auto get_agent_id =
         [](const hsa_queue_t* hsa_queue) -> rocprofiler_agent_id_t {
-        rocprofiler_agent_id_t _agent_id{static_cast<uint64_t>(-1)};
+        rocprofiler_agent_id_t _agent_id{.handle = 0};
         bool                   found_agent{false};
 
         rocprofiler::hsa::get_queue_controller()->iterate_queues(
