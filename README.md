@@ -139,7 +139,7 @@ If you prefer to build RDC from source, follow the steps below.
 
     ```bash
     sudo apt-get update
-    sudo apt-get install automake make cmake g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl
+    sudo apt-get install automake make cmake g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl libcap-dev
     ```
 
 2. **Clone and Build gRPC:**

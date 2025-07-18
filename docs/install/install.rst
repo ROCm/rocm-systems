@@ -58,7 +58,7 @@ gRPC and Protoc must be built from source as the prebuilt packages are not avail
    .. code-block:: shell
 
     sudo apt-get update
-    sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl
+    sudo apt-get install automake make g++ unzip build-essential autoconf libtool pkg-config libgflags-dev libgtest-dev clang libc++-dev curl libcap-dev
 
 2. Clone and build gRPC:
 
