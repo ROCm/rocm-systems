@@ -141,9 +141,11 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   CHECK_STATUS("loader API table query failed", status);
 
   // Instantiate HSA timer
-  timer_ = new HsaTimer;
-  CHECK_STATUS("HSA timer allocation failed",
-               (timer_ == NULL) ? HSA_STATUS_ERROR : HSA_STATUS_SUCCESS);
+  try {
+    timer_ = new HsaTimer;
+  } catch (const std::bad_alloc&) {
+    CHECK_STATUS("HSA timer allocation failed", HSA_STATUS_ERROR);
+  }
 
   // System timeout
   timeout_ =
