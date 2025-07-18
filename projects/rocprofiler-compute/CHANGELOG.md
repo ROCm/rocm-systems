@@ -115,6 +115,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline support for Ubuntu 20.04 and SLES below 15.6
 * Usage of rocm-smi
+* Remove support for MI50/MI60 in accordance with the documentation
 
 ## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 
