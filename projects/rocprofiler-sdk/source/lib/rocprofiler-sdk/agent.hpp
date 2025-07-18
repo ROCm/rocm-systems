@@ -37,6 +37,45 @@ namespace rocprofiler
 {
 namespace agent
 {
+struct uuid_view_t
+{
+    union
+    {
+        uint8_t  bytes[16];   ///< raw bytes
+        uint64_t value64[2];  /// view as 64 bit chunks
+    };
+
+    constexpr uuid_view_t()
+    : bytes()
+    {
+        for(uint8_t& byte : bytes)
+        {
+            byte = 0;
+        }
+    }
+
+    explicit uuid_view_t(rocprofiler_uuid_t _uuid)
+    {
+        static_assert(sizeof(bytes) == sizeof(_uuid.bytes));
+        for(size_t i = 0; i < sizeof(bytes); i++)
+        {
+            bytes[i] = _uuid.bytes[i];
+        }
+    }
+
+    explicit constexpr operator rocprofiler_uuid_t() const
+    {
+        auto _uuid = rocprofiler_uuid_t{};
+        static_assert(std::is_same_v<std::remove_extent_t<decltype(bytes)>,
+                                     std::remove_extent_t<decltype(_uuid.bytes)>> == true);
+        for(size_t i = 0; i < sizeof(bytes); i++)
+        {
+            _uuid.bytes[i] = bytes[i];
+        }
+        return _uuid;
+    }
+};
+
 std::vector<const rocprofiler_agent_t*>
 get_agents();
 

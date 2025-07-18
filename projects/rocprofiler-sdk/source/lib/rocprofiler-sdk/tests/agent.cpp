@@ -111,7 +111,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 304;
+    constexpr auto expected_rocp_agent_size = 312;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
@@ -450,7 +450,9 @@ TEST(rocprofiler_lib, agent_visibility_multigpu)
         for(const auto* itr : _agents)
         {
             ordinals.emplace(itr->id, itr->logical_node_type_id);
-            uuids.emplace(itr->id, fmt::format("GPU-{:X}", itr->uuid.value));
+            auto uuid_view  = rocprofiler::agent::uuid_view_t{itr->uuid};
+            auto uuid_value = uuid_view.value64[0];
+            uuids.emplace(itr->id, fmt::format("GPU-{:X}", uuid_value));
             ROCP_WARNING << ordinals.at(itr->id) << " :: " << uuids.at(itr->id);
 
             all_ordinals = fmt::format("{},{}", all_ordinals, ordinals.at(itr->id));
@@ -637,7 +639,10 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
 
         for(const auto* itr : _agents)
         {
-            auto _uuid = fmt::format("GPU-{:X}", itr->uuid.value);
+            auto uuid_view  = rocprofiler::agent::uuid_view_t{itr->uuid};
+            auto uuid_value = uuid_view.value64[0];
+            auto _uuid      = fmt::format("GPU-{:X}", uuid_value);
+
             if(ordinals.empty())
             {
                 devices_reversed_with_ordinal_0_uuid = fmt::format("1,{}", _uuid);
@@ -761,7 +766,9 @@ TEST(rocprofiler_lib, agent_visibility_inverted_multigpu)
 
     for(const auto* itr : get_gpu_agents())
     {
-        const auto curr_uuid = fmt::format("GPU-{:X}", itr->uuid.value);
+        auto       uuid_view  = rocprofiler::agent::uuid_view_t{itr->uuid};
+        auto       uuid_value = uuid_view.value64[0];
+        const auto curr_uuid  = fmt::format("GPU-{:X}", uuid_value);
         if(ordinals.at(itr->id) == 0)
         {
             ASSERT_EQ(itr->runtime_visibility.hsa, 1) << "agent-" << itr->node_id;
