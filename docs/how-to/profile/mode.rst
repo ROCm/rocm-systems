@@ -294,6 +294,36 @@ for ``Compute Unit - Instruction Mix`` (block 10) and ``Wavefront Launch Statist
    ...
 
 
+It is also possible to collect individual metrics from the analysis report by providing metric ids.
+The following example only collects the counters required to calculate ``Total VALU FLOPs`` (metric id 11.1.0) and ``LDS Utilization`` (metric id 12.1.0).
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy -b 11.1.1 12.1.1 -- ./vcopy -n 1048576 -b 256
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 2.0.0
+   Profiler choice: rocprofv1
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
+   Target: MI200
+   Command: ./vcopy -n 1048576 -b 256
+   Kernel Selection: None
+   Dispatch Selection: None
+   Hardware Blocks: []
+   Report Sections: ['11.1.0', '12.1.0']
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+
 To see a list of available hardware report blocks, use the ``--list-metrics`` option.
 
 .. code-block:: shell-session

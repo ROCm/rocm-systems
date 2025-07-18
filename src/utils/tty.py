@@ -31,7 +31,7 @@ from tabulate import tabulate
 from config import HIDDEN_COLUMNS, HIDDEN_SECTIONS
 from utils import mem_chart, parser
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import convert_metric_id_to_panel_idx
+from utils.utils import convert_metric_id_to_panel_info
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -71,9 +71,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
             name for name, type in filter_panel_ids.items() if type == "metric_id"
         ]
     filter_panel_ids = [
-        convert_metric_id_to_panel_idx(section) for section in filter_panel_ids
+        int(convert_metric_id_to_panel_info(metric_id)[0])
+        for metric_id in filter_panel_ids
     ]
-    comparable_columns = parser.build_comparable_columns(args.time_unit)
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
