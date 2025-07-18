@@ -50,8 +50,8 @@ TEST_CASE("Unit_hipStreamCreate_default") {
 
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
-  REQUIRE(stream != nullptr);        // Check if stream has a valid ptr
-  REQUIRE(hip::checkStream(stream)); // check its flags and priority
+  REQUIRE(stream != nullptr);         // Check if stream has a valid ptr
+  REQUIRE(hip::checkStream(stream));  // check its flags and priority
   HIP_CHECK(hipStreamDestroy(stream));
 }
 /**
@@ -91,9 +91,8 @@ TEST_CASE("Unit_hipStreamCreate_StreamCapture_NegTst") {
   hipStream_t stream{nullptr};
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
-  hipStreamCaptureMode flag =
-      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
-               hipStreamCaptureModeRelaxed);
+  hipStreamCaptureMode flag = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                       hipStreamCaptureModeRelaxed);
   HIP_CHECK(hipStreamBeginCapture(stream, flag));
   HIP_CHECK_ERROR(hipStreamBeginCapture(stream, flag), hipErrorIllegalState);
   hipGraph_t graph = nullptr;
@@ -124,9 +123,8 @@ TEST_CASE("Unit_hipStreamCreate_StreamCapture_ParallelCapture") {
   streamMemAllocTest testObj2(byte_size);
   testObj1.createHostBufferWithData();
   testObj2.createHostBufferWithData();
-  hipStreamCaptureMode flags =
-      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
-               hipStreamCaptureModeRelaxed);
+  hipStreamCaptureMode flags = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                        hipStreamCaptureModeRelaxed);
   HIP_CHECK(hipStreamBeginCapture(stream1, flags));
   HIP_CHECK(hipStreamBeginCapture(stream2, flags));
   testObj1.allocFromDefMempool(stream1);
@@ -163,8 +161,7 @@ TEST_CASE("Unit_hipStreamCreate_StreamCapture_ParallelCapture") {
   testObj2.freeHostBuf();
 }
 
-void threadFunc_1(hipStream_t stream1, size_t byte_size,
-                  hipStreamCaptureMode flags) {
+void threadFunc_1(hipStream_t stream1, size_t byte_size, hipStreamCaptureMode flags) {
   streamMemAllocTest testObj(byte_size);
   testObj.createHostBufferWithData();
   HIP_CHECK(hipStreamBeginCapture(stream1, flags));
@@ -185,8 +182,7 @@ void threadFunc_1(hipStream_t stream1, size_t byte_size,
   testObj.freeHostBuf();
 }
 
-void threadFunc_2(hipStream_t stream2, size_t byte_size,
-                  hipStreamCaptureMode flags) {
+void threadFunc_2(hipStream_t stream2, size_t byte_size, hipStreamCaptureMode flags) {
   streamMemAllocTest testObj(byte_size);
   testObj.createHostBufferWithData();
   HIP_CHECK(hipStreamBeginCapture(stream2, flags));
@@ -228,9 +224,8 @@ TEST_CASE("Unit_hipStreamCreate_StreamCapture_ParallelCapture_MultiThrd") {
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
-  hipStreamCaptureMode flags =
-      GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
-               hipStreamCaptureModeRelaxed);
+  hipStreamCaptureMode flags = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                        hipStreamCaptureModeRelaxed);
   thread t1(threadFunc_1, stream1, byte_size, flags);
   thread t2(threadFunc_2, stream2, byte_size, flags);
   t1.join();
