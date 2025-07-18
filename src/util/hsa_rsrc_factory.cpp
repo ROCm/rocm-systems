@@ -141,6 +141,7 @@ HsaRsrcFactory::HsaRsrcFactory(bool initialize_hsa) : initialize_hsa_(initialize
   CHECK_STATUS("loader API table query failed", status);
 
   // Instantiate HSA timer
+  timer_ = nullptr;  // Ensure timer_ is initialized to nullptr
   try {
     timer_ = new HsaTimer;
   } catch (const std::bad_alloc&) {
