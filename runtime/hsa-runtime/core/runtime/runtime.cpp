@@ -3194,10 +3194,11 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
 
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
-  if (it->second.registered)
+  if (it->second.registered) {
     if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  else
+  } else {
     if (munmap(it->second.os_addr, size)) return HSA_STATUS_ERROR;
+  }
 
   reserved_address_map_.erase(it);
   return HSA_STATUS_SUCCESS;
