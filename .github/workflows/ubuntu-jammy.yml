@@ -16,6 +16,7 @@ on:
       - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
       - .wordlist.txt
+      - CMakePresets.json
   pull_request:
     branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
@@ -30,6 +31,7 @@ on:
       - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
       - .wordlist.txt
+      - CMakePresets.json
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

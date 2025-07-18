@@ -17,11 +17,10 @@
 #endif
 #include "nccl1_compat.h"
 #include "timer.h"
+#include <cstring>
 #include <fstream>
 #include <iostream>
 #include <pthread.h>
-#include <string>
-
 // Ensures backward compatibility for FP8 types in RCCL 2.24.3 and later
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 24, 3)
 #    define ncclFp8E4M3 ncclFloat8e4m3
