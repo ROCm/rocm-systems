@@ -503,7 +503,8 @@ update_agent_runtime_visibility(rocprofiler_agent_t& agent_info)
                 {
                     auto _uuid =
                         std::strtoull(itr.substr(uuid_prefix.length()).c_str(), nullptr, 16);
-                    if(_uuid == agent_info.uuid.value) return parse_result{true, _idx_v};
+                    auto uuid_view = uuid_view_t{agent_info.uuid};
+                    if(_uuid == uuid_view.value64[0]) return parse_result{true, _idx_v};
                 }
                 else
                 {
@@ -720,7 +721,7 @@ read_topology()
         agent_info.name         = "";
         agent_info.product_name = "";
         agent_info.vendor_name  = "";
-        agent_info.uuid         = {.value = 0};
+        memset(&agent_info.uuid.bytes, 0, sizeof(agent_info.uuid.bytes));
         if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             constexpr auto workgrp_max = 1024;
@@ -729,7 +730,10 @@ read_topology()
             constexpr auto grid_max_y  = std::numeric_limits<uint16_t>::max();
             constexpr auto grid_max_z  = std::numeric_limits<uint16_t>::max();
 
-            read_property(properties, "unique_id", agent_info.uuid.value);
+            auto     _uuid    = uuid_view_t{};
+            uint64_t uuid_val = 0;
+            read_property(properties, "unique_id", uuid_val);
+            _uuid.value64[0] = uuid_val;
             read_property(
                 properties, "max_engine_clk_fcompute", agent_info.max_engine_clk_fcompute);
             read_property(properties, "local_mem_size", agent_info.local_mem_size);
@@ -744,6 +748,7 @@ read_topology()
             agent_info.grid_max_dim       = {grid_max_x, grid_max_y, grid_max_z};
             agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
 
+            agent_info.uuid = static_cast<rocprofiler_uuid_t>(_uuid);
             if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
             {
                 uint32_t major_version = 0;

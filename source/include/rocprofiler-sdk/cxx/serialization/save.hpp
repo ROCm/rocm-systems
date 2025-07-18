@@ -1132,7 +1132,7 @@ template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_uuid_t data)
 {
-    ROCP_SDK_SAVE_DATA_FIELD(value);
+    ROCP_SDK_SAVE_DATA_FIELD(bytes);
 }
 
 template <typename ArchiveT>
