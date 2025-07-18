@@ -66,7 +66,12 @@ function(CHECKOUT_GIT_SUBMODULE)
     # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
     # assuming a .gitmodules file exists
-    set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
+    if(NOT CTEST_ONLY_BUILD)
+        set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
+    else()
+        set(_SUBMODULE "${PROJECT_SOURCE_DIR}/../../.gitmodules")
+        get_filename_component(_SUBMODULE "${_SUBMODULE}" REALPATH)
+    endif()
 
     set(_TEST_FILE_EXISTS OFF)
     if(EXISTS "${_TEST_FILE}" AND NOT IS_DIRECTORY "${_TEST_FILE}")

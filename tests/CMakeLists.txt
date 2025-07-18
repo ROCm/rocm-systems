@@ -146,17 +146,10 @@ else()
 
     # Set compile launcher
     set(ROCPROFSYS_COMPILE_LAUNCHER "${SCRIPTS_D}/rocprof-sys-launch-compiler")
-    # Only the following are needed:
-    #   - ROCPROFILER_SYSTEMS_MESSAGE
-    #   - ROCPROFILER_SYSTEMS_ADD_FEATURE
-    #   - ROCPROFILER_SYSTEMS_ADD_OPTION
-    #   - ROCPROFILER_SYSTEMS_CUSTOM_COMPILATION
-    #   - ROCPROFILER_SYSTEMS_PYTHON_CONSOLE_SCRIPT
     include(MacroUtilities)
     include(CTestSettings)
 
     # Test source code dir
-    # set(ROCPROFSYS_DISABLE_EXAMPLES python CACHE STRING "Disable these examples") # Blocked for now
     add_subdirectory(${CTEST_SOURCE_D} ${CMAKE_BINARY_DIR}/examples)
 
     # CTests
@@ -181,7 +174,10 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
-    add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/source)
+    add_subdirectory(
+        ${CMAKE_CURRENT_LIST_DIR}/source
+        ${CMAKE_BINARY_DIR}/thread-limit-tests
+    )
     add_subdirectory(${CLI_CTEST_D} ${CMAKE_BINARY_DIR}/cli-tests)
 endif()
 
@@ -200,6 +196,3 @@ endif()
 #  - rocdecode-dev (might also be rocm-rocdecode-dev)
 #  - perfetto (python)
 #  - pybind11-dev
-#  -
-
-# NOTE: rocprof-sys-python-console-script-test (and the generic one) are not included as these require `rocprof-sys-python` which is not available.
