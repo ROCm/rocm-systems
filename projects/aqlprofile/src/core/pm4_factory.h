@@ -152,6 +152,9 @@ class Pm4Factory {
   // Return number of XCC on the GPU
   uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
 
+  // SPM specific
+  virtual uint32_t GetSpmSampleDelayMax() { return 0; }
+
   const GpuBlockInfo* GetBlockInfo(const aqlprofile_pmc_event_t* event) const {
     const GpuBlockInfo* info = block_map_.Get(event->block_name);
     if (info == NULL) throw std::runtime_error("Bad Block");

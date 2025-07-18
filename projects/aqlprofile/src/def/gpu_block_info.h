@@ -80,12 +80,16 @@ struct CounterRegInfo {
   Register register_addr_lo;
   // counter register address high
   Register register_addr_hi;
+  // counter select1 register address (for SPM)
+  Register select1_addr;
 };
 
 struct BlockDelayInfo {
   Register reg;
-  uint32_t val;
+  const uint32_t* val;  // Layout: val[SA][SE][instance]
 };
+
+#define BLOCK_DELAY_NONE { REG_32B_NULL, nullptr }
 
 struct counter_des_t;
 
@@ -108,7 +112,7 @@ struct GpuBlockInfo {
   // Block attributes mask
   uint32_t attr;
   // Block delay info
-  const BlockDelayInfo* delay_info;
+  BlockDelayInfo delay_info;
   // SPM block id
   uint32_t spm_block_id;
 };

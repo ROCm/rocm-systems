@@ -52,6 +52,8 @@ class Mi100Factory : public Gfx9Factory {
  public:
   explicit Mi100Factory(const AgentInfo* agent_info);
 
+  virtual uint32_t GetSpmSampleDelayMax() { return 0x34; }
+
  protected:
   static const GpuBlockInfo* block_table_[AQLPROFILE_BLOCKS_NUMBER];
 };

@@ -104,19 +104,6 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     // 3. Program the RLC_PERFMON_SEGMENT_SIZE register.
     builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
                                        Primitives::rlc_spm_perfmon_cntl_value(sampling_rate));
-    if (!config->spm_kfd_mode) {
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_RING_BASE_LO__ADDR,
-                                         buffer_ptr);
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_RING_BASE_HI__ADDR,
-                                         buffer_ptr >> 32);
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_RING_SIZE__ADDR,
-                                         buffer_size);
-    }
-
-    // Setting VMID
-    if (!config->spm_kfd_mode)
-      builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_MC_CNTL__ADDR,
-                                         Primitives::rlc_spm_mc_cntl_value());
 
     // Iterate through the list of blocks to create PM4 packets to read counter values
     // Below pair.first is the block id of a counter event and pair.second is the index into
@@ -272,17 +259,16 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
           for (size_t j = 0; j < block_info->instance_count; ++j) {
             builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
                                                Primitives::grbm_inst_se_sh_index_value(j, 0, 0));
-            builder.BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info[j].reg,
+            builder.BuildWriteUConfigRegPacket(cmd_buffer, block_info->delay_info.reg,
                                                Primitives::get_spm_global_delay(counter_des, j));
           }
         } else {
-          for (size_t i = 0; i < config->spm_se_number_total; ++i) {
+          for (size_t i = 0; i < config->se_number; ++i) {
             for (size_t j = 0; j < block_info->instance_count; ++j) {
-              int delay_index = i * block_info->instance_count + j;
               builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::GRBM_GFX_INDEX_ADDR,
                                                  Primitives::grbm_inst_se_index_value(j, i));
               builder.BuildWriteUConfigRegPacket(cmd_buffer,
-                                                 block_info->delay_info[delay_index].reg,
+                                                 block_info->delay_info.reg,
                                                  Primitives::get_spm_se_delay(counter_des, i, j));
             }
           }
@@ -341,7 +327,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
     builder.BuildWriteUConfigRegPacket(
         cmd_buffer, Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE__ADDR,
         Primitives::rlc_spm_perfmon_segment_size_value(global_count, se_count));
-    if (config->mi100) {
+    if (config->spm_has_core1) {
       builder.BuildWriteUConfigRegPacket(
           cmd_buffer, Primitives::RLC_SPM_PERFMON_SEGMENT_SIZE_CORE1__ADDR,
           Primitives::rlc_spm_perfmon_segment_size_core1_value(se_count));
