@@ -33,14 +33,30 @@
 #include "pgen/test_pgen.h"
 #include "util/test_assert.h"
 
-typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> callback_data_t;
+// C++11's solution for std::format()
+template <typename... Args>
+std::string string_format(const std::string& format, Args... args) {
+  int size_s = std::snprintf(nullptr, 0, format.c_str(), args...) + 1;  // Extra space for '\0'
+  if (size_s <= 0) {
+    throw std::runtime_error("Error during formatting.");
+  }
+  auto size = static_cast<size_t>(size_s);
+  std::unique_ptr<char[]> buf(new char[size]);
+  std::snprintf(buf.get(), size, format.c_str(), args...);
+  return std::string(buf.get(), buf.get() + size - 1);  // We don't want the '\0' inside
+}
 
 hsa_status_t TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                                  hsa_ven_amd_aqlprofile_info_data_t* info_data,
                                  void* callback_data) {
   hsa_status_t status = HSA_STATUS_SUCCESS;
-  reinterpret_cast<callback_data_t*>(callback_data)->push_back(*info_data);
-  return status;
+  std::clog << string_format("SPM Callback: Data = %p Size = %zu\n", info_data->trace_data.ptr,
+                             info_data->trace_data.size);
+  if (callback_data) {
+    auto streams_ = (std::ofstream*)callback_data;
+    streams_[info_data->sample_id].write((const char*)info_data->trace_data.ptr,
+                                         info_data->trace_data.size);
+  }  return status;
 }
 
 // Class implements SPM profiling
@@ -121,8 +137,9 @@ class TestPGenSpm : public TestPGen {
         &profile_, HSA_VEN_AMD_AQLPROFILE_INFO_COMMAND_BUFFER_SIZE, &command_buffer_size);
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
 
+    num_xcc_ = GetAgentInfo()->xcc_num ? GetAgentInfo()->xcc_num : 1;
     output_buffer_alignment = buffer_alignment_;
-    output_buffer_size = buffer_size_;
+    output_buffer_size = buffer_size_ * num_xcc_;
 
     // Application is allocating the command buffer
     // AllocateSystem(command_buffer_alignment, command_buffer_size,
@@ -153,6 +170,13 @@ class TestPGenSpm : public TestPGen {
     status = api_->hsa_ven_amd_aqlprofile_stop(&profile_, PostPacket());
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
 
+    for (int i = 0; i < num_xcc_; i++) {
+      std::ostringstream oss;
+      oss << "spm_buffer_" << i << ".bin";
+      streams_[i].open(oss.str(), std::ofstream::binary | std::ofstream::out);
+    }
+    api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, streams_);
+
     return (status == HSA_STATUS_SUCCESS);
   }
 
@@ -161,39 +185,17 @@ class TestPGenSpm : public TestPGen {
 
   bool DumpData() {
     std::clog << "TestPGenSpm::DumpData :" << std::endl;
-
-    callback_data_t data;
-    api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, &data);
-    for (callback_data_t::iterator it = data.begin(); it != data.end(); ++it) {
-      std::cout << "sample(" << std::dec << it->sample_id << ") size(" << std::dec
-                << it->trace_data.size << ") ptr(" << std::hex << it->trace_data.ptr << ")"
-                << std::endl;
-
-      void* sys_buf = GetRsrcFactory()->AllocateSysMemory(GetAgentInfo(), it->trace_data.size);
-      TEST_ASSERT(sys_buf != NULL);
-      if (sys_buf == NULL) return false;
-
-      hsa_status_t status = hsa_memory_copy(sys_buf, it->trace_data.ptr, it->trace_data.size);
-      TEST_ASSERT(status == HSA_STATUS_SUCCESS);
-      if (status != HSA_STATUS_SUCCESS) return false;
-
-      std::string file_name;
-      file_name.append("spm_dump_");
-      file_name.append(std::to_string(it->sample_id));
-      file_name.append(".txt");
-      std::ofstream out_file;
-      out_file.open(file_name);
-
-      // Write the buffer in terms of shorts (16 bits)
-      uint16_t* trace_data = reinterpret_cast<uint16_t*>(sys_buf);
-      for (unsigned i = 0; i < (it->trace_data.size / sizeof(uint16_t)); ++i) {
-        out_file << std::setw(4) << std::setfill('0') << std::hex << trace_data[i] << "\n";
-      }
-
-      out_file.close();
-    }
-
     return true;
+  }
+
+  bool Cleanup() {
+    api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, NULL);
+    for (int i; i < num_xcc_; i++) {
+      if (streams_[i].is_open()) {
+        streams_[i].close();
+      }
+    }
+    return TestAql::Cleanup();
   }
 
   static const uint32_t buffer_alignment_ = 0x1000;  // 4K
@@ -201,6 +203,8 @@ class TestPGenSpm : public TestPGen {
   static const uint32_t spm_sample_rate_ = 10000;    // default SPM sample rate
 
   hsa_ven_amd_aqlprofile_profile_t profile_;
+  std::ofstream streams_[8];
+  uint32_t num_xcc_;
 };
 
 #endif  // TEST_PGEN_TEST_PGEN_SPM_H_

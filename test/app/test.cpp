@@ -35,84 +35,12 @@
 #include "pgen/test_pgen_sqtt.h"
 #include "simple_convolution/simple_convolution.h"
 
-const int argv_pmc_size = 32;
-unsigned argc_pmc = 0;
-char* argv_arr = NULL;
-char** argv_pmc = NULL;
-
-typedef struct {
-  uint32_t size;  // size of buffer in bytes
-  uint32_t timeout;
-  uint32_t len;    // len of streamed data in spm buffer
-  void* addr;      // address of spm buffer
-  bool data_loss;  // OUT
-} spm_buffer_params_t;
-
-int gpu_node_id = -1;
-spm_buffer_params_t spm_buffer_params[2];
-std::atomic<uint32_t> spm_buffer_idx{0};  // current spm buffer in use for spm samples
-std::atomic<bool> spm_check_data{
-    true};                           // request to check spm data in spm_buffer at spm_buffer_idx
-std::atomic<bool> test_done{false};  // is GPU kernel finished?
-
-int get_gpu_node_id() {
-  int gpu_node = -1;
-
-#if 0
-  // find a valid gpu node from /sys/class/kfd/kfd/topology/nodes
-  std::string path = "/sys/class/kfd/kfd/topology/nodes";
-  DIR *dir;
-  struct dirent *ent;
-
-  if ((dir = opendir(path.c_str())) != NULL) {
-    while ((ent = readdir(dir)) != NULL) {
-      std::string dir = ent->d_name;
-
-      if (dir.find_first_not_of("0123456789") == std::string::npos) {
-        std::string file = path + "/" + ent->d_name + "/gpu_id";
-        std::ifstream infile(file);
-        int id;
-
-        infile >> id;
-        if (id != 0) {
-          gpu_node = atoi(ent->d_name);
-          break;
-        }
-      }
-    }
-    closedir(dir);
-  }
-
-        HsaSystemProperties m_SystemProperties;
-        memset(&m_SystemProperties, 0, sizeof(m_SystemProperties));
-
-        HSAKMT_STATUS status = hsaKmtAcquireSystemProperties(&m_SystemProperties);
-        if (status != HSAKMT_STATUS_SUCCESS) {
-          std::cerr << "Error in hsaKmtAcquireSystemProperties" << std::endl;
-          return 1;
-        }
-
-        // tranverse all CPU and GPU nodes and break when a GPU node is found
-        for (unsigned i = 0; i < m_SystemProperties.NumNodes; ++i) {
-          HsaNodeProperties nodeProperties;
-          memset(&nodeProperties, 0, sizeof(HsaNodeProperties));
-
-          status = hsaKmtGetNodeProperties(i, &nodeProperties);
-          if (status != HSAKMT_STATUS_SUCCESS) {
-            std::cerr << "Error in hsaKmtAcquireSystemProperties" << std::endl;
-            break;
-          } else if (nodeProperties.NumFComputeCores) {
-            gpu_node = i;
-            break;
-          }
-        }
-#endif
-
-  printf("GPU node id(%d)\n", gpu_node);
-  return gpu_node;
-}
-
 char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
+  const int argv_pmc_size = 32;
+  static unsigned argc_pmc = 0;
+  static char* argv_arr = NULL;
+  static char** argv_pmc = NULL;
+
   if (argc > argc_pmc) {
     argc_pmc = argc;
     argv_arr = reinterpret_cast<char*>(realloc(argv_arr, argc_pmc * argv_pmc_size));
@@ -129,52 +57,6 @@ char** pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events) {
   return argv_pmc;
 }
 
-typedef char** pf_pmc_argv(unsigned argc, const hsa_ven_amd_aqlprofile_event_t* events);
-
-void thread_kernel(bool* ret_val, pf_pmc_argv pmc_argv, int events_count,
-                   const hsa_ven_amd_aqlprofile_event_t* events) {
-  *ret_val =
-      RunKernel<simple_convolution, TestPGenSpm>(events_count, pmc_argv(events_count, events));
-  test_done = true;
-}
-
-void thread_spm_buffer_setup() {
-#if ENABLE_SPM
-  while (!test_done) {
-    auto idx = (spm_buffer_idx.load() + 1) & 0x1;
-    std::cout << "thread_spm_buffer_setup: " << idx << std::endl;
-    hsa_status_t status =
-        hsa_amd_spm_set_dest_buffer(gpu_node_id, spm_buffer_params[idx].size,
-                                    &spm_buffer_params[idx].timeout, &spm_buffer_params[idx].len,
-                                    spm_buffer_params[idx].addr, &spm_buffer_params[idx].data_loss);
-    if (status != HSA_STATUS_SUCCESS) {
-      std::cerr << "Error in initial spm setup of buffer 0" << std::endl;
-      return;
-    }
-    // inform data saving thread there is spm data to save
-    if (spm_buffer_params[idx].len != 0) spm_check_data = true;
-  }
-#endif
-
-  std::cout << "Exiting thread_spm_buffer_setup ..." << std::endl;
-}
-
-void thread_spm_data_save(FILE* file) {
-  while (!test_done) {
-    if (spm_check_data) {
-      auto buffer_idx = spm_buffer_idx.load();
-      auto idx = buffer_idx & 0x1;
-      std::cout << "thread_spm_data_save " << idx << " with " << spm_buffer_params[idx].len
-                << " bytes" << std::endl;
-      fwrite(spm_buffer_params[idx].addr, 1, spm_buffer_params[idx].len, file);
-
-      spm_buffer_idx = buffer_idx + 1;
-      spm_check_data = false;
-    }
-  }
-  std::cout << "Exiting thread_spm_data_save ..." << std::endl;
-}
-
 int main(int argc, char* argv[]) {
   bool ret_val = false;
   const bool pmc_enable = (getenv("AQLPROFILE_PMC") != NULL);
@@ -185,8 +67,6 @@ int main(int argc, char* argv[]) {
   const bool scan_enable = (getenv("AQLPROFILE_SCAN") != NULL);
   const bool trace_enable = (getenv("AQLPROFILE_TRACE") != NULL);
   const bool spm_enable = (getenv("AQLPROFILE_SPM") != NULL);
-  [[maybe_unused]] const bool spm_kfd_mode = (getenv("AQLPROFILE_SPM_KFD_MODE") != NULL);
-  // int gpu_node_id = -1;
   int scan_step = 1;
   const char* step_env = getenv("AQLPROFILE_SCAN_STEP");
   if (step_env != NULL) {
@@ -199,48 +79,15 @@ int main(int argc, char* argv[]) {
     scan_step = step;
   }
 
+  const char* spm_loop_env = getenv("AQLPROFILE_SPM_LOOPS");
+  int spm_loops = spm_loop_env ? atoi(spm_loop_env) : 1;
+  if (!spm_loops) spm_loops = 1;
+
   if (!trace_enable) {
     std::clog.rdbuf(NULL);
   }
   if (scan_enable) {
     std::cerr.rdbuf(NULL);
-  }
-
-  //{
-  //  hsa_status_t status = hsa_init();
-  //  CHECK_STATUS("Error in hsa_init", status);
-  //}
-
-  if (spm_enable) {
-#if ENABLE_SPM
-    {
-      hsa_status_t status = hsa_init();
-      CHECK_STATUS("Error in hsa_init", status);
-    }
-    gpu_node_id = get_gpu_node_id();
-    if (gpu_node_id == -1) {
-      std::cerr << "Error in get_gpu_node_id()" << std::endl;
-      return 1;
-    }
-
-    if (spm_kfd_mode) {
-      hsa_status_t status = hsa_amd_spm_acquire(gpu_node_id);
-      if (status != HSA_STATUS_SUCCESS) {
-        std::cerr << "Error in acquiring SPM for NodeId " << gpu_node_id << std::endl;
-        return 1;
-      }
-    } else {
-#if SPM_DEBUG_TRAP
-      HSAKMT_STATUS status = hsaKmtEnableDebugTrap(gpu_node_id, INVALID_QUEUEID);
-#else
-      HSAKMT_STATUS status = HSAKMT_STATUS_ERROR;
-#endif
-      if (status != HSAKMT_STATUS_SUCCESS) {
-        std::cerr << "Error in enabling debug trap for NodeId " << gpu_node_id << std::endl;
-        return 1;
-      }
-    }
-#endif
   }
 
   TestHsa::HsaInstantiate();
@@ -449,126 +296,22 @@ int main(int argc, char* argv[]) {
   } else if (pcsmp_enable && TestHsa::HsaAgentName().substr(0, 4) != "gfx1") {
     ret_val = RunKernel<simple_convolution, TestPGenPcsmp>(argc, argv);
   } else if (spm_enable) {
-#ifdef ENABLE_SPM
     int events_count = 0;
     const hsa_ven_amd_aqlprofile_event_t events_spm[] = {
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 0 /*NONE*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*CYCLES*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 3 /*BUSY_CYCLES*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 2 /*CYCLES*/},
         {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 4 /*WAVES*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 14 /*ITEMS*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 47 /*WAVE_READY*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 47 /*CSN_WINDOW_VALID*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA, 0, 1 /*SH_FIFO_BUSY*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD, 0, 1 /*TD_BUSY*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 3 /*REQ*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 22 /*WRITEBACK*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC, 2, 1 /*CYCLE*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP, 1, 2 /*CORE_REG_SCLK_VLD*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS_COUNT*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF, 0, 0 /*ALWAYS_COUNT*/},
-        // {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GDS, 0, 0 /*DS_ADDR_CONFL*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ, 0, 14 /*ITEMS*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 48 /*CSN_BUSY*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 49 /*CSN_NUM_THREADGROUPS*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 51 /*CSN_EVENT_WAVE*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI, 0, 47 /*CSN_WINDOW_VALID*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 0 /*ALWAYS_COUNT*/},
+        {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0, 8 /*SEL_ME1_STALL_WAIT_ON_RCIU_READ*/},
     };
     events_count = sizeof(events_spm) / sizeof(hsa_ven_amd_aqlprofile_event_t);
 
-    if (spm_kfd_mode) {
-      // open a binary file for spm samples
-      const std::string spm_sample_file = "example.txt";
-      FILE* file = fopen(spm_sample_file.c_str(), "wb");
-      if (file == NULL) {
-        std::cerr << "Error opening file " << spm_sample_file << " for spm sampling!" << std::endl;
-        return 1;
-      }
-
-      // set up 2 spm sample data buffers
-      const uint32_t timeout = 10000;
-      const uint32_t spm_buffer_size = 0x2000000;
-      spm_buffer_params[0].size = spm_buffer_size;
-      spm_buffer_params[0].timeout = timeout;
-      spm_buffer_params[0].len = 0;
-      spm_buffer_params[0].addr = malloc(spm_buffer_size);
-      if (spm_buffer_params[0].addr == NULL) {
-        std::cerr << "Malloc(size) for spm buffer 0 Failed." << std::endl;
-        return 1;
-      }
-      spm_buffer_params[0].data_loss = false;
-
-      spm_buffer_params[1].size = spm_buffer_size;
-      spm_buffer_params[1].timeout = timeout;
-      spm_buffer_params[1].len = 0;
-      spm_buffer_params[1].addr = malloc(spm_buffer_size);
-      if (spm_buffer_params[1].addr == NULL) {
-        std::cerr << "Malloc(size) for spm buffer 1 Failed." << std::endl;
-        return 1;
-      }
-      spm_buffer_params[1].data_loss = false;
-
-      // non-blocking set up the first spm buffer for use before GPU kernel started
-      std::cout << "spm_buffer_setup 0 ..." << std::endl;
-      hsa_status_t status = hsa_amd_spm_set_dest_buffer(
-          gpu_node_id, spm_buffer_params[0].size, &spm_buffer_params[0].timeout,
-          &spm_buffer_params[0].len, spm_buffer_params[0].addr, &spm_buffer_params[0].data_loss);
-      if (status != HSA_STATUS_SUCCESS) {
-        std::cerr << "Error in initial spm setup of buffer 0" << std::endl;
-        return 1;
-      }
-
-      // spm threads
-      std::thread k_thread(thread_kernel, &ret_val, pmc_argv, events_count, events_spm);
-      std::thread buffer_setup(thread_spm_buffer_setup);
-      std::thread data_save(thread_spm_data_save, file);
-
-      k_thread.join();
-      buffer_setup.join();
-      data_save.join();
-
-      // my_anaylyze(spm_buffer_params[0].addr, spm_buffer_params[0].size,
-      // spm_buffer_params[0].len); my_anaylyze(spm_buffer_params[1].addr,
-      // spm_buffer_params[1].size, spm_buffer_params[1].len);
-
-      // free allocated spm buffers
-      free(spm_buffer_params[0].addr);
-      free(spm_buffer_params[1].addr);
-
-      std::cout << "data in buff0: " << spm_buffer_params[0].len << " bytes" << std::endl;
-      std::cout << "data in buff1: " << spm_buffer_params[1].len << " bytes" << std::endl;
-
-      status = hsa_amd_spm_release(gpu_node_id);
-      if (status != HSA_STATUS_SUCCESS) {
-        std::cerr << "Error in releasing SPM for NodeId " << gpu_node_id << std::endl;
-        return 1;
-      }
-
-      // close spm sample binary file
-      fclose(file);
-    } else {
-      ret_val = RunKernel<simple_convolution, TestPGenSpm>(events_count,
-                                                           pmc_argv(events_count, events_spm));
-#if SPM_DEBUG_TRAP
-      HSAKMT_STATUS status = hsaKmtDisableDebugTrap(gpu_node_id);
-#else
-      hsa_status_t status = HSA_STATUS_ERROR;
-#endif
-      if (status != HSA_STATUS_SUCCESS) {
-        std::cerr << "Error in disabling debug trap for NodeId " << gpu_node_id << std::endl;
-        return 1;
-      }
-    }
-
-    // SPM data analysis: need to change command dependent on binary vs text sample files
-    // The 'da_16b.py' script is checking the first SPM counter data to match expected value
-    // provided by the option '-e'
-    std::string command = "python3 da_16b.py -e 16 spm_dump_0.txt";
-
-    int command_status = system(command.c_str());
-
-    if (command_status == -1)
-      std::cerr << "Cannot run \"" << command << "\"" << std::endl;
-    else if (command_status == 0)
-      std::cout << "SPM test passed!" << std::endl;
-    else
-      std::cerr << "SPM test failed!" << std::endl;
-#endif
+    ret_val = RunKernel<simple_convolution, TestPGenSpm>(
+        events_count, pmc_argv(events_count, events_spm), spm_loops);
   } else {
     ret_val = RunKernel<simple_convolution, TestAql>(argc, argv);
   }

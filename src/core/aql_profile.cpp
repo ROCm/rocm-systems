@@ -52,10 +52,8 @@
   }
 
 // Getting SPM data using driver API
-namespace spm_kfd_namespace {
 hsa_status_t spm_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* profile,
                               hsa_ven_amd_aqlprofile_data_callback_t callback, void* data);
-}
 
 // PC sampling callback data
 struct pcsmp_callback_data_t {
@@ -254,6 +252,16 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_start(hsa_ven_amd_aqlprofile_prof
     } else if (profile->type == HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_TRACE) {
       pm4_builder::TraceConfig trace_config{};
       const uint64_t se_number_total = pm4_factory->GetShaderEnginesNumber();
+
+      trace_config.spm_sq_32bit_mode = true;
+      trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
+                                   (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
+      trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
+      trace_config.sampleRate = 1600;
+
+      trace_config.xcc_number = pm4_factory->GetXccNumber();
+      trace_config.se_number = se_number_total / trace_config.xcc_number;
+      trace_config.sa_number = pm4_factory->GetGpuId() >= aql_profile::GFX10_GPU_ID ? 2 : 0;
 
       if (profile->parameters) {
         for (const hsa_ven_amd_aqlprofile_parameter_t* p = profile->parameters;
@@ -752,7 +760,7 @@ hsa_ven_amd_aqlprofile_iterate_data(const hsa_ven_amd_aqlprofile_profile_t* prof
             sample_ptr = reinterpret_cast<char*>(sample_ptr) + sample_capacity;
           }
         } else {
-          status = spm_kfd_namespace::spm_iterate_data(profile, callback, data);
+          status = spm_iterate_data(profile, callback, data);
         }
       }
     } else {
