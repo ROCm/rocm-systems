@@ -142,8 +142,7 @@ context_filter(const context::context* ctx)
     return (has_buffered || has_callback);
 }
 
-constexpr auto null_rocp_agent_id =
-    rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
 
 struct async_copy_data
 {

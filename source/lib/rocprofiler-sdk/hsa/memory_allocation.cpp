@@ -324,8 +324,7 @@ get_next_dispatch()
     return _v;
 }
 
-constexpr auto null_rocp_agent_id =
-    rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
 
 struct memory_allocation_data
 {

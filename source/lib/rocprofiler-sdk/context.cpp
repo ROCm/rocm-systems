@@ -20,13 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/context.h>
-#include <rocprofiler-sdk/fwd.h>
-
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <atomic>
 #include <vector>
@@ -60,7 +61,7 @@ rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 rocprofiler_status_t
 rocprofiler_start_context(rocprofiler_context_id_t context_id)
 {
-    if(context_id.handle == rocprofiler_context_none.handle ||
+    if(context_id == rocprofiler_context_none ||
        !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
@@ -74,7 +75,7 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id)
 rocprofiler_status_t
 rocprofiler_stop_context(rocprofiler_context_id_t context_id)
 {
-    if(context_id.handle == rocprofiler_context_none.handle ||
+    if(context_id == rocprofiler_context_none ||
        !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
@@ -91,7 +92,7 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
     *status = 0;
 
     // return context not found if not registered
-    if(context_id.handle == rocprofiler_context_none.handle ||
+    if(context_id == rocprofiler_context_none ||
        !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
@@ -114,7 +115,7 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
 {
     *status = 0;
 
-    if(context_id.handle == rocprofiler_context_none.handle ||
+    if(context_id == rocprofiler_context_none ||
        !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 

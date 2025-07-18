@@ -59,7 +59,18 @@ def test_memory_allocation(json_data):
 
     assert len(bf_op_names) == 5
 
-    allocation_reported_agent_ids = set()
+    # Op values:
+    UNKNOWN_OP = 0
+    HSA_MEMORY_ALLOCATE_OP = 1
+    HSA_AMD_VMEM_HANDLE_CREATE_OP = 2
+    HSA_MEMORY_FREE_OP = 3
+    HSA_AMD_VMEM_HANDLE_RELEASE = 4
+
+    valid_agent_ids = set()
+    for row in data["agents"]:
+        if "id" in row and "handle" in row.id:
+            valid_agent_ids.add(row.id.handle)
+
     # check buffering data
     for node in memory_allocation_data:
         assert "size" in node
@@ -78,7 +89,14 @@ def test_memory_allocation(json_data):
         assert node.allocation_size >= 0
         assert len(node.address) > 0
         assert node.thread_id > 0
-        assert node.agent_id.handle > 0
+
+        op_id = node.operation
+        assert op_id != UNKNOWN_OP
+        if op_id == HSA_MEMORY_ALLOCATE_OP or op_id == HSA_AMD_VMEM_HANDLE_CREATE_OP:
+            assert node.agent_id.handle in valid_agent_ids
+        else:
+            assert node.agent_id.handle == 0  # free ops record agent id as null
+
         assert node.start_timestamp > 0
         assert node.end_timestamp > 0
         assert node.start_timestamp < node.end_timestamp
@@ -88,8 +106,6 @@ def test_memory_allocation(json_data):
             data.strings.buffer_records[node.kind].operations[node.operation]
             in bf_op_names
         )
-
-        allocation_reported_agent_ids.add(node["agent_id"]["handle"])
 
 
 def test_otf2_data(otf2_data, json_data):

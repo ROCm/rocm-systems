@@ -38,7 +38,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * The NULL Context handle.
  */
-#define ROCPROFILER_CONTEXT_NONE ROCPROFILER_HANDLE_LITERAL(rocprofiler_context_id_t, UINT64_MAX)
+#define ROCPROFILER_CONTEXT_NONE ROCPROFILER_HANDLE_LITERAL(rocprofiler_context_id_t, 0UL)
 
 /**
  * @brief Create context.

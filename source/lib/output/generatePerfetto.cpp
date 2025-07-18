@@ -837,8 +837,7 @@ write_perfetto(
         }
 
         // memory allocation counter track
-        constexpr auto null_rocp_agent_id =
-            rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+        constexpr auto null_rocp_agent_id = rocprofiler_agent_id_t{.handle = 0};
         struct free_memory_information
         {
             rocprofiler_timestamp_t start_timestamp = 0;
@@ -855,9 +854,8 @@ write_perfetto(
 
         struct agent_and_size
         {
-            rocprofiler_agent_id_t agent_id =
-                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
-            uint64_t size = {0};
+            rocprofiler_agent_id_t agent_id = rocprofiler_agent_id_t{.handle = 0};
+            uint64_t               size     = {0};
         };
 
         auto mem_alloc_endpoints =
