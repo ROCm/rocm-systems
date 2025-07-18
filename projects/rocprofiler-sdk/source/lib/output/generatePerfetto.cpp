@@ -1094,6 +1094,13 @@ write_perfetto(
                                   itr.first,
                                   itr.second / bytes_multiplier);
                     tracing_session->FlushBlocking();
+
+                    PERFETTO_LOG("TRACE_COUNTER rocprofv3 %s %llu %llu %llu %llu",
+                                 sdk::perfetto_category<sdk::category::scratch_memory>::name,
+                                 (unsigned long long) (mitr.first.handle),
+                                 (unsigned long long) (scratch_mem_tracks.at(mitr.first).uuid),
+                                 (unsigned long long) itr.first,
+                                 (unsigned long long) itr.second);
                 }
             }
         }
