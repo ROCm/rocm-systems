@@ -1,7 +1,7 @@
 AQLprofile APIs
 ===============
 
-Learn about the typical APIs used in AQLProfile.
+Learn about the typical APIs used in AQLprofile.
 
 The APIs in ``hsa_ven_amd_aqlprofile.h`` are used by legacy tools such
 as ``rocprof`` and ``rocprofv2``. These APIs may be deprecated in the

@@ -1,7 +1,7 @@
 What is AQLprofile?
 ===================
 
-The Architected Queuing Language Profiling Library (AQLProfile) is an
+The Architected Queuing Language profiling library (AQLprofile) is an
 open source library that enables advanced GPU profiling and tracing on
 AMD platforms. It works in conjunction with
 `rocprofiler-sdk <https://github.com/ROCm/rocprofiler-sdk>`__ to
