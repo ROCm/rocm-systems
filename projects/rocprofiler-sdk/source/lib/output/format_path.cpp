@@ -107,7 +107,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
            _fpath.find("%q{") != std::string::npos)
         {
             auto replace_env_var = [&](const std::string& pattern_start,
-                                       const std::string& pattern_end = "") {
+                                       const std::string& pattern_end) {
                 size_t pos = 0;
                 while((pos = _fpath.find(pattern_start, pos)) != std::string::npos)
                 {
