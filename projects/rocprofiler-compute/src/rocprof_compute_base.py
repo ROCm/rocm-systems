@@ -246,14 +246,6 @@ class RocProfCompute:
         if self.__args.name.find("/") != -1:
             console_error("'/' not permitted in profile name")
 
-        # Deprecation warning for hardware blocks
-        if [
-            name
-            for name, type in self.__args.filter_blocks.items()
-            if type == "hardware_block"
-        ]:
-            console_warning("Hardware block based filtering will be deprecated soon")
-
         # FIXME:
         #     Changing default path should be done at the end of arg parsing stage,
         #     unless there is a specific reason to do here.
