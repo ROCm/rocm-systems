@@ -151,11 +151,11 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
             //  - $ENV{USER}        Similar to CMake
             //  - %q{USER}          Compatibility with NVIDIA
             //
-            replace_env_var("%env{", "%");
-            replace_env_var("%ENV{", "%");
-            replace_env_var("$env{");
-            replace_env_var("$ENV{");
-            replace_env_var("%q{");
+            replace_env_var("%env{", "}%");
+            replace_env_var("%ENV{", "}%");
+            replace_env_var("$env{", "}");
+            replace_env_var("$ENV{", "}");
+            replace_env_var("%q{", "}");
         }
     } catch(std::exception& _e)
     {
