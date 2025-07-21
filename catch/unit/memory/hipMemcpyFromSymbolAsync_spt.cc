@@ -21,51 +21,40 @@ __device__ int devSymbol[10];
 __constant__ int constSymbol[10];
 TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_Negative") {
   SECTION("Invalid Src Ptr") {
-    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(
-                        nullptr, HIP_SYMBOL(devSymbol), sizeof(int), 0,
-                        hipMemcpyDeviceToHost, nullptr),
+    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(nullptr, HIP_SYMBOL(devSymbol), sizeof(int), 0,
+                                                 hipMemcpyDeviceToHost, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Dst Ptr") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(&result, nullptr, sizeof(int),
-                                                 0, hipMemcpyDeviceToHost,
-                                                 nullptr),
+    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(&result, nullptr, sizeof(int), 0,
+                                                 hipMemcpyDeviceToHost, nullptr),
                     hipErrorInvalidSymbol);
   }
   SECTION("Invalid Size") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(
-                        &result, HIP_SYMBOL(devSymbol), sizeof(int) * 100, 0,
-                        hipMemcpyDeviceToHost, nullptr),
+    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int) * 100,
+                                                 0, hipMemcpyDeviceToHost, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Offset") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(
-                        &result, HIP_SYMBOL(devSymbol), sizeof(int), 300,
-                        hipMemcpyDeviceToHost, nullptr),
+    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int), 300,
+                                                 hipMemcpyDeviceToHost, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Direction") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(
-                        &result, HIP_SYMBOL(devSymbol), sizeof(int), 0,
-                        hipMemcpyHostToDevice, nullptr),
+    HIP_CHECK_ERROR(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int), 0,
+                                                 hipMemcpyHostToDevice, nullptr),
                     hipErrorInvalidMemcpyDirection);
   }
 }
 TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_PositiveTests") {
-  enum StreamTestType {
-    NullStream = 0,
-    StreamPerThread,
-    CreatedStream,
-    NoStream
-  };
+  enum StreamTestType { NullStream = 0, StreamPerThread, CreatedStream, NoStream };
   /* Test type NoStream - Use Sync variants, else use async variants */
-  auto streamType =
-      GENERATE(StreamTestType::NoStream, StreamTestType::NullStream,
-               StreamTestType::StreamPerThread, StreamTestType::CreatedStream);
+  auto streamType = GENERATE(StreamTestType::NoStream, StreamTestType::NullStream,
+                             StreamTestType::StreamPerThread, StreamTestType::CreatedStream);
   hipStream_t stream{nullptr};
   if (streamType == StreamTestType::StreamPerThread) {
     stream = hipStreamPerThread;
@@ -76,10 +65,9 @@ TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_PositiveTests") {
   SECTION("Singular Value") {
     int set{42};
     int result{0};
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &set, sizeof(int),
-                                     0, hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol),
-                                           sizeof(int), 0,
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &set, sizeof(int), 0,
+                                     hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                            hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -90,11 +78,9 @@ TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_PositiveTests") {
     int set[size] = {4, 2, 4, 2, 4, 2, 4, 2, 4, 2};
     int result[size] = {0};
 
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set,
-                                     sizeof(int) * size, 0,
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set, sizeof(int) * size, 0,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol),
-                                           sizeof(int) * size, 0,
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int) * size, 0,
                                            hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
 
@@ -108,15 +94,13 @@ TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_PositiveTests") {
     int set[size] = {9, 9, 9, 9, 9, 2, 4, 2, 4, 2};
     int result[size] = {0};
 
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set, offset, 0,
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set, offset, 0, hipMemcpyHostToDevice,
+                                     stream));
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set + 5, offset, offset,
                                      hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set + 5, offset,
-                                     offset, hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(result, HIP_SYMBOL(devSymbol),
-                                           offset, 0, hipMemcpyDeviceToHost,
-                                           stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(result + 5, HIP_SYMBOL(devSymbol),
-                                           offset, offset,
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(result, HIP_SYMBOL(devSymbol), offset, 0,
+                                           hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(result + 5, HIP_SYMBOL(devSymbol), offset, offset,
                                            hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     for (size_t i = 0; i < size; i++) {
@@ -137,8 +121,7 @@ TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_PositiveTests") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE(
-    "Unit_hipMemcpyFromSymbolAsync_spt_capturehipMemcpyToFromSymbolAsync") {
+TEST_CASE("Unit_hipMemcpyFromSymbolAsync_spt_capturehipMemcpyToFromSymbolAsync") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
@@ -147,17 +130,15 @@ TEST_CASE(
   // Start Capturing
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   SECTION("__constant__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &B_h, sizeof(int),
-                                     0, hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&A_h, HIP_SYMBOL(constSymbol),
-                                           sizeof(int), 0,
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(constSymbol), &B_h, sizeof(int), 0,
+                                     hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&A_h, HIP_SYMBOL(constSymbol), sizeof(int), 0,
                                            hipMemcpyDeviceToHost, stream));
   }
   SECTION("__device__ symbol") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &B_h, sizeof(int),
-                                     0, hipMemcpyHostToDevice, stream));
-    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&A_h, HIP_SYMBOL(devSymbol),
-                                           sizeof(int), 0,
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &B_h, sizeof(int), 0,
+                                     hipMemcpyHostToDevice, stream));
+    HIP_CHECK(hipMemcpyFromSymbolAsync_spt(&A_h, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                            hipMemcpyDeviceToHost, stream));
   }
   // End Capture

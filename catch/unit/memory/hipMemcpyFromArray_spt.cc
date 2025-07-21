@@ -42,7 +42,7 @@ TEST_CASE("Unit_hipMemcpyFromArray_spt_Basic_Postive") {
   size_t height = 1;
   const int N = width * height;
   int value = 10;
-  int *hostMem = reinterpret_cast<int *>(malloc(N * sizeof(int)));
+  int* hostMem = reinterpret_cast<int*>(malloc(N * sizeof(int)));
   REQUIRE(hostMem != nullptr);
   for (int i = 0; i < N; i++) {
     hostMem[i] = value;
@@ -52,12 +52,10 @@ TEST_CASE("Unit_hipMemcpyFromArray_spt_Basic_Postive") {
   unsigned int flags = hipArrayDefault;
   HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
   REQUIRE(array != nullptr);
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int),
-                             hipMemcpyHostToDevice));
-  int *hostMemory = reinterpret_cast<int *>(malloc(N * sizeof(int)));
+  HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+  int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
   REQUIRE(hostMemory != nullptr);
-  HIP_CHECK(hipMemcpyFromArray_spt(hostMemory, array, 0, 0, N * sizeof(int),
-                                   hipMemcpyDefault));
+  HIP_CHECK(hipMemcpyFromArray_spt(hostMemory, array, 0, 0, N * sizeof(int), hipMemcpyDefault));
   for (int i = 0; i < N; i++) {
     if (hostMemory[i] != value) {
       REQUIRE(false);
@@ -83,7 +81,7 @@ TEST_CASE("Unit_hipMemcpyFromArray_spt_NegativeTests") {
   size_t height = 1;
   const int N = width * height;
   int value = 10;
-  int *hostMem = reinterpret_cast<int *>(malloc(N * sizeof(int)));
+  int* hostMem = reinterpret_cast<int*>(malloc(N * sizeof(int)));
   REQUIRE(hostMem != nullptr);
   for (int i = 0; i < N; i++) {
     hostMem[i] = value;
@@ -93,24 +91,21 @@ TEST_CASE("Unit_hipMemcpyFromArray_spt_NegativeTests") {
   unsigned int flags = hipArrayDefault;
   HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
   REQUIRE(array != nullptr);
-  HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int),
-                             hipMemcpyHostToDevice));
-  int *hostMemory = reinterpret_cast<int *>(malloc(N * sizeof(int)));
+  HIP_CHECK(hipMemcpyToArray(array, 0, 0, hostMem, N * sizeof(int), hipMemcpyHostToDevice));
+  int* hostMemory = reinterpret_cast<int*>(malloc(N * sizeof(int)));
   REQUIRE(hostMemory != nullptr);
   SECTION("Destination Array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpyFromArray_spt(nullptr, array, 0, 0,
-                                           N * sizeof(int), hipMemcpyDefault),
+    HIP_CHECK_ERROR(hipMemcpyFromArray_spt(nullptr, array, 0, 0, N * sizeof(int), hipMemcpyDefault),
                     hipErrorInvalidValue);
   }
   SECTION("Source Array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpyFromArray_spt(hostMemory, nullptr, 0, 0,
-                                           N * sizeof(int), hipMemcpyDefault),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemcpyFromArray_spt(hostMemory, nullptr, 0, 0, N * sizeof(int), hipMemcpyDefault),
+        hipErrorInvalidValue);
   }
   SECTION("Invalid Size") {
-    HIP_CHECK_ERROR(
-        hipMemcpyFromArray_spt(hostMemory, array, 0, 0, -3, hipMemcpyDefault),
-        hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpyFromArray_spt(hostMemory, array, 0, 0, -3, hipMemcpyDefault),
+                    hipErrorInvalidValue);
   }
   free(hostMem);
   free(hostMemory);
@@ -120,4 +115,3 @@ TEST_CASE("Unit_hipMemcpyFromArray_spt_NegativeTests") {
  * End doxygen group MemoryTest.
  * @}
  */
-

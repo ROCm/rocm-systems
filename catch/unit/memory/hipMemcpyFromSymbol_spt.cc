@@ -42,35 +42,31 @@ __constant__ int constSymbol[10];
  */
 TEST_CASE("Unit_hipMemcpyFromSymbol_spt_Negative") {
   SECTION("Invalid Src Ptr") {
-    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(nullptr, HIP_SYMBOL(devSymbol),
-                                            sizeof(int), 0,
+    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(nullptr, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                             hipMemcpyDeviceToHost),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Dst Ptr") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, nullptr, sizeof(int), 0,
-                                            hipMemcpyDeviceToHost),
-                    hipErrorInvalidSymbol);
+    HIP_CHECK_ERROR(
+        hipMemcpyFromSymbol_spt(&result, nullptr, sizeof(int), 0, hipMemcpyDeviceToHost),
+        hipErrorInvalidSymbol);
   }
   SECTION("Invalid Size") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol),
-                                            sizeof(int) * 100, 0,
+    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int) * 100, 0,
                                             hipMemcpyDeviceToHost),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Offset") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol),
-                                            sizeof(int), 300,
+    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int), 300,
                                             hipMemcpyDeviceToHost),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Direction") {
     int result{0};
-    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol),
-                                            sizeof(int), 0,
+    HIP_CHECK_ERROR(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int), 0,
                                             hipMemcpyHostToDevice),
                     hipErrorInvalidMemcpyDirection);
   }
@@ -94,18 +90,15 @@ TEST_CASE("Unit_hipMemcpyFromSymbol_spt_Sync") {
     int set{42};
     int result{0};
     HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), &set, sizeof(int)));
-    HIP_CHECK(
-        hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int)));
+    HIP_CHECK(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int)));
     REQUIRE(result == set);
   }
   SECTION("Array Values") {
     constexpr size_t size{10};
     int set[size] = {4, 2, 4, 2, 4, 2, 4, 2, 4, 2};
     int result[size] = {0};
-    HIP_CHECK(
-        hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, sizeof(int) * size));
-    HIP_CHECK(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol),
-                                      sizeof(int) * size));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, sizeof(int) * size));
+    HIP_CHECK(hipMemcpyFromSymbol_spt(&result, HIP_SYMBOL(devSymbol), sizeof(int) * size));
     for (size_t i = 0; i < size; i++) {
       REQUIRE(result[i] == set[i]);
     }
@@ -116,10 +109,8 @@ TEST_CASE("Unit_hipMemcpyFromSymbol_spt_Sync") {
     int set[size] = {9, 9, 9, 9, 9, 2, 4, 2, 4, 2};
     int result[size] = {0};
     HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, offset));
-    HIP_CHECK(
-        hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set + 5, offset, offset));
-    HIP_CHECK(hipMemcpyFromSymbol_spt(result, HIP_SYMBOL(devSymbol),
-                                      sizeof(int) * size));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set + 5, offset, offset));
+    HIP_CHECK(hipMemcpyFromSymbol_spt(result, HIP_SYMBOL(devSymbol), sizeof(int) * size));
     for (size_t i = 0; i < size; i++) {
       REQUIRE(result[i] == set[i]);
     }
@@ -129,4 +120,3 @@ TEST_CASE("Unit_hipMemcpyFromSymbol_spt_Sync") {
  * End doxygen group MemoryTest.
  * @}
  */
-

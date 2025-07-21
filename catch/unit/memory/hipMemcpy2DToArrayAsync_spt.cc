@@ -46,23 +46,22 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Positive_Default") {
   CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
-  const auto stream_type =
-      GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
   const auto width = GENERATE(16, 32, 48);
   const auto height = GENERATE(1, 16, 32, 48);
   SECTION("Host to Array") {
     Memcpy2DHosttoAShell<true, int>(
-        std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
-                  width * sizeof(int), height, hipMemcpyHostToDevice, stream),
+        std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, width * sizeof(int), height,
+                  hipMemcpyHostToDevice, stream),
         width, height, stream);
   }
   SECTION("Host to Array with default kind") {
-    Memcpy2DHosttoAShell<true, int>(std::bind(hipMemcpy2DToArrayAsync_spt, _1,
-                                              0, 0, _2, _3, width * sizeof(int),
-                                              height, hipMemcpyDefault, stream),
-                                    width, height, stream);
+    Memcpy2DHosttoAShell<true, int>(
+        std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, width * sizeof(int), height,
+                  hipMemcpyDefault, stream),
+        width, height, stream);
   }
 }
 /**
@@ -76,25 +75,22 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Positive_Default") {
  * ------------------------
  * - HIP_VERSION >= 6.2
  */
-TEST_CASE(
-    "Unit_hipMemcpy2DToArrayAsync_spt_Positive_Synchronization_Behavior") {
+TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Positive_Synchronization_Behavior") {
   CHECK_IMAGE_SUPPORT
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
   SECTION("Host to Array") {
     const auto width = GENERATE(16, 32, 48);
     const auto height = GENERATE(16, 32, 48);
-    MemcpyHtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2,
-                                     width * sizeof(int), width * sizeof(int),
-                                     height, hipMemcpyHostToDevice, nullptr),
+    MemcpyHtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, width * sizeof(int),
+                                     width * sizeof(int), height, hipMemcpyHostToDevice, nullptr),
                            width, height, false);
   }
   SECTION("Device to Array") {
     const auto width = GENERATE(16, 32, 48);
     const auto height = GENERATE(16, 32, 48);
-    MemcpyDtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2,
-                                     _3, width * sizeof(int), height,
-                                     hipMemcpyDeviceToDevice, nullptr),
+    MemcpyDtoASyncBehavior(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
+                                     width * sizeof(int), height, hipMemcpyDeviceToDevice, nullptr),
                            width, height, false);
   }
 }
@@ -114,36 +110,33 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Positive_ZeroWidthHeight") {
   using namespace std::placeholders;
   const auto width = 16;
   const auto height = 16;
-  const auto stream_type =
-      GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
+  const auto stream_type = GENERATE(Streams::nullstream, Streams::perThread, Streams::created);
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
   SECTION("Array to host") {
     SECTION("Height is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
-                    width * sizeof(int), 0, hipMemcpyHostToDevice, stream),
+          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, width * sizeof(int), 0,
+                    hipMemcpyHostToDevice, stream),
           width, height, stream);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, 0, height,
-                    hipMemcpyHostToDevice, stream),
-          width, height, stream);
+      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
+                                                      0, height, hipMemcpyHostToDevice, stream),
+                                            width, height, stream);
     }
   }
   SECTION("Array to device") {
     SECTION("Height is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
-                    width * sizeof(int), 0, hipMemcpyDeviceToDevice, stream),
+          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, width * sizeof(int), 0,
+                    hipMemcpyDeviceToDevice, stream),
           width, height, stream);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3, 0, height,
-                    hipMemcpyDeviceToDevice, stream),
-          width, height, stream);
+      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArrayAsync_spt, _1, 0, 0, _2, _3,
+                                                      0, height, hipMemcpyDeviceToDevice, stream),
+                                            width, height, stream);
     }
   }
 }
@@ -151,7 +144,7 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Positive_ZeroWidthHeight") {
  * Test Description
  * ------------------------
  * - Test unsuccessful execution of hipMemcpy2DToArrayAsync_spt api when
- * parameters are invalid. 
+ * parameters are invalid.
  * Test source
  * ------------------------
  * - catch\unit\memory\hipMemcpy2DToArrayAsync_spt.cc
@@ -168,113 +161,96 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Negative_Parameters") {
   const unsigned int flag = hipArrayDefault;
   ArrayAllocGuard<int> array_alloc(make_hipExtent(width, height, 0), flag);
   LinearAllocGuard2D<int> device_alloc(width, height);
-  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                   allocation_size);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   SECTION("Host to Array") {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          nullptr, 0, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int), height,
-                          hipMemcpyHostToDevice, nullptr),
-                      hipErrorInvalidHandle);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArrayAsync_spt(nullptr, 0, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                      width * sizeof(int), height, hipMemcpyHostToDevice, nullptr),
+          hipErrorInvalidHandle);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, nullptr,
-                          2 * width * sizeof(int), width * sizeof(int), height,
-                          hipMemcpyHostToDevice, nullptr),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, nullptr, 2 * width * sizeof(int),
+                                      width * sizeof(int), height, hipMemcpyHostToDevice, nullptr),
+          hipErrorInvalidValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                          width * sizeof(int) - 10, width * sizeof(int), height,
-                          hipMemcpyHostToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
+                                                  width * sizeof(int) - 10, width * sizeof(int),
+                                                  height, hipMemcpyHostToDevice, nullptr),
                       hipErrorInvalidPitchValue);
     }
     SECTION("Offset + width/height overflows") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 1, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int), height,
-                          hipMemcpyHostToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 1, 0, host_alloc.ptr(),
+                                                  2 * width * sizeof(int), width * sizeof(int),
+                                                  height, hipMemcpyHostToDevice, nullptr),
                       hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 1, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int), height,
-                          hipMemcpyHostToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 1, host_alloc.ptr(),
+                                                  2 * width * sizeof(int), width * sizeof(int),
+                                                  height, hipMemcpyHostToDevice, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("Width/height overflows") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int) + 1,
-                          height, hipMemcpyHostToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
+                                                  2 * width * sizeof(int), width * sizeof(int) + 1,
+                                                  height, hipMemcpyHostToDevice, nullptr),
                       hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int),
-                          height + 1, hipMemcpyHostToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
+                                                  2 * width * sizeof(int), width * sizeof(int),
+                                                  height + 1, hipMemcpyHostToDevice, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("Memcpy kind is invalid") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int), height,
-                          static_cast<hipMemcpyKind>(-1), nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
+                                                  2 * width * sizeof(int), width * sizeof(int),
+                                                  height, static_cast<hipMemcpyKind>(-1), nullptr),
                       hipErrorInvalidMemcpyDirection);
     }
   }
   SECTION("Device to Array") {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2DToArrayAsync_spt(nullptr, 0, 0, device_alloc.ptr(),
-                                      device_alloc.pitch(), width * sizeof(int),
-                                      height, hipMemcpyDeviceToDevice, nullptr),
-          hipErrorInvalidHandle);
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(nullptr, 0, 0, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int), height,
+                                                  hipMemcpyDeviceToDevice, nullptr),
+                      hipErrorInvalidHandle);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, nullptr,
-                                      device_alloc.pitch(), width * sizeof(int),
-                                      height, hipMemcpyDeviceToDevice, nullptr),
-          hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, nullptr,
+                                                  device_alloc.pitch(), width * sizeof(int), height,
+                                                  hipMemcpyDeviceToDevice, nullptr),
+                      hipErrorInvalidValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                          width * sizeof(int) - 10, width * sizeof(int), height,
-                          hipMemcpyDeviceToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
+                                                  width * sizeof(int) - 10, width * sizeof(int),
+                                                  height, hipMemcpyDeviceToDevice, nullptr),
                       hipErrorInvalidPitchValue);
     }
     SECTION("Offset + width/height overflows") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 1, 0, device_alloc.ptr(),
-                          device_alloc.pitch(), width * sizeof(int), height,
-                          hipMemcpyDeviceToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 1, 0, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int), height,
+                                                  hipMemcpyDeviceToDevice, nullptr),
                       hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 1, device_alloc.ptr(),
-                          device_alloc.pitch(), width * sizeof(int), height,
-                          hipMemcpyDeviceToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 1, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int), height,
+                                                  hipMemcpyDeviceToDevice, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("Width/height overflows") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                          device_alloc.pitch(), width * sizeof(int) + 1, height,
-                          hipMemcpyDeviceToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int) + 1,
+                                                  height, hipMemcpyDeviceToDevice, nullptr),
                       hipErrorInvalidValue);
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                          device_alloc.pitch(), width * sizeof(int), height + 1,
-                          hipMemcpyDeviceToDevice, nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int),
+                                                  height + 1, hipMemcpyDeviceToDevice, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("Memcpy kind is invalid") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(
-                          array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                          device_alloc.pitch(), width * sizeof(int), height,
-                          static_cast<hipMemcpyKind>(-1), nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
+                                                  device_alloc.pitch(), width * sizeof(int), height,
+                                                  static_cast<hipMemcpyKind>(-1), nullptr),
                       hipErrorInvalidMemcpyDirection);
     }
   }
@@ -283,4 +259,3 @@ TEST_CASE("Unit_hipMemcpy2DToArrayAsync_spt_Negative_Parameters") {
  * End doxygen group MemoryTest.
  * @}
  */
-

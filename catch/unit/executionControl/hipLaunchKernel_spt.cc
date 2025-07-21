@@ -47,22 +47,19 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipLaunchKernel_spt_Positive_Basic") {
   SECTION("Kernel with no arguments") {
-    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                  dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr, 0,
-                                  nullptr));
+    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{1, 1, 1},
+                                  nullptr, 0, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
   }
   SECTION("Kernel with arguments using kernelParams") {
     LinearAllocGuard<int> result_dev(LinearAllocs::hipMalloc, sizeof(int));
     HIP_CHECK(hipMemset(result_dev.ptr(), 0, sizeof(*result_dev.ptr())));
-    int *result_ptr = result_dev.ptr();
-    void *kernel_args[1] = {&result_ptr};
-    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel_42),
-                                  dim3{1, 1, 1}, dim3{1, 1, 1}, kernel_args, 0,
-                                  nullptr));
+    int* result_ptr = result_dev.ptr();
+    void* kernel_args[1] = {&result_ptr};
+    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel_42), dim3{1, 1, 1}, dim3{1, 1, 1},
+                                  kernel_args, 0, nullptr));
     int result = 0;
-    HIP_CHECK(
-        hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(&result, result_dev.ptr(), sizeof(result), hipMemcpyDefault));
     REQUIRE(result == 42);
   }
 }
@@ -79,25 +76,19 @@ TEST_CASE("Unit_hipLaunchKernel_spt_Positive_Basic") {
  */
 TEST_CASE("Unit_hipLaunchKernel_spt_Positive_Parameters") {
   SECTION("blockDim.x == maxBlockDimX") {
-    const unsigned int x =
-        GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
-    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                  dim3{1, 1, 1}, dim3{x, 1, 1}, nullptr, 0,
-                                  nullptr));
+    const unsigned int x = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimX, 0);
+    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{x, 1, 1},
+                                  nullptr, 0, nullptr));
   }
   SECTION("blockDim.y == maxBlockDimY") {
-    const unsigned int y =
-        GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0);
-    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                  dim3{1, 1, 1}, dim3{y, 1, 1}, nullptr, 0,
-                                  nullptr));
+    const unsigned int y = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimY, 0);
+    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{y, 1, 1},
+                                  nullptr, 0, nullptr));
   }
   SECTION("blockDim.z == maxBlockDimZ") {
-    const unsigned int z =
-        GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0);
-    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                  dim3{1, 1, 1}, dim3{z, 1, 1}, nullptr, 0,
-                                  nullptr));
+    const unsigned int z = GetDeviceAttribute(hipDeviceAttributeMaxBlockDimZ, 0);
+    HIP_CHECK(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1}, dim3{z, 1, 1},
+                                  nullptr, 0, nullptr));
   }
 }
 /**
@@ -113,53 +104,45 @@ TEST_CASE("Unit_hipLaunchKernel_spt_Positive_Parameters") {
  */
 TEST_CASE("Unit_hipLaunchKernel_spt_Negative_Parameters") {
   SECTION("f == nullptr") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(nullptr, dim3{1, 1, 1}, dim3{1, 1, 1},
-                                        nullptr, 0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(nullptr, dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidDeviceFunction);
   }
   SECTION("gridDim.x == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{0, 1, 1}, dim3{1, 1, 1}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{0, 1, 1},
+                                        dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("gridDim.y == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 0, 1}, dim3{1, 1, 1}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 0, 1},
+                                        dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("gridDim.z == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 1, 0}, dim3{1, 1, 1}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 0},
+                                        dim3{1, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("blockDim.x == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 1, 1}, dim3{0, 1, 1}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                        dim3{0, 1, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("blockDim.y == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 1, 1}, dim3{1, 0, 1}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                        dim3{1, 0, 1}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("blockDim.z == 0") {
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 1, 1}, dim3{1, 1, 0}, nullptr,
-                                        0, nullptr),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                        dim3{1, 1, 0}, nullptr, 0, nullptr),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid stream") {
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void *>(kernel),
-                                        dim3{1, 1, 1}, dim3{1, 1, 1}, nullptr,
-                                        0, stream),
+    HIP_CHECK_ERROR(hipLaunchKernel_spt(reinterpret_cast<void*>(kernel), dim3{1, 1, 1},
+                                        dim3{1, 1, 1}, nullptr, 0, stream),
                     hipErrorInvalidValue);
   }
 }
@@ -167,4 +150,3 @@ TEST_CASE("Unit_hipLaunchKernel_spt_Negative_Parameters") {
  * End doxygen group ExecutionTest.
  * @}
  */
-

@@ -49,9 +49,7 @@ TEST_CASE("Unit_hipMemcpy2D_spt_Positive_Synchronization_Behavior") {
     Memcpy2DDtoHPageableSyncBehavior(hipMemcpy2D_spt, true);
     Memcpy2DDtoHPinnedSyncBehavior(hipMemcpy2D_spt, true);
   }
-  SECTION("Device to Device") {
-    Memcpy2DDtoDSyncBehavior(hipMemcpy2D_spt, true);
-  }
+  SECTION("Device to Device") { Memcpy2DDtoDSyncBehavior(hipMemcpy2D_spt, true); }
   SECTION("Host to Host") { Memcpy2DHtoHSyncBehavior(hipMemcpy2D_spt, true); }
 }
 /**
@@ -85,85 +83,70 @@ TEST_CASE("Unit_hipMemcpy2D_spt_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;
-  constexpr auto NegativeTests = [](void *dst, size_t dpitch, const void *src,
-                                    size_t spitch, size_t width, size_t height,
-                                    hipMemcpyKind kind) {
+  constexpr auto NegativeTests = [](void* dst, size_t dpitch, const void* src, size_t spitch,
+                                    size_t width, size_t height, hipMemcpyKind kind) {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2D_spt(nullptr, dpitch, src, spitch, width, height, kind),
-          hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipMemcpy2D_spt(nullptr, dpitch, src, spitch, width, height, kind),
+                      hipErrorInvalidValue);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2D_spt(dst, dpitch, nullptr, spitch, width, height, kind),
-          hipErrorInvalidValue);
+      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, dpitch, nullptr, spitch, width, height, kind),
+                      hipErrorInvalidValue);
     }
     SECTION("dpitch < width") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2D_spt(dst, width - 1, src, spitch, width, height, kind),
-          hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, width - 1, src, spitch, width, height, kind),
+                      hipErrorInvalidPitchValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2D_spt(dst, dpitch, src, width - 1, width, height, kind),
-          hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, dpitch, src, width - 1, width, height, kind),
+                      hipErrorInvalidPitchValue);
     }
     SECTION("dpitch > max pitch") {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
-      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, static_cast<size_t>(attr) + 1, src,
-                                      spitch, width, height, kind),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2D_spt(dst, static_cast<size_t>(attr) + 1, src, spitch, width, height, kind),
+          hipErrorInvalidValue);
     }
     SECTION("spitch > max pitch") {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
-      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, dpitch, src,
-                                      static_cast<size_t>(attr) + 1, width,
-                                      height, kind),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2D_spt(dst, dpitch, src, static_cast<size_t>(attr) + 1, width, height, kind),
+          hipErrorInvalidValue);
     }
     SECTION("Invalid MemcpyKind") {
-      HIP_CHECK_ERROR(hipMemcpy2D_spt(dst, dpitch, src, spitch, width, height,
-                                      static_cast<hipMemcpyKind>(-1)),
-                      hipErrorInvalidMemcpyDirection);
+      HIP_CHECK_ERROR(
+          hipMemcpy2D_spt(dst, dpitch, src, spitch, width, height, static_cast<hipMemcpyKind>(-1)),
+          hipErrorInvalidMemcpyDirection);
     }
   };
   SECTION("Host to Device") {
     LinearAllocGuard2D<int> device_alloc(cols, rows);
-    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                     device_alloc.pitch() * rows);
-    NegativeTests(device_alloc.ptr(), device_alloc.pitch(), host_alloc.ptr(),
-                  device_alloc.pitch(), device_alloc.width(),
-                  device_alloc.height(), hipMemcpyHostToDevice);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.pitch() * rows);
+    NegativeTests(device_alloc.ptr(), device_alloc.pitch(), host_alloc.ptr(), device_alloc.pitch(),
+                  device_alloc.width(), device_alloc.height(), hipMemcpyHostToDevice);
   }
   SECTION("Device to Host") {
     LinearAllocGuard2D<int> device_alloc(cols, rows);
-    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                     device_alloc.pitch() * rows);
-    NegativeTests(host_alloc.ptr(), device_alloc.pitch(), device_alloc.ptr(),
-                  device_alloc.pitch(), device_alloc.width(),
-                  device_alloc.height(), hipMemcpyDeviceToHost);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.pitch() * rows);
+    NegativeTests(host_alloc.ptr(), device_alloc.pitch(), device_alloc.ptr(), device_alloc.pitch(),
+                  device_alloc.width(), device_alloc.height(), hipMemcpyDeviceToHost);
   }
   SECTION("Host to Host") {
-    LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc,
-                                    cols * rows * sizeof(int));
-    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc,
-                                    cols * rows * sizeof(int));
-    NegativeTests(dst_alloc.ptr(), cols * sizeof(int), src_alloc.ptr(),
-                  cols * sizeof(int), cols * sizeof(int), rows,
-                  hipMemcpyHostToHost);
+    LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc, cols * rows * sizeof(int));
+    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc, cols * rows * sizeof(int));
+    NegativeTests(dst_alloc.ptr(), cols * sizeof(int), src_alloc.ptr(), cols * sizeof(int),
+                  cols * sizeof(int), rows, hipMemcpyHostToHost);
   }
   SECTION("Device to Device") {
     LinearAllocGuard2D<int> src_alloc(cols, rows);
     LinearAllocGuard2D<int> dst_alloc(cols, rows);
-    NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(),
-                  src_alloc.pitch(), dst_alloc.width(), dst_alloc.height(),
-                  hipMemcpyDeviceToDevice);
+    NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
+                  dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
 }
 /**
  * End doxygen group MemoryTest.
  * @}
  */
-

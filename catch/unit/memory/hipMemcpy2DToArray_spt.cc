@@ -49,15 +49,13 @@ TEST_CASE("Unit_hipMemcpy2DToArray_spt_Positive_Default") {
   const auto width = GENERATE(16, 32, 48);
   const auto height = GENERATE(1, 16, 32, 48);
   SECTION("Host to Array") {
-    Memcpy2DHosttoAShell<false, int>(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0,
-                                               _2, _3, width * sizeof(int),
-                                               height, hipMemcpyHostToDevice),
+    Memcpy2DHosttoAShell<false, int>(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3,
+                                               width * sizeof(int), height, hipMemcpyHostToDevice),
                                      width, height);
   }
   SECTION("Host to Array with default kind") {
-    Memcpy2DHosttoAShell<false, int>(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0,
-                                               _2, _3, width * sizeof(int),
-                                               height, hipMemcpyDefault),
+    Memcpy2DHosttoAShell<false, int>(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3,
+                                               width * sizeof(int), height, hipMemcpyDefault),
                                      width, height);
   }
 }
@@ -79,9 +77,8 @@ TEST_CASE("Unit_hipMemcpy2DToArray_spt_Positive_Synchronization_Behavior") {
   SECTION("Host to Array") {
     const auto width = GENERATE(16, 32, 48);
     const auto height = GENERATE(16, 32, 48);
-    MemcpyHtoASyncBehavior(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2,
-                                     width * sizeof(int), width * sizeof(int),
-                                     height, hipMemcpyHostToDevice),
+    MemcpyHtoASyncBehavior(std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, width * sizeof(int),
+                                     width * sizeof(int), height, hipMemcpyHostToDevice),
                            width, height, true);
   }
 }
@@ -104,28 +101,26 @@ TEST_CASE("Unit_hipMemcpy2DToArray_spt_Positive_ZeroWidthHeight") {
   SECTION("Array to host") {
     SECTION("Height is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3,
-                    width * sizeof(int), 0, hipMemcpyHostToDevice),
+          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, width * sizeof(int), 0,
+                    hipMemcpyHostToDevice),
           width, height);
     }
     SECTION("Width is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, 0, height,
-                    hipMemcpyHostToDevice),
+          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, 0, height, hipMemcpyHostToDevice),
           width, height);
     }
   }
   SECTION("Array to device") {
     SECTION("Height is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3,
-                    width * sizeof(int), 0, hipMemcpyDeviceToDevice),
+          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, width * sizeof(int), 0,
+                    hipMemcpyDeviceToDevice),
           width, height);
     }
     SECTION("Width is 0") {
       Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, 0, height,
-                    hipMemcpyDeviceToDevice),
+          std::bind(hipMemcpy2DToArray_spt, _1, 0, 0, _2, _3, 0, height, hipMemcpyDeviceToDevice),
           width, height);
     }
   }
@@ -151,113 +146,95 @@ TEST_CASE("Unit_hipMemcpy2DToArray_spt_Negative_Parameters") {
   const unsigned int flag = hipArrayDefault;
   ArrayAllocGuard<int> array_alloc(make_hipExtent(width, height, 0), flag);
   LinearAllocGuard2D<int> device_alloc(width, height);
-  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                   allocation_size);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, allocation_size);
   SECTION("Host to Array") {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(nullptr, 0, 0, host_alloc.ptr(),
-                                             2 * width * sizeof(int),
-                                             width * sizeof(int), height,
-                                             hipMemcpyHostToDevice),
-                      hipErrorInvalidHandle);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArray_spt(nullptr, 0, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int), height, hipMemcpyHostToDevice),
+          hipErrorInvalidHandle);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, nullptr,
-                                             2 * width * sizeof(int),
-                                             width * sizeof(int), height,
-                                             hipMemcpyHostToDevice),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, nullptr, 2 * width * sizeof(int),
+                                 width * sizeof(int), height, hipMemcpyHostToDevice),
+          hipErrorInvalidValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                                 width * sizeof(int) - 10, width * sizeof(int),
-                                 height, hipMemcpyHostToDevice),
-          hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
+                                             width * sizeof(int) - 10, width * sizeof(int), height,
+                                             hipMemcpyHostToDevice),
+                      hipErrorInvalidPitchValue);
     }
     SECTION("Offset + width/height overflows") {
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 1, 0, host_alloc.ptr(),
-                                 2 * width * sizeof(int), width * sizeof(int),
-                                 height, hipMemcpyHostToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 1, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int), height, hipMemcpyHostToDevice),
           hipErrorInvalidValue);
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 1, host_alloc.ptr(),
-                                 2 * width * sizeof(int), width * sizeof(int),
-                                 height, hipMemcpyHostToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 1, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int), height, hipMemcpyHostToDevice),
           hipErrorInvalidValue);
     }
     SECTION("Width/height overflows") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(
-                          array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                          2 * width * sizeof(int), width * sizeof(int) + 1,
-                          height, hipMemcpyHostToDevice),
-                      hipErrorInvalidValue);
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                                 2 * width * sizeof(int), width * sizeof(int),
-                                 height + 1, hipMemcpyHostToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int) + 1, height, hipMemcpyHostToDevice),
+          hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int), height + 1, hipMemcpyHostToDevice),
           hipErrorInvalidValue);
     }
     SECTION("Memcpy kind is invalid") {
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(),
-                                 2 * width * sizeof(int), width * sizeof(int),
-                                 height, static_cast<hipMemcpyKind>(-1)),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, host_alloc.ptr(), 2 * width * sizeof(int),
+                                 width * sizeof(int), height, static_cast<hipMemcpyKind>(-1)),
           hipErrorInvalidMemcpyDirection);
     }
   }
   SECTION("Device to Array") {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(nullptr, 0, 0, device_alloc.ptr(),
-                                             device_alloc.pitch(),
-                                             width * sizeof(int), height,
-                                             hipMemcpyDeviceToDevice),
-                      hipErrorInvalidHandle);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DToArray_spt(nullptr, 0, 0, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int), height, hipMemcpyDeviceToDevice),
+          hipErrorInvalidHandle);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, nullptr,
-                                             device_alloc.pitch(),
-                                             width * sizeof(int), height,
-                                             hipMemcpyDeviceToDevice),
+      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, nullptr, device_alloc.pitch(),
+                                             width * sizeof(int), height, hipMemcpyDeviceToDevice),
                       hipErrorInvalidValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                                 width * sizeof(int) - 10, width * sizeof(int),
-                                 height, hipMemcpyDeviceToDevice),
-          hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
+                                             width * sizeof(int) - 10, width * sizeof(int), height,
+                                             hipMemcpyDeviceToDevice),
+                      hipErrorInvalidPitchValue);
     }
     SECTION("Offset + width/height overflows") {
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 1, 0, device_alloc.ptr(),
-                                 device_alloc.pitch(), width * sizeof(int),
-                                 height, hipMemcpyDeviceToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 1, 0, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int), height, hipMemcpyDeviceToDevice),
           hipErrorInvalidValue);
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 1, device_alloc.ptr(),
-                                 device_alloc.pitch(), width * sizeof(int),
-                                 height, hipMemcpyDeviceToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 1, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int), height, hipMemcpyDeviceToDevice),
           hipErrorInvalidValue);
     }
     SECTION("Width/height overflows") {
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                                 device_alloc.pitch(), width * sizeof(int) + 1,
-                                 height, hipMemcpyDeviceToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int) + 1, height, hipMemcpyDeviceToDevice),
           hipErrorInvalidValue);
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                                 device_alloc.pitch(), width * sizeof(int),
-                                 height + 1, hipMemcpyDeviceToDevice),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int), height + 1, hipMemcpyDeviceToDevice),
           hipErrorInvalidValue);
     }
     SECTION("Memcpy kind is invalid") {
       HIP_CHECK_ERROR(
-          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(),
-                                 device_alloc.pitch(), width * sizeof(int),
-                                 height, static_cast<hipMemcpyKind>(-1)),
+          hipMemcpy2DToArray_spt(array_alloc.ptr(), 0, 0, device_alloc.ptr(), device_alloc.pitch(),
+                                 width * sizeof(int), height, static_cast<hipMemcpyKind>(-1)),
           hipErrorInvalidMemcpyDirection);
     }
   }
@@ -265,5 +242,3 @@ TEST_CASE("Unit_hipMemcpy2DToArray_spt_Negative_Parameters") {
 /**
  * End doxygen group MemoryTest.
  * @}
- */
-

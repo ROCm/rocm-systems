@@ -47,29 +47,24 @@ TEST_CASE("Unit_hipMemcpy2DAsync_spt_Positive_Synchronization_Behavior") {
   using namespace std::placeholders;
   HIP_CHECK(hipDeviceSynchronize());
   SECTION("Host to Device") {
-    Memcpy2DHtoDSyncBehavior(
-        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
-        false);
+    Memcpy2DHtoDSyncBehavior(std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
+                             false);
   }
   SECTION("Device to Pageable Host") {
     Memcpy2DDtoHPageableSyncBehavior(
-        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
-        true);
+        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr), true);
   }
   SECTION("Device to Pinned Host") {
     Memcpy2DDtoHPinnedSyncBehavior(
-        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
-        false);
+        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr), false);
   }
   SECTION("Device to Device") {
-    Memcpy2DDtoDSyncBehavior(
-        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
-        false);
+    Memcpy2DDtoDSyncBehavior(std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
+                             false);
   }
   SECTION("Host to Host") {
-    Memcpy2DHtoHSyncBehavior(
-        std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
-        true);
+    Memcpy2DHtoHSyncBehavior(std::bind(hipMemcpy2DAsync_spt, _1, _2, _3, _4, _5, _6, _7, nullptr),
+                             true);
   }
 }
 /**
@@ -107,83 +102,71 @@ TEST_CASE("Unit_hipMemcpy2DAsync_spt_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT
   constexpr size_t cols = 128;
   constexpr size_t rows = 128;
-  constexpr auto NegativeTests = [](void *dst, size_t dpitch, const void *src,
-                                    size_t spitch, size_t width, size_t height,
-                                    hipMemcpyKind kind) {
+  constexpr auto NegativeTests = [](void* dst, size_t dpitch, const void* src, size_t spitch,
+                                    size_t width, size_t height, hipMemcpyKind kind) {
     SECTION("dst == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(nullptr, dpitch, src, spitch, width,
-                                           height, kind, nullptr),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DAsync_spt(nullptr, dpitch, src, spitch, width, height, kind, nullptr),
+          hipErrorInvalidValue);
     }
     SECTION("src == nullptr") {
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, dpitch, nullptr, spitch, width,
-                                           height, kind, nullptr),
-                      hipErrorInvalidValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DAsync_spt(dst, dpitch, nullptr, spitch, width, height, kind, nullptr),
+          hipErrorInvalidValue);
     }
     SECTION("dpitch < width") {
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, width - 1, src, spitch, width,
-                                           height, kind, nullptr),
-                      hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DAsync_spt(dst, width - 1, src, spitch, width, height, kind, nullptr),
+          hipErrorInvalidPitchValue);
     }
     SECTION("spitch < width") {
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, dpitch, src, width - 1, width,
-                                           height, kind, nullptr),
-                      hipErrorInvalidPitchValue);
+      HIP_CHECK_ERROR(
+          hipMemcpy2DAsync_spt(dst, dpitch, src, width - 1, width, height, kind, nullptr),
+          hipErrorInvalidPitchValue);
     }
     SECTION("dpitch > max pitch") {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, static_cast<size_t>(attr) + 1,
-                                           src, spitch, width, height, kind,
-                                           nullptr),
+      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, static_cast<size_t>(attr) + 1, src, spitch, width,
+                                           height, kind, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("spitch > max pitch") {
       int attr = 0;
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
-      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, dpitch, src,
-                                           static_cast<size_t>(attr) + 1, width,
+      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, dpitch, src, static_cast<size_t>(attr) + 1, width,
                                            height, kind, nullptr),
                       hipErrorInvalidValue);
     }
     SECTION("Invalid MemcpyKind") {
-      HIP_CHECK_ERROR(
-          hipMemcpy2DAsync_spt(dst, dpitch, src, spitch, width, height,
-                               static_cast<hipMemcpyKind>(-1), nullptr),
-          hipErrorInvalidMemcpyDirection);
+      HIP_CHECK_ERROR(hipMemcpy2DAsync_spt(dst, dpitch, src, spitch, width, height,
+                                           static_cast<hipMemcpyKind>(-1), nullptr),
+                      hipErrorInvalidMemcpyDirection);
     }
   };
   SECTION("Host to device") {
     LinearAllocGuard2D<int> device_alloc(cols, rows);
-    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                     device_alloc.pitch() * rows);
-    NegativeTests(device_alloc.ptr(), device_alloc.pitch(), host_alloc.ptr(),
-                  device_alloc.pitch(), device_alloc.width(),
-                  device_alloc.height(), hipMemcpyHostToDevice);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.pitch() * rows);
+    NegativeTests(device_alloc.ptr(), device_alloc.pitch(), host_alloc.ptr(), device_alloc.pitch(),
+                  device_alloc.width(), device_alloc.height(), hipMemcpyHostToDevice);
   }
   SECTION("Device to host") {
     LinearAllocGuard2D<int> device_alloc(cols, rows);
-    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
-                                     device_alloc.pitch() * rows);
-    NegativeTests(host_alloc.ptr(), device_alloc.pitch(), device_alloc.ptr(),
-                  device_alloc.pitch(), device_alloc.width(),
-                  device_alloc.height(), hipMemcpyDeviceToHost);
+    LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.pitch() * rows);
+    NegativeTests(host_alloc.ptr(), device_alloc.pitch(), device_alloc.ptr(), device_alloc.pitch(),
+                  device_alloc.width(), device_alloc.height(), hipMemcpyDeviceToHost);
   }
   SECTION("Host to host") {
-    LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc,
-                                    cols * rows * sizeof(int));
-    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc,
-                                    cols * rows * sizeof(int));
-    NegativeTests(dst_alloc.ptr(), cols * sizeof(int), src_alloc.ptr(),
-                  cols * sizeof(int), cols * sizeof(int), rows,
-                  hipMemcpyHostToHost);
+    LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc, cols * rows * sizeof(int));
+    LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc, cols * rows * sizeof(int));
+    NegativeTests(dst_alloc.ptr(), cols * sizeof(int), src_alloc.ptr(), cols * sizeof(int),
+                  cols * sizeof(int), rows, hipMemcpyHostToHost);
   }
   SECTION("Device to device") {
     LinearAllocGuard2D<int> src_alloc(cols, rows);
     LinearAllocGuard2D<int> dst_alloc(cols, rows);
-    NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(),
-                  src_alloc.pitch(), dst_alloc.width(), dst_alloc.height(),
-                  hipMemcpyDeviceToDevice);
+    NegativeTests(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
+                  dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
 }
 /**
@@ -198,8 +181,8 @@ TEST_CASE("Unit_hipMemcpy2DAsync_spt_Negative_Parameters") {
  * ------------------------
  *  - HIP_VERSION >= 6.2
  */
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_spt_capturehipMemcpy2DAsync_spt", "",
-                   int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_spt_capturehipMemcpy2DAsync_spt", "", int, float,
+                   double) {
   TestType *A_h, *B_h, *A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
@@ -208,23 +191,21 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_spt_capturehipMemcpy2DAsync_spt", "",
   col = GENERATE(3, 4, 100);
   hipStream_t stream;
   size_t devPitch;
-  A_h = reinterpret_cast<TestType *>(malloc(sizeof(TestType) * row * col));
-  B_h = reinterpret_cast<TestType *>(malloc(sizeof(TestType) * row * col));
+  A_h = reinterpret_cast<TestType*>(malloc(sizeof(TestType) * row * col));
+  B_h = reinterpret_cast<TestType*>(malloc(sizeof(TestType) * row * col));
   HIP_CHECK(hipStreamCreate(&stream));
   for (int i = 0; i < row; i++) {
     for (int j = 0; j < col; j++) {
       B_h[i * col + j] = i * col + j;
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void **>(&A_d), &devPitch,
-                           sizeof(TestType) * col, row));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, B_h, sizeof(TestType) * col,
-                        sizeof(TestType) * col, row, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(TestType) * col, row));
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, B_h, sizeof(TestType) * col, sizeof(TestType) * col, row,
+                        hipMemcpyHostToDevice));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpy2DAsync_spt(A_h, col * sizeof(TestType), A_d, devPitch,
-                                 col * sizeof(TestType), row,
-                                 hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpy2DAsync_spt(A_h, col * sizeof(TestType), A_d, devPitch, col * sizeof(TestType),
+                                 row, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -246,4 +227,3 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_spt_capturehipMemcpy2DAsync_spt", "",
  * End doxygen group MemoryTest.
  * @}
  */
-
