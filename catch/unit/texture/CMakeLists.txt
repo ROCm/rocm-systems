@@ -64,6 +64,7 @@ set(TEST_SRC
     hipTexRefGetFlags.cc
     hipTexRefSetAddressMode.cc
     hipTexRefGetAddressMode.cc
+    hipDeviceGetTexture1DLinearMaxWidth.cc
 )
 
 # tests not for gfx90a+
