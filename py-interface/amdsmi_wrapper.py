@@ -1127,14 +1127,14 @@ amdsmi_accelerator_partition_profile_config_t = struct_amdsmi_accelerator_partit
 # values for enumeration 'amdsmi_link_type_t'
 amdsmi_link_type_t__enumvalues = {
     0: 'AMDSMI_LINK_TYPE_INTERNAL',
-    1: 'AMDSMI_LINK_TYPE_XGMI',
-    2: 'AMDSMI_LINK_TYPE_PCIE',
+    1: 'AMDSMI_LINK_TYPE_PCIE',
+    2: 'AMDSMI_LINK_TYPE_XGMI',
     3: 'AMDSMI_LINK_TYPE_NOT_APPLICABLE',
     4: 'AMDSMI_LINK_TYPE_UNKNOWN',
 }
 AMDSMI_LINK_TYPE_INTERNAL = 0
-AMDSMI_LINK_TYPE_XGMI = 1
-AMDSMI_LINK_TYPE_PCIE = 2
+AMDSMI_LINK_TYPE_PCIE = 1
+AMDSMI_LINK_TYPE_XGMI = 2
 AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3
 AMDSMI_LINK_TYPE_UNKNOWN = 4
 amdsmi_link_type_t = ctypes.c_uint32 # enum

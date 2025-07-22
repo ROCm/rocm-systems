@@ -1,5 +1,3 @@
-# THIS FILE IS GENERATED FROM .clangd!
-# Run .update-clang-tidy.sh to regenerate.
 Checks:
   bugprone*,
   clang-analyzer*,
@@ -12,6 +10,7 @@ Checks:
   -clang-analyzer-security.insecureAPI.strcpy,
   -cppcoreguidelines*,
   -cppcoreguidelines-pro*,
+  -google-readability*,
   -misc-non-copyable-objects,
   -misc-use-anonymous-namespace,
   -modernize-avoid-c-arrays,

@@ -74,7 +74,9 @@ jobs:
       - name: Install AMDSMI
         run: |
           cd $GITHUB_WORKSPACE/build
-          apt update
+          if [ "${{ matrix.os }}" != "Debian10" ]; then
+            apt update
+          fi
 
           RETRIES=3
           for i in $(seq 1 $RETRIES); do
@@ -100,6 +102,7 @@ jobs:
               sleep $((2 ** (i - 1)))
             fi
           done
+          echo "Build completed on ${{ matrix.os }}"
 
       - name: Uninstall
         if: always()
@@ -160,8 +163,6 @@ jobs:
           done
 
           echo 'Installing for test on ${{ matrix.os }}'
-          apt update
-
           for i in $(seq 1 $RETRIES); do
             echo "Installation attempt $i for test on ${{ matrix.os }}..."
             if apt install -y $BUILD_FOLDER/amd-smi-lib*99999-local_amd64.deb; then

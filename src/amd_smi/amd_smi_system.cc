@@ -397,15 +397,16 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
         processors_.clear();
         sockets_.clear();
         esmi_exit();
-        init_flag_ &= ~AMDSMI_INIT_AMD_CPUS;
     }
 #endif
     if (init_flag_ & AMDSMI_INIT_AMD_GPUS) {
-        // we do not need to delete the sockets/processors, clear takes care of this
+        // we do not need to delete the processors, deleting sockets takes care of this
         if (!processors_.empty()) {processors_.clear();}
+        for (uint32_t i = 0; i < sockets_.size(); i++) {
+            delete sockets_[i];
+        }
         if (!sockets_.empty()) {sockets_.clear();}
         drm_.cleanup();
-        init_flag_ &= ~AMDSMI_INIT_AMD_GPUS;
         rsmi_status_t ret = rsmi_shut_down();
         if (ret != RSMI_STATUS_SUCCESS) {
             return amd::smi::rsmi_to_amdsmi_status(ret);

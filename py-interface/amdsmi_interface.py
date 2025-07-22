@@ -3154,14 +3154,12 @@ def amdsmi_topo_get_link_type(
         )
 
     hops = ctypes.c_uint64()
-    #type = AmdSmiIoLinkType()
     type = ctypes.c_uint32()
 
     _check_res(
         amdsmi_wrapper.amdsmi_topo_get_link_type(
-            #processor_handle_src, processor_handle_dst, ctypes.byref(hops), type
-            processor_handle_src, processor_handle_dst, ctypes.byref(
-                hops), ctypes.byref(type)
+            processor_handle_src, processor_handle_dst,
+            ctypes.byref(hops), ctypes.byref(type)
         )
     )
 
@@ -5087,3 +5085,32 @@ def amdsmi_get_rocm_version()-> Tuple[bool, str]:
         return False, "Could not find librocm-core.so"
     except Exception as e:
         return False, f"Unable to detect ROCm installation, Unknown Error: {e}"
+
+
+def amdsmi_get_gpu_revision(processor_handle: processor_handle) -> str:
+    """
+    Get the GPU revision for a given processor handle.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle): The processor handle for the GPU.
+
+    Returns:
+        str: The GPU revision as a string.
+
+    Raises:
+        AmdSmiParameterException: If the processor handle is invalid.
+        AmdSmiLibraryException: If the underlying library call fails.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    revision = ctypes.c_uint16()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_revision(
+            processor_handle, ctypes.byref(revision)
+        )
+    )
+
+    return _pad_hex_value(hex(revision.value), 2)

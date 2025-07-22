@@ -23,6 +23,7 @@ Diagnostics:
           clang-analyzer-security.insecureAPI.strcpy,
           cppcoreguidelines*,
           cppcoreguidelines-pro*,
+          google-readability*,
           misc-non-copyable-objects,
           misc-use-anonymous-namespace,
           modernize-avoid-c-arrays,
