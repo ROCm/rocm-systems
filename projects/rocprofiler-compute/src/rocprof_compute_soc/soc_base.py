@@ -24,6 +24,7 @@
 
 import ctypes
 import glob
+import json
 import math
 import os
 import re
@@ -166,13 +167,14 @@ class OmniSoC_Base:
             )
         )
 
-        # we get the max mclk from amd-smi --showmclkrange
-        # Regular expression to extract the max memory clock (third frequency level in MEM)
-        memory_clock_pattern = (
-            r"MEM:\s*[^:]*FREQUENCY_LEVELS:\s*(?:\d+: \d+ MHz\s*){2}(\d+)\s*MHz"
-        )
-        amd_smi_mclk = run(["amd-smi", "static"], exit_on_error=True)
-        self._mspec.max_mclk = search(memory_clock_pattern, amd_smi_mclk)
+        # Parse json from amd-smi static --clock
+        amd_smi_mclk = run(["amd-smi", "static", "--clock", "--json"], exit_on_error=True)
+        amd_smi_mclk = json.loads(amd_smi_mclk)
+        amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"]["frequency_levels"]
+        # Choose the highest level of memory clock frequency
+        amd_smi_mclk = amd_smi_mclk[sorted(amd_smi_mclk.keys())[-1]]
+        # 100 Mhz -> 100
+        self._mspec.max_mclk = amd_smi_mclk.split(" ")[0]
 
         console_debug("max mem clock is {}".format(self._mspec.max_mclk))
 
