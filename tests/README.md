@@ -15,7 +15,6 @@ The suite of tests can then be ran using the following command:
 ctest --test-dir rocprof-sys-test
 ```
 
-
 ## Test Prerequisites
 
 The standalone test suite requires the following for a minimal build:
@@ -25,13 +24,17 @@ The standalone test suite requires the following for a minimal build:
 - `Python3` along with `pybind11-dev`
 
 ### Python Tests
+
 The python suite of ctests requires the `rocprofsys` module. Should you need to disable all python dependencies, use the flag `-D ROCPROFSYS_USE_PYTHON=OFF`.
 
 ### Perfetto Validation Tests
+
 The perfetto validation tests require the python `perfetto` module to be installed.
 
 ### rocDecode and rocJPEG Tests
+
 These tests respectively require the `rocdecode-dev` and `rocjpeg-dev` packages.
 
 ### Overflow Tests
+
 This family of tests require that the system's `perf_event_paranoid` be `<= 3`.
