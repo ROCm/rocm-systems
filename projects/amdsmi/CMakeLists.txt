@@ -43,7 +43,11 @@ find_program(GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
-get_package_version_number("26.0.0" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_file("include/amd_smi/amdsmi.h" "MAJOR")
+get_version_from_file("include/amd_smi/amdsmi.h" "MINOR")
+get_version_from_file("include/amd_smi/amdsmi.h" "RELEASE")
+set(DEFAULT_VERSION "${MAJOR}.${MINOR}.${RELEASE}")
+get_package_version_number(${DEFAULT_VERSION} ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
@@ -53,6 +57,11 @@ set(${AMD_SMI_LIBS_TARGET}_VERSION_HASH "${PKG_VERSION_HASH}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_STRING
     "${${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_MINOR}.${${AMD_SMI_LIBS_TARGET}_VERSION_PATCH}+${${AMD_SMI_LIBS_TARGET}_VERSION_HASH}"
 )
+
+set(DEFAULT_VERSION "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}")
+update_version_in_file("include/amd_smi/amdsmi.h" ${DEFAULT_VERSION} "#define AMDSMI_LIB_VERSION_" " *" " ")
+update_version_in_file("rust-interface/src/amdsmi_wrapper.rs" ${DEFAULT_VERSION} "AMDSMI_LIB_VERSION_" " *: *u32 *= *"
+                       ": u32 = ")
 
 # Make proper version for appending
 # Default Value is 99999
@@ -213,8 +222,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_logger.h"
     "${SHR_MUTEX_DIR}/shared_mutex.h"
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
-    "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
-    )
+    "${ROCM_INC_DIR}/rocm_smi_board_temp.h")
 
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
