@@ -611,13 +611,9 @@ SELECT
             RS.id = E.category_id
             AND RS.guid = E.guid
     ) AS category,
-    M2.agent_id AS agent_id_alloc,
     E.extdata AS event_extdata
 FROM
     `rocpd_memory_allocate` M
-    LEFT JOIN `rocpd_memory_allocate` M2 ON M2.address != 0
-    AND M2.address = M.address
-    AND M2.type = 'ALLOC'
     LEFT JOIN `rocpd_info_agent` A ON M.agent_id = A.id
     AND M.guid = A.guid
     LEFT JOIN `rocpd_info_queue` Q ON Q.id = M.queue_id

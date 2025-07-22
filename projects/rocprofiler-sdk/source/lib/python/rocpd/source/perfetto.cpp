@@ -719,8 +719,6 @@ write_perfetto(
         {
             for(const auto& itr : memory_allocation_gen.get(ditr))
             {
-                PERFETTO_LOG("LEVEL %s", itr.level.c_str());
-
                 if(itr.type == "ALLOC")
                 {
                     LOG_IF(FATAL, itr.agent_name.empty())
@@ -740,14 +738,19 @@ write_perfetto(
                                                rocprofiler_address_t{.handle = itr.address},
                                                rocprofiler_queue_id_t{.handle = itr.queue_id},
                                                true});
+
+                        address_to_agent_and_size.emplace(
+                            rocprofiler_address_t{.handle = itr.address},
+                            agent_and_size{itr.agent_abs_index, itr.size});
                     }
-
-                    address_to_agent_and_size.emplace(
-                        rocprofiler_address_t{.handle = itr.address},
-                        agent_and_size{itr.agent_abs_index, itr.size});
-
-                    queue_to_agent_and_size.emplace(rocprofiler_queue_id_t{.handle = itr.queue_id},
-                                                    agent_and_size{itr.agent_abs_index, itr.size});
+                    // Scratch memory operations operations are indexed by queue id as agent
+                    // id is not available
+                    else if(itr.level == "SCRATCH")
+                    {
+                        queue_to_agent_and_size.emplace(
+                            rocprofiler_queue_id_t{.handle = itr.queue_id},
+                            agent_and_size{itr.agent_abs_index, itr.size});
+                    }
                 }
                 else if(itr.type == "FREE")
                 {
@@ -774,7 +777,7 @@ write_perfetto(
         {
             if(address_to_agent_and_size.count(itr.address) == 0)
             {
-                if(itr.queue.handle == 0)
+                if(itr.address.handle == 0)
                 {
                     // Freeing null pointers is expected behavior and is occurs in HSA functions
                     // like hipStreamDestroy
@@ -878,13 +881,6 @@ write_perfetto(
                               itr.first,
                               itr.second.alloc_size / bytes_multiplier);
                 tracing_session->FlushBlocking();
-
-                PERFETTO_LOG("TRACE_COUNTER alloc convert %s %llu %llu %llu %llu",
-                             sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                             (unsigned long long) (alloc_itr.first),
-                             (unsigned long long) (mem_alloc_tracks.at(alloc_itr.first).uuid),
-                             (unsigned long long) itr.first,
-                             (unsigned long long) itr.second.alloc_size);
             }
         }
 
@@ -895,8 +891,8 @@ write_perfetto(
             std::numeric_limits<uint64_t>::max(), std::numeric_limits<uint64_t>::min()};
 
         // Load scratch memory usage endpoints
-        for(auto ditr : scratch_memory_gen)
-            for(auto itr : scratch_memory_gen.get(ditr))
+        for(const auto& ditr : scratch_memory_gen)
+            for(const auto& itr : scratch_memory_gen.get(ditr))
             {
                 auto agent_abs_index = itr.agent_abs_index;
                 if(itr.operation == "FREE")
@@ -917,8 +913,8 @@ write_perfetto(
             }
 
         // Load values at each endpoint
-        for(auto ditr : scratch_memory_gen)
-            for(auto itr : scratch_memory_gen.get(ditr))
+        for(const auto& ditr : scratch_memory_gen)
+            for(const auto& itr : scratch_memory_gen.get(ditr))
             {
                 auto agent_abs_index = itr.agent_abs_index;
                 if(itr.operation == "FREE")
@@ -974,24 +970,17 @@ write_perfetto(
         }
 
         // Write counter values to perfetto trace
-        for(auto& mitr : scratch_mem_endpoints)
+        for(const auto& mitr : scratch_mem_endpoints)
         {
             if(scratch_mem_tracks.count(mitr.first) > 0)
             {
-                for(auto itr : mitr.second)
+                for(const auto& itr : mitr.second)
                 {
                     TRACE_COUNTER(sdk::perfetto_category<sdk::category::scratch_memory>::name,
                                   scratch_mem_tracks.at(mitr.first),
                                   itr.first,
                                   itr.second / bytes_multiplier);
                     tracing_session->FlushBlocking();
-
-                    PERFETTO_LOG("TRACE_COUNTER convert %s %llu %llu %llu %llu",
-                                 sdk::perfetto_category<sdk::category::scratch_memory>::name,
-                                 (unsigned long long) (mitr.first),
-                                 (unsigned long long) (scratch_mem_tracks.at(mitr.first).uuid),
-                                 (unsigned long long) itr.first,
-                                 (unsigned long long) itr.second);
                 }
             }
         }
