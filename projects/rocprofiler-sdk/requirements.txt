@@ -1,0 +1,14 @@
+black
+clang-format>=11.0.0,<12.0.0
+clang-tidy>=15.0.0,<19.0.0
+cmake>=3.21.0
+cmake-format
+dataclasses
+flake8
+numpy
+otf2
+pandas
+perfetto
+pycobertura
+pytest
+pyyaml
