@@ -139,6 +139,16 @@ export PATH=/opt/rocprofiler-systems/bin:${PATH}
 export LD_LIBRARY_PATH=/opt/rocprofiler-systems/lib:${LD_LIBRARY_PATH}
 ```
 
+### Using the standalone test suite
+
+To verify your installation using the standalone test suite, run:
+
+```shell
+cmake -B rocprof-sys-test -S tests
+cmake --build rocprof-sys-test --target all --parallel 8
+ctest --test-dir rocprof-sys-test
+```
+
 ### Testing environment
 
 The `build-docker` script can be used to create a testing environment. To see the available options, use the following commands:
