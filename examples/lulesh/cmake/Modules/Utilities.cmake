@@ -66,7 +66,7 @@ function(CHECKOUT_GIT_SUBMODULE)
     # checked out
     set(_TEST_FILE "${_DIR}/${CHECKOUT_TEST_FILE}")
     # assuming a .gitmodules file exists
-    if(NOT CTEST_ONLY_BUILD)
+    if(NOT ROCPROFSYS_CTEST_ONLY)
         set(_SUBMODULE "${PROJECT_SOURCE_DIR}/.gitmodules")
     else()
         set(_SUBMODULE "${PROJECT_SOURCE_DIR}/../../.gitmodules")

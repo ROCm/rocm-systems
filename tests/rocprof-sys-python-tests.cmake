@@ -28,7 +28,7 @@
 
 set(_INDEX 0)
 
-if(CTEST_ONLY_BUILD)
+if(ROCPROFSYS_CTEST_ONLY)
     set(PYTHON_TEST_FILE_PATH "${CMAKE_SOURCE_DIR}/../examples/python")
     get_filename_component(PYTHON_TEST_FILE_PATH "${PYTHON_TEST_FILE_PATH}" REALPATH)
     set(PYTHON_CODE_COVERAGE_FILE_PATH "${CMAKE_SOURCE_DIR}/../examples/code-coverage")

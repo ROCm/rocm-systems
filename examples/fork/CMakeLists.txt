@@ -6,7 +6,7 @@ set(CMAKE_BUILD_TYPE "RelWithDebInfo")
 string(REPLACE " " ";" _FLAGS "${CMAKE_CXX_FLAGS_DEBUG}")
 
 find_package(Threads REQUIRED)
-if(NOT CTEST_ONLY_BUILD)
+if(NOT ROCPROFSYS_CTEST_ONLY)
     find_package(rocprofiler-systems REQUIRED COMPONENTS user)
 endif()
 add_executable(fork-example fork.cpp)

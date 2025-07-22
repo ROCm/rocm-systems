@@ -85,6 +85,47 @@ if(ROCPROFSYS_USE_PYTHON)
     rocprofiler_systems_find_python(_PY REQUIRED)
     set(ROCPROFSYS_PYTHON_ROOT_DIRS "${_PY_ROOT_DIR}" CACHE INTERNAL "" FORCE)
     set(ROCPROFSYS_PYTHON_VERSIONS "${_PY_VERSION}" CACHE INTERNAL "" FORCE)
+    set(DISABLE_PYTHON_TESTS OFF)
+    # Get Python3 executable
+    find_package(Python3 COMPONENTS Interpreter)
+    if(NOT Python3_FOUND)
+        rocprofiler_systems_message(
+            AUTHOR_WARNING
+            "Python3 not found. Disabling Python tests."
+        )
+        set(DISABLE_PYTHON_TESTS ON)
+    endif()
+    # Ensure rocprofsys module is present
+    execute_process(
+        COMMAND "${Python3_EXECUTABLE}" -c "import rocprofsys"
+        RESULT_VARIABLE FOUND_MODULE_ROCPROFSYS
+    )
+    if(NOT FOUND_MODULE_ROCPROFSYS EQUAL 0)
+        set(DISABLE_PYTHON_TESTS ON)
+        rocprofiler_systems_message(
+            AUTHOR_WARNING
+            "Python3 module 'rocprofsys' not found. Disabling Python tests."
+        )
+    endif()
+    # Disable Python tests if python3 or rocprofsys module not found
+    if(DISABLE_PYTHON_TESTS)
+        if(NOT DEFINED ROCPROFSYS_DISABLE_EXAMPLES)
+            set(ROCPROFSYS_DISABLE_EXAMPLES
+                "python"
+                CACHE STRING
+                "Disabled examples"
+                FORCE
+            )
+        else()
+            list(APPEND ROCPROFSYS_DISABLE_EXAMPLES python)
+            set(ROCPROFSYS_DISABLE_EXAMPLES
+                "${ROCPROFSYS_DISABLE_EXAMPLES};python"
+                CACHE STRING
+                "Disabled examples"
+                FORCE
+            )
+        endif()
+    endif()
 endif()
 
 #___________________________________________________________________________________________

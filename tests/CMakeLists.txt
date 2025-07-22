@@ -23,14 +23,13 @@
 #
 # rocprofiler-systems tests
 #
-if(NOT "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
+if(DEFINED ROCPROFSYS_CTEST_ONLY) # Would be defined in top level CMake file
     # ----------------------------------------------------------------------------------------#
     #
     # Ran when building whole project
     #
     # ----------------------------------------------------------------------------------------#
     include_guard(GLOBAL)
-
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
     # test groups
@@ -50,7 +49,9 @@ if(NOT "${CMAKE_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}")
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
+    if(NOT ROCPROFSYS_DISABLE_PYTHON_CTEST)
+        include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
+    endif()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
@@ -65,21 +66,13 @@ else()
 
     cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
 
-    # Set support for Fortran tests
-    find_program(GFORTRAN_EXECUTABLE NAMES gfortran)
-    if(GFORTRAN_EXECUTABLE)
-        set(ENABLE_FORTRAN_TESTS TRUE CACHE BOOL "Enable Fortran CTest support")
-        project(rocprofiler-systems-tests LANGUAGES C CXX Fortran)
-    else()
-        set(ENABLE_FORTRAN_TESTS FALSE CACHE BOOL "Enable Fortran CTest support")
-        project(rocprofiler-systems-tests LANGUAGES CXX)
-    endif()
+    project(rocprofiler-systems-tests LANGUAGES CXX)
 
     if("${CMAKE_BUILD_TYPE}" STREQUAL "")
         set(CMAKE_BUILD_TYPE "RelWithDebInfo" CACHE STRING "Build type" FORCE)
     endif()
 
-    set(CTEST_ONLY_BUILD TRUE CACHE BOOL "CTest only build")
+    set(ROCPROFSYS_CTEST_ONLY TRUE CACHE BOOL "CTest only build")
 
     # Paths for CTests and cmake files
     set(CMAKE_D "${PROJECT_SOURCE_DIR}/../cmake")
@@ -119,7 +112,7 @@ else()
     enable_testing()
     include(CTest)
 
-    # Store python bin for causal in this build file
+    # Store python bin for causal tests
     set(CMAKE_INSTALL_BINDIR "causal" CACHE PATH "Default CTest binaries install path")
 
     # Find the binaries used for testing
@@ -130,7 +123,6 @@ else()
         rocprof-sys-causal
         rocprof-sys-avail
     )
-
     foreach(EXEC ${ROCPROFILER_EXECUTABLES})
         find_program(${EXEC}_PATH NAMES ${EXEC} PATHS ${ROCM_PATH}/bin NO_DEFAULT_PATH)
         if(NOT ${EXEC}_PATH)
@@ -152,8 +144,10 @@ else()
     # Test source code dir
     add_subdirectory(${CTEST_SOURCE_D} ${CMAKE_BINARY_DIR}/examples)
 
-    # CTests
+    # CTest macros
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
+
+    # CTests
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
@@ -170,7 +164,9 @@ else()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
-    include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
+    if(NOT ROCPROFSYS_DISABLE_PYTHON_CTEST)
+        include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
+    endif()
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
     include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
@@ -180,19 +176,3 @@ else()
     )
     add_subdirectory(${CLI_CTEST_D} ${CMAKE_BINARY_DIR}/cli-tests)
 endif()
-
-# =========================================================================================#
-# Important information:
-#   - ROCPROFSYS_USE_PYTHON is set to OFF by default in CTestSettings.cmake until rocprofsys module is ready
-#   - Must check if the CI portion in CTestSettings.cmake is required
-#   - Must check if we want to use rocprofiler_systems_message() after MacroUtilities is included
-#   - Investigate how ${COMMAND_PREFIX} is used in tests (to avoid requiring MPI)
-#   - Investifate RCCL
-#   - Investigate if find_package(ROCmVersion) needs the REQUIRED flag
-
-# Needed installs
-#  - rocprofiler-systems
-#  - rocdecode (contains librocdecode.so.0)
-#  - rocdecode-dev (might also be rocm-rocdecode-dev)
-#  - perfetto (python)
-#  - pybind11-dev
