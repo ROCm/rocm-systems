@@ -197,9 +197,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [
-            float(x) if x != "" else float(0) for x in display_df["Avg"]
-        ]
+        display_df["Avg"] = [float(x) if x != "" else float(0) for x in display_df["Avg"]]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(
