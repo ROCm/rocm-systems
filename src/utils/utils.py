@@ -368,7 +368,7 @@ def capture_subprocess_output(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE,
-            universal_newlines=True,
+            text=True,
             env=new_env,
         )
         if new_env is not None
@@ -378,7 +378,7 @@ def capture_subprocess_output(
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE,
-            universal_newlines=True,
+            text=True,
         )
     )
 
@@ -390,9 +390,7 @@ def capture_subprocess_output(
             if not line:
                 return
             buf.write(line)
-            if "attach" in buf or "detach" in buf:
-                console_log(line.strip())
-            elif enable_logging:
+            if enable_logging:
                 if profileMode:
                     console_log(rocprof_cmd, line.strip(), indent_level=1)
                 else:
@@ -403,7 +401,6 @@ def capture_subprocess_output(
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
-    # Minimal thread to forward sys.stdin to subprocess stdin
     def forward_input():
         try:
             for line in sys.stdin:
@@ -423,8 +420,7 @@ def capture_subprocess_output(
     input_thread.start()
 
     while process.poll() is None:
-        # Wait for events and handle them with their registered callbacks
-        events = selector.select()
+        events = selector.select(timeout=1)
         for key, mask in events:
             callback = key.data
             callback(key.fileobj, mask)
