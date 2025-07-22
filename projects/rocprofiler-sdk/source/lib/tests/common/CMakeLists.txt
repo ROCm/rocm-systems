@@ -5,8 +5,8 @@ project(rocprofiler-sdk-tests-common LANGUAGES C CXX)
 
 include(GoogleTest)
 
-set(common_sources demangling.cpp environment.cpp md5sum.cpp mpl.cpp parse.cpp sha256.cpp
-                   uuid_v7.cpp)
+set(common_sources c_array.cpp demangling.cpp environment.cpp md5sum.cpp mpl.cpp
+                   parse.cpp sha256.cpp uuid_v7.cpp)
 
 add_executable(common-tests)
 target_sources(common-tests PRIVATE ${common_sources})

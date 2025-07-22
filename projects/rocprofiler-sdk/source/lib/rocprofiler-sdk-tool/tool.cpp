@@ -1128,6 +1128,7 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
     auto              profile                 = std::optional<rocprofiler_counter_config_id_t>{};
     auto              counters_v              = counter_vec_t{};
     auto              found_v                 = std::vector<std::string_view>{};
+    auto              not_found_counters_v    = std::vector<std::string_view>{};
     const auto*       agent_v                 = tool_metadata->get_agent(agent_id);
     auto              expected_v              = counters.size();
 
@@ -1158,24 +1159,31 @@ construct_counter_collection_profile(rocprofiler_agent_id_t       agent_id,
         }
 
         // search the gpu agent counter info for a counter with a matching name
+        bool counter_found = false;
         for(const auto& citr : gpu_agents_counter_info.at(agent_id))
         {
             if(name_v == std::string_view{citr.name})
             {
                 counters_v.emplace_back(citr.id);
                 found_v.emplace_back(itr);
+                counter_found = true;
             }
         }
+
+        if(!counter_found) not_found_counters_v.emplace_back(itr);
     }
 
     if(expected_v != counters_v.size())
     {
         auto requested_counters =
             fmt::format("{}", fmt::join(counters.begin(), counters.end(), ", "));
-        auto found_counters = fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
+        auto found_counters   = fmt::format("{}", fmt::join(found_v.begin(), found_v.end(), ", "));
+        auto missing_counters = fmt::format(
+            "{}", fmt::join(not_found_counters_v.begin(), not_found_counters_v.end(), ", "));
         ROCP_WARNING << "Unable to find all counters for agent " << agent_v->node_id << " (gpu-"
                      << agent_v->gpu_index << ", " << agent_v->name << ") in ["
-                     << requested_counters << "]. Found: [" << found_counters << "]";
+                     << requested_counters << "]. Found: [" << found_counters << "]. Missing: ["
+                     << missing_counters << "]";
     }
 
     if(!counters_v.empty())
@@ -1244,6 +1252,22 @@ get_instruction_index(rocprofiler_pc_t pc)
         return -1;
     else
         return CHECK_NOTNULL(tool_metadata)->get_instruction_index(pc);
+}
+
+std::set<std::string>
+get_config_perf_counters()
+{
+    auto tool_pmc_counters = std::set<std::string>{};
+    for(const auto& counters_group : tool::config().counters)
+    {
+        for(const auto& counter : counters_group)
+            tool_pmc_counters.emplace(counter);
+    }
+    for(const auto& att_counter : tool::config().att_param_perfcounters)
+    {
+        tool_pmc_counters.emplace(att_counter.counter_name);
+    }
+    return tool_pmc_counters;
 }
 
 }  // namespace
@@ -1679,7 +1703,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
 
-    tool_metadata->init(tool::metadata::inprocess{});
+    tool_metadata->init(tool::metadata::inprocess_with_counters{get_config_perf_counters()});
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
