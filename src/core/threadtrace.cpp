@@ -190,7 +190,7 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
     trace_config.se_mask = 0x11111111;
 
   const size_t se_number_total = pm4_factory->GetShaderEnginesNumber();
-  size_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
+  uint64_t buffer_size = DEFAULT_TRACE_BUFFER_SIZE;
 
   if (profile.parameters)
     for (const auto* p = profile.parameters; p < profile.parameters + profile.parameter_count; p++)
@@ -204,32 +204,6 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
                 "ThreadTraceConfig: CuId must be between 0 and 15, TargetCu", p->value);
           trace_config.targetCu = p->value;
           break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_VM_ID_MASK:
-          trace_config.vmIdMask = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_MASK:
-          if ((p->value & 0x50) != 0)
-            throw aql_profile::aql_profile_exc_val<uint32_t>(
-                "ThreadTraceConfig: Mask should have bits [4,6] set to Zero, Mask", p->value);
-          trace_config.deprecated_mask = p->value;
-          trace_config.targetCu = p->value & 0xF;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK:
-          if ((p->value & 0xFF000000) != 0)
-            throw aql_profile::aql_profile_exc_val<uint32_t>(
-                "ThreadTraceConfig: TokenMask should have bits [31:25] set to Zero, TokenMask",
-                p->value);
-          trace_config.deprecated_tokenMask = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_TOKEN_MASK2:
-          trace_config.deprecated_tokenMask2 = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SAMPLE_RATE:
-          trace_config.sampleRate = p->value;
-          break;
-        case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT:
-          trace_config.concurrent = p->value;
-          break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION:
           trace_config.simd_sel = p->value & 0xF;
           break;
@@ -237,7 +211,10 @@ hsa_status_t _internal_aqlprofile_att_create_packets(
           trace_config.occupancy_mode = p->value ? 1 : 0;
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE:
-          buffer_size = p->value;
+          buffer_size = (buffer_size & ~static_cast<uint64_t>(UINT32_MAX)) | p->value;
+          break;
+        case AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH:
+          buffer_size = (buffer_size & UINT32_MAX) | (uint64_t(p->value) << 32);  // High 32 bits
           break;
         case HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK:
           trace_config.perfMASK = p->value;
