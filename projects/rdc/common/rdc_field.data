@@ -195,7 +195,6 @@ FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_I
 FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
 // Misc
 FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTILIZATION", false)
-FLD_DESC_ENT(RDC_FI_PROF_UUID,             "UUID from rocprofiler",                         "PROF_UUID",        true)
 FLD_DESC_ENT(RDC_FI_PROF_KFD_ID,           "GPU_ID from rocprofiler, same as KFD_ID",       "PROF_KFD_ID",      true)
 
 // Events
