@@ -25,7 +25,7 @@ THE SOFTWARE.
 *                 hipMemcpyKind kind, hipStream_t stream = 0)` -
 * Copies data between host and device.
 */
-
+#include <hip/hip_ext.h>
 #include <hip_test_common.hh>
 
 #define NUM_SIZES 9
@@ -35,8 +35,8 @@ static const unsigned int Sizes[NUM_SIZES] =
 
 static const unsigned int Iterations[2] = {1, 1000};
 
-#define BUF_TYPES 4
-//  16 ways to combine 4 different buffer types
+#define BUF_TYPES 5
+//  25 ways to combine 5 different buffer types
 #define NUM_SUBTESTS (BUF_TYPES*BUF_TYPES)
 
 static void setData(void *ptr, unsigned int size, char value) {
@@ -63,6 +63,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   bool hostMalloc[2] = {false};
   bool hostRegister[2] = {false};
   bool unpinnedMalloc[2] = {false};
+  bool deviceMallocUncached[2] = {false};
   void *memptr[2] = {NULL};
   void *alignedmemptr[2] = {NULL};
   void *srcBuffer = NULL;
@@ -78,11 +79,14 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     hostMalloc[0] = hostMalloc[1] = false;
     hostRegister[0] = hostRegister[1] = false;
     unpinnedMalloc[0] = unpinnedMalloc[1] = false;
+    deviceMallocUncached[0] = deviceMallocUncached[1] = false;
     srcBuffer = dstBuffer = 0;
     memptr[0] = memptr[1] = NULL;
     alignedmemptr[0] = alignedmemptr[1] = NULL;
 
-    if (srcTest == 3) {
+    if (srcTest == 4) {
+      deviceMallocUncached[0] = true;
+    } else if (srcTest == 3) {
       hostRegister[0] = true;
     } else if (srcTest == 2) {
       hostMalloc[0] = true;
@@ -96,11 +100,17 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       hostMalloc[1] = true;
     } else if (dstTest == 3) {
       hostRegister[1] = true;
+    } else if (dstTest == 4){
+      deviceMallocUncached[1] = true;
     }
+
 
     numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
-    if (hostMalloc[0]) {
+    if (deviceMallocUncached[0]) {
+      HIP_CHECK(hipExtMallocWithFlags(&srcBuffer, bufSize_, hipDeviceMallocUncached));
+      HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
+    } else if (hostMalloc[0]) {
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer),
                               bufSize_, 0));
       setData(srcBuffer, bufSize_, 0xd0);
@@ -120,7 +130,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
     }
 
-    if (hostMalloc[1]) {
+    if (deviceMallocUncached[1]) {
+      HIP_CHECK(hipExtMallocWithFlags(&dstBuffer, bufSize_, hipDeviceMallocUncached));
+    } else if (hostMalloc[1]) {
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer),
                                                        bufSize_, 0));
     } else if (hostRegister[1]) {
@@ -157,7 +169,10 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
 
     const char *strSrc = NULL;
     const char *strDst = NULL;
-    if (hostMalloc[0])
+
+    if (deviceMallocUncached[0])
+      strSrc = "hMUC";
+    else if (hostMalloc[0])
       strSrc = "hHM";
     else if (hostRegister[0])
       strSrc = "hHR";
@@ -166,7 +181,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     else
       strSrc = "hM";
 
-    if (hostMalloc[1])
+    if (deviceMallocUncached[1])
+      strDst = "hMUC";
+    else if (hostMalloc[1])
       strDst = "hHM";
     else if (hostRegister[1])
       strDst = "hHR";
@@ -196,7 +213,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     free(temp);
 
     //  Free src
-    if (hostMalloc[0]) {
+    if (deviceMallocUncached[0]) {
+      HIP_CHECK(hipFree(srcBuffer));
+    } else if (hostMalloc[0]) {
       HIP_CHECK(hipHostFree(srcBuffer));
     } else if (hostRegister[0]) {
       HIP_CHECK(hipHostUnregister(srcBuffer));
@@ -208,7 +227,10 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     }
 
     //  Free dst
-    if (hostMalloc[1]) {
+    if (deviceMallocUncached[1]) {
+      HIP_CHECK(hipFree(dstBuffer));
+    }
+    else if (hostMalloc[1]) {
       HIP_CHECK(hipHostFree(dstBuffer));
     } else if (hostRegister[1]) {
       HIP_CHECK(hipHostUnregister(dstBuffer));
@@ -249,9 +271,9 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
     HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
 
     INFO("hipPerfBufferCopySpeed - info: Set device to " << deviceId
-         << " : " << props.name << "Legend: unp - unpinned(malloc),"
-         " hM - hipMalloc(device)\n        hHR - hipHostRegister(pinned),"
-         " hHM - hipHostMalloc(prePinned)\n");
+     << " : " << props.name << "\nLegend: unp - unpinned(malloc),"
+     " hM - hipMalloc(device), hHR - hipHostRegister(pinned),"
+     " hHM - hipHostMalloc(prePinned), hMUC - hipMallocUncached\n");
 
     REQUIRE(true == hipPerfBufferCopySpeed_test(1));
   }
