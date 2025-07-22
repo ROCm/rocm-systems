@@ -3078,8 +3078,8 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   return agents_by_node_[prefetch_node][0];
 }
 
-hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf,
-                                           uint64_t* offset, uint64_t flags) {
+hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
+                                   uint64_t flags) {
 #ifdef __linux__
   ScopedAcquire<KernelSharedMutex::Shared> lock(memory_lock_.shared());
   // Lookup containing allocation.
@@ -3090,18 +3090,23 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf,
         (ptr < reinterpret_cast<const uint8_t*>(mem->first) + mem->second.size)) {
       // Check size is in bounds.
       if (uintptr_t(ptr) - uintptr_t(mem->first) + size <= mem->second.size) {
-        // Check allocation is on GPU
-        if (mem->second.region->owner()->device_type() != Agent::kAmdGpuDevice)
-          return HSA_STATUS_ERROR_INVALID_AGENT;
+        switch (mem->second.region->owner()->device_type()) {
+          case Agent::kAmdGpuDevice: {
+            auto* owner = static_cast<AMD::GpuAgent*>(mem->second.region->owner());
 
-        rocr::AMD::GpuAgent* owner =
-                    static_cast<AMD::GpuAgent*>(mem->second.region->owner());
-
-        if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE &&
-            !owner->is_xgmi_cpu_gpu() &&
-            !owner->LargeBarEnabled()) {
-            return (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED;
+            if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE && !owner->is_xgmi_cpu_gpu() &&
+                !owner->LargeBarEnabled()) {
+              return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
+            }
+          } break;
+          case Agent::kAmdCpuDevice:
+            return HSA_STATUS_ERROR_INVALID_AGENT;
+          case Agent::kAmdAieDevice:
+            break;
+          case Agent::kUnknownDevice:
+            return HSA_STATUS_ERROR_INVALID_AGENT;
         }
+
         int fd;
         uint64_t off;
         hsa_status_t err = mem->second.region->owner()->driver().ExportDMABuf(
