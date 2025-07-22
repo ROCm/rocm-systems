@@ -217,7 +217,7 @@ def list_basic_agent(args, list_counters):
     agent_info_map = avail.get_agent_info_map()
     agent_counters = avail.get_counters()
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None
@@ -238,7 +238,7 @@ def list_pc_sampling(args):
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
     print("Agents supporting PC Sampling\n")
-    for agent in sampling_agents.keys():
+    for agent in dict(sorted(sampling_agents.items())).keys():
         info = agent_info_map[agent]
         print(
             "{:8}:\t{}\n{:8}:\t{}".format(
@@ -251,8 +251,9 @@ def list_pc_sampling(args):
 def info_pc_sampling(args):
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
-    for agent, configs in sampling_agents.items():
+    for agent, configs in dict(sorted(sampling_agents.items())).items():
         info = agent_info_map[agent]
+
         print(
             "{:8}:\t{}\n{:8}:\t{}".format(
                 "GPU", info["logical_node_type_id"], "Name", info["name"]
@@ -280,7 +281,7 @@ def listing(args):
     agent_counters = avail.get_counters()
     agent_info_map = avail.get_agent_info_map()
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None
@@ -321,7 +322,7 @@ def info_pmc(args):
                         print(counter)
                         print("\n")
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None

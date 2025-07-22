@@ -780,6 +780,12 @@ To see the counters available on the GPU, use:
 
    rocprofv3 --list-avail
 
+Sample output for the list-avail command:
+
+.. file:: /data/list-avail.txt
+   :width: 100%
+   :align: center
+
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
 For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
