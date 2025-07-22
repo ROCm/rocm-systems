@@ -160,8 +160,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 self._add_event_parser(self.subparsers, event)
             elif any(arg in sys_argv for arg in ['topology']):
                 self._add_topology_parser(self.subparsers, topology)
-            elif any(arg in sys_argv for arg in ['set', 'reset']):
+            elif any(arg in sys_argv for arg in ['set']):
                 self._add_set_value_parser(self.subparsers, set_value)
+            elif any(arg in sys_argv for arg in ['reset']):
                 self._add_reset_parser(self.subparsers, reset)
             elif any(arg in sys_argv for arg in ['monitor', 'dmon']):
                 self._add_monitor_parser(self.subparsers, monitor)
@@ -550,6 +551,17 @@ class AMDSMIParser(argparse.ArgumentParser):
                 setattr(args, self.dest, values)
         return _PromptSpecWarning
 
+    @staticmethod
+    def _custom_ceil(x):
+        """ Custom ceiling function to round up float values to the nearest integer.
+            This is used to ensure that fan speed percentages are rounded up correctly.
+        """
+        if x == int(x):  # If x is already an integer
+            return int(x)
+        elif x > 0:  # For positive numbers, floor division + 1
+            return int(x) + 1
+        else:  # For negative numbers, floor division directly gives the ceiling
+            return int(x)
 
     def _validate_fan_speed(self):
         """ Validate fan speed input"""
@@ -562,7 +574,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if '%' in values:
                         try:
                             amdsmi_helpers.confirm_out_of_spec_warning()
-                            values = int(int(values[:-1]) / 100 * 255)
+                            # Convert percentage to fan speed level 
+                            values = (int(values[:-1]) / 100) * 255
+                            values = AMDSMIParser._custom_ceil(values) # Round up (Ceiling)
                             setattr(args, self.dest, values)
                         except ValueError as e:
                             raise argparse.ArgumentError(self, f"Invalid argument: '{values}' needs to be 0-100%")

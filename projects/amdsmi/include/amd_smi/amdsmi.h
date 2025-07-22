@@ -947,11 +947,11 @@ typedef struct {
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef enum {
-    AMDSMI_LINK_TYPE_INTERNAL,        //!< Internal Link Type, within chip
-    AMDSMI_LINK_TYPE_XGMI,            //!< GPU Memory Interconnect (multi GPU communication)
-    AMDSMI_LINK_TYPE_PCIE,            //!< Peripheral Component Interconnect Express Link Type
-    AMDSMI_LINK_TYPE_NOT_APPLICABLE,  //!< Not Applicatble Link Type
-    AMDSMI_LINK_TYPE_UNKNOWN          //!< Unknown Link Type
+    AMDSMI_LINK_TYPE_INTERNAL = 0,        //!< Internal Link Type, within chip
+    AMDSMI_LINK_TYPE_PCIE = 1,            //!< Peripheral Component Interconnect Express Link Type
+    AMDSMI_LINK_TYPE_XGMI = 2,            //!< GPU Memory Interconnect (multi GPU communication)
+    AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,  //!< Not Applicable Link Type
+    AMDSMI_LINK_TYPE_UNKNOWN = 4          //!< Unknown Link Type
 } amdsmi_link_type_t;
 
 /**

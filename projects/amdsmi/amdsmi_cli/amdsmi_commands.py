@@ -4510,14 +4510,27 @@ class AMDSMICommands():
         # Handle args
         if self.helpers.is_baremetal():
             if isinstance(args.fan, int):
+                # Convert fan speed to percentage
+                # Note: amdsmi_set_gpu_fan_speed expects fan speed in RPM, so
+                # we convert the value to a percentage based on the maximum fan speed of 255 RPM.
+                # We need to round down the user's passed fan speed % to the nearest whole number.
+                # This allows us to match the float -> int conversion when converting from percentage to RPM (as previously passed by the parser).
+                fan_percentage = int((int(args.fan) / 255) * 100 // 1) # round down (aka floor) to nearest whole number
                 try:
                     amdsmi_interface.amdsmi_set_gpu_fan_speed(args.gpu, 0, args.fan)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set fan speed {args.fan} on {gpu_string}") from e
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to set fan speed to {args.fan} RPM ({fan_percentage}%)"
+                    self.logger.store_output(args.gpu, 'fan', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
-                self.logger.store_output(args.gpu, 'fan', f"Successfully set fan speed {args.fan}")
+                self.logger.store_output(args.gpu, 'fan', f"Successfully set fan speed to {args.fan} RPM ({fan_percentage}%)")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.perf_level:
                 perf_level = amdsmi_interface.AmdSmiDevPerfLevel[args.perf_level]
                 try:
@@ -4525,20 +4538,37 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set performance level {args.perf_level} on {gpu_string}") from e
+                    self.logger.store_output(args.gpu, 'perflevel', f"[{e.get_error_info(detailed=False)}] Unable to set performance level to {args.perf_level}")
+                    perf_options = str(self.helpers.get_perf_levels()[0][0:-1]).replace("[", "").replace("]", "").replace("'", "").replace(" ", "")
+                    print(f"\nPerformance Level Options:\n\t{perf_options}\n")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
                 self.logger.store_output(args.gpu, 'perflevel', f"Successfully set performance level {args.perf_level}")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.profile:
                 self.logger.store_output(args.gpu, 'profile', "Not Yet Implemented")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if isinstance(args.perf_determinism, int):
                 try:
                     amdsmi_interface.amdsmi_set_gpu_perf_determinism_mode(args.gpu, args.perf_determinism)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set performance determinism and clock frequency to {args.perf_determinism} on {gpu_string}") from e
+                    self.logger.store_output(args.gpu, 'perfdeterminism', f"[{e.get_error_info(detailed=False)}] Unable to enable performance determinism and set GFX clock frequency to {args.perf_determinism} MHz")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
-                self.logger.store_output(args.gpu, 'perfdeterminism', f"Successfully enabled performance determinism and set GFX clock frequency to {args.perf_determinism}")
+                self.logger.store_output(args.gpu, 'perfdeterminism', f"Successfully enabled performance determinism and set GFX clock frequency to {args.perf_determinism} MHz")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.compute_partition:
                 current_set_count = self.helpers.get_set_count()
                 future_set_count = 0
@@ -4565,6 +4595,9 @@ class AMDSMICommands():
                     future_set_count = self.helpers.get_set_count()
                     if current_set_count == future_set_count-1:
                         self.logger.store_output(args.gpu, 'accelerator_partition', f"Successfully set accelerator partition to {user_requested_partition_args}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
@@ -4573,7 +4606,7 @@ class AMDSMICommands():
                             self.helpers.increment_set_count()
                             future_set_count = self.helpers.get_set_count()
                             if current_set_count == future_set_count-1:
-                                out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting compute partition to {user_requested_partition_args}"
+                                out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set compute partition to {user_requested_partition_args}"
                                 self.logger.store_output(args.gpu, 'accelerator_partition', out)
                     elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SETTING_UNAVAILABLE:
                         print(f"\n{attempted_to_set}\n"
@@ -4582,6 +4615,9 @@ class AMDSMICommands():
                         raise ValueError(f"[AMDSMI_STATUS_SETTING_UNAVAILABLE] Unable to set accelerator partition to {args.compute_partition} on {gpu_string}") from e
                     else:
                         raise ValueError(f"Unable to set accelerator partition to {args.compute_partition} on {gpu_string}") from e
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
             if args.memory_partition:
                 lock = multiprocessing.Lock()
@@ -4654,7 +4690,7 @@ class AMDSMICommands():
                             lock.release()
                             return
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Device does not support setting memory partition to {args.memory_partition}"
+                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set memory partition to {args.memory_partition}"
                             self.logger.store_output(args.gpu, 'memory_partition', out)
                             self.logger.print_output()
                             self.logger.clear_multiple_devices_output()
@@ -4706,10 +4742,18 @@ class AMDSMICommands():
                     current_power_cap = power_cap_info["power_cap"]
                     current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    raise ValueError(f"Unable to get power cap info from {gpu_string}") from e
+                    min_power_cap = "N/A"
+                    max_power_cap = "N/A"
+                    current_power_cap = "N/A"
+                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
                 if args.power_cap == current_power_cap:
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}")
+                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}W")
+                elif current_power_cap == 0:
+                    self.logger.store_output(args.gpu, 'powercap', f"Unable to set power cap to {args.power_cap}W, current value is {current_power_cap}W")
                 elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
                     try:
                         new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
@@ -4718,90 +4762,159 @@ class AMDSMICommands():
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
-                        raise ValueError(f"Unable to set power cap to {args.power_cap} on {gpu_string}") from e
-                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                    after_current_power_cap = after_power_cap_info["power_cap"]
-                    after_current_power_cap = self.helpers.convert_SI_unit(after_current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                    if args.power_cap == after_current_power_cap:
-                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
-                    else:
-                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {args.power_cap}W, current value is {after_current_power_cap}W")
+                        self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
+                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
                 else:
                     # setting power cap to 0 will return the current power cap so the technical minimum value is 1
                     if min_power_cap == 0:
                         min_power_cap = 1
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap} and {max_power_cap}")
+                    self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap}W and {max_power_cap}W")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if isinstance(args.soc_pstate, int):
                 try:
                     amdsmi_interface.amdsmi_set_soc_pstate(args.gpu, args.soc_pstate)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set dpm soc pstate policy to {args.soc_pstate} on {gpu_string}") from e
-                self.logger.store_output(args.gpu, 'socpstate', f"Successfully soc pstate dpm policy to id {args.soc_pstate}")
+                    self.logger.store_output(args.gpu, 'socpstate', f"[{e.get_error_info(detailed=False)}] Unable to set soc pstate dpm policy to {args.soc_pstate}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                self.logger.store_output(args.gpu, 'socpstate', f"Successfully set soc pstate dpm policy to {args.soc_pstate}")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if isinstance(args.xgmi_plpd, int):
                 try:
                     amdsmi_interface.amdsmi_set_xgmi_plpd(args.gpu, args.xgmi_plpd)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to set XGMI policy to {args.xgmi_plpd} on {gpu_string}") from e
-                self.logger.store_output(args.gpu, 'xgmiplpd', f"Successfully set per-link power down policy to id {args.xgmi_plpd}")
+                    self.logger.store_output(args.gpu, 'xgmiplpd', f"[{e.get_error_info(detailed=False)}] Unable to set XGMI per-link power down policy to {args.xgmi_plpd}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+                self.logger.store_output(args.gpu, 'xgmiplpd', f"Successfully set XGMI per-link power down policy to {args.xgmi_plpd}")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if isinstance(args.clk_level, tuple):
+
                 clk_type = args.clk_level.clk_type
                 perf_levels = args.clk_level.perf_levels
+                perf_levels_str = str(perf_levels).strip('[]').replace(" ", "")
+                smi_clk_type_mapping = {
+                    "sclk": amdsmi_interface.AmdSmiClkType.SYS,
+                    "mclk": amdsmi_interface.AmdSmiClkType.MEM,
+                    "pcie": amdsmi_interface.AmdSmiClkType.PCIE,
+                    "fclk": amdsmi_interface.AmdSmiClkType.DF,
+                    "socclk": amdsmi_interface.AmdSmiClkType.SOC
+                }
+                results_clk_lvl = {'perf_level': f"Unable to set performance level to MANUAL",
+                                    'get_clock_freq': f"Unable to retrieve {clk_type} frequency levels",
+                                    'set_clock': f"Unable to set {clk_type} perf level(s) to {perf_levels_str}"}
+                if clk_type not in smi_clk_type_mapping:
+                    raise ValueError(f"Invalid clock type {clk_type}. Valid options are: {', '.join(smi_clk_type_mapping.keys())}")
 
-                # check if perf levels are all valid levels
+                # Set perf level to manual if not already set
                 try:
-                    if clk_type == "sclk":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.SYS
-                    elif clk_type == "mclk":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.MEM
-                    elif clk_type == "pcie":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.PCIE
-                    elif clk_type == "fclk":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.DF
-                    elif clk_type == "socclk":
-                        clk_type_conversion = amdsmi_interface.AmdSmiClkType.SOC
-                    else:
-                        clk_type_conversion = "N/A"
-                    frequencies = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, clk_type_conversion)
-                    num_supported = frequencies['num_supported']
+                    amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, amdsmi_interface.AmdSmiDevPerfLevel.MANUAL)
+                    results_clk_lvl['perf_level'] = f"Successfully set performance level to MANUAL"
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    pass
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    results_clk_lvl['perf_level'] = f"[{e.get_error_info(detailed=False)}] Unable to set performance level to MANUAL"
+                    self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
-                # convert perf_levels given to freq bit mask
-                freq_mask = 0
-                valid_level = True
+                if clk_type.lower() == "pcie":
+                    # Get PCIe bandwidth levels
+                    try:
+                        pcie_bandwidth_levels = amdsmi_interface.amdsmi_get_gpu_pci_bandwidth(args.gpu)
+                        num_supported = pcie_bandwidth_levels['transfer_rate']['num_supported']
+                        results_clk_lvl['get_clock_freq'] = f"Successfully retrieved {clk_type} frequency levels"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        results_clk_lvl['get_clock_freq'] = f"[{e.get_error_info(detailed=False)}] Unable to retrieve {clk_type} frequency levels"
+                        self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                else:
+                    # Get clock frequency levels
+                    try:
+                        frequencies = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, smi_clk_type_mapping[clk_type])
+                        num_supported = frequencies['num_supported']
+                        results_clk_lvl['get_clock_freq'] = f"Successfully retrieved {clk_type} frequency levels"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        results_clk_lvl['get_clock_freq'] = f"[{e.get_error_info(detailed=False)}] Unable to retrieve {clk_type} frequency levels"
+                        self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
+                # Validate bandwidth bitmask
+                freq_bitmask = 0
                 invalid_levels = []
                 for level in perf_levels:
                     if level < num_supported:
-                        freq_mask += 2**level
+                        freq_bitmask |= (1 << level)
                     else:
-                        # cancel this instance since the level should not be possible
                         invalid_levels.append(level)
-                        valid_level = False
 
-                if valid_level:
-                    perf_levels_str = str(perf_levels).strip('[]')
-                    if clk_type.lower() == "pcie":
-                        try:
-                            amdsmi_interface.amdsmi_set_gpu_pci_bandwidth(args.gpu, freq_mask)
-                        except amdsmi_exception.AmdSmiLibraryException as e:
-                            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                                raise PermissionError('Command requires elevation') from e
-                            raise ValueError(f"Unable to set pcie bandwidth to perf level(s) {perf_levels_str} on {gpu_string}") from e
-                    else:
-                        try:
-                            amdsmi_interface.amdsmi_set_clk_freq(args.gpu, clk_type, freq_mask)
-                        except amdsmi_exception.AmdSmiLibraryException as e:
-                            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                                raise PermissionError('Command requires elevation') from e
-                            raise ValueError(f"Unable to set {clk_type} to perf level(s) {perf_levels_str} on {gpu_string}") from e
-                    self.logger.store_output(args.gpu, 'clk_level', f"Successfully changed {clk_type} perf level(s) to {perf_levels_str}")
+                if invalid_levels:
+                    # Handle/report invalid levels
+                    invalid_levels_str = str(invalid_levels).strip('[]').replace(" ", "")
+                    valid_levels_str = f"Valid levels for {clk_type}: 0"
+                    if num_supported > 1:
+                        valid_levels_str = f"Valid levels for {clk_type}: 0-{num_supported-1}"
+                    print(f"\n{valid_levels_str}\n")
+                    results_clk_lvl['set_clock'] = f"Invalid level(s) {invalid_levels_str} are not within the range of supported levels for {clk_type}"
+                    self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
                 else:
-                    invalid_levels_str = str(invalid_levels).strip('[]')
-                    self.logger.store_output(args.gpu, 'clk_level', f"level(s) {invalid_levels_str} is/are greater than performance levels supported for device")
+                    # Proceed with freq_bitmask
+                    pass
+
+                if clk_type.lower() == "pcie":
+                    try:
+                        amdsmi_interface.amdsmi_set_gpu_pci_bandwidth(args.gpu, freq_bitmask)
+                        results_clk_lvl['set_clock'] = f"Successfully set {clk_type} perf level(s) to {perf_levels_str}"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                            raise PermissionError('Command requires elevation') from e
+
+                        results_clk_lvl['set_clock'] = f"[{e.get_error_info(detailed=False)}] Unable to set {clk_type} perf level(s) to {perf_levels_str}"
+                        self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                else:
+                    # For non-pcie clocks
+                    try:
+                        amdsmi_interface.amdsmi_set_clk_freq(args.gpu, clk_type, freq_bitmask)
+                        results_clk_lvl['set_clock'] = f"Successfully set {clk_type} perf level(s) to {perf_levels_str}"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                            raise PermissionError('Command requires elevation') from e
+                        results_clk_lvl['set_clock'] = f"[{e.get_error_info(detailed=False)}] Unable to set {clk_type} perf level(s) to {perf_levels_str}"
+                        self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                self.logger.store_output(args.gpu, 'clk_level', results_clk_lvl)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
         if isinstance(args.clk_limit, tuple):
             clk_type = args.clk_limit.clk_type
@@ -4817,23 +4930,38 @@ class AMDSMICommands():
                 elif clk_type == "mclk":
                     amdsmi_clk_type =  amdsmi_interface.AmdSmiClkType.MEM
                 else:
-                    raise ValueError(f"Invalid clock type {clk_type} for {gpu_string}")
+                    print(f"Valid clock types are: sclk, mclk\n")
+                    self.logger.store_output(args.gpu, 'clk_limit', f"Invalid clock type {args.clk_limit.clk_type}")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
                 clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
 
                 if lim_type == "min":
                     if val > clk_tuple['max_clk']:
-                        raise IndexError("cannot set min value greater than max")
+                        self.logger.store_output(args.gpu, 'clk_limit', f"Cannot set {args.clk_limit.clk_type} min value greater than max ({clk_tuple['max_clk']}MHz)")
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+
                     if val == clk_tuple['min_clk']:
                         val_changed = False # Clock limit value did not changed
 
                 if lim_type == "max":
                     if val < clk_tuple['min_clk']:
-                        raise IndexError("cannot set max value less than min")
+                        self.logger.store_output(args.gpu, 'clk_limit', f"Cannot set {args.clk_limit.clk_type} max value less than min ({clk_tuple['min_clk']}MHz)")
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
                     if val == clk_tuple['max_clk']:
                         val_changed = False # Clock limit value did not changed
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get clock extremum info for gpu %s | %s", gpu_id, e.get_error_info())
+                self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to change {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
             # Set the value
             try:
@@ -4842,12 +4970,18 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to set {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val} on {gpu_string}") from e
+                self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to set {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
             if val_changed:
-                self.logger.store_output(args.gpu, 'clk_limit', f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}")
+                self.logger.store_output(args.gpu, 'clk_limit', f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
             else:
-                self.logger.store_output(args.gpu, 'clk_limit', f"Clock limit is already set to {args.clk_limit.val}")
+                self.logger.store_output(args.gpu, 'clk_limit', f"Clock limit is already set to {args.clk_limit.val}MHz")
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
 
         if isinstance(args.process_isolation, int):
             status_string = "Enabled" if args.process_isolation else "Disabled"
@@ -4862,16 +4996,15 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to set process isolation to {status_string} on {gpu_string}") from e
+                self.logger.store_output(args.gpu, 'process_isolation', f"[{e.get_error_info(detailed=False)}] Unable to set process isolation to {status_string}")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
             self.logger.store_output(args.gpu, 'process_isolation', result)
-
-        if multiple_devices:
-            self.logger.store_multiple_device_output()
-            return # Skip printing when there are multiple devices
-
-        self.logger.print_output()
-
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
 
     def set_value(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
@@ -4964,9 +5097,20 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.gpu, args.fan, args.perf_level, args.profile, args.perf_determinism, \
-                        args.compute_partition, args.memory_partition, args.power_cap,\
-                        args.soc_pstate, args.xgmi_plpd, args.clk_limit, args.process_isolation]):
+            if not any([args.gpu is not None,
+                        args.fan is not None,
+                        args.perf_level is not None,
+                        args.profile is not None,
+                        args.perf_determinism is not None,
+                        args.compute_partition is not None,
+                        args.memory_partition is not None,
+                        args.power_cap is not None,
+                        args.soc_pstate is not None,
+                        args.xgmi_plpd is not None,
+                        args.clk_limit is not None,
+                        args.clk_level is not None,
+                        args.process_isolation is not None
+            ]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
@@ -5102,15 +5246,7 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
-        # if device is actually a partition, stop because partitions cannot reset anything
-        try:
-            kfd_info = amdsmi_interface.amdsmi_get_gpu_kfd_info(args.gpu)
-            partition_id = kfd_info['current_partition_id']
-        except amdsmi_exception.AmdSmiLibraryException as e:
-            # assume that device is not partition on fail
-            partition_id = 0
-
-        if self.helpers.is_baremetal() and partition_id == 0:
+        if self.helpers.is_baremetal():
             if args.gpureset:
                 if self.helpers.is_amd_device(args.gpu):
                     try:
@@ -5119,10 +5255,17 @@ class AMDSMICommands():
                     except amdsmi_exception.AmdSmiLibraryException as e:
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
-                        result = "Failed to reset GPU"
+                        result = f"[{e.get_error_info(detailed=False)}] Unable to reset GPU"
+                        self.logger.store_output(args.gpu, 'gpu_reset', result)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
                 else:
                     result = 'Unable to reset non-amd GPU'
                 self.logger.store_output(args.gpu, 'gpu_reset', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.clocks:
                 reset_clocks_results = {'overdrive': '',
                                         'clocks': '',
@@ -5133,30 +5276,34 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    reset_clocks_results['overdrive'] = "N/A"
                     logging.debug("Failed to reset overdrive on gpu %s | %s", gpu_id, e.get_error_info())
-
+                    reset_clocks_results['overdrive'] = f"[{e.get_error_info(detailed=False)}] Unable to reset overdrive to 0"
+                    # continue to reset clocks and performance level
                 try:
                     level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
                     amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                    reset_clocks_results['clocks'] = 'Successfully reset clocks'
+                    reset_clocks_results['clocks'] = 'Successfully reset performance level to auto'
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    reset_clocks_results['clocks'] = "N/A"
+                    reset_clocks_results['clocks'] = f"[{e.get_error_info(detailed=False)}] Unable to reset performance level to auto"
                     logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
+                    #TODO: Check why this is called twice?
                     level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
                     amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                    reset_clocks_results['performance'] = 'Performance level reset to auto'
+                    reset_clocks_results['performance'] = 'Successfully reset performance level to auto'
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    reset_clocks_results['performance'] = "N/A"
+                    reset_clocks_results['performance'] = f"[{e.get_error_info(detailed=False)}] Unable to reset performance level to auto"
                     logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
 
                 self.logger.store_output(args.gpu, 'reset_clocks', reset_clocks_results)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.fans:
                 try:
                     amdsmi_interface.amdsmi_reset_gpu_fan(args.gpu, 0)
@@ -5164,33 +5311,43 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    result = "N/A"
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to reset fan speed to driver control"
                     logging.debug("Failed to reset fans on gpu %s | %s", gpu_id, e.get_error_info())
+                    self.logger.store_output(args.gpu, 'reset_fans', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
                 self.logger.store_output(args.gpu, 'reset_fans', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.profile:
                 reset_profile_results = {'power_profile' : 'N/A',
                                         'performance_level': 'N/A'}
                 try:
                     power_profile_mask = amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
                     amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, power_profile_mask)
-                    reset_profile_results['power_profile'] = 'Successfully reset Power Profile'
+                    reset_profile_results['power_profile'] = 'Successfully reset Power Profile to default (bootup default)'
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    reset_profile_results['power_profile'] = "N/A"
+                    reset_profile_results['power_profile'] = f"[{e.get_error_info(detailed=False)}] Unable to reset Power Profile to default (bootup default)"
                     logging.debug("Failed to reset power profile on gpu %s | %s", gpu_id, e.get_error_info())
-
+                    # Attempt to reset performance level even if power profile fails
                 try:
                     level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
                     amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                    reset_profile_results['performance_level'] = 'Successfully reset Performance Level'
+                    reset_profile_results['performance_level'] = 'Successfully reset Performance Level to default (auto)'
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    reset_profile_results['performance_level'] = "N/A"
+                    reset_profile_results['performance_level'] = f"[{e.get_error_info(detailed=False)}] Unable to reset Performance Level to default (auto)"
                     logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
 
                 self.logger.store_output(args.gpu, 'reset_profile', reset_profile_results)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.xgmierr:
                 try:
                     amdsmi_interface.amdsmi_reset_gpu_xgmi_error(args.gpu)
@@ -5198,20 +5355,34 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    result = "N/A"
                     logging.debug("Failed to reset xgmi error count on gpu %s | %s", gpu_id, e.get_error_info())
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to reset XGMI Error count"
+                    self.logger.store_output(args.gpu, 'reset_xgmi_err', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
                 self.logger.store_output(args.gpu, 'reset_xgmi_err', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.perf_determinism:
                 try:
                     level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
                     amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                    result = 'Successfully disabled performance determinism'
+                    result = 'Successfully reset Performance Level to default (auto)'
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    result = "N/A"
                     logging.debug("Failed to set perf level on gpu %s | %s", gpu_id, e.get_error_info())
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to reset Performance Level to default (auto)"
+                    self.logger.store_output(args.gpu, 'reset_perf_determinism', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
                 self.logger.store_output(args.gpu, 'reset_perf_determinism', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             if args.power_cap:
                 try:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
@@ -5221,10 +5392,13 @@ class AMDSMICommands():
                     current_power_cap_in_w = power_cap_info["power_cap"]
                     current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    raise ValueError(f"Unable to get power cap info from {gpu_id}") from e
+                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to reset power cap to default")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
 
                 if current_power_cap_in_w == default_power_cap_in_w:
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}")
+                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}W")
                 else:
                     try:
                         default_power_cap_in_uw = self.helpers.convert_SI_unit(default_power_cap_in_w,
@@ -5235,16 +5409,10 @@ class AMDSMICommands():
                         if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                             raise PermissionError('Command requires elevation') from e
                         raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
-                    after_power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                    after_current_power_cap_in_w = after_power_cap_info["power_cap"]
-                    after_current_power_cap_in_w = self.helpers.convert_SI_unit(after_current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
-                    if after_current_power_cap_in_w == default_power_cap_in_w:
-                        self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {after_current_power_cap_in_w}W")
-                    else:
-                        self.logger.store_output(args.gpu, 'powercap', f"Unable set power cap to {default_power_cap_in_w}W, current value is {after_current_power_cap_in_w}W")
-        else:
-            result = "Device is a partition. Cannot reset on partition."
-            self.logger.store_output(args.gpu, 'gpu_reset', result)
+                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}W")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
         if args.clean_local_data:
             try:
@@ -5253,14 +5421,15 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to clean local data on GPU {gpu_id}") from e
+                result = f"[{e.get_error_info(detailed=False)}] Unable to clean local data"
+                self.logger.store_output(args.gpu, 'clean_local_data', result)
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
             self.logger.store_output(args.gpu, 'clean_local_data', result)
-
-        if multiple_devices:
-            self.logger.store_multiple_device_output()
-            return # Skip printing when there are multiple devices
-
-        self.logger.print_output()
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
 
 
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,

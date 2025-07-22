@@ -1244,6 +1244,24 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print()
         self.tearDown()
     
+    def test_get_gpu_revision(self):
+        self.setUp()
+        processors = amdsmi.amdsmi_get_processor_handles()
+        self.assertGreaterEqual(len(processors), 1)
+        self.assertLessEqual(len(processors), self.max_num_physical_devices)
+        for i in range(0, len(processors)):
+            bdf = amdsmi.amdsmi_get_gpu_device_bdf(processors[i])
+            print(f"\n\n###Test Processor {i}, bdf: {bdf}")
+            try:
+                print("\n###Test amdsmi_get_gpu_revision \n")
+                revision = amdsmi.amdsmi_get_gpu_revision(processors[i])
+            except amdsmi.AmdSmiLibraryException as e:
+                self._check_exception(e)
+                continue
+            print(f"  GPU revision is: {revision}")
+        print()
+        self.tearDown()
+    
     # Add test for amdsmi_get_gpu_pm_metrics_info
     @handle_exceptions
     def test_gpu_pm_metrics_info(self):

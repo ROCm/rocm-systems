@@ -122,7 +122,7 @@ void TestPowerCapReadWrite::SetCheckPowerCap(std::string msg, uint32_t dv_ind, u
 
 void TestPowerCapReadWrite::Run(void) {
   amdsmi_status_t ret;
-  uint64_t default_cap, min_cap, max_cap, new_cap, curr_cap;
+  uint64_t orig_cap, default_cap, min_cap, max_cap, new_cap, curr_cap;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -148,6 +148,7 @@ void TestPowerCapReadWrite::Run(void) {
     max_cap = info.max_power_cap;
     default_cap = info.default_power_cap;
     curr_cap = info.power_cap;
+    orig_cap = curr_cap;
 
     new_cap = (max_cap + min_cap)/2;
     IF_VERB(STANDARD) {
@@ -160,9 +161,15 @@ void TestPowerCapReadWrite::Run(void) {
 
     // Check if power cap is within the range
     // skip the test otherwise
-    if (new_cap < min_cap || new_cap > max_cap) {
-      std::cout << "\t** Power cap requested (" << new_cap
-                << " uW) is failed to set for " << dv_ind << std::endl;
+    if (new_cap < min_cap || new_cap > max_cap || curr_cap == 0) {
+      std::cout << "\t** Requested Power cap (" << new_cap
+                << " uW) cannot be changed for device #" << dv_ind << "."
+                << "\nCurrent Power Cap: " << curr_cap
+                << " uW, Min Power Cap: " << min_cap
+                << " uW, Max Power Cap: " << max_cap
+                << " uW.\n[WARN] If current power cap is 0 uW, this means we cannot change"
+                << " this device's current power cap. Skipping test for this device."
+                << std::endl;
       continue;
     }
     ret = AMDSMI_STATUS_SUCCESS;
@@ -243,11 +250,12 @@ void TestPowerCapReadWrite::Run(void) {
       }
     }
 
-    // Reset to default power cap
+    // Reset to default power cap -> which is typically the same as the max power cap
     IF_VERB(STANDARD) {
-      std::cout << "Resetting Power Cap" << std::endl;
-      std::cout << "[Before Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[Before Reset] Resetting cap to default " << default_cap << "..." << std::endl;
+      std::cout << "Setting to default power Cap" << std::endl;
+      std::cout << "[Before Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[Before Set] Default Power Cap (default_cap): "
+                << default_cap << "..." << std::endl;
     }
     ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, default_cap);
     CHK_ERR_ASRT(ret)
@@ -257,14 +265,38 @@ void TestPowerCapReadWrite::Run(void) {
     curr_cap = info.power_cap;
 
     IF_VERB(STANDARD) {
+      std::cout << "[After Set] Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[After Set] Requested Power Cap (default_cap): " << default_cap << " uW"
+                << std::endl;
+      std::cout << "[After Set] Power Cap Range [max to min]: " << max_cap << " uW to "
+                << min_cap << " uW" << std::endl;
+    }
+    // Confirm in watts the values are equal
+    ASSERT_EQ(default_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
+
+    // Reset to system's original power cap before the test started
+    IF_VERB(STANDARD) {
+      std::cout << "Resetting Power Cap to original power cap" << std::endl;
+      std::cout << "[Before Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[Before Reset] Original Power Cap (orig_cap): "
+                << orig_cap << "..." << std::endl;
+    }
+    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, orig_cap);
+    CHK_ERR_ASRT(ret)
+
+    ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
+    CHK_ERR_ASRT(ret)
+    curr_cap = info.power_cap;
+
+    IF_VERB(STANDARD) {
       std::cout << "[After Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
-      std::cout << "[After Reset] Requested Power Cap (default): " << default_cap << " uW"
-                                                                   << std::endl;
+      std::cout << "[After Reset] Requested Power Cap (orig_cap): " << orig_cap << " uW"
+                << std::endl;
       std::cout << "[After Reset] Power Cap Range [max to min]: " << max_cap << " uW to "
-                                                                  << min_cap << " uW" << std::endl;
+                << min_cap << " uW" << std::endl;
     }
 
     // Confirm in watts the values are equal
-    ASSERT_EQ(curr_cap/MICRO_CONVERSION, default_cap/MICRO_CONVERSION);
+    ASSERT_EQ(orig_cap/MICRO_CONVERSION, curr_cap/MICRO_CONVERSION);
   }
 }
