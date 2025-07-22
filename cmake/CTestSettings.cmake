@@ -220,7 +220,6 @@ else()
             ${CMAKE_COMMAND} -E create_symlink ${ROCPROFSYS_USER_LIBRARY_PATH}
             ${SYMLINK_PATH}
     )
-
     message(
         STATUS
         "Created symlink for tests: ${SYMLINK_PATH} -> ${ROCPROFSYS_USER_LIBRARY_PATH}"

@@ -23,7 +23,7 @@
 #
 # rocprofiler-systems tests
 #
-if(DEFINED ROCPROFSYS_CTEST_ONLY) # Would be defined in top level CMake file
+if(NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     # ----------------------------------------------------------------------------------------#
     #
     # Ran when building whole project
