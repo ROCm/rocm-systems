@@ -174,7 +174,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - absolute == node_id
   - relative == logical_node_id
   - type-relative == logical_node_type_id
-- Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
+- Added MI300/MI350 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
 - Python bindings for rocprofiler-sdk-roctx
 - SQLite3 output support for rocprofv3 (`--output-format rocpd`)
 - Added `rocprofiler-sdk-rocpd` package
