@@ -292,24 +292,27 @@ def capture_subprocess_output(
     subprocess_args, new_env=None, profileMode=False, enable_logging=True
 ):
     console_debug("subprocess", "Running: " + " ".join(subprocess_args))
+    # Start subprocess
+    # bufsize = 1 means output is line buffered
+    # universal_newlines = True is required for line buffering
     process = (
         subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE,
-            text=True,
-            env=new_env,
+            universal_newlines=True,
         )
-        if new_env is not None
+        if new_env == None
         else subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
-            stdin=subprocess.PIPE,
-            text=True,
+            universal_newlines=True,
+            env=new_env,
         )
     )
 

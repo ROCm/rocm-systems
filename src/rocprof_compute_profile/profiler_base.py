@@ -302,7 +302,7 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            app_cmd=self.__args.remaining,
+            app_cmd=self.__args.remaining if self.__args.remaining else "",
             skip_roof=self.__args.no_roof,
             mspec=self._soc._mspec,
             soc=self._soc,

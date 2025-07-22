@@ -42,8 +42,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
 
     def get_profiler_options(self, fname, soc):
         app_cmd = (
-            shlex.split(self.get_args().remaining) if not self.get_args().pid else None
+            shlex.split(self.get_args().remaining) if not self.get_args().pid else ""
         )
+
         trace_option = "--kernel-trace"
         rocprof_out_format = "json"
 
@@ -66,9 +67,14 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             trace_option,
             "--output-format",
             rocprof_out_format,
-            "--pid",
-            self.get_args().pid,
         ]
+
+        if self.get_args().pid:
+            args = args + [
+                "--pid",
+                self.get_args().pid,
+            ]
+
         # Kernel filtering
         if self.get_args().kernel:
             args.extend(["--kernel-include-regex", "|".join(self.get_args().kernel)])
