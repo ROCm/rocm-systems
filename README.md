@@ -51,10 +51,6 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocminfo`             | 8/11           |
 | `rocr-runtime`         | 8/11           |
 | `rocm-core`            | 8/12           |
-| `clr`                  | 8/13           |
-| `hip`                  | 8/13           |
-| `hipother`             | 8/13           |
-| `hip-tests`            | 8/13           |
 
 *Remaining schedule to be determined.
 
