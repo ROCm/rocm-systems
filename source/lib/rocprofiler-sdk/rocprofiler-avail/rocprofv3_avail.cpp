@@ -78,7 +78,7 @@ initialize_logging()
 {
     auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
     common::init_logging("ROCPROF", logging_cfg);
-    FLAGS_colorlogtostderr = true;
+    FLAGS_colorlogtostderr = isatty(fileno(stderr)) == 1 ? true : false;
 }
 
 tool::metadata&

@@ -1198,7 +1198,7 @@ def run(app_args, args, **kwargs):
     if args.marker_trace and not args.suppress_marker_preload:
         update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
 
-    if trace_count == 0:
+    if trace_count == 0 and len(app_args) != 0:
         warning("No tracing options were enabled.")
 
         # if no tracing was enabled but the options below were enabled, raise an error
@@ -1403,6 +1403,11 @@ def run(app_args, args, **kwargs):
             )
         else:
             app_args = [sys.executable, path, "info", "--pmc"]
+            for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
+                update_env(
+                    f"{itr}_LOG_LEVEL",
+                    "error",
+                )
             exit_code = subprocess.check_call(
                 [sys.executable, path, "info", "--pc-sampling"],
                 env=app_env,
