@@ -3928,7 +3928,7 @@ Field | Description
 `max_bandwidth` | Maximum XGMI bandwidth (in appropriate units, e.g., GB/s)
 `links` | List of dictionaries, one per XGMI link, each with:
 `bdf` | BDF string for the destination
-`link_type` | Link type
+`link_type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `read` | Accumulated read data for this link (e.g., KB)
 `write` | Accumulated write data for this link (e.g., KB)
 
@@ -3950,9 +3950,20 @@ try:
             print(link_metrics['bit_rate'])
             print(link_metrics['max_bandwidth'])
             for idx, link in enumerate(link_metrics['links']):
-                print(f"{idx}: {link['bdf']}, {link['link_type']}, {link['read']} KB, {link['write']} KB")
+                print(f"{idx}: {link['bdf']}, {link['read']} KB, {link['write']} KB")
+                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+                    print('internal')
+                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+                    print('pcie')
+                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+                    print('xgmi')
+                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+                    print('not applicable')
+                if link_type['link_type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+                    print('unknown')
 except AmdSmiException as e:
     print(e)
+```
 
 ### amdsmi_topo_get_link_type
 
@@ -3967,8 +3978,8 @@ Output:  Dictionary with fields:
 
 Field | Description
 ---|---
-`hops` | number of hops
-`type` | the connection type
+`hops` | Number of hops
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 
 Exceptions that can be thrown by `amdsmi_topo_get_link_type` function:
 
@@ -3988,7 +3999,16 @@ try:
         processor_handle_dest = devices[1]
         link_type = amdsmi_topo_get_link_type(processor_handle_src, processor_handle_dest)
         print(link_type['hops'])
-        print(link_type['type'])
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print('internal')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+            print('not applicable')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+            print('unknown')
 except AmdSmiException as e:
     print(e)
 ```
@@ -4006,7 +4026,7 @@ Output:  Dictionary with fields:
 
 Fields | Description
 ---|---
-`type` | AmdSmiIoLinkType
+`type` | The connection type as an int. This should be translated according to the enum amdsmi_link_type_t. Refer to the example below for more details.
 `cap` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`is_iolink_coherent`</td><td>1 == True; 0 == False; Uint_max = Undefined</td></tr><tr><td>`is_iolink_atomics_32bit`</td><td>Supports 32bit atomics</td></tr><tr><td>`is_iolink_atomics_64bit`</td><td>Supports 64bit atomics</td></tr><tr><td>`is_iolink_dma`</td><td>Supports DMA</td></tr><tr><td>`is_iolink_bi_directional`</td><td>Is the IOLink Bidirectional</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
@@ -4026,7 +4046,16 @@ try:
         processor_handle_src = devices[0]
         processor_handle_dest = devices[1]
         link_type = amdsmi_get_P2P_status(processor_handle_src, processor_handle_dest)
-        print(link_type['type'])
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_INTERNAL:
+            print('internal')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE:
+            print('pcie')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_XGMI:
+            print('xgmi')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_NOT_APPLICABLE:
+            print('not applicable')
+        if link_type['type'] == AmdSmiLinkType.AMDSMI_LINK_TYPE_UNKNOWN:
+            print('unknown')
         print(link_type['caps'])
 except AmdSmiException as e:
     print(e)

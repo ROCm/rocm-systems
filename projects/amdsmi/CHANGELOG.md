@@ -34,8 +34,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added the Default command**.  
   - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
 
-    ```console
-    $ amd-smi
+```console
+$ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI 26.0.0+eaa54ecc      amdgpu version: 6.12.12  ROCm version: 7.0.0    |
 |-------------------------------------+----------------------------------------|
@@ -79,7 +79,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 |    6    2427396  rvs                    2.0 MB    2.1 GB     2.4 GB    0.0 % |
 |    7    2427396  rvs                    2.0 MB    2.1 GB     2.5 GB    0.0 % |
 +------------------------------------------------------------------------------+
-    ```
+```
 
 - **Added support for GPU metrics 1.8**.  
   - Added new fields for `amdsmi_gpu_xcp_metrics_t` including:  
@@ -153,7 +153,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Updated `amdsmi_get_clock_info` in `amdsmi_interface.py`**.  
   - The `clk_deep_sleep` field now returns the sleep integer value.  
 
-- **Added Power Cap to amd-smi monitor**.  
+- **Added Power Cap to `amd-smi monitor`**.  
   - `amd-smi monitor -p` will display the power cap along with power.
 
     ```console
@@ -186,13 +186,44 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Removed unused member `year` in struct `amdsmi_version_t`**  
 
-- **Removed `amdsmi_io_link_type_t` and replaced with amdsmi_link_type_t**.  
-  - The IO Link type is no longer needed as the link type is sufficient.
-  - Mapping from amdsmi_io_link_type_t to amdsmi_link_type_t is as follows:
-  ```shell
+- **Removed `amdsmi_io_link_type_t` and replaced with `amdsmi_link_type_t`**.  
+  - `amdsmi_io_link_type_t` is no longer needed as `amdsmi_link_type_t` is sufficient.
+  - Mapping from `amdsmi_io_link_type_t` to `amdsmi_link_type_t` is as follows:
+
+  ```console
   AMDSMI_IOLINK_TYPE_UNDEFINED  == AMDSMI_LINK_TYPE_INTERNAL
   AMDSMI_IOLINK_TYPE_PCIEXPRESS == AMDSMI_LINK_TYPE_PCIE
   AMDSMI_IOLINK_TYPE_XGMI       == AMDSMI_LINK_TYPE_XGMI
+  ```
+
+  - `amdsmi_link_type_t` enum has changed, primarily the ordering of the PCI and XGMI types:
+
+  ```C++
+  typedef enum {
+      AMDSMI_LINK_TYPE_INTERNAL = 0,
+      AMDSMI_LINK_TYPE_PCIE = 1,
+      AMDSMI_LINK_TYPE_XGMI = 2,
+      AMDSMI_LINK_TYPE_NOT_APPLICABLE = 3,
+      AMDSMI_LINK_TYPE_UNKNOWN = 4
+  } amdsmi_link_type_t;
+  ```
+
+  - Please note that this change will also affect `amdsmi_link_metrics_t`, where the link_type field changes from `amdsmi_io_link_type_t` to `amdsmi_link_type_t`:
+
+  ```C++
+  typedef struct {
+    uint32_t num_links;     //!< number of links
+    struct _links {
+        amdsmi_bdf_t bdf;               //!< bdf of the destination gpu
+        uint32_t bit_rate;              //!< current link speed in Gb/s
+        uint32_t max_bandwidth;         //!< max bandwidth of the link in Gb/s
+        amdsmi_link_type_t link_type;   //!< type of the link
+        uint64_t read;                  //!< total data received for each link in KB
+        uint64_t write;                 //!< total data transfered for each link in KB
+        uint64_t reserved[2];
+    } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
+    uint64_t reserved[7];
+  } amdsmi_link_metrics_t;
   ```
 
 - **Removed `amdsmi_get_power_info_v2()`**.  
