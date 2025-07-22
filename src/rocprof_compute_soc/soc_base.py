@@ -267,13 +267,8 @@ class OmniSoC_Base:
             )
             if filename.endswith(".yaml")
         }
-        metric_ids = [
-            name
-            for name, type in self.get_args().filter_blocks.items()
-            if type == "metric_id"
-        ]
         file_ids = []
-        for section in metric_ids:
+        for section in self.get_args().filter_blocks:
             section_num = convert_metric_id_to_panel_idx(section)
             file_id = str(section_num // 100)
             # Convert "4" to "04"
@@ -282,16 +277,17 @@ class OmniSoC_Base:
             file_ids.append(file_id)
             # Apply sub section filtering
             for config_filename in config_filenames:
-                if config_filename.startswith(file_id) and section_num % 100:
+                # If first two characters of the config filename match the file_id
+                if config_filename[:2].startswith(file_id) and section_num % 100:
                     config_filenames[config_filename].append(section_num)
 
         # Apply section filters only if metric ids have been provided for filtering
-        if metric_ids:
+        if self.get_args().filter_blocks:
             # Identify yaml files corresponding to file_ids
             config_filenames = {
                 filename: subsections
                 for filename, subsections in config_filenames.items()
-                if filename.startswith(tuple(file_ids))
+                if filename[:2].startswith(tuple(file_ids))
             }
 
         for config_filename, subsections in config_filenames.items():
@@ -362,18 +358,6 @@ class OmniSoC_Base:
                     counters = counters.union(set(m.group(1).split()))
         else:
             counters = self.detect_counters()
-            # Perfmon hardware block filtering
-            filter_hardware_blocks = [
-                name
-                for name, type in self.get_args().filter_blocks.items()
-                if type == "hardware_block"
-            ]
-            if filter_hardware_blocks:
-                counters = {
-                    counter_name
-                    for counter_name in counters
-                    if counter_name.startswith(tuple(filter_hardware_blocks))
-                }
 
         if not using_v3():
             # Counters not supported in rocprof v1 / v2

@@ -56,14 +56,6 @@ class RocProfCompute_Base:
         self.__profiler = profiler_mode
         self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
-        self.__filter_hardware_blocks = [
-            name for name, type in args.filter_blocks.items() if type == "hardware_block"
-        ]
-        self.__filter_metric_ids = [
-            name for name, type in args.filter_blocks.items() if type == "metric_id"
-        ]
-        # Fixme: remove the hack code "21" after we could enable pc sampling as default
-        self.__pc_sampling = True if "21" in self.__filter_metric_ids else False
 
     def get_args(self):
         return self.__args
@@ -310,14 +302,8 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            ip_blocks=[
-                name
-                for name, type in self.__args.filter_blocks.items()
-                if type == "hardware_block"
-            ],
-            app_cmd=self.__args.remaining if self.__args.remaining else None,
+            app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
-            roof_only=self.__args.roof_only,
             mspec=self._soc._mspec,
             soc=self._soc,
         )
@@ -337,14 +323,10 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
-        if self.__filter_hardware_blocks == None:
-            console_log("Hardware Blocks: All")
-        else:
-            console_log("Hardware Blocks: " + str(self.__filter_hardware_blocks))
-        if self.__filter_metric_ids == None:
+        if self.get_args().filter_blocks is None:
             console_log("Report Sections: All")
         else:
-            console_log("Report Sections: " + str(self.__filter_metric_ids))
+            console_log("Report Sections: " + str(self.get_args().filter_blocks))
 
         msg = "Collecting Performance Counters"
         (
@@ -444,12 +426,12 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
-
             # TODO: change way of handling muliple input files
             if "--pid" in options:
                 break
 
-        if self.__pc_sampling == True and self.__profiler in (
+        # PC sampling data is only collected when block "21" is specified
+        if "21" in self.get_args().filter_blocks and self.__profiler in (
             "rocprofv3",
             "rocprofiler-sdk",
         ):
@@ -466,8 +448,8 @@ class RocProfCompute_Base:
             pc_sampling_duration = end_run_prof - start_run_prof
             console_debug(
                 "The time of pc sampling profiling is {} m {} sec".format(
-                    int((end_run_prof - start_run_prof) / 60),
-                    str((end_run_prof - start_run_prof) % 60),
+                    int((pc_sampling_duration) / 60),
+                    str((pc_sampling_duration) % 60),
                 )
             )
 

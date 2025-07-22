@@ -306,13 +306,14 @@ def process_panels_to_dataframes(
     """
 
     comparable_columns = build_comparable_columns(args.time_unit)
-    filter_panel_ids = [
-        convert_metric_id_to_panel_idx(section)
-        for section in [
-            name
-            for name, type in profiling_config.get("filter_blocks", {}).items()
-            if type == "metric_id"
+    filter_panel_ids = profiling_config.get("filter_blocks", [])
+    if isinstance(filter_panel_ids, dict):
+        # For backward compatibility
+        filter_panel_ids = [
+            name for name, type in filter_panel_ids.items() if type == "metric_id"
         ]
+    filter_panel_ids = [
+        convert_metric_id_to_panel_idx(section) for section in filter_panel_ids
     ]
 
     # Initialize the result structure

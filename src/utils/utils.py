@@ -1162,9 +1162,7 @@ def replace_timestamps(workload_dir):
         )
 
 
-def gen_sysinfo(
-    workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec, soc
-):
+def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc):
     console_debug("[gen_sysinfo]")
     df = mspec.get_class_members()
 
@@ -1172,12 +1170,7 @@ def gen_sysinfo(
     df["command"] = app_cmd
     df["workload_name"] = workload_name
 
-    blocks = []
-    if not ip_blocks:
-        t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
-        blocks += t
-    else:
-        blocks += ip_blocks
+    blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
     if hasattr(soc, "roofline_obj") and (not skip_roof):
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
@@ -1570,10 +1563,9 @@ def convert_metric_id_to_panel_idx(metric_id):
     tokens = metric_id.split(".")
     if len(tokens) == 1:
         return int(tokens[0]) * 100
-    elif len(tokens) == 2:
+    if len(tokens) == 2:
         return int(tokens[0]) * 100 + int(tokens[1])
-    else:
-        raise Exception(f"Invalid metric id: {metric_id}")
+    raise Exception(f"Invalid metric id: {metric_id}")
 
 
 def format_time(seconds):

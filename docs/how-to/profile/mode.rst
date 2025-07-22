@@ -232,7 +232,7 @@ Filtering options
 -----------------
 
 ``-b``, ``--block <block-name>``
-   Allows system profiling on one or more selected hardware report blocks to speed
+   Allows system profiling on one or more selected analysis report blocks to speed
    up the profiling process. See :ref:`profiling-hw-component-filtering`.
 
 ``-k``, ``--kernel <kernel-substr>``
@@ -253,11 +253,11 @@ Filtering options
 
 .. _profiling-hw-component-filtering:
 
-Hardware report block filtering
+Analysis report block filtering
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 You can profile specific hardware report blocks to speed up the profiling process.
-In ROCm Compute Profiler, the term hardware report block refers to a section of the
+In ROCm Compute Profiler, the term analysis report block refers to a section of the
 analysis report which focuses on metrics associated with a hardware component or
 a group of hardware components. All profiling results are accumulated in the same
 target directory without overwriting those for other hardware components.
@@ -332,54 +332,6 @@ To see a list of available hardware report blocks, use the ``--list-metrics`` op
                   6.1.2 -> Workgroup Manager Utilization
 
 
-It is also possible to filter counter collection by hardware component such as Shader Sequencer (SQ)
-and L2 cache (TCC) as shown below.
-
-.. code-block:: shell-session
-
-   $ rocprof-compute profile --name vcopy -b 10 7 -- ./vcopy -n 1048576 -b 256
-
-                                    __                                       _
-    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
-   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
-   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
-   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
-                  |_|                                           |_|
-
-   fname: pmc_cpc_perf: Skipped
-   fname: pmc_spi_perf: Skipped
-   fname: pmc_cpf_perf: Skipped
-   fname: pmc_tcp_perf: Skipped
-   fname: pmc_sq_perf4: Added
-   fname: pmc_tcc_perf: Added
-   fname: pmc_sq_perf8: Added
-   fname: pmc_ta_perf: Skipped
-   fname: pmc_sq_perf1: Added
-   fname: pmc_sq_perf3: Added
-   fname: pmc_td_perf: Skipped
-   fname: pmc_tcc2_perf: Skipped
-   fname: pmc_sqc_perf1: Skipped
-   fname: pmc_sq_perf6: Added
-   fname: pmc_sq_perf2: Added
-   rocprofiler-compute version: 2.0.0
-   Profiler choice: rocprofv1
-   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
-   Target: MI200
-   Command: ./vcopy -n 1048576 -b 256
-   Kernel Selection: None
-   Dispatch Selection: None
-   Hardware Blocks: ['sq', 'tcc']
-   Report Sections: []
-
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   Collecting Performance Counters
-   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-   ...
-
-.. warning::
-
-   Filtering by hardware components (e.g. SQ, TCC) will soon be deprecated.
-   It is recommended to use hardware report block based filtering.
 
 .. _profiling-kernel-filtering:
 
