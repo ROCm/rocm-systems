@@ -38,8 +38,15 @@ class AmdSmiLibraryException(AmdSmiException):
             err_code=self.err_code, err_info=self.err_info
         )
 
-    def get_error_info(self):
-        return self.err_info
+    def get_error_info(self, detailed=True):
+        """Get error info, if detailed is True, return full error message, otherwise return short version"""
+        # If detailed is True, return full error message
+        # If detailed is False, return only the error code and a short description
+        if detailed:
+            return self.err_info
+        else:
+            error_out = str(self.err_info).split(" - ")[0]
+            return f"{error_out}"
 
     def get_error_code(self):
         return self.err_code
