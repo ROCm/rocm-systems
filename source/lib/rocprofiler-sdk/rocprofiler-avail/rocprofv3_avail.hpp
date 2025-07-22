@@ -74,9 +74,9 @@ pc_sample_config(uint64_t  agent_handle,
                  uint64_t* max_interval,
                  uint64_t* flags) ROCPROFILER_EXPORT;
 bool
-is_counter_set(uint64_t* counter_handles,
-               uint64_t  agent_handle,
-               size_t    num_counters) ROCPROFILER_EXPORT;
+is_counter_set(const uint64_t* counter_handles,
+               uint64_t        agent_handle,
+               size_t          num_counters) ROCPROFILER_EXPORT;
 
 void
 agent_info(uint64_t agent_handle, const char** agent_info_str) ROCPROFILER_EXPORT;

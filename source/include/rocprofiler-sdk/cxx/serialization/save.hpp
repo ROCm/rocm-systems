@@ -40,6 +40,7 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker.h>
 #include <rocprofiler-sdk/pc_sampling.h>
+#include <rocprofiler-sdk/cxx/container/c_array.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/utility.hpp>
 
@@ -1236,16 +1237,33 @@ save(ArchiveT& ar, rocprofiler_counter_info_v1_t data)
     ROCP_SDK_SAVE_DATA_CSTR(block);
     ROCP_SDK_SAVE_DATA_CSTR(expression);
 
-    auto convert = [](const auto* val, uint64_t sz) {
-        using data_type = std::remove_cv_t<std::remove_pointer_t<decltype(val)>>;
-        auto retval     = std::vector<data_type>{};
-        for(uint64_t i = 0; i < sz; ++i)
-            retval.emplace_back(val[i]);
-        return retval;
-    };
+    ROCP_SDK_SAVE_VALUE(
+        "dimensions",
+        rocprofiler::sdk::container::make_c_array(data.dimensions, data.dimensions_count));
 
-    ROCP_SDK_SAVE_VALUE("dims", convert(data.dimensions, data.dimensions_count));
-    ROCP_SDK_SAVE_VALUE("instances", convert(data.instance_ids, data.instance_ids_count));
+    ROCP_SDK_SAVE_VALUE("instances",
+                        rocprofiler::sdk::container::make_c_array(data.dimensions_instances,
+                                                                  data.dimensions_instances_count));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_counter_dimension_info_t data)
+{
+    ROCP_SDK_SAVE_DATA_CSTR(dimension_name);
+    ROCP_SDK_SAVE_DATA_FIELD(index);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_counter_record_dimension_instance_info_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(instance_id);
+    ROCP_SDK_SAVE_DATA_FIELD(counter_id);
+
+    ROCP_SDK_SAVE_VALUE(
+        "dimensions",
+        rocprofiler::sdk::container::make_c_array(data.dimensions, data.dimensions_count));
 }
 
 template <typename ArchiveT>
@@ -1301,6 +1319,28 @@ save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info_impl<EnumT, ValueT
     for(auto itr : data.operations)
         _ops.emplace_back(itr);
     ar(cereal::make_nvp("operations", _ops));
+}
+
+template <typename ArchiveT, typename Tp>
+void
+save(ArchiveT& ar, const rocprofiler::sdk::container::c_array<Tp>& data)
+{
+    ar(make_size_tag(data.size()));
+    for(auto itr : data)
+        ar(itr);
+}
+
+template <typename ArchiveT, typename Tp>
+void
+save(ArchiveT& ar, const rocprofiler::sdk::container::c_array<Tp*>& data)
+{
+    size_type _sz = 0;
+    for(auto* itr : data)
+        if(itr) ++_sz;
+
+    ar(make_size_tag(_sz));
+    for(auto* itr : data)
+        ar(*itr);
 }
 
 ROCPROFILER_SDK_CEREAL_NAMESPACE_END

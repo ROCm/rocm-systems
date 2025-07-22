@@ -68,7 +68,7 @@ cmake                                         \
       -DCMAKE_PREFIX_PATH=/opt/rocm           \
        rocprofiler-sdk-source
 
-  cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
+cmake --build rocprofiler-sdk-build --target all --parallel $(nproc)
 ```
 
 To install ROCprofiler, run:

@@ -14,3 +14,4 @@ install(
 add_subdirectory(codeobj)
 add_subdirectory(details)
 add_subdirectory(serialization)
+add_subdirectory(container)

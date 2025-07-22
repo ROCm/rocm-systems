@@ -25,6 +25,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
@@ -53,25 +54,37 @@ get_static_string(std::string_view str)
     return common::get_string_entry(str)->c_str();
 }
 
-template <class T>
-const std::vector<T>*
-get_static_ptr(const std::vector<T>& vec)
+template <typename Tp>
+const Tp**
+get_static_ptr_array(const std::vector<Tp>& vec)
 {
     // The use of std::map is purposeful. Keys can be vectors in map and cannot be in unordered_map.
     // Simplifying the code to create these static objects. Given that they are not created often (
     // or looked up often), the performance difference between map and unordered_map is negligible.
-    using static_ptr_map = std::map<std::vector<T>, std::unique_ptr<std::vector<T>>>;
+    using static_ptr_map = std::map<std::vector<Tp>, std::vector<const Tp*>>;
     static auto*& static_ptrs =
         common::static_object<common::Synchronized<static_ptr_map>>::construct();
-    return static_ptrs->wlock([&](auto& data) {
+
+    return static_ptrs->wlock([&](auto& data) -> const Tp** {
         if(auto it = data.find(vec); it != data.end())
         {
-            return it->second.get();
+            return it->second.data();
         }
-        data[vec] = std::make_unique<std::vector<T>>(vec);
-        return data[vec].get();
+
+        auto [inserted_it, success]       = data.emplace(vec, std::vector<const Tp*>{});
+        const std::vector<Tp>& stored_vec = inserted_it->first;
+
+        auto& ptr_vec = inserted_it->second;
+        ptr_vec.reserve(stored_vec.size());
+        for(const auto& item : stored_vec)
+        {
+            ptr_vec.push_back(&item);
+        }
+
+        return ptr_vec.data();
     });
 }
+
 }  // namespace
 }  // namespace counters
 }  // namespace rocprofiler
@@ -139,7 +152,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
             return true;
         }
 
-        out_struct.dimensions       = counters::get_static_ptr(_dim_info)->data();
+        out_struct.dimensions       = counters::get_static_ptr_array(_dim_info);
         out_struct.dimensions_count = _dim_info.size();
         return true;
     };
@@ -152,20 +165,33 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         const auto* dims = common::get_val(dim_ptr->id_to_dim, counter_id.handle);
         if(!dims) return false;
 
-        std::vector<rocprofiler_counter_instance_id_t> instances;
+        auto instances = std::vector<rocprofiler_counter_record_dimension_instance_info_t>{};
+        auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+
+        constexpr auto rocprofiler_counter_record_dimension_instance_v1_info_t_rt_size =
+            common::compute_runtime_sizeof<rocprofiler_counter_record_dimension_instance_info_t>();
+
+        constexpr auto rocprofiler_counter_dimension_info_v1_t_rt_size =
+            common::compute_runtime_sizeof<rocprofiler_counter_dimension_info_t>();
 
         for(const auto& metric_dim : *dims)
         {
             if(metric_dim.size() == 0) continue;
-            std::vector<rocprofiler_counter_instance_id_t> tmp;
+
+            _dim_info.emplace_back(rocprofiler_counter_record_dimension_info_t{
+                .name          = counters::get_static_string(metric_dim.name()),
+                .instance_size = metric_dim.size(),
+                .id = static_cast<rocprofiler_counter_dimension_id_t>(metric_dim.type())});
+
+            auto tmp = std::vector<rocprofiler_counter_record_dimension_instance_info_t>{};
             // If no instances are found, create the first set of instances
             if(instances.empty())
             {
                 for(size_t i = 0; i < metric_dim.size(); i++)
                 {
                     auto& rec = instances.emplace_back();
-                    counters::set_dim_in_rec(rec, metric_dim.type(), i);
-                    counters::set_counter_in_rec(rec, counter_id);
+                    counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
+                    counters::set_counter_in_rec(rec.instance_id, counter_id);
                 }
             }
             else
@@ -177,8 +203,8 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                     for(const auto& instance : instances)
                     {
                         auto& rec = tmp.emplace_back(instance);
-                        counters::set_dim_in_rec(rec, metric_dim.type(), i);
-                        counters::set_counter_in_rec(rec, counter_id);
+                        counters::set_dim_in_rec(rec.instance_id, metric_dim.type(), i);
+                        counters::set_counter_in_rec(rec.instance_id, counter_id);
                     }
                 }
                 instances = tmp;
@@ -186,13 +212,33 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         }
         if(instances.empty())
         {
-            out_struct.instance_ids       = nullptr;
-            out_struct.instance_ids_count = 0;
+            out_struct.dimensions_instances       = nullptr;
+            out_struct.dimensions_instances_count = 0;
             return true;
         }
 
-        out_struct.instance_ids       = counters::get_static_ptr(instances)->data();
-        out_struct.instance_ids_count = instances.size();
+        for(auto& instance : instances)
+        {
+            auto dimensions  = std::vector<rocprofiler_counter_dimension_info_t>{};
+            auto instance_id = instance.instance_id;
+            for(const auto& dimension : _dim_info)
+            {
+                auto& curr = dimensions.emplace_back(rocprofiler_counter_dimension_info_t{});
+                curr.index = counters::rec_to_dim_pos(
+                    instance_id,
+                    static_cast<counters::rocprofiler_profile_counter_instance_types>(
+                        dimension.id));
+                curr.dimension_name = dimension.name;
+                curr.size           = rocprofiler_counter_dimension_info_v1_t_rt_size;
+            }
+            instance.dimensions       = counters::get_static_ptr_array(dimensions);
+            instance.dimensions_count = std::size(_dim_info);
+            instance.counter_id       = counters::rec_to_counter_id(instance_id).handle;
+            instance.size = rocprofiler_counter_record_dimension_instance_v1_info_t_rt_size;
+        }
+        out_struct.dimensions_instances       = counters::get_static_ptr_array(instances);
+        out_struct.dimensions_instances_count = instances.size();
+        out_struct.size                       = sizeof(rocprofiler_counter_info_v1_t);
         return true;
     };
 

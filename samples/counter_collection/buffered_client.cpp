@@ -112,7 +112,7 @@ fill_dimension_cache(rocprofiler_counter_id_t counter)
     (*dimension_cache())
         ->emplace(counter.handle,
                   std::vector<rocprofiler_counter_record_dimension_info_t>{
-                      info.dimensions, info.dimensions + info.dimensions_count});
+                      *info.dimensions, *info.dimensions + info.dimensions_count});
 }
 
 /**

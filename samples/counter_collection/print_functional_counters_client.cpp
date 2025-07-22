@@ -292,7 +292,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 "Could not query counter_id");
             cap.expected_counter_names.emplace(found_counter.handle, std::string(info.name));
             cap.remaining.push_back(found_counter);
-            cap.expected.emplace(found_counter.handle, info.instance_ids_count);
+            cap.expected.emplace(found_counter.handle, info.dimensions_instances_count);
 
             auto& info_vector =
                 cap.expected_data_dims.emplace(found_counter.handle, validate_dim_presence{})
@@ -300,7 +300,7 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
 
             for(uint64_t i = 0; i < info.dimensions_count; i++)
             {
-                info_vector.maybe_forward(info.dimensions[i]);
+                info_vector.maybe_forward(*info.dimensions[i]);
             }
         }
         if(cap.expected.empty())

@@ -46,8 +46,10 @@
 
 #include <dlfcn.h>
 #include <unistd.h>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace rocprofiler
@@ -70,6 +72,81 @@ query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* c
         avail_configs->emplace_back(configs[i]);
     }
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+/**
+ * @brief Processes and stores the supported counters for a given agent.
+ *
+ * This function iterates over all counters supported by the given agent.
+ * If a filter set is provided, only counters present in the filter set are processed.
+ * Otherwise, all counters are collected.
+ *
+ * @param agent_id The ID of the agent whose counters are being processed.
+ * @param filter_set Optional set of counter names to filter which counters to load. If null,
+ *        all supported counters will be loaded.
+ * @param output_map A reference to the map where the processed counter information will be stored.
+ *
+ * @return ROCPROFILER_STATUS_SUCCESS on success, or an appropriate error status on failure.
+ */
+rocprofiler_status_t
+process_agent_counters(rocprofiler_agent_id_t    agent_id,
+                       std::set<std::string>*    filter_set,
+                       agent_counter_info_map_t& output_map)
+{
+    struct callback_data_t
+    {
+        std::set<std::string>*    counters_set       = nullptr;
+        agent_counter_info_map_t* agent_counter_info = nullptr;
+    };
+
+    auto cb_data = callback_data_t{filter_set, &output_map};
+
+    return rocprofiler_iterate_agent_supported_counters(
+        agent_id,
+        [](rocprofiler_agent_id_t    id,
+           rocprofiler_counter_id_t* counters,
+           size_t                    num_counters,
+           void*                     user_data) {
+            auto* data                    = static_cast<callback_data_t*>(user_data);
+            auto* counters_set_data       = data->counters_set;
+            auto* agent_counter_info_data = data->agent_counter_info;
+
+            agent_counter_info_data->emplace(id, counter_info_vec_t{});
+
+            for(size_t i = 0; i < num_counters; ++i)
+            {
+                auto _info     = rocprofiler_counter_info_v1_t{};
+                auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
+                auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+
+                ROCPROFILER_CHECK(rocprofiler_query_counter_info(
+                    counters[i], ROCPROFILER_COUNTER_INFO_VERSION_1, &_info));
+
+                if(counters_set_data != nullptr && counters_set_data->count(_info.name) == 0)
+                    continue;
+
+                for(uint64_t j = 0; j < _info.dimensions_count; ++j)
+                {
+                    if(_info.dimensions[j] == nullptr)
+                    {
+                        ROCP_WARNING << fmt::format(
+                            "nullptr dimension encountered for counter '{}' at index {}",
+                            _info.name,
+                            j);
+                        continue;
+                    }
+
+                    _dim_ids.emplace_back(_info.dimensions[j]->id);
+                    _dim_info.emplace_back(*_info.dimensions[j]);
+                }
+
+                agent_counter_info_data->at(id).emplace_back(
+                    id, _info, std::move(_dim_ids), std::move(_dim_info));
+            }
+
+            return ROCPROFILER_STATUS_SUCCESS;
+        },
+        &cb_data);
 }
 }  // namespace
 
@@ -155,52 +232,105 @@ metadata::metadata(inprocess)
     add_kernel_symbol(std::move(info));
 }
 
+/**
+ * @brief Initializes the metadata by loading all counters supported on GPU agents.
+ *
+ * This method is used by the `rocprofv3-avail` tool to enumerate all available counters
+ * for each GPU agent in the system.
+ *
+ * For each non-CPU agent, this function calls `process_agent_counters` with a null filter,
+ * ensuring that all counters supported by that agent are queried and stored in metadata.
+ */
 void metadata::init(inprocess)
 {
     if(inprocess_init) return;
-
     inprocess_init = true;
-    for(auto itr : agents)
+
+    for(const auto& agent : agents)
     {
-        if(itr.type == ROCPROFILER_AGENT_TYPE_CPU) continue;
+        if(agent.type == ROCPROFILER_AGENT_TYPE_CPU) continue;
 
-        auto status = rocprofiler_iterate_agent_supported_counters(
-            itr.id,
-            [](rocprofiler_agent_id_t    id,
-               rocprofiler_counter_id_t* counters,
-               size_t                    num_counters,
-               void*                     user_data) {
-                auto* data_v = static_cast<agent_counter_info_map_t*>(user_data);
-                data_v->emplace(id, counter_info_vec_t{});
+        auto status = process_agent_counters(agent.id, nullptr, agent_counter_info);
+        ROCP_WARNING_IF(status != ROCPROFILER_STATUS_SUCCESS) << fmt::format(
+            "rocprofiler_iterate_agent_supported_counters failed for agent {} ({}) :: {}",
+            agent.node_id,
+            agent.name,
+            rocprofiler_get_status_string(status));
+    }
+}
 
-                for(size_t i = 0; i < num_counters; ++i)
-                {
-                    auto _info     = rocprofiler_counter_info_v1_t{};
-                    auto _dim_ids  = std::vector<rocprofiler_counter_dimension_id_t>{};
-                    auto _dim_info = std::vector<rocprofiler_counter_record_dimension_info_t>{};
+/**
+ * @brief Initializes the metadata by loading only selected counters for GPU agents.
+ *
+ * This method is used by the `rocprofv3` tool when profiling with a list
+ * of performance counters which are profiled by user.
+ *
+ * This filtering reduces runtime overhead and significantly shrinks the size of
+ * generated JSON metadata in profiling output.
+ */
+void
+metadata::init(inprocess_with_counters&& data)
+{
+    if(inprocess_init) return;
+    inprocess_init = true;
 
-                    ROCPROFILER_CHECK(rocprofiler_query_counter_info(
-                        counters[i],
-                        ROCPROFILER_COUNTER_INFO_VERSION_1,
-                        &static_cast<rocprofiler_counter_info_v1_t&>(_info)));
+    // No counters to process, exit early. Kernel trace doesn't have to iterate counters.
+    if(data.counters.empty()) return;
 
-                    for(uint64_t j = 0; j < _info.dimensions_count; ++j)
-                    {
-                        _dim_ids.emplace_back(_info.dimensions[j].id);
-                        _dim_info.emplace_back(_info.dimensions[j]);
-                    }
-                    data_v->at(id).emplace_back(
-                        id, _info, std::move(_dim_ids), std::move(_dim_info));
-                }
-                return ROCPROFILER_STATUS_SUCCESS;
-            },
-            &agent_counter_info);
+    auto gpu_index_to_counters_map = std::map<int, std::set<std::string>>{};
+    for(const auto& agent : agents)
+    {
+        gpu_index_to_counters_map[agent.gpu_index] = {};
+    }
+
+    // Used to parse counters like "SQ_WAVES:device=0".
+    constexpr auto device_qualifier = std::string_view{":device="};
+
+    for(const auto& pmc_counter : data.counters)
+    {
+        auto name_v = pmc_counter;
+
+        if(auto pos = pmc_counter.find(device_qualifier); pos != std::string::npos)
+        {
+            name_v           = pmc_counter.substr(0, pos);
+            auto device_id_s = pmc_counter.substr(pos + device_qualifier.length());
+
+            ROCP_FATAL_IF(device_id_s.empty() ||
+                          device_id_s.find_first_not_of("0123456789") != std::string::npos)
+                << fmt::format("Invalid device qualifier format (expected ':device=N') in '{}'",
+                               pmc_counter);
+
+            auto device_id_l = std::stol(device_id_s);
+            if(gpu_index_to_counters_map.find(device_id_l) == gpu_index_to_counters_map.end())
+            {
+                ROCP_WARNING << fmt::format("Device ID not found for PMC counter '{}'",
+                                            pmc_counter);
+                continue;
+            }
+
+            // Add the counter to the corresponding device.
+            gpu_index_to_counters_map[device_id_l].emplace(name_v);
+        }
+        else
+        {
+            // No device qualifier — add to all devices.
+            for(auto& [_, counters] : gpu_index_to_counters_map)
+                counters.emplace(name_v);
+        }
+    }
+
+    // Process selected counters for each GPU agent.
+    for(const auto& agent : agents)
+    {
+        if(agent.type == ROCPROFILER_AGENT_TYPE_CPU) continue;
+
+        auto* filter = &gpu_index_to_counters_map[agent.gpu_index];
+        auto  status = process_agent_counters(agent.id, filter, agent_counter_info);
 
         ROCP_WARNING_IF(status != ROCPROFILER_STATUS_SUCCESS) << fmt::format(
-            "rocprofiler_iterate_agent_supported_counters returned {} for agent {} ({}) :: {}",
-            rocprofiler_get_status_name(status),
-            itr.node_id,
-            itr.name,
+            "rocprofiler_iterate_agent_supported_counters failed for agent {} ({}) :: {}",
+            agent.node_id,
+            agent.name,
             rocprofiler_get_status_string(status));
     }
 }

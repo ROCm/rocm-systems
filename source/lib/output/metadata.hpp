@@ -139,6 +139,11 @@ struct metadata
 
     struct inprocess
     {};
+    // Tag type for initializing with specific counters for rocprofv3 tool.
+    struct inprocess_with_counters
+    {
+        std::set<std::string> counters = {};
+    };
 
     pid_t                             process_id                  = 0;
     pid_t                             parent_process_id           = 0;
@@ -177,7 +182,11 @@ struct metadata
     metadata& operator=(const metadata&) = delete;
     metadata& operator=(metadata&&) noexcept = delete;
 
+    // Loads all counters supported on agents. Used by the 'rocprofv3-avail' tool.
     void init(inprocess);
+
+    // Loads only selected counters into metadata to reduce JSON size. Used by the 'rocprofv3' tool.
+    void init(inprocess_with_counters&&);
 
     const agent_info*                   get_agent(rocprofiler_agent_id_t _val) const;
     const code_object_info*             get_code_object(uint64_t code_obj_id) const;
