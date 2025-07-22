@@ -9,7 +9,7 @@
 # MI GPUs
 #   |-- series: the specific MI series; mi50, mi100, mi200, mi300
 #       |-- architecture: currently, only mi300 gpus hold different architectures
-#           |-- perfmon_config
+#           |-- perfmon_config, copy from ROCm/aqlprofile from gfxip/gfx9/gfx9_block_info.h
 #           |-- gpu model
 #           |-- chip_ids: chip id is specific to the environment the gpu is being used on
 #               | -- physical
@@ -32,7 +32,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -50,7 +50,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -69,7 +69,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -94,7 +94,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -124,7 +124,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -159,7 +159,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
         models:
@@ -294,7 +294,7 @@ mi_gpu_spec:
           TCC: 4
           CPC: 2
           CPF: 2
-          SPI: 2
+          SPI: 6
           GRBM: 2
           GDS: 4
           TCC_channels: 16

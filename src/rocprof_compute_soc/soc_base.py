@@ -28,6 +28,7 @@ import math
 import os
 import re
 import shutil
+import sys
 import threading
 from abc import abstractmethod
 from pathlib import Path
@@ -47,14 +48,10 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.parser import build_in_vars, supported_denom
 from utils.utils import (
     add_counter_extra_config_input_yaml,
-    add_counter_from_source_to_target_extra_config_input_yaml,
     capture_subprocess_output,
     convert_metric_id_to_panel_idx,
     detect_rocprof,
-    get_base_spi_pipe_counter,
     get_submodules,
-    is_counter_existed_in_extra_input_yaml,
-    is_spi_pipe_counter,
     is_tcc_channel_counter,
     using_v3,
 )
@@ -169,7 +166,7 @@ class OmniSoC_Base:
             )
         )
 
-        # we get the max mclk from rocm-smi --showmclkrange
+        # we get the max mclk from amd-smi --showmclkrange
         # Regular expression to extract the max memory clock (third frequency level in MEM)
         memory_clock_pattern = (
             r"MEM:\s*[^:]*FREQUENCY_LEVELS:\s*(?:\d+: \d+ MHz\s*){2}(\d+)\s*MHz"
@@ -495,67 +492,52 @@ class OmniSoC_Base:
                 if "Name:" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
                     rocprof_counters.update(counters)
+            # Custom counter support for mi100 for rocprofv3
+            if self._mspec.gpu_model.lower() == "mi100":
+                counter_defs_path = (
+                    config.rocprof_compute_home
+                    / "rocprof_compute_soc"
+                    / "profile_configs"
+                    / "gfx908_counter_defs.yaml"
+                )
+                with open(counter_defs_path, "r") as fp:
+                    counter_defs_contents = fp.read()
+                counters, _ = self.parse_counters_text(counter_defs_contents)
+                rocprof_counters.update(counters)
 
         elif str(rocprof_cmd) == "rocprofiler-sdk":
-            MAX_STR = 256
-
-            # rocprofiler sdk list avail library
-            libname = str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent.joinpath(
-                    "libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+            sys.path.append(
+                str(
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
+                    / "bin"
                 )
             )
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
+            from rocprofv3_avail_module import avail
 
-            # Intialize the library and set data types for arguments and variables
-            c_lib.avail_tool_init()
-            c_lib.get_number_of_agents.restype = ctypes.c_size_t
-            c_lib.get_agent_node_id.restype = ctypes.c_ulong
-            c_lib.get_agent_node_id.argtypes = [ctypes.c_int]
-            c_lib.get_number_of_counters.restype = ctypes.c_ulong
-            c_lib.get_number_of_counters.argtypes = [ctypes.c_int]
-            c_lib.get_counters_info.argtypes = [
-                ctypes.c_ulong,
-                ctypes.c_int,
-                ctypes.POINTER(ctypes.c_ulong),
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-                ctypes.POINTER(ctypes.c_int),
-            ]
-            c_lib.get_counter_block.argtypes = [
-                ctypes.c_ulong,
-                ctypes.c_ulong,
-                ctypes.POINTER(ctypes.POINTER(ctypes.c_char * MAX_STR)),
-            ]
-
-            # Iterate through each counter index and get its information
-            for idx in range(c_lib.get_number_of_agents()):
-                node_id = c_lib.get_agent_node_id(idx)
-                for counter_idx in range(c_lib.get_number_of_counters(node_id)):
-                    # Counter information will be stored in these variables
-                    name_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    description_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    is_derived_args = ctypes.c_int()
-                    counter_id_args = ctypes.c_ulong()
-                    block_args = ctypes.POINTER(ctypes.c_char * MAX_STR)()
-                    # Get the counter information
-                    c_lib.get_counters_info(
-                        node_id,
-                        counter_idx,
-                        ctypes.byref(counter_id_args),
-                        name_args,
-                        description_args,
-                        ctypes.byref(is_derived_args),
-                    )
-                    c_lib.get_counter_block(node_id, counter_idx, block_args)
-                    block = ctypes.cast(block_args, ctypes.c_char_p).value.decode("utf-8")
-                    if not is_derived_args.value and block:
-                        # Only consider raw hardware counters from IP blocks
-                        rocprof_counters.add(
-                            ctypes.cast(name_args, ctypes.c_char_p).value.decode("utf-8")
-                        )
+            avail.loadLibrary.libname = str(
+                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
+                / "libexec"
+                / "rocprofiler-sdk"
+                / "librocprofv3-list-avail.so"
+            )
+            counters = avail.get_counters()
+            rocprof_counters = {
+                counter.name
+                for counter in counters[list(counters.keys())[0]]
+                if hasattr(counter, "block") or hasattr(counter, "expression")
+            }
+            # Custom counter support for mi100 for rocprofiler-sdk
+            if self._mspec.gpu_model.lower() == "mi100":
+                counter_defs_path = (
+                    config.rocprof_compute_home
+                    / "rocprof_compute_soc"
+                    / "profile_configs"
+                    / "gfx908_counter_defs.yaml"
+                )
+                with open(counter_defs_path, "r") as fp:
+                    counter_defs_contents = fp.read()
+                counters, _ = self.parse_counters_text(counter_defs_contents)
+                rocprof_counters.update(counters)
 
         else:
             console_error(
@@ -647,14 +629,6 @@ class OmniSoC_Base:
                 if output_file:
                     output_file.add(ctr)
                     continue
-            # Store all pipes for SPI pipe counters in the same file
-            if is_spi_pipe_counter(ctr):
-                output_file = spi_pipe_counter_file_map.get(
-                    get_base_spi_pipe_counter(ctr)
-                )
-                if output_file:
-                    output_file.add(ctr)
-                    continue
             # Add counter to first file that has room
             added = False
             for i in range(len(output_files)):
@@ -663,11 +637,6 @@ class OmniSoC_Base:
                     # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
                         tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[i]
-                    # Store all pipes for SPI pipe counters in the same file
-                    if is_spi_pipe_counter(ctr):
-                        spi_pipe_counter_file_map[get_base_spi_pipe_counter(ctr)] = (
-                            output_files[i]
-                        )
                     break
 
             # All files are full, create a new file
@@ -750,18 +719,6 @@ class OmniSoC_Base:
 
         else:
             # Output to files
-            with open(
-                str(
-                    Path(config.rocprof_compute_home).joinpath(
-                        "rocprof_compute_soc",
-                        "profile_configs",
-                        "accum_counters.yaml",
-                    )
-                ),
-                "r",
-            ) as fp:
-                accum_counters_def = yaml.safe_load(fp)
-
             for f in output_files:
                 file_name_txt = str(Path(workload_perfmon_dir).joinpath(f.file_name_txt))
                 file_name_yaml = str(
@@ -777,16 +734,49 @@ class OmniSoC_Base:
                 ]:
                     pmc.append(ctr)
                     if using_v3():
-                        if is_counter_existed_in_extra_input_yaml(
-                            accum_counters_def, ctr
-                        ) and not is_counter_existed_in_extra_input_yaml(
-                            counter_def, ctr
-                        ):
-                            counter_def = (
-                                add_counter_from_source_to_target_extra_config_input_yaml(
-                                    accum_counters_def, counter_def, ctr
+                        # MI 100 accumulate counters dont work with rocprofiler sdk
+                        if self._mspec.gpu_model.lower() != "mi100":
+                            # Add accumulation counters definitions
+                            if ctr == "SQ_IFETCH_LEVEL":
+                                counter_def = add_counter_extra_config_input_yaml(
+                                    counter_def,
+                                    "SQ_IFETCH_LEVEL_ACCUM",
+                                    "SQ_IFETCH_LEVEL accumulation",
+                                    "accumulate(SQ_IFETCH_LEVEL, HIGH_RES)",
+                                    [self.__arch],
                                 )
-                            )
+                            elif ctr == "SQ_INST_LEVEL_LDS":
+                                counter_def = add_counter_extra_config_input_yaml(
+                                    counter_def,
+                                    "SQ_INST_LEVEL_LDS_ACCUM",
+                                    "SQ_INST_LEVEL_LDS accumulation",
+                                    "accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)",
+                                    [self.__arch],
+                                )
+                            elif ctr == "SQ_INST_LEVEL_SMEM":
+                                counter_def = add_counter_extra_config_input_yaml(
+                                    counter_def,
+                                    "SQ_INST_LEVEL_SMEM_ACCUM",
+                                    "SQ_INST_LEVEL_SMEM accumulation",
+                                    "accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)",
+                                    [self.__arch],
+                                )
+                            elif ctr == "SQ_INST_LEVEL_VMEM":
+                                counter_def = add_counter_extra_config_input_yaml(
+                                    counter_def,
+                                    "SQ_INST_LEVEL_VMEM_ACCUM",
+                                    "SQ_INST_LEVEL_VMEM accumulation",
+                                    "accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)",
+                                    [self.__arch],
+                                )
+                            elif ctr == "SQ_LEVEL_WAVES":
+                                counter_def = add_counter_extra_config_input_yaml(
+                                    counter_def,
+                                    "SQ_LEVEL_WAVES_ACCUM",
+                                    "SQ_LEVEL_WAVES accumulation",
+                                    "accumulate(SQ_LEVEL_WAVES, HIGH_RES)",
+                                    [self.__arch],
+                                )
                         # Add TCC channel counters definitions
                         if is_tcc_channel_counter(ctr):
                             counter_name = ctr.split("[")[0]
@@ -813,10 +803,9 @@ class OmniSoC_Base:
                 fd.close()
 
                 # Write counter definitions to file
-                if using_v3():
+                if counter_def:
                     with open(file_name_yaml, "w") as fp:
-                        if counter_def:
-                            fp.write(yaml.dump(counter_def, sort_keys=False))
+                        fp.write(yaml.dump(counter_def, sort_keys=False))
 
         # Add a timestamp file
         # TODO: Does v3 need this?
@@ -860,18 +849,8 @@ class LimitedSet:
         if e.split("[")[0] in {element.split("[")[0] for element in self.elements}:
             self.elements.append(e)
             return True
-        # Store all pipes for SPI pipe counters in the same file
-        if is_spi_pipe_counter(e) and get_base_spi_pipe_counter(e) in {
-            get_base_spi_pipe_counter(element) for element in self.elements
-        }:
-            self.elements.append(e)
-            return True
         if self.avail > 0:
-            # SPI pipe counters take space of 2 counters
-            if is_spi_pipe_counter(e):
-                self.avail -= 2
-            else:
-                self.avail -= 1
+            self.avail -= 1
             self.elements.append(e)
             return True
         return False

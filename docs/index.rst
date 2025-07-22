@@ -48,6 +48,8 @@ in practice.
 
         * :doc:`how-to/analyze/standalone-gui`
 
+        * :doc:`how-to/analyze/tui`
+
    .. grid-item-card:: Conceptual
 
       * :doc:`conceptual/performance-model`

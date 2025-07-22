@@ -107,7 +107,9 @@ class webui_analysis(OmniAnalyze_Base):
         ):
             console_debug("analysis", "gui normalization is %s" % norm_filt)
 
-            base_data = self.initalize_runs()  # Re-initalizes everything
+            # Re-initalizes everything
+            base_data = self.initalize_runs(normalization_filter=norm_filt)
+
             panel_configs = copy.deepcopy(arch_configs.panel_configs)
             # Generate original raw df
             base_data[base_run].raw_pmc = file_io.create_df_pmc(

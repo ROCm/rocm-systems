@@ -158,30 +158,20 @@ def generate_machine_specs(args, sysinfo: dict = None):
     accelerator_partition_pattern = r"ACCELERATOR_PARTITION:\s*(\S+)"
     memory_partition_pattern = r"MEMORY_PARTITION:\s*(\S+)"
 
-    rocm_smi_compute_partition_output = run(
-        ["rocm-smi", "--showcomputepartition"], exit_on_error=True
-    )
-    rocm_smi_compute_partition_pattern = r"Compute Partition:\s*(\S+)"
-
     vbios = search(vbios_pattern, amd_smi_output)
-    # 1. get compute partition from amd-smi
+
+    # Non-high-frequency System Patterns
     compute_partition = search(compute_partition_pattern, amd_smi_output)
     console_debug(f"amd-smi compute partition: {compute_partition}")
-    # 2. get compute partition from rocm-smi
-    if compute_partition is None:
-        compute_partition = search(
-            rocm_smi_compute_partition_pattern, rocm_smi_compute_partition_output
-        )
-        console_debug(f"rocm-smi compute partition: {compute_partition}")
-    # 3. get compute partition from amd-smi using keyword accelerator
+
+    # High-frequency System Pattern using keyword accelerator
     if compute_partition is None:
         compute_partition = search(accelerator_partition_pattern, amd_smi_output)
         console_debug(f"amd-smi accelerator partition: {compute_partition}")
-    # 4. apply default compute partition
+
+    # Apply default compute partition is above fails
     if compute_partition is None:
-        console_warning(
-            f"Can not detect compute/accelerator partition from amd-smi and rocm-smi."
-        )
+        console_warning(f"Can not detect compute/accelerator partition from amd-smi.")
         console_warning(f"Applying default compute partition: SPX")
         compute_partition = "SPX"
 

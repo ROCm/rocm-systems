@@ -519,6 +519,13 @@ MFMA instructions are classified by the type of input data they operate on, and
 
      - Instructions per :ref:`normalization unit <normalization-units>`
 
+   * - MFMA-F8 Instructions
+
+     - The total number of 8-bit floating point :ref:`MFMA <desc-mfma>`
+       instructions issued per :ref:`normalization unit <normalization-units>`. This is supported in AMD Instinct MI300 series and later only.
+
+     - Instructions per :ref:`normalization unit <normalization-units>`
+
    * - MFMA-F16 Instructions
 
      - The total number of 16-bit floating point :ref:`MFMA <desc-mfma>`

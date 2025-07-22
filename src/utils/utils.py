@@ -40,6 +40,7 @@ import time
 from collections import OrderedDict
 from itertools import product
 from pathlib import Path as path
+from typing import Optional
 
 import pandas as pd
 import yaml
@@ -61,21 +62,6 @@ spi_pipe_counter_regexs = [r"SPI_CS\d+_(.*)", r"SPI_CSQ_P\d+_(.*)"]
 
 def is_tcc_channel_counter(counter):
     return counter.startswith("TCC") and counter.endswith("]")
-
-
-def is_counter_existed_in_extra_input_yaml(data: dict, counter_name: str) -> bool:
-    """
-    Check if a counter with the given name exists in the rocprofiler-sdk counters.
-
-    Args:
-        data (dict): The loaded YAML dictionary.
-        counter_name (str): The name of the counter to check.
-
-    Returns:
-        bool: True if the counter exists, False otherwise.
-    """
-    counters = data.get("rocprofiler-sdk", {}).get("counters", [])
-    return any(counter.get("name") == counter_name for counter in counters)
 
 
 def add_counter_extra_config_input_yaml(
@@ -155,7 +141,7 @@ def add_counter_extra_config_input_yaml(
 
 def extract_counter_info_extra_config_input_yaml(
     data: dict, counter_name: str
-) -> dict | None:
+) -> Optional[dict]:
     """
     Extract the full counter dictionary from 'data' for the given counter_name.
 
@@ -164,68 +150,13 @@ def extract_counter_info_extra_config_input_yaml(
         counter_name (str): The counter to find.
 
     Returns:
-        dict | None: The full counter dict if found, else None.
+        Optional[dict]: The full counter dict if found, else None.
     """
     counters = data.get("rocprofiler-sdk", {}).get("counters", [])
     for counter in counters:
         if counter.get("name") == counter_name:
             return counter
     return None
-
-
-def add_counter_from_source_to_target_extra_config_input_yaml(
-    source_data: dict, target_data: dict, counter_name: str
-) -> dict:
-    """
-    Check if counter_name exists in source_data, and if yes, add it to target_data.
-
-    Args:
-        source_data (dict): Source YAML dictionary to extract from.
-        target_data (dict): Target YAML dictionary to add to.
-        counter_name (str): Name of the counter to copy.
-
-    Returns:
-        dict: Updated target_data dictionary.
-    """
-    counter = extract_counter_info_extra_config_input_yaml(source_data, counter_name)
-    if not counter:
-        raise ValueError(f"Counter '{counter_name}' not found in source data")
-
-    # Extract required info
-    name = counter.get("name")
-    description = counter.get("description", "")
-    properties = counter.get("properties", [])
-    definitions = counter.get("definitions", [])
-
-    if not definitions:
-        raise ValueError(f"Counter '{counter_name}' has no definitions")
-
-    architectures = definitions[0].get("architectures", [])
-    expression = definitions[0].get("expression", "")
-
-    return add_counter_extra_config_input_yaml(
-        target_data,
-        counter_name=name,
-        description=description,
-        expression=expression,
-        architectures=architectures,
-        properties=properties,
-    )
-
-
-def is_spi_pipe_counter(counter):
-    for pattern in spi_pipe_counter_regexs:
-        if re.match(pattern, counter):
-            return True
-    return False
-
-
-def get_base_spi_pipe_counter(counter):
-    for pattern in spi_pipe_counter_regexs:
-        match = re.match(pattern, counter)
-        if match:
-            return match.group(1)
-    return ""
 
 
 def using_v1():
@@ -826,57 +757,66 @@ def run_prof(
         if is_mode_live_attach:
             console_error("The live attach/detach only supports rocprofv3")
 
-    new_env = None
+    new_env = os.environ.copy()
 
-    path_counter_config_yaml = path(fname).with_suffix(".yaml")
-    if using_v3() and path_counter_config_yaml.exists():
+    if using_v3():
+        # Default counter definitions
+        if rocprof_cmd == "rocprofiler-sdk":
+            counter_defs_path = (
+                path(options["ROCP_TOOL_LIBRARIES"])
+                .resolve()
+                .parent.parent.parent.joinpath(
+                    "share", "rocprofiler-sdk", "counter_defs.yaml"
+                )
+            )
+        else:
+            counter_defs_path = (
+                path(shutil.which(rocprof_cmd))
+                .resolve()
+                .parent.parent.joinpath("share", "rocprofiler-sdk", "counter_defs.yaml")
+            )
+        # Custom counter definitions for MI 100
+        if mspec.gpu_model.lower() == "mi100":
+            counter_defs_path = (
+                config.rocprof_compute_home
+                / "rocprof_compute_soc"
+                / "profile_configs"
+                / "gfx908_counter_defs.yaml"
+            )
+        # Read counter definitions
+        with open(counter_defs_path, "r") as file:
+            counter_defs = yaml.safe_load(file)
         # Get extra counter definitions
-        with open(path_counter_config_yaml, "r") as file:
-            extra_counter_defs = yaml.safe_load(file)
-        if extra_counter_defs:
-            # Get default counter definitions path
-            if rocprof_cmd == "rocprofiler-sdk":
-                counter_defs_path = (
-                    path(options["ROCP_TOOL_LIBRARIES"])
-                    .resolve()
-                    .parent.parent.parent.joinpath(
-                        "share", "rocprofiler-sdk", "counter_defs.yaml"
-                    )
-                )
-            else:
-                counter_defs_path = (
-                    path(shutil.which(rocprof_cmd))
-                    .resolve()
-                    .parent.parent.joinpath(
-                        "share", "rocprofiler-sdk", "counter_defs.yaml"
-                    )
-                )
-            # Get default counter definitions
-            with open(counter_defs_path, "r") as file:
-                counter_defs = yaml.safe_load(file)
-            # Merge counter definitions
+        path_counter_config_yaml = path(fname).with_suffix(".yaml")
+        if path_counter_config_yaml.exists():
+            with open(path_counter_config_yaml, "r") as file:
+                extra_counter_defs = yaml.safe_load(file)
+            # Merge extra counter definitions
             counter_defs["rocprofiler-sdk"]["counters"].extend(
                 extra_counter_defs["rocprofiler-sdk"]["counters"]
             )
-            # Write merged counter definitions to a temporary file
-            tmp_dir = tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp")
-            tmpfile_path = path(tmp_dir) / "counter_defs.yaml"
-            with open(tmpfile_path, "w") as tmpfile:
-                yaml.dump(
-                    counter_defs, tmpfile, default_flow_style=False, sort_keys=False
-                )
-            # Set the environment variable to point to the temporary file
-            if not new_env:
-                new_env = os.environ.copy()
-            new_env["ROCPROFILER_METRICS_PATH"] = str(path(tmp_dir))
-            console_debug(
-                f"Adding env var for extra counters: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
-            )
+        # Write counter definitions to a temporary file
+        tmpfile_path = (
+            path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
+            / "counter_defs.yaml"
+        )
+        with open(tmpfile_path, "w") as tmpfile:
+            yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
+        # Set rocprofiler sdk counter definitions
+        new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
+        console_debug(
+            f"Adding env var for counter definitions: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+        )
 
-    # set required env var for mi300
-    if mspec.gpu_model.lower() not in ("mi50", "mi60", "mi210", "mi250", "mi250x"):
-        if not new_env:
-            new_env = os.environ.copy()
+    # set required env var for >= mi300
+    if mspec.gpu_model.lower() not in (
+        "mi50",
+        "mi60",
+        "mi100",
+        "mi210",
+        "mi250",
+        "mi250x",
+    ):
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
 
     is_timestamps = False
@@ -886,8 +826,6 @@ def run_prof(
 
     if rocprof_cmd == "rocprofiler-sdk":
         app_cmd = options.pop("APP_CMD")
-        if not new_env:
-            new_env = os.environ.copy()
         for key, value in options.items():
             new_env[key] = value
         console_debug("rocprof sdk env vars: {}".format(new_env))
@@ -898,14 +836,9 @@ def run_prof(
     else:
         console_debug("rocprof command: {}".format([rocprof_cmd] + options))
         # profile the app
-        if new_env:
-            success, output = capture_subprocess_output(
-                [rocprof_cmd] + options, new_env=new_env, profileMode=True
-            )
-        else:
-            success, output = capture_subprocess_output(
-                [rocprof_cmd] + options, profileMode=True
-            )
+        success, output = capture_subprocess_output(
+            [rocprof_cmd] + options, new_env=new_env, profileMode=True
+        )
 
     time_2 = time.time()
     console_debug(
@@ -914,8 +847,8 @@ def run_prof(
         )
     )
 
-    # Delete temporary files
-    if new_env and "ROCPROFILER_METRICS_PATH" in new_env:
+    # Delete counter definition temporary directory
+    if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
     if not success:
@@ -979,7 +912,7 @@ def run_prof(
             workload_dir + "/out/pmc_1/results_" + fbase + ".csv", index=False
         )
 
-    if new_env and not using_v3() and not using_v1():
+    if not using_v3() and not using_v1():
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         xcds = mi_gpu_specs.get_num_xcds(
@@ -1256,6 +1189,10 @@ def gen_sysinfo(
 def detect_roofline(mspec):
     from utils import specs
 
+    rocm_ver = int(mspec.rocm_version[:1])
+
+    target_binary = {"rocm_ver": rocm_ver, "distro": "override", "path": None}
+
     os_release = path("/etc/os-release").read_text()
     ubuntu_distro = specs.search(r'VERSION_ID="(.*?)"', os_release)
     rhel_distro = specs.search(r'PLATFORM_ID="(.*?)"', os_release)
@@ -1264,38 +1201,51 @@ def detect_roofline(mspec):
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
         if path(rooflineBinary).exists():
-            console_warning("roofline", "Detected user-supplied binary")
-            return {
-                "distro": "override",
-                "path": rooflineBinary,
-            }
+            msg = "Detected user-supplied binary --> ROOFLINE_BIN = %s\n" % rooflineBinary
+            console_warning("roofline", msg)
+            # distro stays marked as override and path value is substituted in
+            target_binary["path"] = rooflineBinary
+            return target_binary
         else:
-            msg = "user-supplied path to binary not accessible"
-            msg += "--> ROOFLINE_BIN = %s\n" % target_binary
+            msg = (
+                "user-supplied path to binary not accessible --> ROOFLINE_BIN = %s\n"
+                % rooflineBinary
+            )
             console_error("roofline", msg)
-    elif (
+
+    # Must be a valid RHEL machine
+    elif rocm_ver == 6 and (
         rhel_distro == "platform:el8"
+        or rhel_distro == "platform:al8"
         or rhel_distro == "platform:el9"
         or rhel_distro == "platform:el10"
-        or rhel_distro == "platform:al8"
     ):
-        # Must be a valid RHEL machine
+        # RHEL8 supported up to ROCm6
         distro = "platform:el8"
+    elif rocm_ver == 7 and (
+        rhel_distro == "platform:el9" or rhel_distro == "platform:el10"
+    ):
+        # ROCm7 supports RHEL9 and above
+        distro = "platform:el9"
+
+    # Must be a valid SLES machine
     elif (
         (type(sles_distro) == str and len(sles_distro) >= 3)
         and sles_distro[:2] == "15"  # confirm string and len
         and int(sles_distro[3]) >= 6  # SLES15 and SP >= 6
     ):
-        # Must be a valid SLES machine
         # Use SP6 binary for all forward compatible service pack versions
         distro = "15.6"
+
+    # Must be a valid Ubuntu machine
     elif ubuntu_distro == "22.04" or ubuntu_distro == "24.04":
-        # Must be a valid Ubuntu machine
         distro = "22.04"
+
     else:
         console_error("roofline", "Cannot find a valid binary for your operating system")
 
-    target_binary = {"distro": distro}
+    # distro gets assigned, to follow default roofline bin location and nomenclature
+    target_binary["distro"] = distro
     return target_binary
 
 
@@ -1305,6 +1255,7 @@ def mibench(args, mspec):
 
     distro_map = {
         "platform:el8": "rhel8",
+        "platform:el9": "rhel9",
         "15.6": "sles15sp6",
         "22.04": "ubuntu22_04",
     }
@@ -1323,7 +1274,13 @@ def mibench(args, mspec):
         ]
 
         for dir in potential_paths:
-            path_to_binary = dir + "-" + distro_map[target_binary["distro"]]
+            path_to_binary = (
+                dir
+                + "-"
+                + distro_map[target_binary["distro"]]
+                + "-rocm"
+                + str(target_binary["rocm_ver"])
+            )
             binary_paths.append(path_to_binary)
 
     # Distro is valid but cant find rocm ver
