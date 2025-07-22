@@ -34,7 +34,7 @@
     },
     {
       "name": "rocm-smi-lib",
-      "url": "ROCm/rocm-smi-lib",
+      "url": "ROCm/rocm_smi_lib",
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": true,
@@ -66,7 +66,7 @@
     },
     {
       "name": "rocr-runtime",
-      "url": "ROCm/rocr-runtime",
+      "url": "ROCm/ROCR-Runtime",
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": true,
