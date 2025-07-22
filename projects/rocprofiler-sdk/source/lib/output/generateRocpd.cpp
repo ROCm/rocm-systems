@@ -1272,27 +1272,17 @@ write_rocpd(
                                 // Following should not occur
                                 ROCP_INFO << "Unpaired free operation occurred";
                             }
-                            continue;
                         }
                         else
                         {
                             auto [agent_abs_index, size] = address_to_agent_and_size[_address];
                             _node_id                     = agent_abs_index;
-                            _allocation_size             = size;
+                            _allocation_size             = 0;
                         }
                     }
                     else
                     {
                         ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
-                    }
-
-                    // Add free memory operations to the endpoint map
-                    // for(const auto& itr : free_mem_info)
-                    {
-                        /*mem_alloc_endpoints[agent_abs_index].emplace(
-                            itr.start_timestamp, memory_information{size, itr.address, false});
-                        mem_alloc_endpoints[agent_abs_index].emplace(
-                            itr.end_timestamp, memory_information{size, itr.address, false});*/
                     }
 
                     auto evt_id = create_event(
