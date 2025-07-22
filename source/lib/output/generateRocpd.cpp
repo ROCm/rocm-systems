@@ -1251,15 +1251,6 @@ write_rocpd(
                         ROCP_CI_LOG(WARNING) << "unhandled memory allocation type " << _type;
                     }
 
-                    // Add free memory operations to the endpoint map
-                    // for(const auto& itr : free_mem_info)
-                    {
-                        /*mem_alloc_endpoints[agent_abs_index].emplace(
-                            itr.start_timestamp, memory_information{size, itr.address, false});
-                        mem_alloc_endpoints[agent_abs_index].emplace(
-                            itr.end_timestamp, memory_information{size, itr.address, false});*/
-                    }
-
                     auto evt_id = create_event(
                         conn,
                         {

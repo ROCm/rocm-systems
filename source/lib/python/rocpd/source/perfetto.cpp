@@ -719,8 +719,6 @@ write_perfetto(
         {
             for(const auto& itr : memory_allocation_gen.get(ditr))
             {
-                PERFETTO_LOG("LEVEL %s", itr.level.c_str());
-
                 if(itr.type == "ALLOC")
                 {
                     LOG_IF(FATAL, itr.agent_name.empty())
@@ -742,12 +740,21 @@ write_perfetto(
                                                true});
                     }
 
-                    address_to_agent_and_size.emplace(
-                        rocprofiler_address_t{.handle = itr.address},
-                        agent_and_size{itr.agent_abs_index, itr.size});
-
-                    queue_to_agent_and_size.emplace(rocprofiler_queue_id_t{.handle = itr.queue_id},
-                                                    agent_and_size{itr.agent_abs_index, itr.size});
+                    // Agent and allocation size are stored to pair with free memory operations
+                    if(itr.level == "REAL")
+                    {
+                        address_to_agent_and_size.emplace(
+                            rocprofiler_address_t{.handle = itr.address},
+                            agent_and_size{itr.agent_abs_index, itr.size});
+                    }
+                    // Scratch memory operations operations are indexed by queue id as agent
+                    // id is not available
+                    else if(itr.level == "SCRATCH")
+                    {
+                        queue_to_agent_and_size.emplace(
+                            rocprofiler_queue_id_t{.handle = itr.queue_id},
+                            agent_and_size{itr.agent_abs_index, itr.size});
+                    }
                 }
                 else if(itr.type == "FREE")
                 {
@@ -774,7 +781,7 @@ write_perfetto(
         {
             if(address_to_agent_and_size.count(itr.address) == 0)
             {
-                if(itr.queue.handle == 0)
+                if(itr.address.handle == 0)
                 {
                     // Freeing null pointers is expected behavior and is occurs in HSA functions
                     // like hipStreamDestroy
@@ -878,13 +885,6 @@ write_perfetto(
                               itr.first,
                               itr.second.alloc_size / bytes_multiplier);
                 tracing_session->FlushBlocking();
-
-                PERFETTO_LOG("TRACE_COUNTER alloc convert %s %llu %llu %llu %llu",
-                             sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                             (unsigned long long) (alloc_itr.first),
-                             (unsigned long long) (mem_alloc_tracks.at(alloc_itr.first).uuid),
-                             (unsigned long long) itr.first,
-                             (unsigned long long) itr.second.alloc_size);
             }
         }
 
@@ -985,13 +985,6 @@ write_perfetto(
                                   itr.first,
                                   itr.second / bytes_multiplier);
                     tracing_session->FlushBlocking();
-
-                    PERFETTO_LOG("TRACE_COUNTER convert %s %llu %llu %llu %llu",
-                                 sdk::perfetto_category<sdk::category::scratch_memory>::name,
-                                 (unsigned long long) (mitr.first),
-                                 (unsigned long long) (scratch_mem_tracks.at(mitr.first).uuid),
-                                 (unsigned long long) itr.first,
-                                 (unsigned long long) itr.second);
                 }
             }
         }
