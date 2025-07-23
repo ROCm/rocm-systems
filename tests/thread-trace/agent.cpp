@@ -29,17 +29,6 @@
 
 #include <set>
 
-#define C_API_BEGIN                                                                                \
-    try                                                                                            \
-    {
-#define C_API_END                                                                                  \
-    }                                                                                              \
-    catch(std::exception & e)                                                                      \
-    {                                                                                              \
-        std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << std::endl;   \
-    }                                                                                              \
-    catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
-
 namespace ATTTest
 {
 namespace Agent
@@ -135,9 +124,10 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 }
 
 int
-tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
+tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 {
-    (void) fini_func;
+    Callbacks::init();
+
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
 
@@ -147,7 +137,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr,
                                                        0,
                                                        Callbacks::tool_codeobj_tracing_callback,
-                                                       tool_data),
+                                                       nullptr),
         "code object tracing service configure");
 
     ROCPROFILER_CALL(
@@ -156,13 +146,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr,
                                                        0,
                                                        dispatch_tracing_callback,
-                                                       tool_data),
+                                                       nullptr),
         "dispatch tracing service configure");
 
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         &query_available_agents,
                                                         sizeof(rocprofiler_agent_t),
-                                                        tool_data),
+                                                        nullptr),
                      "Failed to find GPU agents");
 
     int valid_ctx = 0;
@@ -175,13 +165,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     // no errors
     return 0;
-}
-
-void
-tool_fini(void* tool_data)
-{
-    Callbacks::finalize_json(tool_data);
-    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Agent
@@ -206,8 +189,8 @@ rocprofiler_configure(uint32_t /* version */,
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &ATTTest::Agent::tool_init,
-                                            &ATTTest::Agent::tool_fini,
-                                            new Callbacks::ToolData{"att_agent_test/"}};
+                                            &Callbacks::finalize,
+                                            nullptr};
 
     // return pointer to configure data
     return &cfg;

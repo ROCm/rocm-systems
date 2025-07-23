@@ -60,9 +60,9 @@ using SymbolInfo  = rocprofiler::sdk::codeobj::disassembly::SymbolInfo;
 
 struct ToolData
 {
-    ToolData(std::vector<char>&                        data,
-             WaveConfig&                               config,
-             rocprofiler_thread_trace_decoder_handle_t decoder);
+    ToolData(std::vector<char>&                    data,
+             WaveConfig&                           config,
+             rocprofiler_thread_trace_decoder_id_t decoder);
     ~ToolData();
 
     CodeLine& get(pcinfo_t pc);
@@ -73,7 +73,7 @@ struct ToolData
     std::vector<char> shader_data{};
     size_t            num_waves = 0;
 
-    rocprofiler_thread_trace_decoder_handle_t decoder{};
+    rocprofiler_thread_trace_decoder_id_t decoder{};
 };
 
 }  // namespace att_wrapper
