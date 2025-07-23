@@ -111,6 +111,7 @@ void RdciDiscoverySubSystem::show_help() const {
 void RdciDiscoverySubSystem::show_attributes() {
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
+
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
   if (result != RDC_ST_OK) {
     throw RdcException(result, "Fail to get device information");

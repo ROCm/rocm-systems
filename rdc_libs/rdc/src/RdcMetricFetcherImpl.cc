@@ -25,8 +25,8 @@ THE SOFTWARE.
 #include <string.h>
 #include <sys/time.h>
 
-#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <set>
 #include <sstream>
 #include <vector>
@@ -88,8 +88,8 @@ RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
-  struct timeval tv {};
-  gettimeofday(&tv, NULL);
+  struct timeval tv{};
+  gettimeofday(&tv, nullptr);
   return static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 }
 
@@ -299,7 +299,7 @@ void RdcMetricFetcherImpl::get_pcie_throughput(const RdcFieldKey& key) {
 
   uint64_t curTime = now();
   MetricValue value{};
-  value.cache_ttl = 30 * 1000;  // cache 30 seconds
+  value.cache_ttl = static_cast<long>(30) * 1000;  // cache 30 seconds
   value.value.type = INTEGER;
   do {
     std::lock_guard<std::mutex> guard(task_mutex_);
@@ -370,7 +370,7 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
   auto ite = bulk_fields.begin();
   for (; ite != bulk_fields.end(); ite++) {
     amdsmi_gpu_metrics_t gpu_metrics;
-    amdsmi_processor_handle processor_handle;
+    amdsmi_processor_handle processor_handle = nullptr;
     rs = get_processor_handle_from_id(ite->first, &processor_handle);
 
     rs = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
@@ -758,7 +758,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       constexpr uint32_t kUTILIZATION_COUNTERS(1);
       amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS];
       utilization_counters[0].type = AMDSMI_COARSE_DECODER_ACTIVITY;
-      uint64_t timestamp;
+      uint64_t timestamp = 0;
 
       value->status = amdsmi_get_utilization_count(processor_handle, utilization_counters,
                                                    kUTILIZATION_COUNTERS, &timestamp);
@@ -1115,6 +1115,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
       // TODO: All other fields => N/A for partition IN AMDSMI
       // RDC_LOG(RDC_DEBUG, "Partition " << gpu_index << ": Field " << field_id_string(field_id)
       //                                 << " not supported => NO_DATA.");
+      return RDC_ST_NOT_SUPPORTED;
       break;
   }
 }
@@ -1131,6 +1132,16 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
     RDC_LOG(RDC_ERROR, "Cannot get processor handle for CPU " << gpu_index);
     return Smi2RdcError(ret);
   }
+
+  processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_UNKNOWN;
+  ret = amdsmi_get_processor_type(processor_handle, &processor_type);
+
+  if (ret != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Cannot get processor type for CPU " << gpu_index);
+    return Smi2RdcError(ret);
+  }
+
+  RDC_LOG(RDC_DEBUG, "Processor type for CPU " << gpu_index << ": " << processor_type);
 
   switch (field_id) {
     case RDC_FI_CPU_MODEL: {
@@ -1642,8 +1653,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   // temporarily force cpu type
   // TODO: Remove once entities support CPUs
   if (field_id > RDC_FI_CPU_COUNT) {
+    RDC_LOG(RDC_ERROR, "Forcing device type to CPU for field "
+                           << field_id_string(field_id) << " current type is " << info.device_type);
     info.device_type = RDC_DEVICE_TYPE_CPU;
-    RDC_LOG(RDC_ERROR, "Forcing device type to CPU for field " << field_id_string(field_id));
   }
 
   if ((field_id > RDC_FI_CPU_COUNT) && (info.device_type != RDC_DEVICE_TYPE_CPU)) {
@@ -1769,7 +1781,7 @@ rdc_status_t RdcMetricFetcherImpl::delete_smi_handle(RdcFieldKey fk) {
     case RDC_EVNT_XGMI_3_THRPUT:
     case RDC_EVNT_XGMI_4_THRPUT:
     case RDC_EVNT_XGMI_5_THRPUT: {
-      amdsmi_event_handle_t h;
+      amdsmi_event_handle_t h = 0L;
       if (smi_data_.find(fk) == smi_data_.end()) {
         return RDC_ST_NOT_SUPPORTED;
       }
@@ -1802,8 +1814,8 @@ rdc_status_t RdcMetricFetcherImpl::acquire_smi_handle(RdcFieldKey fk) {
   rdc_status_t ret = RDC_ST_OK;
 
   auto get_evnt_handle = [&](amdsmi_event_group_t grp) {
-    amdsmi_event_handle_t handle;
-    rdc_status_t result;
+    amdsmi_event_handle_t handle = 0L;
+    rdc_status_t result = RDC_ST_UNKNOWN_ERROR;
 
     if (get_smi_data(fk) != nullptr) {
       // This event has already been initialized.
@@ -1815,7 +1827,7 @@ rdc_status_t RdcMetricFetcherImpl::acquire_smi_handle(RdcFieldKey fk) {
       RDC_LOG(RDC_ERROR, "Failed to init SMI counter. Return:" << result);
       return result;
     }
-    auto fsh = std::shared_ptr<FieldSMIData>(new FieldSMIData);
+    auto fsh = std::make_shared<FieldSMIData>();
 
     if (fsh == nullptr) {
       return RDC_ST_INSUFF_RESOURCES;
