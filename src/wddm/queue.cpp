@@ -406,7 +406,6 @@ void ComputeQueue::InitScratchSRD() {
 
   // Populate flat scratch parameters in amd_queue_.
   amd_queue_->scratch_backing_memory_location = scratch_base;
-  amd_queue_->scratch_backing_memory_byte_size = scratch_size_;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
