@@ -409,9 +409,10 @@ of the application (note zero-based indexing).
 Standalone roofline
 ===================
 
-If you are only interested in generating roofline analysis data try using
-``--roof-only``. This will only collect counters relevant to roofline, as well
-as generate a standalone ``.pdf`` output of your roofline plot.
+Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
+You don't need to include any additional roofline-specific options for roofline analysis.
+If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
+This option limits the profiling to just the roofline performance counters.
 
 Roofline options
 ----------------
