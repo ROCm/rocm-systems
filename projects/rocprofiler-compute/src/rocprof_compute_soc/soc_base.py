@@ -50,7 +50,7 @@ from utils.parser import build_in_vars, supported_denom
 from utils.utils import (
     add_counter_extra_config_input_yaml,
     capture_subprocess_output,
-    convert_metric_id_to_panel_idx,
+    convert_metric_id_to_panel_info,
     detect_rocprof,
     get_submodules,
     is_tcc_channel_counter,
@@ -261,66 +261,73 @@ class OmniSoC_Base:
         Create a set of counters required for the selected report sections.
         Parse analysis report configuration files based on the selected report sections to be filtered.
         """
-        counters = set()
-        config_filenames = {
-            filename: []
-            for filename in os.listdir(
-                Path(self.get_args().config_dir).joinpath(self.__arch)
-            )
-            if filename.endswith(".yaml")
+        # Read the analysis config files and filter
+        config_root_dir = f"{self.get_args().config_dir}/{self.__arch}"
+        # File id dict
+        config_filename_dict = {
+            Path(filename).name.split("_")[0]: filename
+            for filename in glob.glob(f"{config_root_dir}/*.yaml")
         }
-        file_ids = []
-        for section in self.get_args().filter_blocks:
-            section_num = convert_metric_id_to_panel_idx(section)
-            file_id = str(section_num // 100)
-            # Convert "4" to "04"
-            if len(file_id) == 1:
-                file_id = f"0{file_id}"
-            file_ids.append(file_id)
-            # Apply sub section filtering
-            for config_filename in config_filenames:
-                # If first two characters of the config filename match the file_id
-                if config_filename[:2].startswith(file_id) and section_num % 100:
-                    config_filenames[config_filename].append(section_num)
+        texts = list()
 
-        # Apply section filters only if metric ids have been provided for filtering
-        if self.get_args().filter_blocks:
-            # Identify yaml files corresponding to file_ids
-            config_filenames = {
-                filename: subsections
-                for filename, subsections in config_filenames.items()
-                if filename[:2].startswith(tuple(file_ids))
-            }
+        if not self.get_args().filter_blocks:
+            # Read all config files if no filter_blocks are specified
+            for filename in config_filename_dict.values():
+                with open(filename, "r") as stream:
+                    texts.append(stream.read())
 
-        for config_filename, subsections in config_filenames.items():
-            # Read the yaml file
-            with open(
-                Path(self.get_args().config_dir).joinpath(self.__arch, config_filename),
-                "r",
-            ) as stream:
-                section_config = yaml.safe_load(stream)
-            # Extract subsection if section is of the form 4.52
-            if subsections:
-                section_config_text = "\n".join(
-                    [
-                        # Convert yaml to string
-                        yaml.dump(subsection, sort_keys=False)
-                        for subsection in section_config["Panel Config"]["data source"]
-                        if subsection["metric_table"]["id"] in subsections
-                    ]
+        for block_id in self.get_args().filter_blocks:
+            file_id, panel_id, metric_id = convert_metric_id_to_panel_info(block_id)
+
+            # File id filtering
+            if file_id not in config_filename_dict:
+                console_warning(
+                    f"Skipping {block_id}: file id {file_id} not found in {config_root_dir}"
                 )
-            else:
-                # Convert yaml to string
-                section_config_text = yaml.dump(section_config, sort_keys=False)
-            counters = counters.union(self.parse_counters(section_config_text))
+                continue
+            with open(config_filename_dict[file_id], "r") as stream:
+                file_config = yaml.safe_load(stream)
+            if panel_id is None:
+                # If no panel id level filtering, then read the whole file
+                texts.append(yaml.dump(file_config, sort_keys=False))
+                continue
+
+            # Panel id filtering
+            panel_dict = {
+                section["metric_table"]["id"]: section["metric_table"]
+                for section in file_config["Panel Config"]["data source"]
+                if "metric_table" in section
+            }
+            if panel_id not in panel_dict:
+                console_warning(
+                    f"Skipping {block_id}: metric table {panel_id} not found in {config_filename_dict[file_id]}"
+                )
+                continue
+            if metric_id is None:
+                # If no metric id level filtering, then read the whole panel
+                texts.append(yaml.dump(panel_dict[panel_id], sort_keys=False))
+
+            # Metric id filtering
+            metric_dict = {
+                id: panel_dict[panel_id]["metric"][metric]
+                for id, metric in enumerate(panel_dict[panel_id]["metric"].keys())
+            }
+            if metric_id not in metric_dict:
+                console_warning(
+                    f"Skipping {block_id}: metric id {metric_id} not found in panel id {panel_id}"
+                )
+                continue
+            texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
+
+        counters = self.parse_counters("\n".join(texts))
 
         # Handle TCC channel counters: if hw_counter_matches has elements ending with '['
         # Expand and interleve the TCC channel counters
         # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
-        num_xcd_for_pmc_file = 1
         if using_v3():
             num_xcd_for_pmc_file = int(self._mspec.num_xcd)
-
+        else:
+            num_xcd_for_pmc_file = 1
         for counter_name in counters.copy():
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
@@ -562,7 +569,7 @@ class OmniSoC_Base:
 
         # Sanity check whether counters are supported by underlying rocprof tool
         rocprof_counters = self.get_rocprof_supported_counters()
-        # rocprof does not support TCC channel counters, so remove channel suffix for comparison
+        # rocprof does not support TCC channel counters in the avail output, so remove channel suffix for comparison
         not_supported_counters = {
             counter.split("[")[0] if is_tcc_channel_counter(counter) else counter
             for counter in counters
@@ -606,8 +613,6 @@ class OmniSoC_Base:
         file_count = 0
         # Store all channels for a TCC channel counter in the same file
         tcc_channel_counter_file_map = dict()
-        # Store all pipes for SPI pipe counters in the same file
-        spi_pipe_counter_file_map = dict()
         for ctr in counters:
             # Store all channels for a TCC channel counter in the same file
             if is_tcc_channel_counter(ctr):
