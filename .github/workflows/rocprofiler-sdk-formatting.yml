@@ -121,6 +121,7 @@ jobs:
 
     - name: black format
       run: |
+        pwd
         cd projects/rocprofiler-sdk
         black .
         if [ $(git diff | wc -l) -ne 0 ]; then
