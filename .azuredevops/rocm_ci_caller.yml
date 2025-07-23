@@ -3,7 +3,6 @@ pr:
   branches:
     include:
       - develop
-      - release-staging/rocm-rel-*
   paths:  
     include:  
       - projects/*
