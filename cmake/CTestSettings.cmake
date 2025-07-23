@@ -190,16 +190,14 @@ find_file(
     NO_DEFAULT_PATH
 )
 if(NOT ROCPROFSYS_USER_LIBRARY_PATH)
-    message(FATAL_ERROR "Could not find librocprof-sys-user.so in /opt/rocm/lib.")
+    rocprofiler_systems_message(FATAL_ERROR "Could not find librocprof-sys-user.so in /opt/rocm/lib.")
 else()
-    message(STATUS "Found pre-installed user library: ${ROCPROFSYS_USER_LIBRARY_PATH}")
-    # Create an IMPORTED target that represents the pre-built library
+    rocprofiler_systems_message(STATUS "Found pre-installed user library: ${ROCPROFSYS_USER_LIBRARY_PATH}")
     add_library(rocprofiler-systems-user-library SHARED IMPORTED)
     set_target_properties(
         rocprofiler-systems-user-library
         PROPERTIES IMPORTED_LOCATION "${ROCPROFSYS_USER_LIBRARY_PATH}"
     )
-    # Namespace alias required
     if(NOT TARGET rocprofiler-systems::rocprofiler-systems-user-library)
         add_library(
             rocprofiler-systems::rocprofiler-systems-user-library
@@ -207,21 +205,19 @@ else()
         )
     endif()
 
-    # Define the name the test executable is looking for
+    # A CTest requires specific library name
     set(EXPECTED_LIBRARY_NAME "librocprofiler-systems-user-library.so")
     set(SYMLINK_DIR "${PROJECT_BINARY_DIR}/lib")
     set(SYMLINK_PATH "${SYMLINK_DIR}/${EXPECTED_LIBRARY_NAME}")
 
-    # Ensure the directory exists
     file(MAKE_DIRECTORY ${SYMLINK_DIR})
-    # Create the symbolic link, overwriting if it already exists
     execute_process(
         COMMAND
             ${CMAKE_COMMAND} -E create_symlink ${ROCPROFSYS_USER_LIBRARY_PATH}
             ${SYMLINK_PATH}
     )
-    message(
+    rocprofiler_systems_message(
         STATUS
-        "Created symlink for tests: ${SYMLINK_PATH} -> ${ROCPROFSYS_USER_LIBRARY_PATH}"
+        "Created library symlink: ${SYMLINK_PATH} -> ${ROCPROFSYS_USER_LIBRARY_PATH}"
     )
 endif()
