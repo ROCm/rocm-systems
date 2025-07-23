@@ -17,7 +17,7 @@ concurrency:
 
 jobs:
   cmake:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-latest
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -50,7 +50,7 @@ jobs:
         fi
 
   source:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-latest
     container: rocm/dev-ubuntu-22.04:latest
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -86,7 +86,7 @@ jobs:
         fi
 
   python:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ['3.10']
@@ -125,7 +125,7 @@ jobs:
         fi
 
   missing-new-line:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
