@@ -12,9 +12,6 @@ include_guard(GLOBAL)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_MPI "Enable MPI support" OFF)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_ROCM "Enable ROCm support" ON)
 rocprofiler_systems_add_option(ROCPROFSYS_USE_PYTHON "Enable Python support" ON)
-rocprofiler_systems_add_option(ROCPROFSYS_BUILD_TESTING
-                                   "Enable building the testing suite" ON ADVANCED
-)
 rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PYTHON
                                    "Build python bindings with internal pybind11" OFF
 )
