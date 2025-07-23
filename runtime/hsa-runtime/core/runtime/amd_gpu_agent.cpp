@@ -2563,10 +2563,6 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   for (uint32_t i = 0; i < size; i++) {
-    if ((isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) &&
-        sampleInfoList[i].method == HSA_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1) {
-      continue;
-    }
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
     if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) == HSA_STATUS_SUCCESS
         && cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
@@ -2613,10 +2609,6 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
     pcs_data = &pcs_hosttrap_data_;
   } else if (sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
-    if (isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
     pcs_data = &pcs_stochastic_data_;
   } else {
     // Unsupported sampling method
