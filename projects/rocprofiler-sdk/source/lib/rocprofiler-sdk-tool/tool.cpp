@@ -1612,22 +1612,29 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
             "[PPID={}][PID={}] failed to post to semaphore in {}", ppid, pid, this_func);
     }
 
-    int _sem_val = 0;
-    do
+    for(size_t i = 0; i < _peer.size(); ++i)
     {
-        if(sem_getvalue(_sem, &_sem_val) == -1)
+        ROCP_TRACE << fmt::format(
+            "{} waiting on semaphore for peer {}/{} in group: {}",
+            this_func,
+            i + 1,
+            _peer.size(),
+            _sem_pid_group);
+        if(sem_wait(_sem) == -1)
         {
             ROCP_WARNING << fmt::format(
-                "[PPID={}][PID={}] failed to get semaphore value in {}", ppid, pid, this_func);
+                "[PPID={}][PID={}] failed to wait on semaphore in {}", ppid, pid, this_func);
         }
-        ROCP_TRACE << fmt::format(
-            "{} shows current sem_pid_group name: {} semaphore value: {}, peer size(): {}",
-            this_func,
-            _sem_pid_group,
-            _sem_val,
-            _peer.size());
-        std::this_thread::sleep_for(std::chrono::milliseconds{100});
-    } while(static_cast<unsigned long>(_sem_val) < _peer.size());
+        else
+        {
+            ROCP_TRACE << fmt::format(
+                "{} successfully waited on semaphore for peer {}/{} in group: {}",
+                this_func,
+                i + 1,
+                _peer.size(),
+                _sem_pid_group);
+        }
+    }
 
     // Clean up semaphore
     if(sem_close(_sem) == -1)
