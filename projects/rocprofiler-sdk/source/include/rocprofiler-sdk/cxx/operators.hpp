@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -148,6 +149,7 @@ ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_record_dimension_inf
 ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_record_dimension_instance_info_t&)
 ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_dimension_info_t&)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_thread_trace_decoder_id_t)
 
 // definitions of operator==
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -164,6 +166,7 @@ ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 inline bool
 operator==(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
@@ -241,6 +244,7 @@ ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_dim3_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_amd_memory_pool_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 // definitions of operator<
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -257,6 +261,7 @@ ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 inline bool
 operator<(const rocprofiler_counter_record_dimension_info_t& lhs,
@@ -334,6 +339,7 @@ ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_dim3_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_amd_memory_pool_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_thread_trace_decoder_id_t)
 
 // cleanup defines
 #undef ROCPROFILER_CXX_DECLARE_OPERATORS
