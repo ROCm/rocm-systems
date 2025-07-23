@@ -25,6 +25,15 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 
+void
+init_logging()
+{
+    rocprofiler::common::init_logging("ROCPROFILER");
+}
+
+// ensure that logging is always initialized when library is loaded
+bool init_logging_at_load = (init_logging(), true);
+
 extern "C" {
 int
 rocprofiler_queue_set_api_table(
@@ -53,19 +62,91 @@ rocprofiler_queue_set_api_table(
 
     return 0;
 }
-}
 
-void
-init_logging()
+int
+rocprofiler_queue_export_all_registrations(
+    void* queue_registrations,
+    uint64_t* num_queue_registrations)
 {
-    rocprofiler::common::init_logging("ROCPROFILER");
+    if (!queue_registrations && num_queue_registrations)
+    {
+        *num_queue_registrations = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations().size();
+        return 0;
+    }
+
+    CHECK_NOTNULL(queue_registrations);
+    CHECK_NOTNULL(num_queue_registrations);
+    auto qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations();
+    auto qrs_out = reinterpret_cast<rocprofiler::hsa::queue_registration_export_t*>(queue_registrations);
+    if (*num_queue_registrations < qrs.size())
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    for (const auto& qr : qrs)
+    {
+        qrs_out->agent = qr.second.agent;
+        qrs_out->queue = qr.second.queue;
+        ++qrs_out;
+    }
+
+    return 0;
 }
 
-// ensure that logging is always initialized when library is loaded
-bool init_logging_at_load = (init_logging(), true);
+int rocprofiler_queue_set_write_interceptor(
+    hsa_queue_t* queue,
+    rocprofiler::hsa::write_interceptor_t func,
+    void* data
+)
+{
+    auto& qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations();
+    auto qr_pair = qrs.find(queue);
+    if (qr_pair == qrs.end())
+    {
+        ROCP_ERROR << "couldn't find registration to set write interceptor for queue " << queue;
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    qr_pair->second.user_write_interceptor_func = func;
+    qr_pair->second.user_write_interceptor_data = data;
+    return 0;
+}
+
+int rocprofiler_queue_get_version()
+{
+    constexpr int ROCPROFILER_QUEUE_VERSION = 1;
+    return ROCPROFILER_QUEUE_VERSION;
+}
+}
 
 namespace rocprofiler {
 namespace hsa {
+
+void write_interceptor
+    (const void* packets,
+    uint64_t     pkt_count,
+    uint64_t     unused,
+    void*        data,
+    hsa_amd_queue_intercept_packet_writer_t writer)
+{
+    ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
+    auto queue = static_cast<hsa_queue_t*>(data);
+
+    auto& queue_map = CHECK_NOTNULL(get_queue_registration_controller())->get_all_registrations();
+    auto queue_registration_pair = queue_map.find(queue);
+    ROCP_FATAL_IF(queue_registration_pair == queue_map.end()) << "WriteInterceptor was not passed a valid queue";
+    auto& queue_registration = queue_registration_pair->second;
+
+    if (queue_registration.user_write_interceptor_func)
+    {
+        queue_registration.user_write_interceptor_func(
+            packets,
+            pkt_count,
+            unused,
+            queue_registration.user_write_interceptor_data,
+            writer);
+    } else {
+        writer(packets, pkt_count);
+    }
+}
 
 // HSA Intercept Functions (create_queue/destroy_queue)
 hsa_status_t
@@ -80,7 +161,7 @@ create_queue(hsa_agent_t        agent,
 {
     auto* controller = CHECK_NOTNULL(get_queue_registration_controller());
 
-    auto new_queue_registration = std::make_shared<QueueRegistration>(
+    auto new_queue_registration = create_queue_registration(
         agent,
         size,
         type,
@@ -90,9 +171,10 @@ create_queue(hsa_agent_t        agent,
         group_segment_size,
         controller->get_core_table(),
         controller->get_ext_table(),
-        queue);
+        write_interceptor);
 
-    controller->add_queue(*queue, new_queue_registration);
+    *queue = new_queue_registration.queue;
+    controller->add_queue(new_queue_registration);
     ROCP_INFO << "created queue registration for HSA agent handle " << agent.handle;
     return HSA_STATUS_SUCCESS;
 }
@@ -111,27 +193,22 @@ destroy_queue(hsa_queue_t* hsa_queue)
 // HSA has been inited.
 void QueueRegistrationController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 {
-    _core_table = core_table;
-    _ext_table = ext_table;
+    m_core_table = core_table;
+    m_ext_table = ext_table;
 
     core_table.hsa_queue_create_fn  = hsa::create_queue;
     core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
 }
 
 // Called to add a queue that was created by the user program
-void QueueRegistrationController::add_queue(hsa_queue_t* id, std::shared_ptr<QueueRegistration> queue_registration)
+void QueueRegistrationController::add_queue(queue_registration_t queue_registration)
 {
-    _queues[id] = queue_registration;
+    m_queues[queue_registration.queue] = queue_registration;
 }
 
 void QueueRegistrationController::destroy_queue(hsa_queue_t* id)
 {
-    _queues.erase(id);
-}
-
-const std::unordered_map<hsa_queue_t*, std::shared_ptr<QueueRegistration>> QueueRegistrationController::get_all_registrations()
-{
-    return _queues;
+    m_queues.erase(id);
 }
 
 QueueRegistrationController*

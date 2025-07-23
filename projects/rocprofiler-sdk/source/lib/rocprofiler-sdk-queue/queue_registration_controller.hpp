@@ -36,10 +36,31 @@ rocprofiler_queue_set_api_table(
     uint64_t    lib_instance,
     void**      tables,
     uint64_t    num_tables) ROCPROFILER_PUBLIC_API;
+
+
+int
+rocprofiler_queue_export_all_registrations(
+    void* queue_registrations,
+    uint64_t* num_queue_registrations) ROCPROFILER_PUBLIC_API;
+
+int
+rocprofiler_queue_set_write_interceptor(
+    hsa_queue_t* queue,
+    rocprofiler::hsa::write_interceptor_t func,
+    void* data) ROCPROFILER_PUBLIC_API;
+
+int rocprofiler_queue_get_version() ROCPROFILER_PUBLIC_API;
 }
 
 namespace rocprofiler {
 namespace hsa{
+
+using queue_registration_map_t = std::unordered_map<hsa_queue_t*, queue_registration_t>;
+
+struct queue_registration_export_t {
+    hsa_agent_t agent;
+    hsa_queue_t* queue;
+};
 
 // Tracks and manages HSA queues to be profiled later when rocprof is loaded
 class QueueRegistrationController
@@ -52,22 +73,22 @@ public:
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
 
     // Called to add a queue that was created by the user program
-    void add_queue(hsa_queue_t*, std::shared_ptr<QueueRegistration>);
+    void add_queue(queue_registration_t);
     void destroy_queue(hsa_queue_t*);
 
-    const std::unordered_map<hsa_queue_t*, std::shared_ptr<QueueRegistration>> get_all_registrations() ROCPROFILER_PUBLIC_API;
+    queue_registration_map_t& get_all_registrations() { return m_queues; };
+    const CoreApiTable& get_core_table() const { return m_core_table; }
+    const AmdExtTable&  get_ext_table() const { return m_ext_table; }
 
-    const CoreApiTable& get_core_table() const { return _core_table; }
-    const AmdExtTable&  get_ext_table() const { return _ext_table; }
-
+    queue_registration_export_t& export_all_registrations();
 private:
-    CoreApiTable _core_table = {};
-    AmdExtTable  _ext_table  = {};
-    std::unordered_map<hsa_queue_t*, std::shared_ptr<QueueRegistration>> _queues;
+    CoreApiTable m_core_table = {};
+    AmdExtTable  m_ext_table  = {};
+    queue_registration_map_t m_queues;
 };
 
 QueueRegistrationController*
-get_queue_registration_controller() ROCPROFILER_PUBLIC_API;
+get_queue_registration_controller();
 
 void
 queue_registration_controller_init(HsaApiTable* table);
