@@ -1,5 +1,5 @@
 
-name: Formatting
+name: RocProfiler-SDK Formatting
 
 on:
   workflow_dispatch:
@@ -24,6 +24,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -58,6 +60,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Install dependencies
       run: |
@@ -96,6 +100,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -130,6 +136,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Find missing new line
       shell: bash
