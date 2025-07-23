@@ -131,3 +131,6 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
 
 > [!WARNING]
 > The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.
+
+
+Force a commit
