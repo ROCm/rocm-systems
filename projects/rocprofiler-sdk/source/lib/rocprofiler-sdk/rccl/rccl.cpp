@@ -97,7 +97,10 @@ convert_arg_type(Tp&& val)
     {
         if constexpr(std::is_same<data_type, const char*>::value)
         {
-            return common::get_string_entry(val)->c_str();
+            if(val)
+                return common::get_string_entry(val)->c_str();
+            else
+                return std::remove_reference_t<Tp>(val);
         }
         else
         {
