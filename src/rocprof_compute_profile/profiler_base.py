@@ -399,6 +399,15 @@ class RocProfCompute_Base:
             console_log("profiling", "Current input file: %s" % fname)
 
             options = self.get_profiler_options(fname, self._soc)
+
+            # Only 1-run case is permitted for attach/detach
+            if "--pid" in options and total_runs > 1:
+                console_error(
+                    "Attach/Detach can only work with 1 run of application. Current configuration needs {} times of replay of application".format(
+                        total_runs
+                    )
+                )
+
             if (
                 self.__profiler == "rocprofv1"
                 or self.__profiler == "rocprofv2"
@@ -426,9 +435,6 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
-            # TODO: change way of handling muliple input files
-            if "--pid" in options:
-                break
 
         # PC sampling data is only collected when block "21" is specified
         if "21" in self.get_args().filter_blocks and self.__profiler in (
