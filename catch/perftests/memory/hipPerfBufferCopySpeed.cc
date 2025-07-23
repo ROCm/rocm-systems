@@ -59,6 +59,7 @@ static void checkData(void *ptr, unsigned int size, char value) {
 }
 
 static bool hipPerfBufferCopySpeed_test(int p_tests) {
+
   unsigned int bufSize_;
   unsigned int numIter;
   bool hostMalloc[2] = {false};
@@ -77,6 +78,8 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     unsigned int srcTest = (test / NUM_SIZES) % BUF_TYPES;
     unsigned int dstTest = (test / (NUM_SIZES*BUF_TYPES)) % BUF_TYPES;
     bufSize_ = Sizes[test % NUM_SIZES];
+    int numDevices = 0;
+    HIP_CHECK(hipGetDeviceCount(&numDevices));
     hostMalloc[0] = hostMalloc[1] = false;
     hostRegister[0] = hostRegister[1] = false;
     unpinnedMalloc[0] = unpinnedMalloc[1] = false;
@@ -105,6 +108,56 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       deviceMallocUncached[1] = true;
     }
 
+    // Peer-to-peer (inter-device) copy subtest
+    if (srcTest == 0 && dstTest == 0 && numDevices >= 2) {
+        // Allocate src on device 0
+        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
+        setData(srcBuffer, bufSize_, 0xd0);
+    
+        // Allocate dst on device 1
+        HIP_CHECK(hipSetDevice(1));
+        HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
+    
+        // Enable peer access
+        HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
+        HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
+    
+        // Warm up
+        HIP_CHECK(hipMemcpyPeer(dstBuffer, 1, srcBuffer, 0, bufSize_));
+    
+        // Timing
+        auto all_start = std::chrono::steady_clock::now();
+        for (unsigned int i = 0; i < numIter; i++) {
+            HIP_CHECK(hipMemcpyPeerAsync(dstBuffer, 1, srcBuffer, 0, bufSize_, 0));
+        }
+        HIP_CHECK(hipSetDevice(1));
+        HIP_CHECK(hipDeviceSynchronize());
+        auto all_end = std::chrono::steady_clock::now();
+      
+        std::chrono::duration<double> elapsed_secs = all_end - all_start;
+        double perf = (static_cast<double>(bufSize_ * numIter) *
+                       static_cast<double>(1e-09)) / elapsed_secs.count();
+      
+        INFO("HIPPerfBufferCopySpeed[P2P]\t( " << bufSize_ <<
+             ")\ts:dev0 d:dev1\ti:" << numIter <<
+             "\t(GB/s) perf\t" << (float)perf);
+        
+        // Verification
+        void* temp = malloc(bufSize_ + 4096);
+        HIP_CHECK(hipMemcpy(temp, dstBuffer, bufSize_, hipMemcpyDeviceToHost));
+        checkData(temp, bufSize_, 0xd0);
+        free(temp);
+        
+        // Free
+        HIP_CHECK(hipSetDevice(0));
+        HIP_CHECK(hipFree(srcBuffer));
+        HIP_CHECK(hipSetDevice(1));
+        HIP_CHECK(hipFree(dstBuffer));
+        HIP_CHECK(hipSetDevice(0)); // restore
+        
+        continue; // Skip the rest of the loop for this case
+    }
 
     numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
