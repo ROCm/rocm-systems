@@ -188,9 +188,8 @@ Examples:
     )
 
     def validate_block(value):
-        # Metric id regex, for example, 10, 4, 4.3, 4.32
-        # Dont allow more than two digits after decimal point
-        metric_id_pattern = re.compile(r"^\d+$|^\d+\.\d$|^\d+\.\d\d$")
+        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
+        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
         if metric_id_pattern.match(value):
             return value
         raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
@@ -204,7 +203,7 @@ Examples:
         nargs="+",
         required=False,
         default=[],
-        help="""\t\t\tSpecify metric id(s) from --list-metrics for filtering (e.g. 10, 4, 4.3).\n\t\t\tCan provide multiple space separated arguments.""",
+        help="""\t\t\tSpecify metric id(s) from --list-metrics for filtering (e.g. 12, 12.1, 12.1.1).\n\t\t\tCan provide multiple space separated arguments.""",
     )
     profile_group.add_argument(
         "--list-metrics",
