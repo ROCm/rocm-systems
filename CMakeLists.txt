@@ -221,7 +221,6 @@ add_test(
         --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_property(TEST test_profile_ipblocks PROPERTY COST 5)
 
 add_test(
     NAME test_profile_mem
@@ -257,7 +256,6 @@ add_test(
 
 set_tests_properties(
     test_profile_kernel_execution
-    test_profile_ipblocks
     test_profile_dispatch
     test_profile_mem
     test_profile_join

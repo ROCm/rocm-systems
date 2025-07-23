@@ -52,7 +52,7 @@ def multi_bar_chart(table_id, display_df):
         nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
         for index, row in display_df.iterrows():
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
-    if table_id == 1704:
+    if table_id == 1705:  # L2 - Fabric Interface Stalls
         nested_bar = {"Read": {}, "Write": {}}
         for index, row in display_df.iterrows():
             nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
@@ -197,9 +197,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [
-            x.astype(float) if x != "" else float(0) for x in display_df["Avg"]
-        ]
+        display_df["Avg"] = [float(x) if x != "" else float(0) for x in display_df["Avg"]]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(

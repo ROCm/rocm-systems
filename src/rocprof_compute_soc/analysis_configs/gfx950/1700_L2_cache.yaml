@@ -40,6 +40,10 @@ Panel Config:
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
+          HBM Bandwidth:
+            value: $hbmBandwidth
+            unit: GB/s
+            tips:
 
     - metric_table:
         id: 1702
