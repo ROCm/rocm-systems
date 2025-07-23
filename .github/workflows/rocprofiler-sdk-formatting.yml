@@ -121,6 +121,7 @@ jobs:
 
     - name: black format
       run: |
+        cd projects/rocprofiler-sdk
         black .
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Python code not formatted. Run black...\n"
