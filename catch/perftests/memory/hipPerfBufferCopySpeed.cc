@@ -27,11 +27,12 @@ THE SOFTWARE.
 */
 #include <hip/hip_ext.h>
 #include <hip_test_common.hh>
+#include <cstdlib>
 
 #define NUM_SIZES 9
 //  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
 static const unsigned int Sizes[NUM_SIZES] =
-  {4096, 8192, 65536, 262144, 524288, 1048576, 4194304, 16777216, 16777216+10};
+  {4096, 8192, 65536, 1048576, 4194304, 16777216, 16777216+10, 134217728, 536870912};
 
 static const unsigned int Iterations[2] = {1, 1000};
 
@@ -116,13 +117,17 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       setData(srcBuffer, bufSize_, 0xd0);
     } else if (hostRegister[0]) {
       memptr[0] = malloc(bufSize_ + 4096);
-      alignedmemptr[0] = reinterpret_cast<void*>(memptr[0]);
+      uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[0]);
+      uintptr_t aligned = (raw + 4095) & ~static_cast<uintptr_t>(4095);
+      alignedmemptr[0] = reinterpret_cast<void*>(aligned);
       srcBuffer = alignedmemptr[0];
       setData(srcBuffer, bufSize_, 0xd0);
       HIP_CHECK(hipHostRegister(srcBuffer, bufSize_, 0));
     } else if (unpinnedMalloc[0]) {
       memptr[0] = malloc(bufSize_ + 4096);
-      alignedmemptr[0] = reinterpret_cast<void*>(memptr[0]);
+      uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[0]);
+      uintptr_t aligned = (raw + 4095) & ~static_cast<uintptr_t>(4095);
+      alignedmemptr[0] = reinterpret_cast<void*>(aligned);
       srcBuffer = alignedmemptr[0];
       setData(srcBuffer, bufSize_, 0xd0);
     } else {
@@ -137,12 +142,16 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
                                                        bufSize_, 0));
     } else if (hostRegister[1]) {
       memptr[1] = malloc(bufSize_ + 4096);
-      alignedmemptr[1] = reinterpret_cast<void*>(memptr[1]);
+      uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[1]);
+      uintptr_t aligned = (raw + 4095) & ~static_cast<uintptr_t>(4095);
+      alignedmemptr[1] = reinterpret_cast<void*>(aligned);
       dstBuffer = alignedmemptr[1];
       HIP_CHECK(hipHostRegister(dstBuffer, bufSize_, 0));
     } else if (unpinnedMalloc[1]) {
       memptr[1] = malloc(bufSize_ + 4096);
-      alignedmemptr[1] = reinterpret_cast<void*>(memptr[1]);
+      uintptr_t raw = reinterpret_cast<uintptr_t>(memptr[1]);
+      uintptr_t aligned = (raw + 4095) & ~static_cast<uintptr_t>(4095);
+      alignedmemptr[1] = reinterpret_cast<void*>(aligned);
       dstBuffer = alignedmemptr[1];
     } else {
       HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
