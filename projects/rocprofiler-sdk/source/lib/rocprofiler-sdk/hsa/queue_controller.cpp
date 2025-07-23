@@ -32,6 +32,8 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
 
+#include <dlfcn.h>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -244,18 +246,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     for(const auto* itr : agents)
     {
         const auto* cached_agent = agent::get_agent_cache(itr);
-        ROCP_TRACE << fmt::format(
+        ROCP_INFO << fmt::format(
             "RocP Agent {:x} has Cache Agent? {}", itr->id.handle, cached_agent ? "yes" : "no");
         if(cached_agent)
         {
-            ROCP_TRACE << fmt::format("RocP Agent {:x} Type {}",
+            ROCP_INFO << fmt::format("RocP Agent {:x} Type {}",
                                       itr->id.handle,
                                       (int) cached_agent->get_rocp_agent()->type);
         }
 
         if(cached_agent && cached_agent->get_rocp_agent()->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
-            ROCP_TRACE << fmt::format("RocP Agent {:x} is added to cache", itr->id.handle);
+            ROCP_INFO << fmt::format("RocP Agent {:x} is added to cache", itr->id.handle);
             get_supported_agents().emplace(cached_agent->index(), *cached_agent);
         }
     }
@@ -270,21 +272,29 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         // TODO: finalize name
         if (common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
         {
-            for (auto qr_pair : get_queue_registration_controller()->get_all_registrations())
+            std::vector<queue_registration_export_t> exported_registrations;
+            uint64_t exported_registrations_count;
+
+            ROCP_FATAL_IF(rocprofiler_queue_export_all_registrations(nullptr, &exported_registrations_count) != 0);
+            exported_registrations.resize(exported_registrations_count);
+            ROCP_FATAL_IF(rocprofiler_queue_export_all_registrations(exported_registrations.data(), &exported_registrations_count) != 0);
+
+            for (uint64_t iter = 0; iter < exported_registrations.size(); ++iter)
             {
-                auto& qr = qr_pair.second;
-                auto agent = qr->agent();
+                bool registration_consumed = false;
+                auto qr = exported_registrations[iter];
+                auto agent = qr.agent;
+
                 for(const auto& [_, agent_info] : get_supported_agents())
-                {                
+                {
                     if(agent_info.get_hsa_agent().handle == agent.handle)
                     {
-                        // use lambda to bind the member function to a normal function
-                        auto set_write_interceptor = [&qr](QueueRegistration::write_interceptor_t wi, void* data)
+                        auto set_write_interceptor = [&qr](write_interceptor_t wi, void* data)
                         {
-                            return qr->set_write_interceptor(wi, data);
+                            rocprofiler_queue_set_write_interceptor(qr.queue, wi, data);
                         };
 
-                        hsa_queue_t* queue = qr->intercept_queue();
+                        hsa_queue_t* queue = qr.queue;
 
                         auto new_queue = std::make_unique<Queue>(agent_info,
                                                                 get_core_table(),
@@ -294,14 +304,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 
                         
                         serializer(new_queue.get()).wlock([&](auto& serializer) {
-
                             serializer.add_queue(&queue, *new_queue);
                         });
                         add_queue(queue, std::move(new_queue));
+                        registration_consumed = true;
                         ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+                        break;
                     }
                 }
-                ROCP_FATAL << "Could not find agent - " << agent.handle;
+                if (!registration_consumed)
+                {
+                    ROCP_FATAL << "Could not find agent - " << agent.handle;
+                }
             }
         }
     }
