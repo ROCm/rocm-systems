@@ -183,21 +183,21 @@ Panel Config:
             unit: (Bytes + $normUnit)
             tips:
           Read Bandwidth:
-            avg: AVG(TCC_READ_SECTORS_sum / $denom)
-            min: MIN(TCC_READ_SECTORS_sum / $denom)
-            max: MAX(TCC_READ_SECTORS_sum / $denom)
+            avg: AVG(TCC_READ_SECTORS_sum * 32 / $denom)
+            min: MIN(TCC_READ_SECTORS_sum * 32 / $denom)
+            max: MAX(TCC_READ_SECTORS_sum * 32 / $denom)
             unit: (Bytes + $normUnit)
             tips:
           Write Bandwidth:
-            avg: AVG(TCC_WRITE_SECTORS_sum / $denom)
-            min: MIN(TCC_WRITE_SECTORS_sum / $denom)
-            max: MAX(TCC_WRITE_SECTORS_sum / $denom)
+            avg: AVG(TCC_WRITE_SECTORS_sum * 32 / $denom)
+            min: MIN(TCC_WRITE_SECTORS_sum * 32 / $denom)
+            max: MAX(TCC_WRITE_SECTORS_sum * 32 / $denom)
             unit: (Bytes + $normUnit)
             tips:
           Atomic Bandwidth:
-            avg: AVG(TCC_ATOMIC_SECTORS_sum / $denom)
-            min: MIN(TCC_ATOMIC_SECTORS_sum / $denom)
-            max: MAX(TCC_ATOMIC_SECTORS_sum / $denom)
+            avg: AVG(TCC_ATOMIC_SECTORS_sum * 32 / $denom)
+            min: MIN(TCC_ATOMIC_SECTORS_sum * 32 / $denom)
+            max: MAX(TCC_ATOMIC_SECTORS_sum * 32 / $denom)
             unit: (Bytes + $normUnit)
             tips:
           Req:

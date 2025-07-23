@@ -96,7 +96,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed not collecting TCC channel counters in rocprof v3
 * Fixed peak FLOPS of F8 I8 F16 and BF16 on MI300
 * Fixed not detecting memory clock issue when using amd-smi
-* Fix standalone GUI crashing
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on MI350
 
 ### Known issues
 
