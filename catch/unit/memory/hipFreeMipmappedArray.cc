@@ -56,6 +56,8 @@ TEMPLATE_TEST_CASE("Unit_hipFreeMipmappedArrayImplicitSyncArray", "", char, floa
   HIP_CHECK(hipGetDeviceProperties(&props, 0))
 
   for (auto numLevels : levels) {
+    INFO(" extent: (" << extent.width << ", " << extent.height << ", " << extent.depth << ") and "
+                      << numLevels << " levels. Total VRAM: " << props.totalGlobalMem);
     if (extent.width * extent.height * extent.depth * numLevels * sizeof(TestType) >
         props.totalGlobalMem) {
       // some devices will not have enough memory allocate the 6GB required for the biggest extent
