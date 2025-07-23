@@ -51,6 +51,7 @@ jobs:
           git diff
           exit 1
         fi
+      working-directory: projects/rocprofiler-sdk
 
   source:
     runs-on: ubuntu-latest
@@ -61,7 +62,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: 
+          projects/rocprofiler-sdk
+          projects/rocprofiler-register
 
     - name: Install dependencies
       run: |
@@ -89,6 +92,7 @@ jobs:
           git diff
           exit 1
         fi
+      working-directory: projects/rocprofiler-sdk
 
   python:
     runs-on: ubuntu-latest
@@ -101,7 +105,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: 
+          projects/rocprofiler-sdk
+          projects/rocprofiler-register
 
     - name: Extract branch name
       shell: bash
@@ -121,9 +127,6 @@ jobs:
 
     - name: black format
       run: |
-        pwd
-        ls -la
-        cd projects/rocprofiler-sdk
         black .
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Python code not formatted. Run black...\n"
@@ -133,6 +136,7 @@ jobs:
           git diff
           exit 1
         fi
+      working-directory: projects/rocprofiler-sdk
 
   missing-new-line:
     runs-on: ubuntu-latest
@@ -140,7 +144,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: 
+          projects/rocprofiler-sdk
+          projects/rocprofiler-register
 
     - name: Find missing new line
       shell: bash
