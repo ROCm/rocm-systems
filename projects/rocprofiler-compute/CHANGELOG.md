@@ -89,6 +89,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * ROCm Compute Profiler CLI has been improved to better display the GPU architecture analytics
+* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
 
 ### Resolved issues
 

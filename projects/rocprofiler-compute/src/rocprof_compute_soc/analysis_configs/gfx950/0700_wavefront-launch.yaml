@@ -91,7 +91,7 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          Kernel Time (Nanosec):
+          Kernel Time:
             avg: AVG((End_Timestamp - Start_Timestamp))
             min: MIN((End_Timestamp - Start_Timestamp))
             max: MAX((End_Timestamp - Start_Timestamp))

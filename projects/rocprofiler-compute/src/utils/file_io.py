@@ -22,11 +22,8 @@
 # SOFTWARE.
 ##############################################################################el
 
-import collections
-import glob
 import os
 import re
-import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -54,8 +51,6 @@ top_stats_build_in_config = {
         "data source": [{"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}],
     },
 }
-
-time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 
 def load_sys_info(f):
@@ -173,11 +168,11 @@ def create_df_kernel_top_stats(
     ]
 
     key = "Sum" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
     key = "Mean" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
     key = "Median" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
 
     grouped = grouped.reset_index()  # Remove special group indexing
 

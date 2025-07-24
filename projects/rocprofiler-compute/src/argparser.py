@@ -595,7 +595,7 @@ Examples:
         metavar="",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="\t\tSpecify display time unit in kernel top stats: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
+        help="\t\tSpecify display time unit: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
