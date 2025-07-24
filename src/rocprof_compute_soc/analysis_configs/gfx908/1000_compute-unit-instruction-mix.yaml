@@ -19,28 +19,10 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          VALU:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          VMEM:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
           LDS:
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
             max: MAX((SQ_INSTS_LDS / $denom))
-            unit: (instr + $normUnit)
-            tips:
-          MFMA:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
             unit: (instr + $normUnit)
             tips:
           SALU:
@@ -73,96 +55,6 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          INT32:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          INT64:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F16-ADD:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F16-MUL:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F16-FMA:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F16-Trans:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F32-ADD:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F32-MUL:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F32-FMA:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F32-Trans:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F64-ADD:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F64-MUL:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F64-FMA:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          F64-Trans:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
-          Conversion:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (instr + $normUnit)
-            tips:
 
     - metric_table:
         id: 1003
@@ -179,13 +71,6 @@ Panel Config:
             avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
-            unit: (instr + $normUnit)
-            tips:
-         # TODO: Fix baseline comparision logic to handle non existent metrics, then remove this
-          Spill/Stack Coalesceable Instr:
-            avg: None
-            min: None
-            max: None
             unit: (instr + $normUnit)
             tips:
           Global/Generic Read:
@@ -242,46 +127,3 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          MFMA-I8:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          MFMA-F8:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          MFMA-F16:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          MFMA-BF16:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          MFMA-F32:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          MFMA-F64:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (instr + $normUnit)
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          MFMA-F6F4:
-            avg: None
-            min: None
-            max: None
-            unit: (instr + $normUnit)
-            tips:

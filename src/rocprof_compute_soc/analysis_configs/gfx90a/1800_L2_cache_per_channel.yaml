@@ -333,3 +333,18 @@ Panel Config:
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
+
+    - metric_table:
+        id: 1812
+        title: L2-Fabric (128B read requests per normUnit)
+        header:
+          metric: Channel
+          expr: Expression
+        metric:
+          "::_1":
+            expr: (TO_INT(TCC_BUBBLE[::_1]) / $denom)
+          placeholder_range:
+            "::_1": $total_l2_chan
+          # tips: Number of 128-byte read requests sent to EA
+        cli_style: simple_box
+        tui_style: simple_box

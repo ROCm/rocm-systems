@@ -189,30 +189,6 @@ Panel Config:
               + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
             unit: (Bytes + $normUnit)
             tips:
-          Tag RAM 0 Req:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            unit: (Req  + $normUnit)
-            tips:
-          Tag RAM 1 Req:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            unit: (Req  + $normUnit)
-            tips:
-          Tag RAM 2 Req:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            unit: (Req  + $normUnit)
-            tips:
-          Tag RAM 3 Req:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            unit: (Req  + $normUnit)
-            tips:
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -419,12 +395,6 @@ Panel Config:
             max: MAX((TCP_UTCL1_TRANSLATION_MISS_sum / $denom))
             units: (Req + $normUnit)
             tips:
-          Misses under Translation Miss:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Req + $normUnit)
-            tips:
           Permission Misses:
             avg: AVG((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
             min: MIN((TCP_UTCL1_PERMISSION_MISS_sum / $denom))
@@ -442,45 +412,3 @@ Panel Config:
           units: Units
           tips: Tips
         metric:
-          Cache Full Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          Cache Miss Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          Serialization Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          Thrashing Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          Latency FIFO Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          Resident Page Full Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:
-          UTCL2 Stall:
-            avg: None # Missing perfmon
-            min: None # Missing perfmon
-            max: None # Missing perfmon
-            units: (Cycles + $normUnit)
-            tips:

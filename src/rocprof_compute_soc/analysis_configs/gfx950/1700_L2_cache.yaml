@@ -473,24 +473,6 @@ Panel Config:
             max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Read Bandwidth - PCIe:
-            avg: None # AVG(TCC_EA0_RDREQ_IO_32B_sum / $denom)
-            min: None # MIN(TCC_EA0_RDREQ_IO_32B_sum / $denom)
-            max: None # MAX(TCC_EA0_RDREQ_IO_32B_sum / $denom)
-            unit: (Bytes + $normUnit)
-            tips:
-          Read Bandwidth - Infinity Fabric™:
-            avg: None # AVG(TCC_EA0_RDREQ_GMI_32B_sum / $denom)
-            min: None # MIN(TCC_EA0_RDREQ_GMI_32B_sum / $denom)
-            max: None # MAX(TCC_EA0_RDREQ_GMI_32B_sum / $denom)
-            unit: (Bytes + $normUnit)
-            tips:
-          Read Bandwidth - HBM:
-            avg: None # AVG(TCC_EA0_RDREQ_DRAM_32B_sum / $denom)
-            min: None # MIN(TCC_EA0_RDREQ_DRAM_32B_sum / $denom)
-            max: None # MAX(TCC_EA0_RDREQ_DRAM_32B_sum / $denom)
-            unit: (Bytes + $normUnit)
-            tips:
           Write and Atomic (32B):
             avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
             min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))

@@ -209,13 +209,6 @@ Panel Config:
             max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
             unit: (instr + $normUnit)
             tips:
-         # TODO: Fix baseline comparision logic to handle non existent metrics, then remove this
-          Spill/Stack Coalesceable Instr:
-            avg: None
-            min: None
-            max: None
-            unit: (instr + $normUnit)
-            tips:
           Spill/Stack Read:
             avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
@@ -280,10 +273,5 @@ Panel Config:
             avg: AVG((SQ_INSTS_VALU_MFMA_F64 / $denom))
             min: MIN((SQ_INSTS_VALU_MFMA_F64 / $denom))
             max: MAX((SQ_INSTS_VALU_MFMA_F64 / $denom))
-            unit: (instr + $normUnit)
-          MFMA-F6F4:
-            avg: None
-            min: None
-            max: None
             unit: (instr + $normUnit)
             tips:

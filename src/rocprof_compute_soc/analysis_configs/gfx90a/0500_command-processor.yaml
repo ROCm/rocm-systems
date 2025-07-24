@@ -19,24 +19,6 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          CPC SYNC FIFO Full Rate:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
-          CPC CANE Stall Rate:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
-          CPC ADC Utilization:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
           CPF Utilization:
             avg: AVG((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
               if ((CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE) != 0) else None))

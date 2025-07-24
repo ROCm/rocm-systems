@@ -114,6 +114,34 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     show_roof_plot(roof_plot)
                     continue
 
+                # Metrics baseline comparison mode
+                # We cannot guarantee that all runs have the same metrics. Only show common metrics.
+                if (
+                    type == "metric_table"
+                    and "Metric" in table_config["header"].values()
+                    and len(runs) > 1
+                ):
+                    # Common metrics across all runs
+                    common_metrics = set()
+                    for _, data in runs.items():
+                        if not common_metrics:
+                            common_metrics = set(data.dfs[table_config["id"]]["Metric"])
+                        else:
+                            common_metrics &= set(data.dfs[table_config["id"]]["Metric"])
+                    # Apply common metrics across all runs
+                    # Reindex all runs based on first run
+                    initial_index = None
+                    for key in runs.keys():
+                        runs[key].dfs[table_config["id"]] = (
+                            runs[key]
+                            .dfs[table_config["id"]]
+                            .loc[lambda d: d["Metric"].isin(common_metrics)]
+                        )
+                        if initial_index is None:
+                            initial_index= runs[key].dfs[table_config["id"]].index
+                        else:
+                            runs[key].dfs[table_config["id"]].index = initial_index
+
                 # take the 1st run as baseline
                 base_run, base_data = next(iter(runs.items()))
                 base_df = base_data.dfs[table_config["id"]]

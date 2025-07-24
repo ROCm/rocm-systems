@@ -433,6 +433,16 @@ class OmniSoC_Base:
 
     def get_rocprof_supported_counters(self):
         rocprof_cmd = detect_rocprof(self.get_args())
+
+        if rocprof_cmd != "rocprofiler-sdk":
+            console_warning(
+                "rocprof v1 / v2 / v3 interfaces will be removed in favor of "
+                "rocprofiler-sdk interface in a future release. To use rocprofiler-sdk "
+                "interface, please set the environment variable ROCPROF to 'rocprofiler-sdk' "
+                "and optionally provide the path to librocprofiler-sdk.so library via the "
+                "--rocprofiler-sdk-library-path option."
+            )
+
         rocprof_counters = set()
 
         if str(rocprof_cmd).endswith("rocprof"):
@@ -482,7 +492,7 @@ class OmniSoC_Base:
                     f"Failed to list rocprof supported counters using command: {command}"
                 )
             for line in output.splitlines():
-                if "Name:" in line:
+                if "counter_name" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
                     rocprof_counters.update(counters)
             # Custom counter support for mi100 for rocprofv3

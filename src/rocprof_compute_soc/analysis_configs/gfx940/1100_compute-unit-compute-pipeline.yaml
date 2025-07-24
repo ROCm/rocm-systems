@@ -76,13 +76,6 @@ Panel Config:
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk * $cu_per_gpu) * 256) / 1000))
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          MFMA FLOPs (F6F4):
-            value: None
-            unit: GFLOP
-            peak: None
-            pop: None
-            tips:
           MFMA IOPs (INT8):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GIOP
@@ -130,13 +123,6 @@ Panel Config:
             avg: AVG((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             min: MIN((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
-            unit: pct
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          VALU Co-Issue Efficiency:
-            avg: None
-            min: None
-            max: None
             unit: pct
             tips:
           VMEM Utilization:
@@ -277,13 +263,6 @@ Panel Config:
               + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64)) / $denom))
             max: MAX((((64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
               + (SQ_INSTS_VALU_FMA_F64 * 2))) + (512 * SQ_INSTS_VALU_MFMA_MOPS_F64)) / $denom))
-            unit: (OPs  + $normUnit)
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          F6F4 OPs:
-            avg: None
-            min: None
-            max: None
             unit: (OPs  + $normUnit)
             tips:
           INT8 OPs:

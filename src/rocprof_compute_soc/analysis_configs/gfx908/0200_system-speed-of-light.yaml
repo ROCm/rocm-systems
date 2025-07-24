@@ -32,12 +32,6 @@ Panel Config:
             peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
             pop: None # No perf counter
             tips:
-          MFMA FLOPs (F8):
-            value: None # No HW module
-            unit: GFLOP/s
-            peak: None # No HW module
-            pop: None # No HW module
-            tips:
           MFMA FLOPs (BF16):
             value: None # No perf counter
             unit: GFLOP/s
@@ -61,13 +55,6 @@ Panel Config:
             unit: GFLOP/s
             peak: ((($max_sclk * $cu_per_gpu) * 256) / 1000)
             pop: None # No perf counter
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then remove this
-          MFMA FLOPs (F6F4):
-            value: None
-            unit: GFLOP/s
-            peak: None
-            pop: None
             tips:
           MFMA IOPs (Int8):
             value: None # No perf counter
