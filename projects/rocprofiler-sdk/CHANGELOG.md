@@ -216,6 +216,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Code object disassembly was missing function inlining information
 - Fixed queue preemption error and HSA_STATUS_ERROR_INVALID_PACKET_FORMAT error for stochastic PC-sampling for MI300X, leading to more stable runs.
 - Fixed the system hang issue for host-trap PC-sampling on MI300X. 
+- Fixed rocpd counter collection issue when counter collection alone is enabled, rocpd_kernel_dispatch table gets populated by counters data instead of kernel_dispatch data.
 
 ### Removed
 
