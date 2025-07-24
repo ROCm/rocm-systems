@@ -1,13 +1,16 @@
 [submodule "external/googletest"]
 	path = external/googletest
 	url = https://github.com/google/googletest.git
-[submodule "external/glog"]
-	path = external/glog
+[submodule "projects/rocprofiler-register/external/glog"]
+	path = projects/rocprofiler-register/external/glog
 	url = https://github.com/google/glog.git
-[submodule "'projects/rocprofiler-sdk/external/fmt'"]
+[submodule "projects/rocprofiler-sdk/external/glog"]
+	path = projects/rocprofiler-sdk/external/glog
+	url = https://github.com/google/glog.git
+[submodule "projects/rocprofiler-sdk/external/fmt"]
 	path = projects/rocprofiler-sdk/external/fmt
 	url = https://github.com/fmtlib/fmt.git
-[submodule "'projects/rocprofiler-register/external/fmt'"]
+[submodule "projects/rocprofiler-register/external/fmt"]
 	path = projects/rocprofiler-register/external/fmt
 	url = https://github.com/fmtlib/fmt.git
 [submodule "source/docs/doxygen-awesome-css"]
