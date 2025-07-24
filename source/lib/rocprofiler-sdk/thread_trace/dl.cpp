@@ -40,7 +40,7 @@ DL::DL(const char* libpath)
     {
         path = common::filesystem::path(libpath);
     }
-    else if(auto aqlprofile_handle = dlopen("libhsa-amd-aqlprofile64.so", RTLD_NOLOAD | RTLD_LAZY))
+    else if(auto* aqlprofile_handle = dlopen("libhsa-amd-aqlprofile64.so", RTLD_NOLOAD | RTLD_LAZY))
     {
         link_map* linkmap{nullptr};
         if(dlinfo(aqlprofile_handle, RTLD_DI_LINKMAP, &linkmap) == 0 && linkmap != nullptr)
