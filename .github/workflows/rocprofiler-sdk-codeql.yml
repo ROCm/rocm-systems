@@ -88,6 +88,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         python3 -m pip install -r requirements.txt
         cmake -B /tmp/build -DCMAKE_PREFIX_PATH=/opt/rocm ${{ env.GLOBAL_CMAKE_OPTIONS }} -DPython3_EXECUTABLE=$(which python3) .
         cmake --build /tmp/build --target all --parallel 16
