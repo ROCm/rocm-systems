@@ -19,61 +19,6 @@ Panel Config:
           pop: Pct of Peak
           tips: Tips
         metric:
-          VALU FLOPs:
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
-          VALU IOPs:
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
-          MFMA FLOPs (F8):
-            value: None # No perf counter
-            unit: GFLOP
-            peak: None # No perf counter
-            pop: None # No perf counter
-            tips:
-          MFMA FLOPs (BF16):
-            value: None # No perf counter
-            Unit: None
-            peak: None
-            pop: None
-            tips:
-          MFMA FLOPs (F16):
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
-          MFMA FLOPs (F32):
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
-          MFMA FLOPs (F64):
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          MFMA FLOPs (F6F4):
-            value: None
-            unit: GFLOP
-            peak: None
-            pop: None
-            tips:
-          MFMA IOPs (INT8):
-            value: None # No perf counter
-            unit: None
-            peak: None
-            pop: None
-            tips:
 
     - metric_table:
         id: 1102
@@ -116,25 +61,6 @@ Panel Config:
             max: MAX((((100 * SQ_ACTIVE_INST_VALU) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             unit: pct
             tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          VALU Co-Issue Efficiency:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
-          VMEM Utilization:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: pct
-            tips:
-          Branch Utilization:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: pct
-            tips:
           VALU Active Threads:
             avg: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
@@ -143,32 +69,6 @@ Panel Config:
             max: MAX(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
             unit: Threads
-            tips:
-          MFMA Utilization:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: pct
-            tips:
-          MFMA Instr Cycles:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: cycles/instr
-            tips:
-          VMEM Latency:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: Cycles
-            coll_level: SQ_INST_LEVEL_VMEM
-            tips:
-          SMEM Latency:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: Cycles
-            coll_level: SQ_INST_LEVEL_SMEM
             tips:
 
     - metric_table:
@@ -182,58 +82,3 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          FLOPs (Total):
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          IOPs (Total):
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          F8 OPs:
-            avg: None # No HW module
-            min: None # No HW module
-            max: None # No HW module
-            unit: (OPs  + $normUnit)
-            tips:
-          F16 OPs:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          BF16 OPs:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          F32 OPs:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          F64 OPs:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          F6F4 OPs:
-            avg: None
-            min: None
-            max: None
-            unit: (OPs  + $normUnit)
-            tips:
-          INT8 OPs:
-            avg: None # No perf counter
-            min: None # No perf counter
-            max: None # No perf counter
-            unit: (OPs  + $normUnit)
-            tips:

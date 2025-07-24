@@ -19,13 +19,6 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          Schedule-Pipe Wave Occupancy:
-            avg: None
-            min: None
-            max: None
-            unit: Wave
-            tips:
           Accelerator Utilization:
             avg: AVG(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
             min: MIN(100 * $GRBM_GUI_ACTIVE_PER_XCD / $GRBM_COUNT_PER_XCD)
@@ -36,13 +29,6 @@ Panel Config:
             avg: AVG(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
             min: MIN(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
             max: MAX(100 * SPI_CSN_BUSY / ($GRBM_GUI_ACTIVE_PER_XCD * $pipes_per_gpu * $se_per_gpu))
-            unit: Pct
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          Scheduler-Pipe Wave Utilization:
-            avg: None
-            min: None
-            max: None
             unit: Pct
             tips:
           Workgroup Manager Utilization:
@@ -120,13 +106,6 @@ Panel Config:
               0) else None)
             max: MAX((100 * SPI_RA_REQ_NO_ALLOC / ($GRBM_SPI_BUSY_PER_XCD * $se_per_gpu)) if ($GRBM_SPI_BUSY_PER_XCD !=
               0) else None)
-            unit: Pct
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          Scheduler-Pipe FIFO Full Rate:
-            avg: None
-            min: None
-            max: None
             unit: Pct
             tips:
           Scheduler-Pipe Stall Rate:

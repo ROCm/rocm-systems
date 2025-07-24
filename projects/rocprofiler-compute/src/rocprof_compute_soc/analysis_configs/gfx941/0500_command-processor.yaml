@@ -19,27 +19,6 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          CPC SYNC FIFO Full Rate:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          CPC CANE Stall Rate:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
-          # TODO: Fix baseline comparision logic to handle non existent metrics, then 
-          CPC ADC Utilization:
-            avg: None
-            min: None
-            max: None
-            unit: pct
-            tips:
           CPF Utilization:
             avg: AVG((((100 * CPF_CPF_STAT_BUSY) / (CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE))
               if ((CPF_CPF_STAT_BUSY + CPF_CPF_STAT_IDLE) != 0) else None))

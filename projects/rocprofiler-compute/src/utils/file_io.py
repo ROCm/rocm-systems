@@ -75,6 +75,12 @@ def load_panel_configs(dir):
             if f.endswith(".yaml"):
                 with open(str(Path(root).joinpath(f))) as file:
                     config = yaml.safe_load(file)
+                    # metric key can be None due to some metric tables not having any metrics
+                    # metric key should be empty dict instead of None
+                    for data_source in config["Panel Config"]["data source"]:
+                        metric_table = data_source.get("metric_table")
+                        if metric_table and metric_table["metric"] is None:
+                            metric_table["metric"] = {}
                     d[config["Panel Config"]["id"]] = config["Panel Config"]
 
     # TODO: sort metrics as the header order in case they are not defined in the same order

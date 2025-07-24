@@ -45,10 +45,6 @@ Panel Config:
             #alias: valu_
             value: ROUND(AVG((SQ_INSTS_VALU / $denom)), 0)
             tips:
-          MFMA:
-            #alias: mfma_
-            value: None # No perf counter
-            tips:
           VMEM:
             #alias: vmem_
             value: ROUND(AVG((SQ_INSTS_VMEM / $denom)), 0)
