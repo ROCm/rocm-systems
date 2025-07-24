@@ -204,7 +204,7 @@ size_t CounterSampler::get_counter_size(rocprofiler_counter_id_t counter) {
   rocprofiler_counter_info_v1_t info;
   rocprofiler_query_counter_info(counter, ROCPROFILER_COUNTER_INFO_VERSION_1,
                                  static_cast<void*>(&info));
-  return info.instance_ids_count;
+  return info.dimensions_instances_count;
 }
 
 std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_supported_counters(
@@ -241,7 +241,7 @@ std::unordered_map<std::string, rocprofiler_counter_id_t> CounterSampler::get_su
   return out;
 }
 
-std::vector<rocprofiler_record_dimension_info_t> CounterSampler::get_counter_dimensions(
+std::vector<rocprofiler_counter_record_dimension_info_t> CounterSampler::get_counter_dimensions(
     rocprofiler_counter_id_t counter) {
   rocprofiler_counter_info_v1_t info;
   RocprofilerCall(
@@ -250,8 +250,8 @@ std::vector<rocprofiler_record_dimension_info_t> CounterSampler::get_counter_dim
                                               static_cast<void*>(&info));
       },
       "Could not query info for counter", __FILE__, __LINE__);
-  return std::vector<rocprofiler_record_dimension_info_t>{info.dimensions,
-                                                          info.dimensions + info.dimensions_count};
+  return std::vector<rocprofiler_counter_record_dimension_info_t>{
+      *info.dimensions, *info.dimensions + info.dimensions_count};
 }
 
 int tool_init(rocprofiler_client_finalize_t, void*) {
