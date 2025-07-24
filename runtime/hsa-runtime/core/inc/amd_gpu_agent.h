@@ -76,7 +76,7 @@ class GpuAgentInt : public core::Agent {
   // @param [in] node_id Node id.
   // @param [in] driver_type Driver type. Default is KFD.
   GpuAgentInt(uint32_t node_id, core::DriverType driver_type)
-      : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(driver_type), node_id, 
+      : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(driver_type), node_id,
       core::Agent::DeviceType::kAmdGpuDevice) {}
 
    // @brief Ensure blits are ready (performance hint).
@@ -724,9 +724,6 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Alternative aperture base address. Only on KV.
   uintptr_t ape1_base_;
-
-  // @brief Alternative aperture size. Only on KV.
-  size_t ape1_size_;
 
   // @brief Queue with GWS access.
   struct {
