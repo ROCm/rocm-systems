@@ -1,5 +1,5 @@
-[submodule "external/googletest"]
-	path = external/googletest
+[submodule "projects/rocprofiler-sdk/external/googletest"]
+	path = projects/rocprofiler-sdk/external/googletest
 	url = https://github.com/google/googletest.git
 [submodule "projects/rocprofiler-register/external/glog"]
 	path = projects/rocprofiler-register/external/glog
@@ -13,36 +13,36 @@
 [submodule "projects/rocprofiler-register/external/fmt"]
 	path = projects/rocprofiler-register/external/fmt
 	url = https://github.com/fmtlib/fmt.git
-[submodule "source/docs/doxygen-awesome-css"]
-	path = external/doxygen-awesome-css
+[submodule "projects/rocprofiler-sdk/source/docs/doxygen-awesome-css"]
+	path = projects/rocprofiler-sdk/external/doxygen-awesome-css
 	url = https://github.com/jothepro/doxygen-awesome-css.git
-[submodule "external/ptl"]
-	path = external/ptl
+[submodule "projects/rocprofiler-sdk/external/ptl"]
+	path = projects/rocprofiler-sdk/external/ptl
 	url = https://github.com/jrmadsen/PTL
-[submodule "external/cereal"]
-	path = external/cereal
+[submodule "projects/rocprofiler-sdk/external/cereal"]
+	path = projects/rocprofiler-sdk/external/cereal
 	url = https://github.com/jrmadsen/cereal.git
-[submodule "external/filesystem"]
+[submodule "projects/rocprofiler-sdk/external/filesystem"]
 	path = external/filesystem
 	url = https://github.com/gulrak/filesystem.git
-[submodule "external/perfetto"]
-	path = external/perfetto
+[submodule "projects/rocprofiler-sdk/external/perfetto"]
+	path = projects/rocprofiler-sdk/external/perfetto
 	url = https://github.com/google/perfetto
-[submodule "external/elfio"]
-	path = external/elfio
+[submodule "projects/rocprofiler-sdk/external/elfio"]
+	path = projects/rocprofiler-sdk/external/elfio
 	url = https://github.com/serge1/ELFIO.git
-[submodule "external/yaml-cpp"]
-	path = external/yaml-cpp
+[submodule "projects/rocprofiler-sdk/external/yaml-cpp"]
+	path = projects/rocprofiler-sdk/external/yaml-cpp
 	url = https://github.com/jbeder/yaml-cpp.git
-[submodule "external/json"]
-	path = external/json
+[submodule "projects/rocprofiler-sdk/external/json"]
+	path = projects/rocprofiler-sdk/external/json
 	url = https://github.com/nlohmann/json.git
-[submodule "external/sqlite"]
-	path = external/sqlite
+[submodule "projects/rocprofiler-sdk/external/sqlite"]
+	path = projects/rocprofiler-sdk/external/sqlite
 	url = https://github.com/sqlite/sqlite
-[submodule "external/pybind11"]
-	path = external/pybind11
+[submodule "projects/rocprofiler-sdk/external/pybind11"]
+	path = projects/rocprofiler-sdk/external/pybind11
 	url = https://github.com/pybind/pybind11.git
-[submodule "external/gotcha"]
-	path = external/gotcha
+[submodule "projects/rocprofiler-sdk/external/gotcha"]
+	path = projects/rocprofiler-sdk/external/gotcha
 	url = https://jrmadsen@github.com/jrmadsen/GOTCHA
