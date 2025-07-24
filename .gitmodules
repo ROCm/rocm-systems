@@ -23,7 +23,7 @@
 	path = projects/rocprofiler-sdk/external/cereal
 	url = https://github.com/jrmadsen/cereal.git
 [submodule "projects/rocprofiler-sdk/external/filesystem"]
-	path = external/filesystem
+	path = projects/rocprofiler-sdk/external/filesystem
 	url = https://github.com/gulrak/filesystem.git
 [submodule "projects/rocprofiler-sdk/external/perfetto"]
 	path = projects/rocprofiler-sdk/external/perfetto
