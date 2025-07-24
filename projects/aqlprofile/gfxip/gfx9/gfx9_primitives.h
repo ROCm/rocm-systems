@@ -683,7 +683,7 @@ class gfx9_cntx_prim {
 
   // Indicates the size of buffer to use per Shader Engine instance.
   // The size is specified in terms of 4KB blocks
-  static uint32_t sqtt_buffer_size_value(uint32_t size_val, uint32_t base_hi) {
+  static uint32_t sqtt_buffer_size_value(uint64_t size_val, uint32_t base_hi) {
     uint32_t sq_thread_trace_size =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_SIZE, SIZE, (size_val >> TT_BUFF_ALIGN_SHIFT));
     return sq_thread_trace_size;
