@@ -1,4 +1,4 @@
-name: Code Coverage
+name: RocProfiler-SDK Code Coverage
 
 permissions:
   contents: read
@@ -7,18 +7,19 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [ amd-staging, amd-mainline ]
-    paths-ignore:
-      - '*.md'
-      - '**/README.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - '**/README.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
