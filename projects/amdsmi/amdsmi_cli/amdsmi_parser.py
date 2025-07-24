@@ -186,7 +186,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         if int_value == "":
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
 
 
     def _positive_int(self, int_value, sub_arg=None):
@@ -199,7 +199,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         if int_value == "":
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], int_value, outputformat)
 
 
     def _is_valid_string(self, string_value, sub_arg=None):
@@ -212,7 +212,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         if string_value == "":
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(sub_arg, outputformat)
         else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], string_value, outputformat)
 
 
     def _is_command_supported(self, user_input, acceptable_values, command_name):
@@ -220,7 +220,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command_name, self.helpers.get_output_format())
         elif str(user_input).upper() not in acceptable_values:
             print(f"Valid inputs are {acceptable_values}")
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(str(user_input).upper(), self.helpers.get_output_format())
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], str(user_input).upper(), self.helpers.get_output_format())
         else:
             return str(user_input).upper()
 
@@ -245,10 +245,10 @@ class AMDSMIParser(argparse.ArgumentParser):
 
                 # Check if the val is a valid integer value
                 if not val.isdigit():
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(val, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], val, output_format)
                 val = int(val)
                 if val < 0:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(val, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], val, output_format)
                 clk_limit_args = collections.namedtuple('clk_limit_args', ['clk_type', 'lim_type', 'val'])
                 setattr(namespace, self.dest, clk_limit_args(clk_type, lim_type, val))
         return AMDSMILimitArgs
@@ -274,10 +274,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 # Check if every item in perf level is valid
                 for level in perf_levels_str:
                     if not level.isdigit():
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(level, output_format)
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], level, output_format)
                     level = int(level)
                     if level < 0:
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(level, output_format)
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], level, output_format)
                     perf_levels.append(level)
 
                 clk_level_args = collections.namedtuple('clk_level_args', ['clk_type', 'perf_levels'])
@@ -406,7 +406,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if selected_device_handles == '':
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--gpu", _GPUSelectAction.outputformat)
                     elif not gpu_format:
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], selected_device_handles,
                                                                                          _GPUSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
@@ -436,7 +436,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if selected_device_handles == '':
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--cpu", _CPUSelectAction.outputformat)
                     elif not cpu_format:
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], selected_device_handles,
                                                                                          _CPUSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
@@ -465,7 +465,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     if selected_device_handles == '':
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException("--core", _CoreSelectAction.outputformat)
                     elif not core_format:
-                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(selected_device_handles,
+                        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], selected_device_handles,
                                                                                          _CoreSelectAction.outputformat)
                     else:
                         raise amdsmi_cli_exceptions.AmdSmiDeviceNotFoundException(selected_device_handles,
@@ -499,15 +499,15 @@ class AMDSMIParser(argparse.ArgumentParser):
             if value.isdigit():
                 if int(value) < 0:
                     outputformat = self.helpers.get_output_format()
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(value, outputformat)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], value, outputformat)
             else:
                 outputformat = self.helpers.get_output_format()
-                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(value, outputformat)
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], value, outputformat)
 
         if isinstance(value, int):
             if int(value) < 0:
                 outputformat = self.helpers.get_output_format()
-                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(value, outputformat)
+                raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], value, outputformat)
 
         return value
 
