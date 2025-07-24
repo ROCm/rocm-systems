@@ -67,9 +67,8 @@ Callback Typedefs
 | ``aqlprofile_memory | Callback for allocating memory buffers for     |
 | _alloc_callback_t`` | profiles (PMC/ATT).                            |
 +---------------------+------------------------------------------------+
-| ``                  | Callback for deallocating memory buffers       |
-| aqlprofile_memory_d | allocated for profiles.                        |
-| ealloc_callback_t`` |                                                |
+|``aqlprofile_memory  | Callback for deallocating memory buffers       |
+|_dealloc_callback_t``| allocated for profiles.                        |
 +---------------------+------------------------------------------------+
 | ``aqlprof           | Callback for copying memory (used internally   |
 | ile_memory_copy_t`` | by the profiler).                              |
@@ -93,9 +92,8 @@ From header ``hsa_ven_amd_aqlprofile.h``
 +----------------------+-----------------------------------------------+
 | API Name             | Purpose                                       |
 +======================+===============================================+
-| `                    | Checks if a given event (counter) is valid    |
-| `hsa_ven_amd_aqlprof | for the specified GPU agent.                  |
-| ile_validate_event`` |                                               |
+| ``hsa_ven_amd_aqlprof| Checks if a given event (counter) is valid    |
+| ile_validate_event`` | for the specified GPU agent.                  |
 +----------------------+-----------------------------------------------+
 | ``hsa_ven_am         | Populates an AQL packet with commands to      |
 | d_aqlprofile_start`` | start profiling (PMC or SQTT).                |
@@ -106,9 +104,8 @@ From header ``hsa_ven_amd_aqlprofile.h``
 | ``hsa_ven_a          | Populates an AQL packet with commands to read |
 | md_aqlprofile_read`` | profiling results from the GPU.               |
 +----------------------+-----------------------------------------------+
-| `                    | Converts an AQL packet to a PM4 packet blob   |
-| `hsa_ven_amd_aqlprof | (for legacy devices).                         |
-| ile_legacy_get_pm4`` |                                               |
+| ``hsa_ven_amd_aqlprof| Converts an AQL packet to a PM4 packet blob   |
+| ile_legacy_get_pm4`` | (for legacy devices).                         |
 +----------------------+-----------------------------------------------+
 | ``hsa_ven_amd_aql    | Inserts a marker (correlation ID) into the    |
 | profile_att_marker`` | ATT (thread trace) buffer.                    |
@@ -136,19 +133,18 @@ From header ``hsa_ven_amd_aqlprofile.h``
 Callback Typedefs
 ~~~~~~~~~~~~~~~~~
 
-+-----------------------+----------------------------------------------+
-| Callback Typedef Name | Purpose                                      |
-+=======================+==============================================+
-| ``hsa_ven_amd_aqlprof | Used with                                    |
-| ile_data_callback_t`` | ``hsa_ven_amd_aqlprofile_iterate_data`` to   |
-|                       | process each profiling result (PMC/SQTT).    |
-+-----------------------+----------------------------------------------+
-| ``hsa                 | Used with                                    |
-| _ven_amd_aqlprofile_e | ``hsa_ven_amd_aqlprofile_iterate_event_ids`` |
-| ventname_callback_t`` | to process event IDs and names.              |
-+-----------------------+----------------------------------------------+
-| ``hsa_                | Used with                                    |
-| ven_amd_aqlprofile_co | ``                                           |
-| ordinate_callback_t`` | hsa_ven_amd_aqlprofile_iterate_event_coord`` |
-|                       | to process event coordinate info.            |
-+-----------------------+----------------------------------------------+
++-----------------------+-----------------------------------------------+
+| Callback Typedef Name | Purpose                                       |
++=======================+===============================================+
+| ``hsa_ven_amd_aqlprof | Used with                                     |
+| ile_data_callback_t`` | ``hsa_ven_amd_aqlprofile_iterate_data`` to    |
+|                       | process each profiling result (PMC/SQTT).     |
++-----------------------+-----------------------------------------------+
+| ``hsa                 | Used with                                     |
+| _ven_amd_aqlprofile_e | ``hsa_ven_amd_aqlprofile_iterate_event_ids``  |
+| ventname_callback_t`` | to process event IDs and names.               |
++-----------------------+-----------------------------------------------+
+| ``hsa                 | Used with                                     |
+| _ven_amd_aqlprofile_c | ``hsa_ven_amd_aqlprofile_iterate_event_coord``|
+| oordinate_callback_t``| to process event coordinate info.             |
++-----------------------+-----------------------------------------------+
