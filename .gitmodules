@@ -5,7 +5,7 @@
 	path = external/glog
 	url = https://github.com/google/glog.git
 [submodule "fmt"]
-	path = external/fmt
+	path = projects/rocprofiler-sdk/external/fmt
 	url = https://github.com/fmtlib/fmt.git
 [submodule "source/docs/doxygen-awesome-css"]
 	path = external/doxygen-awesome-css
