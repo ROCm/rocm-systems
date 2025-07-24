@@ -64,19 +64,19 @@ rocprofiler_queue_set_api_table(
 }
 
 int
-rocprofiler_queue_export_all_registrations(
+rocprofiler_queue_export_all_queue_registrations(
     void* queue_registrations,
     uint64_t* num_queue_registrations)
 {
     if (!queue_registrations && num_queue_registrations)
     {
-        *num_queue_registrations = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations().size();
+        *num_queue_registrations = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_queue_registrations().size();
         return 0;
     }
 
     CHECK_NOTNULL(queue_registrations);
     CHECK_NOTNULL(num_queue_registrations);
-    auto qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations();
+    auto qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_queue_registrations();
     auto qrs_out = reinterpret_cast<rocprofiler::hsa::queue_registration_export_t*>(queue_registrations);
     if (*num_queue_registrations < qrs.size())
     {
@@ -98,7 +98,7 @@ int rocprofiler_queue_set_write_interceptor(
     void* data
 )
 {
-    auto& qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_registrations();
+    auto& qrs = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_queue_registrations();
     auto qr_pair = qrs.find(queue);
     if (qr_pair == qrs.end())
     {
@@ -107,6 +107,29 @@ int rocprofiler_queue_set_write_interceptor(
     }
     qr_pair->second.user_write_interceptor_func = func;
     qr_pair->second.user_write_interceptor_data = data;
+    return 0;
+}
+
+int rocprofiler_queue_export_all_code_object_registrations(
+    hsa_executable_t* executables,
+    uint64_t* num_executables)
+{
+    if (!executables && num_executables)
+    {
+        *num_executables = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_code_object_registrations().size();
+        return 0;
+    }
+
+    CHECK_NOTNULL(executables);
+    CHECK_NOTNULL(num_executables);
+    auto cos = CHECK_NOTNULL(rocprofiler::hsa::get_queue_registration_controller())->get_all_code_object_registrations();
+    auto cos_out = executables;
+    if (*num_executables < cos.size())
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    std::copy(cos.begin(), cos.end(), cos_out);
+
     return 0;
 }
 
@@ -130,7 +153,7 @@ void write_interceptor
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
     auto queue = static_cast<hsa_queue_t*>(data);
 
-    auto& queue_map = CHECK_NOTNULL(get_queue_registration_controller())->get_all_registrations();
+    auto& queue_map = CHECK_NOTNULL(get_queue_registration_controller())->get_all_queue_registrations();
     auto queue_registration_pair = queue_map.find(queue);
     ROCP_FATAL_IF(queue_registration_pair == queue_map.end()) << "WriteInterceptor was not passed a valid queue";
     auto& queue_registration = queue_registration_pair->second;
@@ -189,6 +212,32 @@ destroy_queue(hsa_queue_t* hsa_queue)
     return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t
+executable_freeze(hsa_executable_t executable, const char* options)
+{
+    auto qrc = CHECK_NOTNULL(get_queue_registration_controller());
+    auto status = qrc->get_hsa_executable_freeze_fn()(executable, options);
+    if (status)
+    {
+        return status;
+    }
+    qrc->add_code_object(executable);
+    return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t
+executable_destroy(hsa_executable_t executable)
+{
+    auto qrc = CHECK_NOTNULL(get_queue_registration_controller());
+    auto status = qrc->get_hsa_executable_destroy_fn()(executable);
+    if (status)
+    {
+        return status;
+    }
+    qrc->destroy_code_object(executable);
+    return HSA_STATUS_SUCCESS;
+}
+
 // Initializes the QueueRegistrationController. This must be delayed until
 // HSA has been inited.
 void QueueRegistrationController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
@@ -198,6 +247,11 @@ void QueueRegistrationController::init(CoreApiTable& core_table, AmdExtTable& ex
 
     core_table.hsa_queue_create_fn  = hsa::create_queue;
     core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
+
+    m_hsa_executable_freeze_fn = core_table.hsa_executable_freeze_fn;
+    core_table.hsa_executable_freeze_fn = hsa::executable_freeze;
+    m_hsa_executable_destroy_fn = core_table.hsa_executable_destroy_fn;
+    core_table.hsa_executable_destroy_fn = hsa::executable_destroy;
 }
 
 // Called to add a queue that was created by the user program
@@ -209,6 +263,28 @@ void QueueRegistrationController::add_queue(queue_registration_t queue_registrat
 void QueueRegistrationController::destroy_queue(hsa_queue_t* id)
 {
     m_queues.erase(id);
+}
+
+void QueueRegistrationController::add_code_object(hsa_executable_t executable)
+{
+    ROCP_TRACE << "adding executable " << executable.handle;
+    m_code_objects.emplace_back(executable);
+}
+
+void QueueRegistrationController::destroy_code_object(hsa_executable_t executable)
+{
+    ROCP_TRACE << "removing executable " << executable.handle;
+    auto pred = [&](const hsa_executable_t& a)
+    {
+        return a.handle == executable.handle;
+    };
+    auto itr = std::find_if(m_code_objects.begin(), m_code_objects.end(), pred);
+    if (itr == m_code_objects.end())
+    {
+        ROCP_INFO << "destroy_code_object could not find " << executable.handle;
+        return;
+    }
+    m_code_objects.erase(itr);
 }
 
 QueueRegistrationController*
