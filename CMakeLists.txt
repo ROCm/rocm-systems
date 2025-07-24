@@ -151,7 +151,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.67.1 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.74.0 CACHE STRING "GRPC desired package version.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH ${GRPC_ROOT} /usr/local)
