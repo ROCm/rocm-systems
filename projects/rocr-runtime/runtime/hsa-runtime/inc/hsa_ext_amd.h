@@ -62,9 +62,10 @@
  * - 1.9 - hsa_amd_portable_export_dmabuf_v2
  * - 1.10 - hsa_amd_vmem_address_reserve: HSA_AMD_VMEM_ADDRESS_NO_REGISTER
  * - 1.11 - hsa_amd_agent_info_t: HSA_AMD_AGENT_INFO_CLOCK_COUNTERS
+ * - 1.12 - hsa_amd_pointer_info: HSA_EXT_POINTER_TYPE_HSA_VMEM and HSA_EXT_POINTER_TYPE_RESERVED_ADDR
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 11
+#define HSA_AMD_INTERFACE_VERSION_MINOR 12
 
 #ifdef __cplusplus
 extern "C" {
@@ -2362,7 +2363,11 @@ typedef enum {
   /*
   No backend memory but virtual address
   */
-  HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5
+  HSA_EXT_POINTER_TYPE_RESERVED_ADDR = 5,
+  /*
+  Memory was allocated with an HSA virtual memory allocator
+  */
+  HSA_EXT_POINTER_TYPE_HSA_VMEM = 6
 } hsa_amd_pointer_type_t;
 
 /**
