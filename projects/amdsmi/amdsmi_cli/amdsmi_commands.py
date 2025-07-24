@@ -1045,7 +1045,7 @@ class AMDSMICommands():
                     else:
                         clk_type_conversion = "N/A"
                         output_format = self.helpers.get_output_format()
-                        raise AmdSmiInvalidParameterException(clk_type, output_format) # clk type given is bad
+                        raise AmdSmiInvalidParameterException('static', clk_type, output_format) # clk type given is bad
 
                     try:
                         frequencies = amdsmi_interface.amdsmi_get_clk_freq(args.gpu, clk_type_conversion)

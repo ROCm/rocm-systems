@@ -106,6 +106,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         super().__init__(
             formatter_class= lambda prog: AMDSMIParserHelpFormatter(prog),
             description=f"AMD System Management Interface | {version_string} | {rocm_version_string} | {platform_string}",
+            epilog="For detailed help on specific commands: amd-smi [command] -h",
             add_help=True,
             prog=program_name)
 
@@ -238,9 +239,9 @@ class AMDSMIParser(argparse.ArgumentParser):
 
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(clk_type, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], clk_type, output_format)
                 if lim_type not in valid_lim_types:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(lim_type, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], lim_type, output_format)
 
                 # Check if the val is a valid integer value
                 if not val.isdigit():
@@ -267,7 +268,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
                 # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(clk_type, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], clk_type, output_format)
 
                 perf_levels = []
                 # Check if every item in perf level is valid
@@ -1536,6 +1537,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         elif "unrecognized arguments: " in message:
             l = len("unrecognized arguments: ")
             message = message[l:]
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(message, outputformat)
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(sys.argv[1], message, outputformat)
         else:
             print(message)
