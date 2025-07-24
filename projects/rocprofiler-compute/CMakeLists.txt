@@ -255,13 +255,9 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 set_tests_properties(
-    test_profile_kernel_execution
-    test_profile_dispatch
-    test_profile_mem
-    test_profile_join
-    test_profile_sort
-    test_profile_misc
-    PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
+    test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
+    test_profile_sort test_profile_misc PROPERTIES LABELS "profile" RESOURCE_GROUPS
+                                                   gpus:1)
 
 # ---------------------------
 # analysis command tests
