@@ -76,8 +76,8 @@ jobs:
         sparse-checkout: projects/rocprofiler-sdk
     
     - name: Setup submodules for rocprofiler-sdk only
-      working-directory: projects/rocprofiler-sdk
       run: |
+        cd projects/rocprofiler-sdk
         if [ -f .gitmodules ]; then
           git submodule update --init --recursive
         fi
