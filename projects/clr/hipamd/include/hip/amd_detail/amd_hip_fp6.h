@@ -23,14 +23,9 @@ SOFTWARE.
 #pragma once
 
 #include "amd_hip_mx_common.h"
-
-#include "amd_hip_fp16.h"
-#include "amd_hip_bf16.h"
 #include "amd_hip_fp8.h"
 
-#include "amd_hip_ocp_types.h"
 #include "amd_hip_ocp_host.hpp"
-#include "hip/amd_detail/amd_hip_mx_common.h"
 
 #if defined(__HIPCC_RTC__)
 #define __FP6_HOST_DEVICE__ __device__
@@ -52,33 +47,6 @@ enum __hip_fp6_interpretation_t {
   __HIP_E3M2 = 0, /**< FP6 E3M2 Type*/
   __HIP_E2M3 = 1, /**< FP6 E2M3 Type */
 };
-
-namespace internal {
-__FP6_HOST_DEVICE_STATIC__ __amd_fp16_storage_t half_to_f16(const __half val) {
-  __half_raw tmp = val;
-  return tmp.data;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_fp16x2_storage_t half2_to_f16x2(const __half2 val) {
-  __half2_raw tmp = val;
-  return tmp.data;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_bf16_storage_t hipbf16_to_bf16(const __hip_bfloat16 val) {
-  static_assert(sizeof(__hip_bfloat16) == sizeof(__amd_bf16_storage_t));
-  union {
-    __hip_bfloat16 hip_bf16;
-    __amd_bf16_storage_t bf16;
-  } u{val};
-  return u.bf16;
-}
-__FP6_HOST_DEVICE_STATIC__ __amd_bf16x2_storage_t hipbf162_to_bf16x2(const __hip_bfloat162 val) {
-  static_assert(sizeof(__hip_bfloat162) == sizeof(__amd_bf16x2_storage_t));
-  union {
-    __hip_bfloat162 hip_bf16;
-    __amd_bf16x2_storage_t bf16;
-  } u{val};
-  return u.bf16;
-}
-}  // namespace internal
 
 
 // Note: Ignore rounding input on AMD GPUs for now. At the moment AMD GPUs do not support rounding
