@@ -39,7 +39,7 @@ rocprofiler_queue_set_api_table(
 
 
 int
-rocprofiler_queue_export_all_registrations(
+rocprofiler_queue_export_all_queue_registrations(
     void* queue_registrations,
     uint64_t* num_queue_registrations) ROCPROFILER_PUBLIC_API;
 
@@ -49,6 +49,10 @@ rocprofiler_queue_set_write_interceptor(
     rocprofiler::hsa::write_interceptor_t func,
     void* data) ROCPROFILER_PUBLIC_API;
 
+int rocprofiler_queue_export_all_code_object_registrations(
+    hsa_executable_t* executables,
+    uint64_t* num_executables) ROCPROFILER_PUBLIC_API;
+
 int rocprofiler_queue_get_version() ROCPROFILER_PUBLIC_API;
 }
 
@@ -56,6 +60,7 @@ namespace rocprofiler {
 namespace hsa{
 
 using queue_registration_map_t = std::unordered_map<hsa_queue_t*, queue_registration_t>;
+using code_object_vector_t = std::vector<hsa_executable_t>;
 
 struct queue_registration_export_t {
     hsa_agent_t agent;
@@ -66,6 +71,9 @@ struct queue_registration_export_t {
 class QueueRegistrationController
 {
 public:
+    using hsa_executable_freeze_t = decltype(CoreApiTable::hsa_executable_freeze_fn);
+    using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
+
     QueueRegistrationController()  = default;
     ~QueueRegistrationController() = default;
     // Initializes the QueueRegistrationController. This must be delayed until
@@ -76,15 +84,25 @@ public:
     void add_queue(queue_registration_t);
     void destroy_queue(hsa_queue_t*);
 
-    queue_registration_map_t& get_all_registrations() { return m_queues; };
+    void add_code_object(hsa_executable_t);
+    void destroy_code_object(hsa_executable_t);
+
+    queue_registration_map_t& get_all_queue_registrations() { return m_queues; };
+    code_object_vector_t& get_all_code_object_registrations() { return m_code_objects; };
     const CoreApiTable& get_core_table() const { return m_core_table; }
     const AmdExtTable&  get_ext_table() const { return m_ext_table; }
+    hsa_executable_freeze_t get_hsa_executable_freeze_fn() const { return m_hsa_executable_freeze_fn; }
+    hsa_executable_destroy_t get_hsa_executable_destroy_fn() const { return m_hsa_executable_destroy_fn; }
 
-    queue_registration_export_t& export_all_registrations();
 private:
     CoreApiTable m_core_table = {};
     AmdExtTable  m_ext_table  = {};
+
     queue_registration_map_t m_queues;
+    code_object_vector_t m_code_objects;
+
+    hsa_executable_freeze_t m_hsa_executable_freeze_fn;
+    hsa_executable_destroy_t m_hsa_executable_destroy_fn;
 };
 
 QueueRegistrationController*

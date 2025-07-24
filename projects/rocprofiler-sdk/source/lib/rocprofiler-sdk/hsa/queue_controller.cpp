@@ -275,10 +275,11 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
             std::vector<queue_registration_export_t> exported_registrations;
             uint64_t exported_registrations_count;
 
-            ROCP_FATAL_IF(rocprofiler_queue_export_all_registrations(nullptr, &exported_registrations_count) != 0);
+            ROCP_FATAL_IF(rocprofiler_queue_export_all_queue_registrations(nullptr, &exported_registrations_count) != 0);
             exported_registrations.resize(exported_registrations_count);
-            ROCP_FATAL_IF(rocprofiler_queue_export_all_registrations(exported_registrations.data(), &exported_registrations_count) != 0);
+            ROCP_FATAL_IF(rocprofiler_queue_export_all_queue_registrations(exported_registrations.data(), &exported_registrations_count) != 0);
 
+            ROCP_INFO << "Got " << exported_registrations_count << " queues from the queue library";
             for (uint64_t iter = 0; iter < exported_registrations.size(); ++iter)
             {
                 bool registration_consumed = false;
@@ -308,13 +309,13 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                         });
                         add_queue(queue, std::move(new_queue));
                         registration_consumed = true;
-                        ROCP_INFO << "created queue for HSA agent handle " << agent.handle;
+                        ROCP_INFO << "Adding queue from queue registration for HSA agent handle " << agent.handle;
                         break;
                     }
                 }
                 if (!registration_consumed)
                 {
-                    ROCP_FATAL << "Could not find agent - " << agent.handle;
+                    ROCP_FATAL << "Could not find agent " << agent.handle << " for queue registration";
                 }
             }
         }
