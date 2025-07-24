@@ -191,6 +191,8 @@ To decode the raw thread trace data, create and initialize a Trace Decoder:
     rocprofiler_thread_trace_decoder_id_t decoder{};
     
     // Create the Trace Decoder with the path to the decoder library
+    // Alternative 1: _trace_decoder_create(&decoder, nullptr) searches aqlprofile install location
+    // Alternative 2: _trace_decoder_create(&decoder, "") searches LD_LIBRARY_PATH
     ROCPROFILER_CALL(
         rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"),
         "thread trace decoder creation");
