@@ -3,20 +3,18 @@ name: "CodeQL Advanced Analysis"
 on:
   workflow_dispatch:
   pull_request:
-    branches:
-      - amd-staging
-    paths-ignore:
-      - '*.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
 
   push:
-    branches:
-      - amd-staging
-    paths-ignore:
-      - '*.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
 
 env:
   ROCM_PATH: "/opt/rocm"
