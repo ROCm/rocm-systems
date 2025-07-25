@@ -6,7 +6,7 @@ on:
 
 jobs:
   git-mirror:
-    runs-on: AMD-ROCm-Internal-dev1
+    runs-on: ubuntu-latest
     steps:
       - name: git-sync
         uses: AMD-ROCm-Internal/rocprofiler-github-actions@git-sync-v3
