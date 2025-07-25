@@ -118,9 +118,7 @@ size_t Os::pageSize_ = 0;
 
 int Os::processorCount_ = 0;
 
-void Os::spinPause() {
-  simde_mm_pause();
-}
+void Os::spinPause() { simde_mm_pause(); }
 
 void Os::sleep(long n) {
 // FIXME_lmoriche: Should be nano-seconds not seconds.

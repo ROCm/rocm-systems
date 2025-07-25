@@ -3532,7 +3532,7 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize) {
 #if IS_LINUX
 __attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
-#if defined(__AVX512F__) && false // Disable until SIMDe adds support.
+#if defined(__AVX512F__) && false  // Disable until SIMDe adds support.
   for (auto i = 0u; i != size / sizeof(simde__m512i); ++i) {
     simde_mm512_stream_si512(reinterpret_cast<simde__m512i* __restrict&>(dst)++,
                              *reinterpret_cast<const simde__m512i* __restrict&>(src)++);
