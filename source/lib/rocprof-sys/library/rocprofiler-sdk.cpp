@@ -1002,6 +1002,83 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     }
                 }
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(
+                        header->payload);
+
+                auto        _corr_id      = record->correlation_id.internal;
+                auto        _beg_ns       = record->start_timestamp;
+                auto        _end_ns       = record->end_timestamp;
+                auto        _name =
+                    tool_data->buffered_tracing_info.at(record->kind, record->operation);
+
+                uint64_t _stream_id = get_stream_id(record).handle;
+
+                if(get_use_timemory())
+                {
+                    const auto& _tinfo = thread_info::get(record->thread_id, SystemTID);
+                    auto        _tid   = _tinfo->index_data->sequent_value;
+
+                    auto _bundle = kernel_dispatch_bundle_t{ _name };
+
+                    _bundle.push(_tid).start().stop();
+                    _bundle.get([_beg_ns, _end_ns](tim::component::wall_clock* _wc) {
+                        _wc->set_value(_end_ns - _beg_ns);
+                        _wc->set_accum(_end_ns - _beg_ns);
+                    });
+                    _bundle.pop();
+                }
+
+                if(get_use_perfetto() && _stream_id != 0)
+                {
+                    auto add_perfetto_annotations = [&](::perfetto::EventContext ctx) {
+                        if(config::get_perfetto_annotations())
+                        {
+                            tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
+                            tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
+                            tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
+                            tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                                _stream_id);
+                        }
+                    };
+
+                    if(_group_by_queue)
+                    {
+                        auto _track_desc = [](rocprofiler_thread_id_t _tid) {
+                            const auto& _tid_v = thread_info::get(_tid, SystemTID);
+                            return JOIN("", "GPU Memory Copy to Agent Thread ",
+                                _tid_v->index_data->sequent_value);
+                        };
+
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_hip_api{}, _track_desc,
+                            record->thread_id);
+
+                        tracing::push_perfetto(category::rocm_hip_api{}, _name.data(),
+                                               _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_hip_api{}, "", _track,
+                                              _end_ns);
+                    }
+                    else
+                    {
+                        const auto _track = tracing::get_perfetto_track(
+                            category::rocm_hip_stream{}, _track_desc_stream, _stream_id);
+
+                        tracing::push_perfetto(category::rocm_hip_stream{}, _name.data(),
+                                               _track, _beg_ns,
+                                               ::perfetto::Flow::ProcessScoped(_corr_id),
+                                               add_perfetto_annotations);
+
+                        tracing::pop_perfetto(category::rocm_hip_stream{}, "", _track,
+                                              _end_ns);
+                    }
+                }
+            }
             else
             {
                 ROCPROFSYS_THROW(
@@ -1300,9 +1377,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
     // and memory copy.
 
     auto external_corr_id_request_kinds =
-        std::array<rocprofiler_external_correlation_id_request_kind_t, 2>{
+        std::array<rocprofiler_external_correlation_id_request_kind_t, 3>{
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API
         };
 
     ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
@@ -1312,7 +1390,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
 #if(ROCPROFILER_VERSION >= 700)
     if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
+       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0) ||
+       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API) > 0))
     {
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
             _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
@@ -1342,6 +1421,18 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
             _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0,
             _data->memory_copy_buffer));
+    }
+
+    if(_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API) > 0)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(
+            _data->primary_ctx, buffer_size, watermark,
+            ROCPROFILER_BUFFER_POLICY_LOSSLESS, tool_tracing_buffered, tool_data,
+            &_data->hip_runtime_api_buffer));
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+            _data->primary_ctx, ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API, nullptr, 0,
+            _data->hip_runtime_api_buffer));
     }
 
     if(!_counter_events.empty())
