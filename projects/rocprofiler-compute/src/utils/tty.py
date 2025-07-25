@@ -23,6 +23,7 @@
 ##############################################################################el
 
 import copy
+import textwrap
 from pathlib import Path
 
 import pandas as pd
@@ -51,8 +52,21 @@ def string_multiple_lines(source, width, max_rows):
 
 
 def get_table_string(df, transpose=False, decimal=2):
+    """
+    Convert DataFrame to a formatted table string, wrapping specified columns.
+    """
+    df_to_show = df.transpose() if transpose else df
+    wrap_columns = ["Description"]
+    wrap_width = 40
+    for col in wrap_columns:
+        if col in df_to_show.columns:
+            df_to_show[col] = (
+                df_to_show[col]
+                .astype(str)
+                .apply(lambda x: textwrap.fill(x, width=wrap_width))
+            )
     return tabulate(
-        df.transpose() if transpose else df,
+        df_to_show,
         headers="keys",
         tablefmt="fancy_grid",
         floatfmt="." + str(decimal) + "f",
@@ -118,6 +132,10 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
         int(convert_metric_id_to_panel_info(metric_id)[0])
         for metric_id in filter_panel_ids
     ]
+    if args.include_cols:
+        hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
+    else:
+        hidden_cols = config.HIDDEN_COLUMNS_CLI
 
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
@@ -196,12 +214,14 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 df = pd.DataFrame(index=base_df.index)
 
                 for header in list(base_df.keys()):
+                    # For raw csv table, columns cannot be filtered
+                    # If columns are filtered, then skip the headers not in filtered columns
                     if (
-                        (not args.cols)
-                        or (args.cols and base_df.columns.get_loc(header) in args.cols)
-                        or (type == "raw_csv_table")
+                        type == "raw_csv_table"
+                        or not args.cols
+                        or base_df.columns.get_loc(header) in args.cols
                     ):
-                        if header in config.HIDDEN_COLUMNS:
+                        if header in hidden_cols:
                             pass
                         elif header not in comparable_columns:
                             if (
@@ -236,8 +256,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                     cur_df = convert_time_columns(cur_df, args.time_unit)
 
                                 if (type == "raw_csv_table") or (
-                                    type == "metric_table"
-                                    and (not header in config.HIDDEN_COLUMNS)
+                                    type == "metric_table" and (not header in hidden_cols)
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline

@@ -228,7 +228,7 @@ class MIGPUSpecs:
         gpu_arch_lower = gpu_arch_.lower()
 
         # Handle gfx942 with chip_id mapping
-        if gpu_arch_lower not in ("gfx906", "gfx908", "gfx90a"):
+        if gpu_arch_lower not in ("gfx908", "gfx90a"):
             if chip_id_ and int(chip_id_) in cls._chip_id_dict:
                 gpu_model = cls._chip_id_dict.get(int(chip_id_))
             else:
@@ -283,7 +283,7 @@ class MIGPUSpecs:
         4. Default settings (last resort)
         """
         # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx906", "gfx908", "gfx90a"}
+        LEGACY_ARCHS = {"gfx908", "gfx90a"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison

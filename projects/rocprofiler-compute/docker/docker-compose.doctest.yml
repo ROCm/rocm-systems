@@ -3,11 +3,6 @@ services:
     build:
       context: ../
       dockerfile: docker/Dockerfile.doctest
-    devices:
-      - /dev/kfd
-      - /dev/dri
-    security_opt:
-      - seccomp:unconfined
     volumes:
       - ../:/app
     tty: true

@@ -509,17 +509,19 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                             headers.append(k)
 
                         for key, tile in data_config["header"].items():
-                            if key != "metric" and key != "tips" and key != "expr":
+                            if key != "metric" and key != "expr":
                                 headers.append(tile)
                     else:
+                        headers.append(data_config["header"]["metric"])
                         for key, tile in data_config["header"].items():
-                            if key != "tips":
+                            if key != "metric":
                                 headers.append(tile)
 
-                    # do we always need one?
                     headers.append("coll_level")
-                    if "tips" in data_config["header"].keys():
-                        headers.append(data_config["header"]["tips"])
+
+                    # Only add Metrics Description column if it is defined in the panel
+                    if "metrics_description" in panel:
+                        headers.append("Description")
 
                     df = pd.DataFrame(columns=headers)
 
@@ -563,16 +565,12 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                                         for bk, bv in simple_box.items():
                                             values.append(bv[0] + v + bv[1])
                                     else:
-                                        if (
-                                            k != "tips"
-                                            and k != "coll_level"
-                                            and k != "alias"
-                                        ):
+                                        if k != "coll_level" and k != "alias":
                                             values.append(v)
 
                             else:
                                 for k, v in entries.items():
-                                    if k != "tips" and k != "coll_level" and k != "alias":
+                                    if k != "coll_level" and k != "alias":
                                         values.append(v)
                                         eqn_content.append(v)
 
@@ -584,8 +582,11 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                             else:
                                 values.append(schema.pmc_perf_file_prefix)
 
-                            if "tips" in entries.keys():
-                                values.append(entries["tips"])
+                            if "metrics_description" in panel:
+                                if key in panel["metrics_description"]:
+                                    values.append(panel["metrics_description"][key])
+                                else:
+                                    values.append("")
 
                             # print(headers, values)
                             # print(key, entries)
@@ -1459,7 +1460,14 @@ def build_comparable_columns(time_unit):
     Build comparable columns/headers for display
     """
     comparable_columns = schema.supported_field
-    top_stat_base = ["Count", "Sum", "Mean", "Median", "Standard Deviation"]
+    top_stat_base = [
+        "Count",
+        "Sum",
+        "Mean",
+        "Median",
+        "Standard Deviation",
+        "Description",
+    ]
 
     for h in top_stat_base:
         comparable_columns.append(h + "(" + time_unit + ")")

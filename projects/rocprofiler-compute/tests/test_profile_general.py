@@ -41,7 +41,6 @@ import test_utils
 
 # TODO: MI350 What are the gpu models in MI 350 series
 SUPPORTED_ARCHS = {
-    "gfx906": {"mi50": ["MI50", "MI60"]},
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
     "gfx940": {"mi300": ["MI300A_A0"]},

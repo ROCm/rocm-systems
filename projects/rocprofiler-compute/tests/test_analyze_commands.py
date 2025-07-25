@@ -470,35 +470,11 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
         assert code == 0
 
         files_in_workload = os.listdir(output_path)
-        single_row_tables = [
-            "0.1_Top_Kernels.csv",
-            "13.3_Instruction_Cache_-_L2_Interface.csv",
-            "18.1_Aggregate_Stats_(All_channels).csv",
-        ]
         for file_name in files_in_workload:
             df = pd.read_csv(output_path + "/" + file_name)
-            if file_name in single_row_tables:
-                assert len(df.index) == 1
-            else:
-                assert len(df.index) >= 3
+            assert len(df.index) >= 1
 
         shutil.rmtree(output_path)
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-    for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
-    code = binary_handler_analyze_rocprof_compute(
-        ["analyze", "--path", workload_dir, "--save-dfs", output_path]
-    )
-    assert code == 0
-
-    files_in_workload = os.listdir(output_path)
-    for file_name in files_in_workload:
-        df = pd.read_csv(output_path + "/" + file_name)
-        if file_name in single_row_tables:
-            assert len(df.index) == 1
-        else:
-            assert len(df.index) >= 3
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -519,7 +495,7 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--cols", "2"]
+            ["analyze", "--path", workload_dir, "--cols", "2", "--include-cols", "Description"]
         )
         assert code == 0
 

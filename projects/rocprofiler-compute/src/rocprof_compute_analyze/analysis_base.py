@@ -25,6 +25,7 @@
 import copy
 import os
 import sys
+import textwrap
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -96,15 +97,28 @@ class OmniAnalyze_Base:
                     sys_info.iloc[0],
                 )
 
+            metric_descriptions = {
+                k: v
+                for dfs in self._arch_configs[args.list_metrics].dfs.values()
+                for k, v in dfs.to_dict().get("Description", {}).items()
+            }
             for key, value in self._arch_configs[args.list_metrics].metric_list.items():
                 prefix = ""
+                description = ""
                 if "." not in str(key):
                     prefix = ""
                 elif str(key).count(".") == 1:
                     prefix = "\t"
                 else:
                     prefix = "\t\t"
-                print(prefix + key, "->", value)
+                    description = metric_descriptions.get(key, "")
+                print(prefix + key, "->", value + "\n")
+                if description:
+                    print(
+                        prefix
+                        + f"\n{prefix}".join(textwrap.wrap(description, width=40))
+                        + "\n"
+                    )
             sys.exit(0)
         else:
             console_error("Unsupported arch")
