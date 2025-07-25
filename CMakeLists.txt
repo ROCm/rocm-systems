@@ -23,20 +23,6 @@ foreach(_LANG C CXX)
         CACHE STRING "${_LANG} flags for code coverage builds")
 endforeach()
 
-project(
-    rocprofiler-sdk
-    LANGUAGES C CXX
-    VERSION ${ROCPROFILER_SDK_VERSION}
-    DESCRIPTION "ROCm GPU performance analysis SDK"
-    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-sdk")
-
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
-set(PACKAGE_NAME ${PROJECT_NAME})
-
-if(NOT PROJECT_IS_TOP_LEVEL)
-    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
-endif()
-
 # Find ROCm clang compilers
 find_program(
     rocmclangpp_EXECUTABLE
@@ -59,6 +45,21 @@ if(rocmclang_EXECUTABLE AND rocmclangpp_EXECUTABLE)
     message(STATUS "Using ROCm clang compiler: ${rocmclang_EXECUTABLE}")
     set(CMAKE_C_COMPILER ${rocmclang_EXECUTABLE})
     set(CMAKE_CXX_COMPILER ${rocmclangpp_EXECUTABLE})
+endif()
+
+
+project(
+    rocprofiler-sdk
+    LANGUAGES C CXX
+    VERSION ${ROCPROFILER_SDK_VERSION}
+    DESCRIPTION "ROCm GPU performance analysis SDK"
+    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-sdk")
+
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
+set(PACKAGE_NAME ${PROJECT_NAME})
+
+if(NOT PROJECT_IS_TOP_LEVEL)
+    set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 endif()
 
 find_package(Git)
