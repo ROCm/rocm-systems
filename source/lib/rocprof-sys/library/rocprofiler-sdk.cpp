@@ -1008,10 +1008,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(
                         header->payload);
 
-                auto        _corr_id      = record->correlation_id.internal;
-                auto        _beg_ns       = record->start_timestamp;
-                auto        _end_ns       = record->end_timestamp;
-                auto        _name =
+                auto _corr_id = record->correlation_id.internal;
+                auto _beg_ns  = record->start_timestamp;
+                auto _end_ns  = record->end_timestamp;
+                auto _name =
                     tool_data->buffered_tracing_info.at(record->kind, record->operation);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
@@ -1040,7 +1040,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
                             tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
                             tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                                _stream_id);
+                                                             _stream_id);
                         }
                     };
 
@@ -1049,12 +1049,11 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                         auto _track_desc = [](rocprofiler_thread_id_t _tid) {
                             const auto& _tid_v = thread_info::get(_tid, SystemTID);
                             return JOIN("", "GPU Memory Copy to Agent Thread ",
-                                _tid_v->index_data->sequent_value);
+                                        _tid_v->index_data->sequent_value);
                         };
 
                         const auto _track = tracing::get_perfetto_track(
-                            category::rocm_hip_api{}, _track_desc,
-                            record->thread_id);
+                            category::rocm_hip_api{}, _track_desc, record->thread_id);
 
                         tracing::push_perfetto(category::rocm_hip_api{}, _name.data(),
                                                _track, _beg_ns,

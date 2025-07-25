@@ -173,12 +173,8 @@ client_data::get_contexts() const
 inline client_data::buffer_id_vec_t
 client_data::get_buffers() const
 {
-    return buffer_id_vec_t{
-        kernel_dispatch_buffer,
-        memory_copy_buffer,
-        counter_collection_buffer,
-        hip_runtime_api_buffer
-    };
+    return buffer_id_vec_t{ kernel_dispatch_buffer, memory_copy_buffer,
+                            counter_collection_buffer, hip_runtime_api_buffer };
 }
 
 inline const rocprofiler_agent_t*
