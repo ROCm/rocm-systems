@@ -73,10 +73,8 @@ jobs:
 
     - uses: actions/checkout@v4
       with:
-        sparse-checkout-cone-mode: false
-        sparse-checkout: |
+        sparse-checkout: 
           projects/rocprofiler-sdk
-          .github/workflows/rocprofiler-sdk*
         submodules: 'true'
 
     # Initializes the CodeQL tools for scanning.
