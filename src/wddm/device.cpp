@@ -451,17 +451,17 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
 
   num_adapters = 0;
   for (int i = 0; i < args.NumAdapters; i++) {
-    D3DKMT_ADAPTERREGISTRYINFO query = {0};
+    D3DKMT_QUERY_DEVICE_IDS query = {0};
 
-    ret = WDDMQueryAdapter(info[i].hAdapter, KMTQAITYPE_ADAPTERREGISTRYINFO,
+    ret = WDDMQueryAdapter(info[i].hAdapter, KMTQAITYPE_PHYSICALADAPTERDEVICEIDS,
 			   &query, sizeof(query));
     if (ret != STATUS_SUCCESS)
       goto err_out1;
 
-    if (!std::wcsstr(query.ChipType, L"AMD"))
+    if (query.DeviceIds.VendorID != 0x1002)
       continue;
 
-    supported = thunk_proxy::QueryAdapterSupported(info[i].hAdapter);
+    supported = thunk_proxy::QueryAdapterSupported(query.DeviceIds.DeviceID);
 
     if (supported) {
       adapters[num_adapters++] = info[i];

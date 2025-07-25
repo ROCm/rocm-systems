@@ -102,7 +102,7 @@ int EngineOrdinal(int engine, DeviceInfo *device_info);
 bool GetHwsEnabled(int engine, DeviceInfo *device_info);
 bool ShouldDisableGpuTimeout(int engine, DeviceInfo *device_info);
 bool ParseAdapterInfo(D3DKMT_HANDLE adapter, DeviceInfo *device_info);
-bool QueryAdapterSupported(D3DKMT_HANDLE adapter);
+bool QueryAdapterSupported(unsigned int device_id);
 
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
 void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
