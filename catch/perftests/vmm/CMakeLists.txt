@@ -18,13 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-add_custom_target(perf_test COMMAND "${CMAKE_CTEST_COMMAND}" -R "Perf_"
-                            COMMENT "Build complete, now executing the performnce test ...")
+set(TEST_SRC
+  hipPerfVMMAlloc.cc
+)
 
-add_subdirectory(memory)
-add_subdirectory(stream)
-add_subdirectory(dispatch)
-add_subdirectory(compute)
-add_subdirectory(graph)
-add_subdirectory(event)
-add_subdirectory(vmm)
+hip_add_exe_to_target(NAME perfVMMTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME perf_test)
