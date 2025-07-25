@@ -4399,8 +4399,6 @@ def amdsmi_get_clk_freq(
         )
     )
 
-    clk_type_str = AmdSmiClkType(clk_type).name
-
     dict_ret = {
         "num_supported": freq.num_supported,
         "current": freq.current,
