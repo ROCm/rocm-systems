@@ -75,5 +75,5 @@ rocprofiler_samples_get_preload_env(PRELOAD_ENV)
 list(APPEND PRELOAD_ENV "ROCPROFILER_TRACE_DECODER_LIB_PATH=${attdecoder_LIB_DIR}")
 
 set_tests_properties(
-    thread-trace-sample PROPERTIES TIMEOUT 60 ENVIRONMENT ${PRELOAD_ENV} LABELS
+    thread-trace-sample PROPERTIES TIMEOUT 60 ENVIRONMENT "${PRELOAD_ENV}" LABELS
                                    "samples;thread-trace" DISABLED ${IS_DISABLED})
