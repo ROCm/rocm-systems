@@ -37,6 +37,29 @@ if(NOT PROJECT_IS_TOP_LEVEL)
     set(CMAKE_MESSAGE_INDENT "[${PROJECT_NAME}] ")
 endif()
 
+# Find ROCm clang compilers
+find_program(
+    rocmclangpp_EXECUTABLE
+    NAMES clang++
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+mark_as_advanced(rocmclangpp_EXECUTABLE)
+
+find_program(
+    rocmclang_EXECUTABLE
+    NAMES clang
+    HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+mark_as_advanced(rocmclang_EXECUTABLE)
+
+if(rocmclang_EXECUTABLE AND rocmclangpp_EXECUTABLE)
+    message(STATUS "Using ROCm clang compiler: ${rocmclang_EXECUTABLE}")
+    set(CMAKE_C_COMPILER ${rocmclang_EXECUTABLE})
+    set(CMAKE_CXX_COMPILER ${rocmclangpp_EXECUTABLE})
+endif()
+
 find_package(Git)
 
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
