@@ -66,6 +66,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add deprecation warning for database update mode.
 
+* Show description of metrics during analysis
+  * Use `--include-cols Description` to show `Description` column which is excluded by default from cli output
+
 ### Changed
 
 * Change the default rocprof version to rocprofv3, this is used when environment variable "ROCPROF" is not set
@@ -89,6 +92,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Optimized
 
 * ROCm Compute Profiler CLI has been improved to better display the GPU architecture analytics
+* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
 
 ### Resolved issues
 
@@ -100,6 +104,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed not detecting memory clock issue when using amd-smi
 * Fixed standalone GUI crashing
 * Fixed L2 read/write/atomic bandwidths on MI350
+* Update metric names for better alignment between analysis configuration and documentation
 
 ### Known issues
 

@@ -8702,7 +8702,7 @@ def test_add_counter_overwrite_existing():
 
     updated_description = "Updated version"
     updated_expression = "updated_expr"
-    updated_architectures = ["gfx906", "gfx908"]
+    updated_architectures = ["gfx908"]
     updated_properties = ["P_UPDATED", "P_NEW"]
 
 

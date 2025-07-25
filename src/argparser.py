@@ -211,7 +211,7 @@ Examples:
         nargs="?",
         const="",
         # Argument to --list-metrics is optional
-        choices=[""] + list(supported_archs.keys()),  # ["gfx906", "gfx908", "gfx90a"],
+        choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
     profile_group.add_argument(
@@ -604,7 +604,7 @@ Examples:
         metavar="",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="\t\tSpecify display time unit in kernel top stats: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
+        help="\t\tSpecify display time unit: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
@@ -632,7 +632,18 @@ Examples:
         dest="cols",
         metavar="",
         nargs="+",
-        help="\t\tSpecify column indices to display.",
+        help="\t\tSpecify column indices to display.\n\t\tDefaults to display all columns.",
+    )
+    analyze_advanced_group.add_argument(
+        "--include-cols",
+        dest="include_cols",
+        metavar="",
+        nargs="+",
+        help=(
+            "\t\tSpecify which hidden column names should be included in cli output.\n"
+            "\t\tFor example, to show 'Description' column which is hidden by default in cli output,\n"
+            "\t\tuse the option --include-cols Description."
+        ),
     )
     analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."

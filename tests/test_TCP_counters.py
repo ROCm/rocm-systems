@@ -174,7 +174,7 @@ def test_L1_cache_counters(
         # 3. save results in local
 
         # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir + "/16.3_L1D_Cache_Accesses.csv"
+        csv_path = workload_dir + "/16.3_vL1D_cache_access_metrics.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:

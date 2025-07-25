@@ -49,12 +49,16 @@ def filter_df(column, df, filt):
 
 def multi_bar_chart(table_id, display_df):
     if table_id == 1604:
-        nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
+        nested_bar = {}
         for index, row in display_df.iterrows():
+            if not row["Coherency"] in nested_bar:
+                nested_bar[row["Coherency"]] = {}
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
     if table_id == 1705:  # L2 - Fabric Interface Stalls
-        nested_bar = {"Read": {}, "Write": {}}
+        nested_bar = {}
         for index, row in display_df.iterrows():
+            if not row["Transaction"] in nested_bar:
+                nested_bar[row["Transaction"]] = {}
             nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
 
     return nested_bar
@@ -307,14 +311,14 @@ def build_table_chart(
         else:
             formatted_columns.append(dict(id=col, name=col, type="text"))
 
-    # tooltip shows only on the 1st col for now if 'Tips' available
+    # tooltip shows only on the 1st col for now if 'Metric Description' available
     table_tooltip = (
         [
             {
                 column: {
                     "value": (
-                        str(row["Tips"])
-                        if column == display_columns[0] and row["Tips"]
+                        str(row["Description"])
+                        if column == display_columns[0] and row["Description"]
                         else ""
                     ),
                     "type": "markdown",
@@ -323,7 +327,7 @@ def build_table_chart(
             }
             for row in original_df.to_dict("records")
         ]
-        if "Tips" in original_df.columns.values.tolist()
+        if "Description" in original_df.columns.values.tolist()
         else None
     )
 
