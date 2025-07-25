@@ -362,35 +362,24 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
 
   std::memset(&props, 0, sizeof(props));
 
-  D3DKMT_ADAPTERINFO *adapters;
-  int num_adapters;
-  if (wsl::thunk::WDDMGetAdapters(adapters, num_adapters) != STATUS_SUCCESS) {
-    pr_err("Failed to get adapters\n");
-    ret = HSAKMT_STATUS_ERROR;
-    goto err;
-  }
-
-  dxg_topology->num_sysfs_nodes = num_adapters + 1;
-
   dxg_runtime->HeapFini();
   for (auto device : dxg_topology->wdevices_)
     delete device;
   dxg_topology->wdevices_.clear();
 
-  for (uint32_t i = 0; i < num_adapters; i++) {
-    wsl::thunk::WDDMDevice *device = new wsl::thunk::WDDMDevice(
-        adapters[i].hAdapter, adapters[i].AdapterLuid, i+1);
-    assert(device && "Create WDDM Device fail");
-    dxg_topology->wdevices_.push_back(device);
+  WDDMCreateDevices(dxg_topology->wdevices_);
+  int num_adapters = dxg_topology->wdevices_.size();
+  if (num_adapters == 0) {
+    pr_err("No WDDM adapters found.\n");
+    return HSAKMT_STATUS_ERROR;
   }
+
+  dxg_topology->num_sysfs_nodes = num_adapters + 1;
   dxg_runtime->HeapInit();
   props.NumNodes = dxg_topology->num_sysfs_nodes;
   if (dxg_runtime->default_node > num_adapters)
     dxg_runtime->default_node = num_adapters;
 
-  delete[] adapters;
-  return ret;
-err:
   return ret;
 }
 

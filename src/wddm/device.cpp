@@ -422,7 +422,7 @@ uint32_t WDDMDevice::LdsBlocks(const hsa_kernel_dispatch_packet_t *pkt) {
   return blk_num;
 }
 
-NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
+NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices)
 {
   bool supported = false;
   D3DKMT_ENUMADAPTERS2 args = {0};
@@ -431,8 +431,6 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
     return ret;
 
   if (!args.NumAdapters) {
-    adapters = NULL;
-    num_adapters = 0;
     return STATUS_SUCCESS;
   }
 
@@ -445,11 +443,6 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
   if (ret != STATUS_SUCCESS)
     goto err_out0;
 
-  adapters = new D3DKMT_ADAPTERINFO[args.NumAdapters];
-  if (!adapters)
-    goto err_out0;
-
-  num_adapters = 0;
   for (int i = 0; i < args.NumAdapters; i++) {
     D3DKMT_QUERY_DEVICE_IDS query = {0};
 
@@ -464,7 +457,11 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
     supported = thunk_proxy::QueryAdapterSupported(query.DeviceIds.DeviceID);
 
     if (supported) {
-      adapters[num_adapters++] = info[i];
+      auto device = new WDDMDevice(
+        info[i].hAdapter, info[i].AdapterLuid, devices.size() + 1);
+      if (!device)
+        goto err_out1;
+      devices.push_back(device);
     }
   }
 
@@ -472,8 +469,8 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
   return STATUS_SUCCESS;
 
  err_out1:
-  delete[] adapters;
-  adapters = NULL;
+  for (auto &device : devices)
+    delete device;
  err_out0:
   delete[] info;
   return ret;

@@ -222,7 +222,7 @@ private:
   //CmdUtil cmd_util;
 };
 
-NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters);
+NTSTATUS WDDMCreateDevices(std::vector<WDDMDevice *> &devices);
 
 } // namespace thunk
 } // namespace wsl
