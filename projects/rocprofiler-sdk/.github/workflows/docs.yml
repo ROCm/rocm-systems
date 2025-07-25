@@ -1,4 +1,4 @@
-name: Documentation
+name: RocProfiler-SDK Documentation
 
 on:
   workflow_dispatch:
@@ -45,8 +45,8 @@ jobs:
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
-          mkdir -p docs/_doxygen/rocprofiler-sdk
-          mkdir -p docs/_doxygen/roctx
+          mkdir -p projects/rocprofiler-sdk/docs/_doxygen/rocprofiler-sdk
+          mkdir -p projects/rocprofiler-sdk/docs/_doxygen/roctx
       - name: Install documentation dependencies
         timeout-minutes: 10
         shell: bash
@@ -102,15 +102,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+            sparse-checkout: projects/rocprofiler-sdk
             submodules: true
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
-          mkdir -p source/docs/_doxygen/rocprofiler-sdk
-          mkdir -p source/docs/_doxygen/roctx
+          mkdir -p projects/rocprofiler-sdk/source/docs/_doxygen/rocprofiler-sdk
+          mkdir -p projects/rocprofiler-sdk/source/docs/_doxygen/roctx
       - name: Install requirements
         timeout-minutes: 10
         shell: bash
+        working-directory: projects/rocprofiler-sdk/
         run: |
           git config --global --add safe.directory '*'
           sudo apt-get update
