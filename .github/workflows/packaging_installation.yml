@@ -77,7 +77,7 @@ jobs:
       shell: bash
       run: |
         cd $BUILD_DIR
-        cpack -G ${{ maxtrix.system.package }
+        cpack -G ${{ maxtrix.system.package }}
 
     - name: Install the package
       timeout-minutes: 15
