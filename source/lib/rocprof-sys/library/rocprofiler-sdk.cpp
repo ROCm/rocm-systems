@@ -1004,9 +1004,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
             {
-                auto* record =
-                    static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(
-                        header->payload);
+                auto* record = static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(
+                    header->payload);
 
                 auto _corr_id = record->correlation_id.internal;
                 auto _beg_ns  = record->start_timestamp;
