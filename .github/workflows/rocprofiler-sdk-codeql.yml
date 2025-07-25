@@ -73,7 +73,8 @@ jobs:
 
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: 
+        sparse-checkout-cone-mode: false
+        sparse-checkout: |
           projects/rocprofiler-sdk
           .github/workflows/rocprofiler-sdk*
         submodules: 'true'
