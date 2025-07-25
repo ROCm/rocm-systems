@@ -127,6 +127,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * ``--specs-correction`` option to provide missing system specifications for analysis.
 
+* Add `--set` and `--list-sets` to enable single pass counter collection for predefined subsets of metrics
+
 ### Changed
 
 * Changed the default ``rocprof`` version to ``rocprofv3``. This is used when environment variable ``ROCPROF`` is not set.
