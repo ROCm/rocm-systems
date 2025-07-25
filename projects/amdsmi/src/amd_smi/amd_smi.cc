@@ -2196,15 +2196,6 @@ amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle
     return AMDSMI_STATUS_SUCCESS;
 }
 
-static void translated_link_type(amdsmi_link_type_t *type) {
-    // Convert type to match rocm-smi or amd-smi
-    if (*type == AMDSMI_LINK_TYPE_PCIE)
-        *type = AMDSMI_LINK_TYPE_XGMI;
-    else if (*type == AMDSMI_LINK_TYPE_XGMI)
-        *type = AMDSMI_LINK_TYPE_PCIE;
-    return;
-}
-
 amdsmi_status_t
 amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
                         uint64_t *hops, amdsmi_link_type_t *type) {
@@ -2218,12 +2209,8 @@ amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src, amdsmi_p
     r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
-    // Convert type to match rocm-smi
-    translated_link_type(type);
     auto rstatus = rsmi_topo_get_link_type(src_device->get_gpu_id(), dst_device->get_gpu_id(),
                 hops, reinterpret_cast<RSMI_IO_LINK_TYPE*>(type));
-    // Convert type to match amd-smi
-    translated_link_type(type);
     return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
@@ -2260,13 +2247,9 @@ amdsmi_topo_get_p2p_status(amdsmi_processor_handle processor_handle_src,
     r = get_gpu_device_from_handle(processor_handle_dst, &dst_device);
     if (r != AMDSMI_STATUS_SUCCESS)
         return r;
-    // Convert type to match rocm-smi
-    translated_link_type(type);
     auto rstatus = rsmi_topo_get_p2p_status(src_device->get_gpu_id(), dst_device->get_gpu_id(),
                 reinterpret_cast<RSMI_IO_LINK_TYPE*>(type),
                 reinterpret_cast<rsmi_p2p_capability_t*>(cap));
-    // Convert type to match amd-smi
-    translated_link_type(type);
     return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
