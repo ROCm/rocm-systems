@@ -78,7 +78,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void) {
   HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupport();
 
   if (result)
-    return result;
+    return HSAKMT_STATUS_SUCCESS;
 
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
