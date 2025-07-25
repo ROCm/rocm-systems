@@ -51,7 +51,8 @@ find_program(
     NAMES clang
     HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
     PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-    PATH_SUFFIXES bin llvm/bin NO_CACHE)
+    PATH_SUFFIXES bin llvm/bin
+    NO_CACHE)
 mark_as_advanced(rocmclang_EXECUTABLE)
 
 if(rocmclang_EXECUTABLE AND rocmclangpp_EXECUTABLE)
