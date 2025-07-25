@@ -3,22 +3,21 @@ name: Documentation
 on:
   workflow_dispatch:
   push:
-    branches: [ amd-staging, amd-mainline ]
     paths:
-      - '*.md'
-      - 'VERSION'
-      - 'source/docs/**'
-      - 'source/scripts/update-docs.sh'
-      - 'source/include/rocprofiler-sdk/**'
-      - '.github/workflows/docs.yml'
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/VERSION'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
+      - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
+      - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
   pull_request:
     paths:
-      - '*.md'
-      - 'VERSION'
-      - 'source/docs/**'
-      - 'source/scripts/update-docs.sh'
-      - 'source/include/rocprofiler-sdk/**'
-      - '.github/workflows/docs.yml'
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/VERSION'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
+      - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
+      - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -39,6 +38,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+            sparse-checkout: projects/rocprofiler-sdk
             submodules: true
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -55,7 +55,7 @@ jobs:
           apt-get install -y doxygen graphviz build-essential cmake
       - name: Build Docs
         shell: bash -el {0}
-        working-directory: source/docs
+        working-directory: projects/rocprofiler-sdk/source/docs
         run: |
           conda init
           conda env create -n rocprofiler-docs -f environment.yml
@@ -68,7 +68,7 @@ jobs:
         if: ${{ github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./docs
+          path: projects/rocprofiler-sdk/docs
 
   deploy-docs:
     if: github.ref == 'refs/heads/amd-mainline'
