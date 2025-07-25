@@ -155,8 +155,6 @@ extern hsakmtRuntime *dxg_runtime;
 #define CHECK_DXG_OPEN() \
 	do { if (dxg_runtime->dxg_open_count == 0 || dxg_runtime->is_forked) return HSAKMT_STATUS_KERNEL_IO_CHANNEL_NOT_OPENED; } while (0)
 
-extern int PAGE_SHIFT;
-
 /* 64KB BigK fragment size for TLB efficiency */
 #define GPU_BIGK_PAGE_SIZE (1 << 16)
 
