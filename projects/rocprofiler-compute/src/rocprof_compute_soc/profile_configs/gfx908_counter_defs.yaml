@@ -2250,35 +2250,40 @@ rocprofiler-sdk:
       - gfx908
       expression: reduce(TCC_WRITEBACK,sum)
   - name: TCC_EA_WR_UNCACHED_32B_sum
-    description: .
+    description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic. Note that CC
+      mtypes can produce uncached requests, and those are included in this. A 64-byte request will be counted as 2. Sum over
+      TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_WR_UNCACHED_32B,sum)
   - name: TCC_EA_WRREQ_STALL_sum
-    description: .
+    description: Number of cycles a write request was stalled. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_WRREQ_STALL,sum)
   - name: TCC_EA_WRREQ_IO_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles a EA write request was stalled because the interface was out of IO credits. Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_WRREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_GMI_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles a EA write request was stalled because the interface was out of GMI credits. Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_WRREQ_GMI_CREDIT_STALL,sum)
   - name: TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles a EA write request was stalled because the interface was out of DRAM credits. Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
@@ -2292,56 +2297,64 @@ rocprofiler-sdk:
       - gfx908
       expression: reduce(TCC_TOO_MANY_EA_WRREQS_STALL,sum)
   - name: TCC_EA_WRREQ_LEVEL_sum
-    description: .
+    description: The sum of the number of EA write requests in flight. This is primarily meant for measure average EA write
+      latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_WRREQ_LEVEL,sum)
   - name: TCC_EA_RDREQ_LEVEL_sum
-    description: .
+    description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure average EA read
+      latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_RDREQ_LEVEL,sum)
   - name: TCC_EA_ATOMIC_sum
-    description: .
+    description: Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests. Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_ATOMIC,sum)
   - name: TCC_EA_ATOMIC_LEVEL_sum
-    description: .
+    description: The sum of the number of EA atomics in flight. This is primarily meant for measure average EA atomic latency.
+      Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_ATOMIC_LEVEL,sum)
   - name: TCC_EA_RD_UNCACHED_32B_sum
-    description: .
+    description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted as 2 Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_RD_UNCACHED_32B,sum)
   - name: TCC_EA_RDREQ_IO_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles there was a stall because the read request interface was out of IO credits. Stalls occur
+      regardless of whether a read needed to be performed or not. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_RDREQ_IO_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_GMI_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles a EA write request was stalled because the interface was out of GMI credits. Sum over TCC
+      instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_RDREQ_GMI_CREDIT_STALL,sum)
   - name: TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum
-    description: .
+    description: Number of cycles there was a stall because the read request interface was out of DRAM credits. Stalls occur
+      regardless of whether a read needed to be performed or not. Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
@@ -2376,14 +2389,14 @@ rocprofiler-sdk:
       - gfx908
       expression: reduce(TCC_ALL_TC_OP_INV_EVICT,sum)
   - name: TCC_EA_RDREQ_DRAM_sum
-    description: .
+    description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
       - gfx908
       expression: reduce(TCC_EA_RDREQ_DRAM,sum)
   - name: TCC_EA_WRREQ_DRAM_sum
-    description: .
+    description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances.
     properties: []
     definitions:
     - architectures:
