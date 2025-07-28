@@ -26,7 +26,6 @@
 #include <ctime>
 #include <cstring>
 #include <cassert>
-#include "libhsakmt.h"
 #include "impl/wddm/device.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,

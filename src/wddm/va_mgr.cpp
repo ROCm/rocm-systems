@@ -2,7 +2,6 @@
 #include <map>
 #include <algorithm>
 #include "impl/wddm/va_mgr.h"
-#include "libhsakmt.h"
 
 using namespace std;
 

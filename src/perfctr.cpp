@@ -22,7 +22,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  */
-#include "libhsakmt.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterProperties(
     HSAuint32 NodeId, HsaCounterProperties **CounterProperties) {

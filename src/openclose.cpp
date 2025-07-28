@@ -34,7 +34,6 @@
 #include <cstdio>
 #include <strings.h>
 #include <cassert>
-#include "libhsakmt.h"
 
 
 hsakmtRuntime *dxg_runtime = new hsakmtRuntime();

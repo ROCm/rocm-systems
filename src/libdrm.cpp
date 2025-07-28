@@ -43,7 +43,6 @@
 
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
-#include "libhsakmt.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
     HSAuint32 NodeId, HsaAMDGPUDeviceHandle *DeviceHandle) {

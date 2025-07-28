@@ -78,7 +78,7 @@ endif ()
 set ( BUILD_VERSION_STRING "${BUILD_VERSION_MAJOR}.${BUILD_VERSION_MINOR}.${BUILD_VERSION_PATCH}" )
 
 ## Compiler flags
-set (HSAKMT_CXX_FLAGS -fPIC)
+set (HSAKMT_CXX_FLAGS -fPIC -include ${CMAKE_CURRENT_SOURCE_DIR}/src/libhsakmt.h)
 
 if ( CMAKE_COMPILER_IS_GNUCC )
     set ( HSAKMT_CXX_FLAGS "${HSAKMT_CXX_FLAGS}" -Wlogical-op)

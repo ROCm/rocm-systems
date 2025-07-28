@@ -27,7 +27,6 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include "libhsakmt.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingSupport(void) {
   CHECK_DXG_OPEN();

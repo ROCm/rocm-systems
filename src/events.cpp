@@ -27,7 +27,6 @@
 #include <cassert>
 #include <thread>
 #include <chrono>
-#include "libhsakmt.h"
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
                                           bool ManualReset, bool IsSignaled,

@@ -46,7 +46,6 @@
 
 #include "impl/wddm/queue.h"
 #include "impl/registers.h"
-#include "libhsakmt.h"
 
 #include "hsa-runtime/inc/hsa.h"
 #include "hsa-runtime/inc/hsa_ven_amd_loader.h"

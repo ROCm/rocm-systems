@@ -23,7 +23,6 @@
  * DEALINGS IN THE SOFTWARE.
  */
 #include <cinttypes>
-#include "libhsakmt.h"
 #include "impl/wddm/device.h"
 #include "impl/wddm/queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"

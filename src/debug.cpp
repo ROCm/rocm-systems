@@ -26,7 +26,6 @@
 #include <cassert>
 #include <cstring>
 
-#include "libhsakmt.h"
 
 static uint32_t runtime_capabilities_mask = 0;
 

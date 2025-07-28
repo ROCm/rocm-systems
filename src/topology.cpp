@@ -38,7 +38,6 @@
 #include <unistd.h>
 #include <sys/sysinfo.h>
 
-#include "libhsakmt.h"
 #include "impl/wddm/types.h"
 #include "impl/wddm/device.h"
 #include "util/utils.h"
