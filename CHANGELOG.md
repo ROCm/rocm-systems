@@ -16,14 +16,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add notice for change in default output format to `rocpd` in a future release
   * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
-
 * When `--format-rocprof-output rocpd` is used, only pmc_perf.csv will be written to workload directory instead of mulitple csv files.
-
 * Improve analysis block based filtering to accept metric id level filtering
   * This can be used to collect individual metrics from various sections of analysis config
-
 * CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
   * Remove metrics from analysis configuration files which are explicitly marked as empty or None
+* Change the basic (default) view of TUI from aggregated analysis to kernel analysis
 
 ### Resolved issues
 
@@ -42,7 +40,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Usage of rocm-smi
 * Hardware IP block based filtering has been removed in favor of analysis report block based filtering
-
+* Removed aggregated analysis view from TUI analyze mode
 
 ## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
 
