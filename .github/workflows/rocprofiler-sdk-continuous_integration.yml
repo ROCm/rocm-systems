@@ -1,20 +1,21 @@
-name: Continuous Integration
+name: RocProfiler-SDK Continuous Integration
 
 on:
   workflow_dispatch:
   push:
-    branches: [ amd-staging, amd-mainline ]
-    paths-ignore:
-      - '*.md'
-      - '**/README.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - '**/README.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -188,7 +189,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprof-azure-${{ matrix.os }}-emu-runner-set
+    runs-on: rocprofiler-ubuntu-22
 
     # define this for containers
     env:
@@ -261,7 +262,7 @@ jobs:
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-azure' || matrix.runner }}-emu-runner-set
+    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprofiler-ubuntu-22' || matrix.runner }}-emu-runner-set
 
     # define this for containers
     env:
