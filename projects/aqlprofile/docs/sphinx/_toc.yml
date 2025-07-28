@@ -10,7 +10,7 @@ subtrees:
   - caption: Install
     entries:
     - file: install/aqlprofile-install.rst
-      title: Install AQLprofile 
+      title: Install AQLProfile 
 
   - caption: Examples
     entries:

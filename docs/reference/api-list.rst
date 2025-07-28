@@ -1,7 +1,7 @@
-AQLprofile APIs
+AQLProfile APIs
 ===============
 
-Learn about the typical APIs used in AQLprofile.
+Learn about the typical APIs used in AQLProfile.
 
 The APIs in ``hsa_ven_amd_aqlprofile.h`` are used by legacy tools such
 as ``rocprof`` and ``rocprofv2``. These APIs may be deprecated in the
@@ -17,8 +17,8 @@ From header ``aql_profile_v2.h``
 +--------------------+-------------------------------------------------+
 | API Name           | Purpose                                         |
 +====================+=================================================+
-| ``aqlprofil        | Registers an agent for profiling using basic    |
-| e_register_agent`` | agent info.                                     |
+| ``aqlprofile        | Registers an agent for profiling using basic    |
+|  _register_agent`` | agent info.                                     |
 +--------------------+-------------------------------------------------+
 | ``aqlprofile_reg   | Registers an agent for profiling using extended |
 | ister_agent_info`` | agent info and versioning.                      |
