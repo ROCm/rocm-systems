@@ -108,12 +108,21 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       deviceMallocUncached[1] = true;
     }
 
+    numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
+
     // Peer-to-peer (inter-device) copy subtest
     if (srcTest == 0 && dstTest == 0 && numDevices >= 2) {
         // Allocate src on device 0
         HIP_CHECK(hipSetDevice(0));
         HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
-        setData(srcBuffer, bufSize_, 0xd0);
+        hipError_t errMemset = hipMemset(srcBuffer, 0xd0, bufSize_);
+        printf("hipMemset err=%d\n", errMemset);
+        if (errMemset != hipSuccess) {
+            hipFree(srcBuffer);
+            hipFree(dstBuffer);
+            continue;
+        }
+        hipError_t errCopy = hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDevice);
     
         // Allocate dst on device 1
         HIP_CHECK(hipSetDevice(1));
@@ -158,48 +167,33 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         
         continue; // Skip the rest of the loop for this case
     }
-    // Device-to-Device (intra-device) copy subtest using hipMemcpyDeviceToDeviceNoCU
-    else if (srcTest == 0 && dstTest == 0 && numDevices == 1) {
-        // Allocate src and dst on device 0
+    // Device-to-device (intra-device) copy subtest using hipMemcpyDeviceToDeviceNoCU kind
+    if (srcTest == 0 && dstTest == 0 && numDevices >= 1) {
         HIP_CHECK(hipSetDevice(0));
         HIP_CHECK(hipMalloc(&srcBuffer, bufSize_));
         HIP_CHECK(hipMalloc(&dstBuffer, bufSize_));
-        setData(srcBuffer, bufSize_, 0xd0);
-    
+        HIP_CHECK(hipMemset(srcBuffer, 0xd0, bufSize_));
         // Warm up
-        HIP_CHECK(hipMemcpyDeviceToDeviceNoCU(dstBuffer, srcBuffer, bufSize_));
-    
+        HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU));
         // Timing
         auto all_start = std::chrono::steady_clock::now();
         for (unsigned int i = 0; i < numIter; i++) {
-            HIP_CHECK(hipMemcpyDeviceToDeviceNoCU(dstBuffer, srcBuffer, bufSize_));
+            HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU));
         }
         HIP_CHECK(hipDeviceSynchronize());
         auto all_end = std::chrono::steady_clock::now();
-      
         std::chrono::duration<double> elapsed_secs = all_end - all_start;
-        double perf = (static_cast<double>(bufSize_ * numIter) *
-                       static_cast<double>(1e-09)) / elapsed_secs.count();
-      
-        INFO("HIPPerfBufferCopySpeed[D2D-NoCU]\t( " << bufSize_ <<
-             ")\ts:dev0 d:dev0\ti:" << numIter <<
-             "\t(GB/s) perf\t" << (float)perf);
-        
+        double perf = (static_cast<double>(bufSize_ * numIter) * static_cast<double>(1e-09)) / elapsed_secs.count();
+        INFO("HIPPerfBufferCopySpeed[IntraD2DNoCU]\t( " << bufSize_ << ")\ts:dev0 d:dev0\ti:" << numIter << "\t(GB/s) perf\t" << (float)perf);
         // Verification
         void* temp = malloc(bufSize_ + 4096);
         HIP_CHECK(hipMemcpy(temp, dstBuffer, bufSize_, hipMemcpyDeviceToHost));
         checkData(temp, bufSize_, 0xd0);
         free(temp);
-        
-        // Free
         HIP_CHECK(hipFree(srcBuffer));
         HIP_CHECK(hipFree(dstBuffer));
-        HIP_CHECK(hipSetDevice(0)); // restore
-        
-        continue; // Skip the rest of the loop for this case
+        continue;
     }
-    
-    numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
     if (deviceMallocUncached[0]) {
       HIP_CHECK(hipExtMallocWithFlags(&srcBuffer, bufSize_, hipDeviceMallocUncached));
@@ -377,7 +371,7 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
      " hM - hipMalloc(device), hHR - hipHostRegister(pinned),"
      " hHM - hipHostMalloc(prePinned), hMUC - hipMallocUncached\n");
 
-    REQUIRE(true == hipPerfBufferCopySpeed_test(1));
+    REQUIRE(true == hipPerfBufferCopySpeed_test(0));
   }
 }
 
