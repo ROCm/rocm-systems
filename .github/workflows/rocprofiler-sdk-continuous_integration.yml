@@ -72,6 +72,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
@@ -83,6 +84,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -94,12 +96,14 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
+          cd projects/rocprofiler-sdk
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
+        cd projects/rocprofiler-sdk
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
@@ -124,12 +128,14 @@ jobs:
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       run:
+        cd projects/rocprofiler-sdk
         cmake --build build --target install --parallel 16
 
     - name: Build Packaging
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       run:
+        cd projects/rocprofiler-sdk
         cmake --build build --target package --parallel 16
 
     - name: Test Install Build
@@ -137,6 +143,7 @@ jobs:
       timeout-minutes: 20
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -150,6 +157,7 @@ jobs:
       timeout-minutes: 5
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk 
         export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
         ls -la
         ls -la ./build
@@ -162,6 +170,7 @@ jobs:
       timeout-minutes: 20
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
@@ -203,6 +212,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         if [ "${OS_TYPE}" == "rhel" ]; then
           dnf makecache
@@ -217,6 +227,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -228,12 +239,14 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
+          cd projects/rocprofiler-sdk
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
+        cd projects/rocprofiler-sdk
         if [ "${OS_TYPE}" == "rhel" ]; then source scl_source enable gcc-toolset-11; fi;
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
@@ -276,6 +289,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev
@@ -290,6 +304,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
@@ -299,12 +314,14 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       run: |
+          cd projects/rocprofiler-sdk
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
       shell: bash
       run:
+        cd projects/rocprofiler-sdk
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
