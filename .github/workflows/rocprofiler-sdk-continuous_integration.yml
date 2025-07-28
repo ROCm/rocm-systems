@@ -102,7 +102,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      run:
+      run: |
         cd projects/rocprofiler-sdk
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
@@ -127,14 +127,14 @@ jobs:
     - name: Install
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
-      run:
+      run: |
         cd projects/rocprofiler-sdk
         cmake --build build --target install --parallel 16
 
     - name: Build Packaging
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
-      run:
+      run: |
         cd projects/rocprofiler-sdk
         cmake --build build --target package --parallel 16
 
@@ -245,7 +245,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      run:
+      run: |
         cd projects/rocprofiler-sdk
         if [ "${OS_TYPE}" == "rhel" ]; then source scl_source enable gcc-toolset-11; fi;
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
@@ -320,7 +320,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 45
       shell: bash
-      run:
+      run: |
         cd projects/rocprofiler-sdk
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
