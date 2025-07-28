@@ -49,14 +49,12 @@ How does AQLProfile fit into the ROCm profiling stack?
 
 Here's the typical workflow:
 
-**Application** → **rocprofiler-sdk** → **AQLProfile** → **AMD GPU
-hardware**
+Application → ``rocprofiler-sdk`` ⇄ AQLProfile  
+``rocprofiler-sdk`` → ``HSA/ROCR/KFD`` → AMD GPU hardware
 
--  AQLProfile provides the mechanisms for constructing profiling
-   commands, managing command buffers, and interacting with hardware
-   counters.
--  The ``rocprofiler-sdk`` provides a higher-level API and user-facing
-   tools, using AQLProfile internally.
+- **AQLprofile** generates profiling command packets (AQL/PM4) tailored to the GPU architecture. It does *not* interact with hardware or drivers directly; it only produces the packets and buffer requirements requested by ``rocprofiler-sdk``.
+ 
+- **rocprofiler-sdk** provides a higher-level API and user-facing tools, using AQLprofile internally. It manages profiling sessions, submits packets to the GPU via HSA/ROCR/KFD, and collects results.
 
 Supported architectures and counter blocks
 ------------------------------------------
