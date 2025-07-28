@@ -5,7 +5,7 @@ Agents
 ------
 
 Agents represent computational devices (CPUs, GPUs) in the Heterogeneous
-System Architecture (HSA) runtime. In AQLprofile, agents are discovered
+System Architecture (HSA) runtime. In AQLProfile, agents are discovered
 via HSA APIs and encapsulated in the ``AgentInfo`` structure. Each agent
 contains metadata such as device type, name, compute unit count, and
 memory pools.
@@ -52,7 +52,7 @@ Command packets
 Command packets are AQL or PM4 packets that encode profiling commands
 for the GPU. They're constructed and written into command buffers.
 
-They're built using AQLprofile APIs or helper functions and submitted to
+They're built using AQLProfile APIs or helper functions and submitted to
 the GPU via HSA queues.
 
 .. code:: cpp
@@ -71,7 +71,7 @@ event type, list of events, command buffer, and additional parameters.
 
 Profile objects are constructed by specifying the agent, event type
 (PMC, SQTT), events to collect, and associated buffers. They're passed
-to AQLprofile APIs to start, stop, and read profiling data.
+to AQLProfile APIs to start, stop, and read profiling data.
 
 .. code:: cpp
 

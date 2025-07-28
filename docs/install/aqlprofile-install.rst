@@ -1,12 +1,12 @@
 .. meta::
-  :description: AQLprofile installation process
-  :keywords: AQLprofile, ROCm, install
+  :description: AQLProfile installation process
+  :keywords: AQLProfile, ROCm, install
 
 ******************
-Install AQLprofile
+Install AQLProfile
 ******************
 
-Learn how to build AQLprofile with a script or with CMake, then install the library with a command.
+Learn how to build AQLProfile with a script or with CMake, then install the library with a command.
 
 Prerequisites
 =============
@@ -17,10 +17,10 @@ Before you begin, ensure these tools and dependencies are installed:
 * ``rocm-llvm-dev`` (required to build tests)
 
 
-Build AQLprofile
+Build AQLProfile
 ================
 
-You can build AQLprofile using either the provided build script (recommended for most users) or by manually invoking CMake for custom builds.
+You can build AQLProfile using either the provided build script (recommended for most users) or by manually invoking CMake for custom builds.
 
 
 Option 1: Use the build script (Recommended)
@@ -66,10 +66,10 @@ To enable debug tracing, set this environment variable before running CMake:
 This enables verbose debug output of the command packets while this library executes.
 
 
-Install the AQLprofile libraries
+Install the AQLProfile libraries
 ================================
 
-Once your build is successful, install the AQLprofile libraries with:
+Once your build is successful, install the AQLProfile libraries with:
 
 .. code:: bash
 
