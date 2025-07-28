@@ -312,6 +312,9 @@ configure_settings(bool _init)
                               "Enable causal profiling analysis", false, "backend",
                               "causal", "analysis");
 
+    ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCPD", "Enable rocpd backend", false,
+                              "backend", "rocpd");
+
     ROCPROFSYS_CONFIG_SETTING(bool, "ROCPROFSYS_USE_ROCM",
                               "Enable ROCm API and kernel tracing", true, "backend",
                               "rocm");
@@ -1246,10 +1249,17 @@ configure_signal_handler(const std::shared_ptr<settings>& _config)
     static auto _dyninst_trampoline_signal =
         getenv("DYNINST_SIGNAL_TRAMPOLINE_SIGILL") ? SIGILL : SIGTRAP;
 
+    static auto root_pid =
+        get_env<pid_t>("ROCPROFSYS_ROOT_PROCESS", process::get_id(), false);
     if(_config->get_enable_signal_handler())
     {
         tim::signals::disable_signal_detection();
         signal_settings::enable(sys_signal::Interrupt);
+        auto is_child_process = root_pid != getpid();
+        if(is_child_process)
+        {
+            signal_settings::enable(sys_signal::Terminate);
+        }
         signal_settings::set_exit_action(rocprofsys_exit_action);
         signal_settings::check_environment();
         auto default_signals = signal_settings::get_default();
@@ -2345,6 +2355,40 @@ get_tmpdir()
 {
     static auto _v = get_config()->find("ROCPROFSYS_TMPDIR");
     return static_cast<tim::tsettings<std::string>&>(*_v->second).get();
+}
+
+std::string
+get_database_absolute_path(std::string_view database_name)
+{
+    const auto* _existing_path = std::getenv("ROCPROFSYS_DATABASE_DIR");
+    auto        _dir = _existing_path ? std::string{ _existing_path } : std::string{};
+    auto        _ext = std::string{ "db" };
+
+    auto _cfg = settings::compose_filename_config{ settings::use_output_suffix(),
+                                                   settings::default_process_suffix(),
+                                                   false, _dir };
+
+    const auto get_path = [](const std::string& path) {
+        size_t last_slash = path.find_last_of("/\\");
+        return (last_slash != std::string::npos) ? path.substr(0, last_slash + 1)
+                                                 : std::string{};
+    };
+
+    auto _val = settings::compose_output_filename(std::string(database_name), _ext, _cfg);
+    _dir      = get_path(_val);
+
+    setenv("ROCPROFSYS_DATABASE_DIR", _dir.c_str(), 1);
+
+    if(!_val.empty() && _val.at(0) != '/')
+        return settings::format(JOIN('/', "%env{PWD}%", _val), get_config()->get_tag());
+    return _val;
+}
+
+bool&
+get_use_rocpd()
+{
+    static auto _v = get_config()->at("ROCPROFSYS_USE_ROCPD");
+    return static_cast<tim::tsettings<bool>&>(*_v).get();
 }
 
 tmp_file::tmp_file(std::string _v)

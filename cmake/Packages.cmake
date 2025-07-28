@@ -53,6 +53,9 @@ rocprofiler_systems_add_interface_library(rocprofiler-systems-python
 rocprofiler_systems_add_interface_library(rocprofiler-systems-perfetto
                                           "Enables Perfetto support"
 )
+rocprofiler_systems_add_interface_library(rocprofiler-systems-sqlite3
+                                          "Use SQLite3 for rocpd data storage"
+)
 rocprofiler_systems_add_interface_library(rocprofiler-systems-timemory
                                           "Provides timemory libraries"
 )
@@ -531,6 +534,14 @@ rocprofiler_systems_checkout_git_submodule(
 )
 
 include(Perfetto)
+
+# ----------------------------------------------------------------------------------------#
+#
+# SQLite3
+#
+# ----------------------------------------------------------------------------------------#
+
+include(SQLite3)
 
 # ----------------------------------------------------------------------------------------#
 #
