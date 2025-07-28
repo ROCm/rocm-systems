@@ -98,6 +98,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev
@@ -116,6 +117,7 @@ jobs:
 
     - name: List Files
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run: |
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
@@ -127,6 +129,7 @@ jobs:
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
@@ -134,7 +137,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        python3 ./source/scripts/run-ci.py -B build
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -154,7 +157,7 @@ jobs:
       shell: bash
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 ./source/scripts/run-ci.py -B build
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -174,7 +177,7 @@ jobs:
       shell: bash
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 ./source/scripts/run-ci.py -B build
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -203,6 +206,7 @@ jobs:
       timeout-minutes: 5
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         echo "PWD: ${PWD}"
         ls -la
 
@@ -301,6 +305,7 @@ jobs:
     - name: Verify Test Labels
       timeout-minutes: 5
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run: |
         pushd build
         #
