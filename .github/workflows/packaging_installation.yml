@@ -36,6 +36,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        set -v
         ROCM_VERSION=${{ matrix.system.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
@@ -54,6 +55,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        set -v
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
         RPM_TAG=".el${OS_VERSION_MAJOR}"
         ROCM_VERSION=${{ matrix.system.rocm-version }}
@@ -61,7 +63,7 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         dnf -y --enablerepo=crb install perl-File-BaseDir
-        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/${{ matrix.system.os == 'RHEL' && 'rhel' || 'sle' }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os == 'RHEL' && 'rhel' || 'sle' }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
         yum install -y rocm-dev rocdecode-devel
         if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
@@ -69,6 +71,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        set -v
         cmake --preset release -S $SOURCE_DIR -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR
         cmake --build $BUILD_DIR --target all
 
@@ -76,6 +79,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        set -v
         cd $BUILD_DIR
         cpack -G ${{ matrix.system.package }}
 
@@ -83,14 +87,13 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        set -v
         dpkg -i *.{{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
 
     - name: Verify installation
       timeout-minutes: 15
       shell: bash
       run: |
-        cd /opt/rocprofiler-systems/bin
-        rocprof-sys-run --help
-        rocprof-sys-instrument --help
-        rocprof-sys-python --help
-        rocprof-sys-sample --help
+        set -v
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
