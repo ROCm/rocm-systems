@@ -405,9 +405,10 @@ class OmniSoC_Base:
             subvariable_matches = set()
             for var in variable_matches:
                 if var in build_in_vars:
-                    hw_counter_matches_vars, variable_matches_vars = (
-                        self.parse_counters_text(build_in_vars[var])
-                    )
+                    (
+                        hw_counter_matches_vars,
+                        variable_matches_vars,
+                    ) = self.parse_counters_text(build_in_vars[var])
                     hw_counter_matches.update(hw_counter_matches_vars)
                     subvariable_matches.update(variable_matches_vars)
             # process new found variables
