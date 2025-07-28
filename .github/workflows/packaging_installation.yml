@@ -54,6 +54,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
         RPM_TAG=".el${OS_VERSION_MAJOR}"
         ROCM_VERSION=${{ matrix.system.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
