@@ -58,7 +58,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-azure' || matrix.runner }}-emu-runner-set
+    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-ubuntu-22' || matrix.runner }}-emu-runner-set
 
     # define this for containers
     env:
@@ -198,7 +198,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprofiler-ubuntu-22
+    runs-on: rocprofiler-${{ matrix.os }}
 
     # define this for containers
     env:
