@@ -1,5 +1,5 @@
 
-name: Code Restrictions
+name: RocProfiler-SDK Code Restrictions
 permissions:
     contents: read
 
@@ -14,12 +14,13 @@ permissions:
 on:
   workflow_dispatch:
   pull_request:
-    paths-ignore:
-      - '.github/workflows/pull_*.yml'
-      - '.github/workflows/linting.yml'
-      - '.github/workflows/markdown_lint.yml'
-      - '*.md'
-      - '**/README.md'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
+      - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
+      - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -29,7 +30,7 @@ jobs:
   regex:
     runs-on: ubuntu-latest
     env:
-      FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx"
+      FOLDERS: "projects/rocprofiler-sdk/source/lib/common projects/rocprofiler-sdk/source/lib/rocprofiler-sdk projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-roctx"
 
     steps:
     - uses: actions/checkout@v4
@@ -42,6 +43,7 @@ jobs:
 
     - name: Apply restriction
       run: |
+        cd projects/rocprofiler-sdk
         set +e
         FILES="$(find ${FOLDERS} -type f)"
         GREP="$(grep -E -n 'std::regex|<regex>' ${FILES})"
