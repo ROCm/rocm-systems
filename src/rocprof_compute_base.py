@@ -169,6 +169,14 @@ class RocProfCompute:
         )
         self.__args = parser.parse_args()
 
+        if (
+            "format_rocprof_output" in self.__args
+            and self.__args.format_rocprof_output != "rocpd"
+        ):
+            console_warning(
+                f"The option --format-rocprof-output currently set to {self.__args.format_rocprof_output} will default to rocpd in a future release."
+            )
+
         if self.__args.mode == None:
             if self.__args.specs:
                 print(generate_machine_specs(self.__args))

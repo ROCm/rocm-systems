@@ -22,6 +22,7 @@
 # SOFTWARE.
 ##############################################################################el
 
+import csv
 import glob
 import logging
 import os
@@ -68,6 +69,30 @@ class RocProfCompute_Base:
     @demarcate
     def join_prof(self, out=None):
         """Manually join separated rocprof runs"""
+        if self.get_args().format_rocprof_output == "rocpd":
+            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
+            result_files = glob.glob(self.get_args().path + "/results_*.csv")
+            if out is None:
+                out = self.__args.path + "/pmc_perf.csv"
+            with open(out, "w", newline="") as outfile:
+                writer = None
+                for file in result_files:
+                    with open(file, "r", newline="") as infile:
+                        reader = csv.reader(infile)
+                        header = next(reader)
+                        # Write header only once
+                        if writer is None:
+                            writer = csv.writer(outfile)
+                            writer.writerow(header)
+                        for row in reader:
+                            writer.writerow(row)
+            console_debug(f"Created file: {out}")
+            # Delete results_*.csv files
+            for file in result_files:
+                os.remove(file)
+                console_debug(f"Deleted file: {file}")
+            return
+
         # Set default output directory if not specified
         if type(self.__args.path) == str:
             if out is None:
@@ -422,6 +447,7 @@ class RocProfCompute_Base:
                     mspec=self._soc._mspec,
                     loglevel=self.get_args().loglevel,
                     format_rocprof_output=self.get_args().format_rocprof_output,
+                    retain_rocpd_output=self.get_args().retain_rocpd_output,
                 )
                 end_run_prof = time.time()
                 actual_profiling_duration = end_run_prof - start_run_prof

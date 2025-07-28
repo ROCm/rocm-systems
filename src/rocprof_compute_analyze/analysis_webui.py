@@ -120,6 +120,7 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
@@ -168,6 +169,7 @@ class webui_analysis(OmniAnalyze_Base):
                 dir=self.dest_dir,
                 is_gui=True,
                 args=self.get_args(),
+                config=self._profiling_config,
             )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -300,6 +302,7 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 args.verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:

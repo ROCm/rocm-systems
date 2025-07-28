@@ -38,6 +38,7 @@ indirs = [
     "tests/workloads/vcopy/MI200",
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
+    "tests/workloads/vcopy/MI300X_A1_rocpd",
     "tests/workloads/vcopy/MI350",
 ]
 
@@ -266,7 +267,11 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        if dir.endswith("MI350"):
+        # if dir.endswith("MI350") or dir.endswith("MI300X_A1_rocpd"):
+        if dir in (
+            "tests/workloads/vcopy/MI350",
+            "tests/workloads/vcopy/MI300X_A1_rocpd",
+        ):
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -783,12 +788,12 @@ def test_parser_error_handling():
     from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
 
     try:
-        build_eval_string("AVG(SQ_WAVES)", None)
+        build_eval_string("AVG(SQ_WAVES)", None, config={})
         assert False, "Should have raised exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
 
-    assert build_eval_string("", "pmc_perf") == ""
+    assert build_eval_string("", "pmc_perf", config={}) == ""
     assert update_denom_string("", "per_wave") == ""
 
     class MockSysInfo:
@@ -813,12 +818,12 @@ def test_parser_error_handling():
     from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
 
     try:
-        build_eval_string("AVG(SQ_WAVES)", None)
+        build_eval_string("AVG(SQ_WAVES)", None, config={})
         assert False, "Should have raised exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
 
-    assert build_eval_string("", "pmc_perf") == ""
+    assert build_eval_string("", "pmc_perf", config={}) == ""
     assert update_denom_string("", "per_wave") == ""
 
     class MockSysInfo:
@@ -943,7 +948,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     }
 
     try:
-        eval_metric(mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True)
+        eval_metric(mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True, config={})
     except Exception as e:
         pass
 

@@ -128,11 +128,13 @@ class OmniAnalyze_Base:
         if not normalization_filter:
             for k, v in self._arch_configs.items():
                 parser.build_metric_value_string(
-                    v.dfs, v.dfs_type, self.__args.normal_unit
+                    v.dfs, v.dfs_type, self.__args.normal_unit, self._profiling_config
                 )
         else:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
+                parser.build_metric_value_string(
+                    v.dfs, v.dfs_type, normalization_filter, self._profiling_config
+                )
 
         args = self.__args
         # Error checking for multiple runs and multiple kernel filters
