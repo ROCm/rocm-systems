@@ -45,6 +45,7 @@ import pandas as pd
 import yaml
 
 import config
+from utils import rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -707,9 +708,14 @@ def parse_text(text_file):
 
 
 def run_prof(
-    fname, profiler_options, workload_dir, mspec, loglevel, format_rocprof_output
+    fname,
+    profiler_options,
+    workload_dir,
+    mspec,
+    loglevel,
+    format_rocprof_output,
+    retain_rocpd_output=False,
 ):
-    time_0 = time.time()
     fbase = path(fname).stem
 
     console_debug("pmc file: %s" % path(fname).name)
@@ -831,7 +837,29 @@ def run_prof(
 
     results_files = []
 
-    if rocprof_cmd.endswith("v2"):
+    if format_rocprof_output == "rocpd":
+        if rocprof_cmd == "rocprofiler-sdk" or rocprof_cmd.endswith("v3"):
+            # Write results_fbase.csv
+            rocpd_data.convert_db_to_csv(
+                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+                workload_dir + f"/results_{fbase}.csv",
+            )
+            if retain_rocpd_output:
+                shutil.copyfile(
+                    glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
+                    workload_dir + "/" + fbase + ".db",
+                )
+                console_warning(
+                    f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
+                )
+            # Remove temp directory
+            shutil.rmtree(workload_dir + "/" + "out")
+            return
+        else:
+            console_error(
+                "rocpd output format is only supported with rocprofiler-sdk or rocprofv3."
+            )
+    elif rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
         results_files = glob.glob(workload_dir + "/out/pmc_1/results_*.csv")
 
@@ -1058,7 +1086,6 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
         else:
             # when the input is not for timestamps, and counter csv file is not generated, we assume failed rocprof run and will completely bypass the file generation and merging for current pmc
             results_files_csv = []
-
     else:
         console_error("The output file of rocprofv3 can only support json or csv!!!")
 

@@ -249,7 +249,7 @@ Examples:
         required=False,
         metavar="",
         dest="format_rocprof_output",
-        choices=["json", "csv"],
+        choices=["json", "csv", "rocpd"],
         default="csv",
         help="\t\t\tSet the format of output file of rocprof.",
     )
@@ -279,6 +279,13 @@ Examples:
         required=False,
         default="/opt/rocm/lib/librocprofiler-sdk.so",
         help="\t\t\tSet the path to rocprofiler SDK library.",
+    )
+    profile_group.add_argument(
+        "--retain-rocpd-output",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tRetain the large raw rocpd database in workload directory.\n\t\t\tThis option requires --format-rocprof-output rocpd.",
     )
 
     ## Roofline Command Line Options

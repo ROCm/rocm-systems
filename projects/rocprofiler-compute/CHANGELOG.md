@@ -6,6 +6,26 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
+* Add `rocpd` choice for `--format-rocprof-output` option in profile mode
+* Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
+
+### Changed
+
+* Add notice for change in default output format to `rocpd` in a future release
+  * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
+
+* When `--format-rocprof-output rocpd` is used, only pmc_perf.csv will be written to workload directory instead of mulitple csv files.
+
+### Resolved issues
+
+### Known issues
+
+### Removed
+
+## ROCm Compute Profiler 3.2.0 for ROCm 7.0.0
+
+### Added
+
 * Support Roofline plot on CLI (single run)
 
 * Stochastic (hardware-based) PC sampling has been enabled for AMD Instinct MI300X series and later accelerators.

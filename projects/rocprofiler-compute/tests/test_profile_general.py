@@ -573,6 +573,21 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
+def test_path_rocpd(binary_handler_profile_rocprof_compute):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+
+    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
 def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     if soc in ("MI100"):
         # roofline is not supported on MI100
@@ -709,6 +724,45 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
     finally:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+def test_roof_rocpd(binary_handler_profile_rocprof_compute):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--roof-only", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    assert (Path(workload_dir) / "pmc_perf.csv").exists()
+    assert (Path(workload_dir) / "roofline.csv").exists()
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+def test_roofline_kernel_names_validation_error(binary_handler_profile_rocprof_compute):
+    """
+    Test validate_parameters() error: --roof-only is required for --kernel-names
+    This should trigger console_error("--roof-only is required for --kernel-names")
+    """
+    if soc in ("MI100"):
+        # roofline is not supported on MI100
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = ["--device", "0", "--kernel-names"]  # missing --roof-only
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
+
+    assert returncode != 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -1612,7 +1666,7 @@ def test_comprehensive_error_paths():
     assert result == 16
 
     try:
-        build_eval_string("test", None)
+        build_eval_string("test", None, config={})
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)

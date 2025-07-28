@@ -61,6 +61,7 @@ class tui_analysis(OmniAnalyze_Base):
             self.get_args().spatial_multiplexing,
             self.get_args().kernel_verbose,
             self.get_args().verbose,
+            self._profiling_config,
         )
 
         if self.get_args().spatial_multiplexing:
@@ -90,6 +91,7 @@ class tui_analysis(OmniAnalyze_Base):
             dir=self.path,
             is_gui=False,
             args=self.get_args(),
+            config=self._profiling_config,
         )
 
     def initalize_runs(self, normalization_filter=None):
