@@ -1,14 +1,13 @@
-name: Python Linting
+name: RocProfiler-SDK Python Linting
 
 on:
   workflow_dispatch:
   push:
-    branches: [ amd-staging, amd-mainline ]
     paths:
-      - '**.py'
+      - 'projects/rocprofiler-sdk'
   pull_request:
     paths:
-      - '**.py'
+      - 'projects/rocprofiler-sdk'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -23,16 +22,20 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
+        cd projects/roprofiler-sdk
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8
       run: |
+        cd projects/roprofiler-sdk
         # stop the build if there are Python syntax errors or undefined names
         flake8 source --count --show-source --statistics --select=E9,F63,F7,F82
         # flake8 options are defined in .flake8

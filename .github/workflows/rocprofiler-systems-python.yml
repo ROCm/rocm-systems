@@ -1,17 +1,15 @@
-name: Python
+name: RocProfiler-Systems Python Linting
 run-name: Python
 
 on:
   push:
-    branches: [ amd-mainline, amd-staging ]
     paths:
-      - 'source/python/gui/*.py'
-      - 'source/python/gui/**/*.py'
+      - 'projects/rocprofiler-systems/source/python/gui/*.py'
+      - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
   pull_request:
-    branches: [ amd-mainline, amd-staging ]
     paths:
-      - 'source/python/gui/*.py'
-      - 'source/python/gui/**/*.py'
+      - 'projects/rocprofiler-systems/source/python/gui/*.py'
+      - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,19 +24,21 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
-      working-directory: ${{ github.workspace }}/source/python/gui
       run: |
+        cd projects/rocprofiler-systems/source/python/gui
         python -m pip install --upgrade pip
         pip install flake8
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8
-      working-directory: ${{ github.workspace }}/source/python/gui
       run: |
+        cd projects/rocprofiler-systems/source/python/gui
         # stop the build if there are Python syntax errors or undefined names
         flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         # flake8 options are defined in setup.cfg
