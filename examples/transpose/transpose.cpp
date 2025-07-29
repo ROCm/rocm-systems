@@ -127,6 +127,9 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     int* in  = nullptr;
     int* out = nullptr;
 
+    hipEvent_t stop;
+    HIP_API_CALL(hipEventCreate(&stop));
+
     HIP_API_CALL(hipMalloc(&in, size));
     HIP_API_CALL(hipMalloc(&out, size));
     HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
@@ -150,6 +153,8 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     double time =
         std::chrono::duration_cast<std::chrono::duration<double>>(t2 - t1).count();
     float GB = (float) size * nitr * 2 / (1 << 30);
+
+    HIP_API_CALL(hipEventRecord(stop, stream));
 
     print_lock.lock();
     std::cout << "[" << rank << "][" << tid << "] Runtime of transpose is " << time

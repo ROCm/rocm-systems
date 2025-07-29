@@ -49,5 +49,6 @@ include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-decode-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-nic-perf.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-roctx-tests.cmake)
 include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-hip-stream.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-hipEvent-flow.cmake)
 
 add_subdirectory(source)
