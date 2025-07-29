@@ -28,7 +28,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
-  
+
 jobs:
   kws:
     if: ${{ github.event_name == 'pull_request' }}
