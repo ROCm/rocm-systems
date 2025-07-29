@@ -42,6 +42,7 @@ def main(argv=None, config=None):
     from . import merge
     from . import otf2
     from . import output_config
+    from . import package
     from . import pftrace
     from . import query
     from . import summary
@@ -72,6 +73,13 @@ Example usage:
 Example usage:
 
     TODO: Add examples for merge command
+"""
+
+    package_examples = """
+
+Example usage:
+
+    TODO: Add examples for package command
 """
 
     query_examples = """
@@ -134,6 +142,14 @@ Example usage:
         epilog=merge_examples,
     )
 
+    packager = subparsers.add_parser(
+        "package",
+        description="Package database files into .rpdb output",
+        allow_abbrev=False,
+        formatter_class=argparse.RawTextHelpFormatter,
+        epilog=package_examples,
+    )
+
     query_reporter = subparsers.add_parser(
         "query",
         description="Generate output on a query",
@@ -184,6 +200,16 @@ Example usage:
         help="Input path and filename to one or more database(s)",
     )
 
+    packager_required_params = packager.add_argument_group("Required options")
+    packager_required_params.add_argument(
+        "-i",
+        "--input",
+        required=True,
+        type=output_config.check_file_exists,
+        nargs="+",
+        help="Input path and filename to one or more database(s)",
+    )
+
     query_required_params = query_reporter.add_argument_group("Required options")
     query_required_params.add_argument(
         "-i",
@@ -215,6 +241,9 @@ Example usage:
     # merge: subparser args
     valid_merge_args = merge.add_args(merger)
 
+    # package: subparser args
+    valid_package_args = package.add_args(packager)
+
     # query: subparser args
     valid_out_config_args = output_config.add_args(query_reporter)
     valid_query_args = query.add_args(query_reporter)
@@ -240,6 +269,17 @@ Example usage:
         parser.print_help()
         return
 
+    # convert to real number of DB input files
+    input_files = package.flatten_rocpd_yaml_input_file(args.input)
+    db_count = len(input_files)
+
+    # TODO: add logic to determine how many DBs to merge into
+    ## SQLITE_MAX_ATTACHED == 10, can query once you have connection
+    ## if db_count > 10
+    ##  call merge to combine to fewer DBs
+    ##  optionally, can also package up into own .rpdb package
+    ## Only after DBs have been merged and < SQLITE_MAX_ATTACHED, then we can call importer to attach DBs for analysis/convert
+
     # if the user requested converter, process the conversion
     if args.command == "convert":
         # process the args
@@ -253,7 +293,7 @@ Example usage:
         window_args = time_window.process_args(args, valid_time_window_args)
 
         # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
+        importData = RocpdImportData(input_files)
 
         # adjust the time window view of the data
         if window_args is not None:
@@ -291,7 +331,13 @@ Example usage:
     elif args.command == "merge":
         # merge subparser args
         merge_args = merge.process_args(args, valid_merge_args)
-        merge.execute(args.input, **merge_args)
+        merge.execute(input_files, **merge_args)
+
+    # if the user requested package module, package up the database
+    elif args.command == "package":
+        # merge subparser args
+        package_args = package.process_args(args, valid_package_args)
+        package.execute(input_files, **package_args)
 
     # if the user requested query module, execute the query
     elif args.command == "query":
@@ -303,7 +349,7 @@ Example usage:
         all_args = {**query_args, **out_cfg_args}
 
         query.execute(
-            args.input,
+            input_files,
             args,
             window_args=window_args,
             **all_args,
@@ -317,7 +363,7 @@ Example usage:
         window_args = time_window.process_args(args, valid_time_window_args)
 
         # now start processing the data.  Import the data and merge the views
-        importData = RocpdImportData(args.input)
+        importData = RocpdImportData(input_files)
 
         # adjust the time window view of the data
         if window_args is not None:
