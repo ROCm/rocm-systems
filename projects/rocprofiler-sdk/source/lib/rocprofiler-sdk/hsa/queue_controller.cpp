@@ -27,7 +27,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include "lib/rocprofiler-sdk-queue/queue_registration_controller.hpp"
+#include "lib/rocprofiler-sdk-prestore/queue_registration_controller.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>

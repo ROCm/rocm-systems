@@ -34,7 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include "lib/rocprofiler-sdk-queue/queue_registration_controller.hpp"
+#include "lib/rocprofiler-sdk-prestore/queue_registration_controller.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
