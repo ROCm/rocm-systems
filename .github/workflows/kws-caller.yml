@@ -24,6 +24,11 @@ on:
       - 'projects/rocr-runtime/**'
       - 'projects/roctracer/**'
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  
 jobs:
   kws:
     if: ${{ github.event_name == 'pull_request' }}
