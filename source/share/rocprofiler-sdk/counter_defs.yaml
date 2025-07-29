@@ -28,9 +28,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
-      - gfx12
-      - gfx1200
-      - gfx1201
       expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
   - name: AvgNumActiveThreads
     description: 'Unit: percent'
@@ -1029,7 +1026,7 @@ rocprofiler-sdk:
       - gfx12
       - gfx1200
       - gfx1201
-      block: GL2c
+      block: GL2C
       event: 122
   - name: GL2C_MC_WRREQ_sum
     description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface. Sum over GL2C
@@ -1375,9 +1372,6 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
-      - gfx12
-      - gfx1200
-      - gfx1201
       expression: 100*reduce(SQC_ICACHE_HITS,sum)/reduce(SQC_ICACHE_REQ,sum)
   - name: L2CacheHit
     description: 'The percentage of fetch, write, atomic, and other instructions that hit the data in L2 cache. Value range:
@@ -1493,6 +1487,10 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
       expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
     - architectures:
       - gfx12
