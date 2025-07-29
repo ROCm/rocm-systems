@@ -36,7 +36,7 @@ Define parameters and profile
 .. code:: cpp
 
     hsa_ven_amd_aqlprofile_parameter_t params[] = {
-        { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, 16 } // 16 MB buffer
+        { HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, 0x1000000} // 16 MB buffer
     };
 
     hsa_ven_amd_aqlprofile_profile_t profile = {
