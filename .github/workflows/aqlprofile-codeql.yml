@@ -1,4 +1,4 @@
-name: "AQLProfile CodeQL Advanced"
+name: "AqlProfile CodeQL Advanced"
 
 on:
   push:
@@ -62,6 +62,13 @@ jobs:
         sparse-checkout: |
           projects/aqlprofile
           .github/workflows/aqlprofile-code-ql.yml
+    
+    - name: Configure Git Safe Directory
+      shell: bash
+      run: |
+        cd projects/aqlprofile
+        git config --global --add safe.directory '*'
+        git config --global --add safe.directory '/__w/rocm-systems/rocm-systems'
 
 
     - if: matrix.build-mode == 'manual'

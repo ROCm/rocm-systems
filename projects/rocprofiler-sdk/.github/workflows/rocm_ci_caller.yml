@@ -1,10 +1,18 @@
 name: ROCm CI Caller  
 on:  
-  pull_request:  
-    branches: [amd-staging, release/rocm-rel-*]  
+  pull_request:
     types: [opened, reopened, synchronize]  
+    paths:
+      - 'projects/rocm-smi-lib/**'
+      - 'projects/rocprofiler-register/**'
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/**'
   push:  
-    branches: [amd-mainline]  
+    paths:
+      - 'projects/rocm-smi-lib/**'
+      - 'projects/rocprofiler-register/**'
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/**'
   workflow_dispatch:  
   issue_comment:  
     types: [created]  

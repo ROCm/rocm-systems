@@ -1,17 +1,27 @@
-name: ROCm CI Caller
-on: 
-  # Commenting below to avoid re-runs of amd smi for trivial rebases
-  pull_request:  
-    branches: [amd-staging, amd-mainline, release/rocm-rel-*]  
-    types: [opened, reopened, synchronize]  
-  push:  
-    branches: [amd-mainline]  
+name: Aql ROCm CI Caller
+  
+on:  
+  push:
+    paths:
+      - 'projects/aqlprofile/**'
+      - 'projects/rdc/**'
+      - 'projects/rocminfo/**'
+      - 'projects/rocprofiler/**'
+      - 'projects/roctracer/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/aqlprofile/**'
+      - 'projects/rdc/**'
+      - 'projects/rocminfo/**'
+      - 'projects/rocprofiler/**'
+      - 'projects/roctracer/**'
   workflow_dispatch:
   issue_comment:  
-    types: [created]
+    types: [created]  
   
 jobs:  
-  call-workflow:  
+  call-workflow:
     if: ${{ github.event_name != 'issue_comment' || github.event.comment.body == '!verify' }}
     uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline 
     secrets: inherit  
@@ -21,5 +31,5 @@ jobs:
       input_pr_url: ${{ github.event_name == 'pull_request' && github.event.pull_request.html_url || '' }}  
       input_pr_title: ${{ github.event_name == 'pull_request' && github.event.pull_request.title || '' }}  
       repository_name: ${{ github.repository }}  
-      base_ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }} 
-      trigger_event_type: ${{ github.event_name }}
+      base_ref: ${{ github.event_name == 'pull_request' && github.base_ref || github.ref }}  
+      trigger_event_type: ${{ github.event_name }} 
