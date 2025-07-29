@@ -70,6 +70,12 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                 self.get_args().pid,
             ]
 
+            if self.get_args().attach_duration_msec:
+                args = args + [
+                    "--attach-duration-msec",
+                    self.get_args().attach_duration_msec,
+                ]
+
         # Kernel filtering
         if self.get_args().kernel:
             args.extend(["--kernel-include-regex", "|".join(self.get_args().kernel)])

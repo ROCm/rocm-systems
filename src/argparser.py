@@ -128,6 +128,15 @@ Examples:
         help="\t\t\tenable attach/detach mode and set its process id.",
     )
     profile_group.add_argument(
+        "--attach-duration-msec",
+        type=str,
+        dest="attach_duration_msec",
+        metavar="",
+        default=None,
+        required=False,
+        help="\t\t\tWhen --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach",
+    )
+    profile_group.add_argument(
         "-p",
         "--path",
         metavar="",
