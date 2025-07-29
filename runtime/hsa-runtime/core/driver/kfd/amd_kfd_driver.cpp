@@ -692,5 +692,29 @@ hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* freque
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::ShareMemory(void* mem, size_t size,
+                                    HsaSharedMemoryHandle* share_mem) const {
+  assert(share_mem);
+
+  if (HSAKMT_CALL(hsaKmtShareMemory(mem, size, share_mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
+                                             uint64_t* size) const {
+  assert(share_mem);
+  assert(mem);
+  assert(size);
+
+  if (HSAKMT_CALL(hsaKmtRegisterSharedHandle(share_mem, mem, size)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

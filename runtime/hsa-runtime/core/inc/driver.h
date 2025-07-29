@@ -351,6 +351,25 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
 
+  /// @brief Shares memory with another process.
+  /// @param[in] mem Pointer to the memory to be shared.
+  /// @param[in] size Size of the memory to be shared.
+  /// @param[out] share_mem Pointer to the shared memory handle.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully shared, or an error code.
+  virtual hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* share_mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Registers a shared memory handle.
+  /// @param[in] share_mem Pointer to the shared memory handle.
+  /// @param[out] mem Pointer to the memory.
+  /// @param[out] size Size of the memory.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully registered, or an error code.
+  virtual hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
+                                            uint64_t* size) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

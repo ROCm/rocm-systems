@@ -1216,6 +1216,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (info.agentBaseAddress != ptr || info.sizeInBytes != len)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
+  Agent* agent = Agent::Convert(info.agentOwner);
   bool useFrag = (block.base != ptr || block.length != len);
   // Assume all pointers and blocks are 4Kb aligned.
   uint32_t fragOffset = (reinterpret_cast<uint8_t*>(ptr) -
@@ -1229,7 +1230,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle *sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS)
+    if (agent->driver().ShareMemory(block.base, block.length, sHandle) != HSA_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     hsa_status_t err = HSA_STATUS_SUCCESS;
@@ -1250,7 +1251,6 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   handle->handle[1] = dmaBufFdHandleHi;
   handle->handle[2] = getpid(); // socket server name handle
 
-  Agent *agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
   // System sub allocations are not supported for now.
   if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1391,6 +1391,9 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
+  if (Runtime::IsDifferentDriver(*agents, num_agents)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  core::Driver* driver = &agents[0]->driver();
+
   auto fixFragment = [&](amdgpu_bo_handle ldrm_bo) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
@@ -1402,14 +1405,17 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     allocation_map_[importAddress].ldrm_bo = ldrm_bo;
   };
 
-  auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes,
-                          amdgpu_bo_import_result *res) {
-    int ret = ipc_dmabuf_supported_ ?
-          IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res,
-                          numNodes, nodes, &importAddress, &importSize) :
-          HSAKMT_CALL(hsaKmtRegisterSharedHandle(reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
-                                     &importAddress, &importSize));
-    if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+  auto importMemory = [&](unsigned int numNodes, HSAuint32* nodes, amdgpu_bo_import_result* res) {
+    if (ipc_dmabuf_supported_) {
+      int ret = IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res, numNodes, nodes,
+                                &importAddress, &importSize);
+      if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+    } else {
+      hsa_status_t ret = driver->RegisterSharedHandle(
+          reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle), &importAddress,
+          &importSize);
+      if (ret != HSA_STATUS_SUCCESS) return ret;
+    }
 
     return HSA_STATUS_SUCCESS;
   };

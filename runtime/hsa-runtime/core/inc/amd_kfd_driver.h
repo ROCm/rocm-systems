@@ -136,6 +136,9 @@ public:
                                   const HsaMemMapFlags* mem_flags, uint32_t num_nodes,
                                   const uint32_t* nodes) const override;
   hsa_status_t MakeMemoryUnresident(const void* mem) const override;
+  hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* share_mem) const override;
+  hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
+                                    uint64_t* size) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 
