@@ -1,4 +1,4 @@
-name: ROCm Release Compatibility
+name: RocProfiler-SDK ROCm Release Compatibility
 
 permissions:
     contents: read
@@ -6,16 +6,17 @@ permissions:
 on:
   workflow_dispatch:
   push:
-    branches: [ amd-staging, amd-mainline ]
-    paths-ignore:
-      - '*.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
   pull_request:
-    paths-ignore:
-      - '*.md'
-      - 'source/docs/**'
-      - 'CODEOWNERS'
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -59,6 +60,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
@@ -71,6 +73,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
@@ -81,6 +84,7 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        cd projects/rocprofiler-sdk
         echo "Number of processors: $(nproc)"
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
@@ -93,7 +97,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        python3 ./source/scripts/run-ci.py -B build
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-rocm-${{ matrix.rocm-release }}
           --build-jobs 4
           --site "$(hostname)"

@@ -4,10 +4,10 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - 'projects/rocprofiler-sdk'
+      - 'projects/rocprofiler-sdk/**'
   pull_request:
     paths:
-      - 'projects/rocprofiler-sdk'
+      - 'projects/rocprofiler-sdk/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
