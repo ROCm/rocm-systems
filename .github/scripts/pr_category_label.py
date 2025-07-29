@@ -28,9 +28,10 @@ Example Usage:
 """
 
 import argparse
-import sys
-import os
+import json
 import logging
+import os
+import sys
 from pathlib import Path
 from typing import List, Optional
 from github_cli_client import GitHubCLIClient
@@ -61,14 +62,8 @@ def compute_desired_labels(file_paths: list) -> set:
 
 def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run: bool) -> None:
     """Output the labels to add/remove to GITHUB_OUTPUT or log them in dry-run mode."""
-    existing_auto_labels = {
-        label for label in existing_labels
-        if label.startswith("project: ") or label.startswith("shared: ")
-    }
     to_add = sorted(desired_labels - set(existing_labels))
-    to_remove = sorted(existing_auto_labels - desired_labels)
     logger.debug(f"Labels to add: {to_add}")
-    logger.debug(f"Labels to remove: {to_remove}")
     if dry_run:
         logger.info("Dry run enabled. Labels will not be applied.")
     else:
@@ -76,9 +71,7 @@ def output_labels(existing_labels: List[str], desired_labels: List[str], dry_run
         if output_file:
             with open(output_file, 'a') as f:
                 print(f"label_add={','.join(to_add)}", file=f)
-                print(f"label_remove={','.join(to_remove)}", file=f)
             logger.info(f"Wrote to GITHUB_OUTPUT: add={','.join(to_add)}")
-            logger.info(f"Wrote to GITHUB_OUTPUT: remove={','.join(to_remove)}")
         else:
             print("GITHUB_OUTPUT environment variable not set. Outputs cannot be written.")
             sys.exit(1)
@@ -93,18 +86,19 @@ def main(argv=None) -> None:
     changed_files = [file for file in client.get_changed_files(args.repo, int(args.pr))]
 
     if not changed_files:
-        logger.warning("REST API failed or returned no changed files. Falling back to Git CLI...")
+        logger.warning("REST API failed or returned no changed files. Falling back to SHA-based Git diff...")
         try:
-            # Ensure fetch is safe
-            os.system("git fetch origin +refs/pull/*/merge:refs/remotes/origin/pr/*")
-            # Get merge commit ref for this PR
-            base_ref = f"origin/{os.getenv('GITHUB_BASE_REF', 'main')}"
-            head_ref = "HEAD"  # Assumes checkout to PR merge ref
-            result = os.popen(f"git diff --name-only {base_ref}...{head_ref}").read()
+            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
+            pr = json.loads(pr_data)
+            base_sha = pr["base"]["sha"]
+            head_sha = pr["head"]["sha"]
+            logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
+            os.system(f"git fetch origin {base_sha} {head_sha}")
+            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
             changed_files = result.strip().splitlines()
-            logger.info(f"Fallback changed files: {changed_files}")
+            logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:
-            logger.error(f"Git CLI fallback failed: {e}")
+            logger.error(f"SHA-based Git CLI fallback failed: {e}")
             sys.exit(1)
 
     existing_labels = client.get_existing_labels_on_pr(args.repo, int(args.pr))
