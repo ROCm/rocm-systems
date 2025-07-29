@@ -48,7 +48,6 @@ add_test(
         ${ROCPROFSYS_VALIDATION_PYTHON}
         ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -i
         ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/transpose-hipEvent-flow-sampling/perfetto-trace.proto
-        --flow-events hipEventRecord -t
-        /opt/trace_processor/bin/trace_processor_shell -p
+        --flow-events hipEventRecord -t /opt/trace_processor/bin/trace_processor_shell -p
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
 )
