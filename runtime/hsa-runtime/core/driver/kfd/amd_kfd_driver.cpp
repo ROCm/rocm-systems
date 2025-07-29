@@ -716,5 +716,19 @@ hsa_status_t KfdDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* share_
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::ReplaceAsanHeaderPage(void* mem) const {
+  if (HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReturnAsanHeaderPage(void* mem) const {
+  if (HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

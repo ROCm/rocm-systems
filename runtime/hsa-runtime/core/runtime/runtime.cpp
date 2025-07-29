@@ -368,7 +368,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr)) == HSAKMT_STATUS_SUCCESS);
+    assert(region->owner()->driver().ReturnAsanHeaderPage(ptr) == HSA_STATUS_SUCCESS);
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {

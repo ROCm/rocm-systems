@@ -139,6 +139,8 @@ public:
   hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* share_mem) const override;
   hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
                                     uint64_t* size) const override;
+  hsa_status_t ReplaceAsanHeaderPage(void* mem) const override;
+  hsa_status_t ReturnAsanHeaderPage(void* mem) const override;
 
   hsa_status_t OpenSMI(uint32_t node_id, int* fd) const override;
 

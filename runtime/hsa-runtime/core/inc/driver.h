@@ -370,6 +370,22 @@ public:
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
 
+  /// @brief Replaces the ASAN header page with a valid one.
+  /// @param[in] mem Pointer to the memory to be replaced.
+  /// @return HSA_STATUS_SUCCESS if the ASAN header page was successfully replaced, or an error
+  /// code.
+  virtual hsa_status_t ReplaceAsanHeaderPage(void* mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Returns the ASAN header page to its original state.
+  /// @param[in] mem Pointer to the memory to be returned.
+  /// @return HSA_STATUS_SUCCESS if the ASAN header page was successfully returned, or an error
+  /// code.
+  virtual hsa_status_t ReturnAsanHeaderPage(void* mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 
