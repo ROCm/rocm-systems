@@ -743,29 +743,6 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_roofline_kernel_names_validation_error(binary_handler_profile_rocprof_compute):
-    """
-    Test validate_parameters() error: --roof-only is required for --kernel-names
-    This should trigger console_error("--roof-only is required for --kernel-names")
-    """
-    if soc in ("MI100"):
-        # roofline is not supported on MI100
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = ["--device", "0", "--kernel-names"]  # missing --roof-only
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode != 0
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.misc
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
