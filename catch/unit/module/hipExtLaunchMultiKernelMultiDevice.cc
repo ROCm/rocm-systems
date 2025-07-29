@@ -133,4 +133,14 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
       REQUIRE(fabs(C_h[i] - (A_h[i] * A_h[i])) < 0.00000000001);
     }
   }
+  free(A_h);
+  free(C_h);
+  free(launchParamsList);
+  for (int i = 0; i < nGpu; i++) {
+    HIP_CHECK(hipSetDevice(i));
+    HIP_CHECK(hipStreamDestroy(stream[i]));
+
+    HIP_CHECK(hipFree(A_d[i]));
+    HIP_CHECK(hipFree(C_d[i]));
+  }
 }
