@@ -8,8 +8,8 @@ on:
     branches: [amd-staging, amd-mainline, release/**]
 
 env:
-  BUILD_DIR: './rocprof-sys-build/release'
-  SOURCE_DIR: './rocprof-sys-src'
+  BUILD_DIR: './release'
+  SOURCE_DIR: './source'
   INSTALL_DIR: '/opt/rocprofiler-systems'
 
 jobs:
@@ -55,9 +55,6 @@ jobs:
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
         apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
-        echo "/opt/rocm/bin" >> $GITHUB_PATH
-        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Setup ROCm (rpm)
       if: ${{ matrix.system.package == 'RPM'}}
