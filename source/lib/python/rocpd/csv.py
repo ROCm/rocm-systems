@@ -23,15 +23,117 @@
 # THE SOFTWARE.
 ###############################################################################
 
+import os
+
 from .importer import RocpdImportData
+from .query import export_sqlite_query
 from .time_window import apply_time_window
 from . import output_config
 from . import libpyrocpd
 
+def write_sql_query_to_csv(
+    connection: RocpdImportData, query, output_path, filename=""
+) -> None:
+    """Write the contents of a SQL query to a CSV file in the specified output path."""
+
+    # call query module to export to csv
+    export_path = os.path.join(output_path, f"{filename}.csv")
+    export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
+
+def write_agent_info_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            A.guid AS Guid,
+            json_extract(A.extdata, '$.node_id') AS Node_Id,
+            json_extract(A.extdata, '$.logical_node_id') AS Logical_Node_Id,
+            A.type AS Agent_Type,
+            json_extract(A.extdata, '$.cpu_cores_count') AS Cpu_Cores_Count,
+            json_extract(A.extdata, '$.simd_count') AS Simd_Count,
+            json_extract(A.extdata, '$.cpu_core_id_base') AS Cpu_Core_Id_Base,
+            json_extract(A.extdata, '$.simd_id_base') AS Simd_Id_Base,
+            json_extract(A.extdata, '$.max_waves_per_simd') AS Max_Waves_Per_Simd,
+            json_extract(A.extdata, '$.lds_size_in_kb') AS Lds_Size_In_Kb,
+            json_extract(A.extdata, '$.gds_size_in_kb') AS Gds_Size_In_Kb,
+            json_extract(A.extdata, '$.num_gws') AS Num_Gws,
+            json_extract(A.extdata, '$.wave_front_size') AS Wave_Front_Size,
+            json_extract(A.extdata, '$.num_xcc') AS Num_Xcc,
+            json_extract(A.extdata, '$.cu_count') AS Cu_Count,
+            json_extract(A.extdata, '$.array_count') AS Array_Count,
+            json_extract(A.extdata, '$.num_shader_banks') AS Num_Shader_Banks,
+            json_extract(A.extdata, '$.simd_arrays_per_engine') AS Simd_Arrays_Per_Engine,
+            json_extract(A.extdata, '$.cu_per_simd_array') AS Cu_Per_Simd_Array,
+            json_extract(A.extdata, '$.simd_per_cu') AS Simd_Per_Cu,
+            json_extract(A.extdata, '$.max_slots_scratch_cu') AS Max_Slots_Scratch_Cu,
+            json_extract(A.extdata, '$.gfx_target_version') AS Gfx_Target_Version,
+            json_extract(A.extdata, '$.vendor_id') AS Vendor_Id,
+            json_extract(A.extdata, '$.device_id') AS Device_Id,
+            json_extract(A.extdata, '$.location_id') AS Location_Id,
+            json_extract(A.extdata, '$.domain') AS Domain,
+            json_extract(A.extdata, '$.drm_render_minor') AS Drm_Render_Minor,
+            json_extract(A.extdata, '$.num_sdma_engines') AS Num_Sdma_Engines,
+            json_extract(A.extdata, '$.num_sdma_xgmi_engines') AS Num_Sdma_Xgmi_Engines,
+            json_extract(A.extdata, '$.num_sdma_queues_per_engine') AS Num_Sdma_Queues_Per_Engine,
+            json_extract(A.extdata, '$.num_cp_queues') AS Num_Cp_Queues,
+            json_extract(A.extdata, '$.max_engine_clk_ccompute') AS Max_Engine_Clk_Ccompute,
+            json_extract(A.extdata, '$.max_engine_clk_fcompute')  AS Max_Engine_Clk_Fcompute,
+            json_extract(A.extdata, '$.sdma_fw_version.uCodeSDMA') AS Sdma_Fw_Version,
+            json_extract(A.extdata, '$.fw_version.uCode') AS Fw_Version,
+            (COALESCE(json_extract(A.extdata, '$.capability.HotPluggable'), 0) << 0x0) |
+            (COALESCE(json_extract(A.extdata, '$.capability.HSAMMUPresent'), 0) << 0x1) |
+            (COALESCE(json_extract(A.extdata, '$.capability.SharedWithGraphics'), 0) << 0x2) |
+            (COALESCE(json_extract(A.extdata, '$.capability.QueueSizePowerOfTwo'), 0) << 0x3) |
+            (COALESCE(json_extract(A.extdata, '$.capability.QueueSize32bit'), 0) << 0x4) |
+            (COALESCE(json_extract(A.extdata, '$.capability.QueueIdleEvent'), 0) << 0x5) |
+            (COALESCE(json_extract(A.extdata, '$.capability.VALimit'), 0) << 0x6) |
+            (COALESCE(json_extract(A.extdata, '$.capability.WatchPointsSupported'), 0) << 0x7) |
+            ((COALESCE(json_extract(A.extdata, '$.capability.WatchPointsTotalBits'), 0) & 0xF) << 0x8) |
+            ((COALESCE(json_extract(A.extdata, '$.capability.DoorbellType'), 0) & 0x3) << 0xC) |
+            (COALESCE(json_extract(A.extdata, '$.capability.AQLQueueDoubleMap'), 0) << 0xE) |
+            (COALESCE(json_extract(A.extdata, '$.capability.DebugTrapSupported'), 0) << 0xF) |
+            (COALESCE(json_extract(A.extdata, '$.capability.WaveLaunchTrapOverrideSupported'), 0) << 0x10) |
+            (COALESCE(json_extract(A.extdata, '$.capability.WaveLaunchModeSupported'), 0) << 0x11) |
+            (COALESCE(json_extract(A.extdata, '$.capability.PreciseMemoryOperationsSupported'), 0) << 0x12) |
+            (COALESCE(json_extract(A.extdata, '$.capability.DEPRECATED_SRAM_EDCSupport'), 0) << 0x13) |
+            (COALESCE(json_extract(A.extdata, '$.capability.Mem_EDCSupport'), 0) << 0x14) |
+            (COALESCE(json_extract(A.extdata, '$.capability.RASEventNotify'), 0) << 0x15) |
+            ((COALESCE(json_extract(A.extdata, '$.capability.ASICRevision'), 0) & 0xF) << 0x16) |
+            (COALESCE(json_extract(A.extdata, '$.capability.SRAM_EDCSupport'), 0) << 0x1A) |
+            (COALESCE(json_extract(A.extdata, '$.capability.SVMAPISupported'), 0) << 0x1B) |
+            (COALESCE(json_extract(A.extdata, '$.capability.CoherentHostAccess'), 0) << 0x1C) |
+            (COALESCE(json_extract(A.extdata, '$.capability.DebugSupportedFirmware'), 0) << 0x1D) |
+            (COALESCE(json_extract(A.extdata, '$.capability.PreciseALUOperationsSupported'), 0) << 0x1E) |
+            (COALESCE(json_extract(A.extdata, '$.capability.PerQueueResetSupported'), 0) << 0x1F) AS Capability,
+            json_extract(A.extdata, '$.cu_per_engine') AS Cu_Per_Engine,
+            json_extract(A.extdata, '$.max_waves_per_cu') AS Max_Waves_Per_Cu,
+            json_extract(A.extdata, '$.workgroup_max_size') AS Workgroup_Max_Size,
+            json_extract(A.extdata, '$.family_id') AS Family_Id,
+            json_extract(A.extdata, '$.grid_max_size') AS Grid_Max_Size,
+            json_extract(A.extdata, '$.local_mem_size') AS Local_Mem_Size,
+            json_extract(A.extdata, '$.hive_id') AS Hive_Id,
+            json_extract(A.extdata, '$.gpu_id') AS Gpu_Id,
+            json_extract(A.extdata, '$.workgroup_max_dim.x') AS Workgroup_Max_Dim_X,
+            json_extract(A.extdata, '$.workgroup_max_dim.y') AS Workgroup_Max_Dim_Y,
+            json_extract(A.extdata, '$.workgroup_max_dim.z') AS Workgroup_Max_Dim_Z,
+            json_extract(A.extdata, '$.grid_max_dim.x') AS Grid_Max_Dim_X,
+            json_extract(A.extdata, '$.grid_max_dim.y') AS Grid_Max_Dim_Y,
+            json_extract(A.extdata, '$.grid_max_dim.z') AS Grid_Max_Dim_Z,
+            A.name AS Name,
+            json_extract(A.extdata, '$.vendor_name') AS Vendor_Name,
+            json_extract(A.extdata, '$.product_name') AS Product_Name,
+            A.model_name AS Model_Name
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_agent as A
+            ON A.guid = N.guid
+            AND A.nid = N.id
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_agent_info")
 
 def write_csv(importData, config):
-    return libpyrocpd.write_csv(importData, config)
 
+    write_agent_info_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
