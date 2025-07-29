@@ -31,6 +31,14 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Configure Env
+      shell: bash
+      run:
+        echo "/opt/rocm/bin" >> $GITHUB_PATH
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
+
     - name: Setup ROCm (deb)
       if: ${{ matrix.system.package == 'DEB'}}
       timeout-minutes: 15
@@ -56,15 +64,16 @@ jobs:
       shell: bash
       run: |
         set -v
-        RPM_TAG=".el$${{ contains(matrix.system.os-release, '8') && '8' || '9' }}"
+        RPM_TAG=".el${OS_VERSION_MAJOR}"
         ROCM_VERSION=${{ matrix.system.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        dnf -y --enablerepo=${{ contains(matrix.system.os-release, '8') && 'powertools' || 'crb'}} install perl-File-BaseDir
-        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os == 'RHEL' && 'rhel' || 'sle' }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
+        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
+        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/rhel/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
         yum install -y rocm-dev rocdecode-devel
-        if [ "${{ contains(matrix.system.os-release, '8') && '8' || '9' }}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Build rocprofiler-systems
       timeout-minutes: 15
