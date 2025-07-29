@@ -4,10 +4,12 @@ run-name: Python
 on:
   push:
     paths:
+      - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
   pull_request:
     paths:
+      - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'
       - 'projects/rocprofiler-systems/source/python/gui/**/*.py'
 
