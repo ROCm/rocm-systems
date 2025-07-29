@@ -168,7 +168,15 @@ Analyze mode
 
       $ rocprof-compute analyze --help
 
-See :doc:`analyze/mode` to learn about this mode in depth and to get started
+   Analyze mode now supports a lightweight Text-based User Interface (TUI) that
+   provides an interactive terminal experience for enhanced usability. To enable TUI mode,
+   use the ``--tui`` flag when running the analyze command:
+
+   .. code-block:: shell
+
+      $ rocprof-compute analyze --tui
+
+See :doc:`analyze/mode` to learn about these modes in depth and to get started
 with analysis using ROCm Compute Profiler.
 
 .. _modes-database:
