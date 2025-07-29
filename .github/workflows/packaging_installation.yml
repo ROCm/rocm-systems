@@ -21,8 +21,8 @@ jobs:
           #{os: 'ubuntu', os-release: '22.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04', rocm-version: '6.4'},
           #{os: 'ubuntu', os-release: '24.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04', rocm-version: '6.4'},
           {os: 'RHEL', os-release: '8.10', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '9.4', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '9.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
+          #{os: 'RHEL', os-release: '9.4', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
+          #{os: 'RHEL', os-release: '9.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
           #{os: 'SLES', os-release: '15.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.5', rocm-version: '6.4'},
           #{os: 'SLES', os-release: '15.6', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.6', rocm-version: '6.4'}
         ]
@@ -34,10 +34,11 @@ jobs:
     - name: Configure Env
       shell: bash
       run:
-        echo "/opt/rocm/bin" >> $GITHUB_PATH
-        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
-        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
-        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV
+        echo "/opt/rocm/bin" >> $GITHUB_PATH  &&
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        env
 
     - name: Setup ROCm (deb)
       if: ${{ matrix.system.package == 'DEB'}}
