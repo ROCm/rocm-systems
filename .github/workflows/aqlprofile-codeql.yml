@@ -1,10 +1,12 @@
-name: "CodeQL Advanced"
+name: "AQLProfile CodeQL Advanced"
 
 on:
   push:
-    branches: [ "amd-staging" ]
+    paths:
+      - 'projects/aqlprofile/**'
   pull_request:
-    branches: [ "amd-staging" ]
+    paths:
+      - 'projects/aqlprofile/**'
   schedule:
     - cron: '0 0 * * *'
 
@@ -56,12 +58,18 @@ jobs:
         
     - name: Checkout repository
       uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          projects/aqlprofile
+          .github/workflows/aqlprofile-code-ql.yml
+
 
     - if: matrix.build-mode == 'manual'
       name: Install requirements
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/aqlprofile
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev rocm-llvm-dev libgtest-dev libgmock-dev
@@ -93,6 +101,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run: |
+        cd projects/aqlprofile
         cmake -B /tmp/build -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DCMAKE_PREFIX_PATH=/opt/rocm
         cmake --build /tmp/build --target all --parallel 16
 
