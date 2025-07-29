@@ -56,8 +56,7 @@ jobs:
       shell: bash
       run: |
         set -v
-        OS_VERSION_MAJOR =${{ contains(matrix.system.os-release, '8') && '8' || '9' }}
-        RPM_TAG=".el${OS_VERSION_MAJOR}"
+        RPM_TAG=".el$${{ contains(matrix.system.os-release, '8') && '8' || '9' }}"
         ROCM_VERSION=${{ matrix.system.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
@@ -65,7 +64,7 @@ jobs:
         dnf -y --enablerepo=${{ contains(matrix.system.os-release, '8') && 'powertools' || 'crb'}} install perl-File-BaseDir
         yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os == 'RHEL' && 'rhel' || 'sle' }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
         yum install -y rocm-dev rocdecode-devel
-        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+        if [ "${{ contains(matrix.system.os-release, '8') && '8' || '9' }}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Build rocprofiler-systems
       timeout-minutes: 15
