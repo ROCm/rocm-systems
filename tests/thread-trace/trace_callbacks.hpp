@@ -30,7 +30,6 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
-#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
