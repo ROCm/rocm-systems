@@ -47,7 +47,7 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
     HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, ""), hipErrorInvalidImage);
   }
   SECTION("Invalid fatbin") {
-    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, "sample.txt"), hipErrorInvalidImage);
+    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, "not_a_module.txt"), hipErrorInvalidImage);
   }
   SECTION("Load Module with No Kernel function") {
     const auto loaded_module = LoadModuleIntoBuffer("emptyModuleCount.code");
