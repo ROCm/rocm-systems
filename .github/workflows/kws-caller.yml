@@ -1,0 +1,34 @@
+name: Rocm Validation Suite KWS
+on:
+  push:
+    paths:
+      - 'projects/aqlprofiler/**'
+      - 'projects/rdc/**'
+      - 'projects/rocm-smi-lib/**'
+      - 'projects/rocminfo/**'
+      - 'projects/rocprofiler/**'
+      - 'projects/rocprofiler-register/**'
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/**'
+      - 'projects/roctracer/**'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'projects/aqlprofiler/**'
+      - 'projects/rdc/**'
+      - 'projects/rocm-smi-lib/**'
+      - 'projects/rocminfo/**'
+      - 'projects/rocprofiler/**'
+      - 'projects/rocprofiler-register/**'
+      - 'projects/rocprofiler-sdk/**'
+      - 'projects/rocr-runtime/**'
+      - 'projects/roctracer/**'
+  workflow_dispatch:
+jobs:
+  kws:
+    if: ${{ github.event_name == 'pull_request' }}
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/kws.yml@mainline
+    secrets: inherit
+    with:
+      pr_number: ${{github.event.pull_request.number}}
+      base_branch: ${{github.base_ref}}
