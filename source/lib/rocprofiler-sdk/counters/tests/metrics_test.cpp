@@ -241,9 +241,9 @@ TEST(metrics, check_public_api_query)
         for(size_t i = 0; i < info.dimensions_count; i++)
         {
             const auto& dim = dims->at(i);
-            EXPECT_EQ(dim.size(), info.dimensions[i].instance_size);
-            EXPECT_EQ(dim.type(), info.dimensions[i].id);
-            EXPECT_EQ(std::string(info.dimensions[i].name), dim.name());
+            EXPECT_EQ(dim.size(), info.dimensions[i]->instance_size);
+            EXPECT_EQ(dim.type(), info.dimensions[i]->id);
+            EXPECT_EQ(std::string(info.dimensions[i]->name), dim.name());
         }
 
         size_t instance_count = 0;
@@ -256,18 +256,20 @@ TEST(metrics, check_public_api_query)
                 instance_count = metric_dim.size() * instance_count;
         }
 
-        EXPECT_EQ(info.instance_ids_count, instance_count);
+        EXPECT_EQ(info.dimensions_instances_count, instance_count);
         std::set<std::vector<size_t>> dim_permutations;
 
-        for(size_t i = 0; i < info.instance_ids_count; i++)
+        for(size_t i = 0; i < info.dimensions_instances_count; i++)
         {
             std::vector<size_t> dim_ids;
-            ASSERT_EQ(rocprofiler::counters::rec_to_counter_id(info.instance_ids[i]).handle,
-                      metric.id());
+            ASSERT_EQ(
+                rocprofiler::counters::rec_to_counter_id(info.dimensions_instances[i]->instance_id)
+                    .handle,
+                metric.id());
             for(const auto& metric_dim : *dims)
             {
-                dim_ids.push_back(
-                    rocprofiler::counters::rec_to_dim_pos(info.instance_ids[i], metric_dim.type()));
+                dim_ids.push_back(rocprofiler::counters::rec_to_dim_pos(
+                    info.dimensions_instances[i]->instance_id, metric_dim.type()));
             }
             // Ensure that the premutation is unique
             ASSERT_EQ(dim_permutations.insert(dim_ids).second, true);

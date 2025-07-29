@@ -78,7 +78,7 @@ initialize_logging()
 {
     auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
     common::init_logging("ROCPROF", logging_cfg);
-    FLAGS_colorlogtostderr = true;
+    FLAGS_colorlogtostderr = isatty(fileno(stderr)) == 1 ? true : false;
 }
 
 tool::metadata&
@@ -262,7 +262,7 @@ pc_sample_config(uint64_t  agent_handle,
 }
 
 bool
-is_counter_set(uint64_t* counter_handles, uint64_t agent_handle, size_t num_counters)
+is_counter_set(const uint64_t* counter_handles, uint64_t agent_handle, size_t num_counters)
 {
     rocprofiler_profile_config_id_t cfg_id = {.handle = 0};
     for(size_t itr = 0; itr < num_counters; itr++)

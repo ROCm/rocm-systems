@@ -24,8 +24,3 @@ jobs:
   - advanced_thread_trace: True
     att_library_path:
     - @LIB_PATH_LOC@/att
-    - @LIB_PATH_LOC@
-
-  - advanced_thread_trace: True
-    att_library_path:
-    - @LIB_PATH_LOC@

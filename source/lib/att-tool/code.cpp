@@ -151,13 +151,24 @@ CodeFile::~CodeFile()
 
         jcode.push_back(nlohmann::json::parse(code.str()));
 
-        size_t lineref = isa.code_line->comment.rfind(':');
-        if(lineref == 0 || lineref == std::string::npos) continue;
+        auto&  comment  = isa.code_line->comment;
+        size_t lineref  = comment.find(':');
+        size_t previous = 0;
 
-        auto source_ref = isa.code_line->comment.substr(0, lineref);
+        // size() + 2 because we need at least ':' and one number after
+        while(lineref != std::string::npos && lineref < comment.size() + 2)
+        {
+            auto source_ref = comment.substr(previous, lineref - previous);
 
-        if(!source_ref.empty() && snapshots.find(source_ref) == snapshots.end())
-            snapshots.insert(std::move(source_ref));
+            if(!source_ref.empty() && snapshots.find(source_ref) == snapshots.end())
+                snapshots.insert(std::move(source_ref));
+
+            previous = comment.find(CodeLine::Instruction::separator, lineref);
+            if(previous == std::string::npos) break;
+
+            previous += CodeLine::Instruction::separator.size();
+            lineref = comment.find(':', previous);
+        }
     }
 
     nlohmann::json json;

@@ -68,7 +68,7 @@ add_domain(domain_context<DomainT>& _cfg, DomainT _domain)
 
     if(_didx >= _cfg.array_size) return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
-    _cfg.domains |= (1 << _didx);
+    _cfg.domains |= (1UL << _didx);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

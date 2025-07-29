@@ -174,7 +174,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - absolute == node_id
   - relative == logical_node_id
   - type-relative == logical_node_type_id
-- Added MI300 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
+- Added MI300/MI350 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
 - Python bindings for rocprofiler-sdk-roctx
 - SQLite3 output support for rocprofv3 (`--output-format rocpd`)
 - Added `rocprofiler-sdk-rocpd` package
@@ -213,8 +213,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed potential data race in rocprofiler-sdk double buffering scheme
 - Usage of std::regex in core rocprofiler-sdk library which causes segfaults/exceptions when used under dual ABI
 - Fixed perfetto counter collection by introducing per dispatch accumulation.
+- Code object disassembly was missing function inlining information
 - Fixed queue preemption error and HSA_STATUS_ERROR_INVALID_PACKET_FORMAT error for stochastic PC-sampling for MI300X, leading to more stable runs.
 - Fixed the system hang issue for host-trap PC-sampling on MI300X. 
+- Fixed rocpd counter collection issue when counter collection alone is enabled, rocpd_kernel_dispatch table gets populated by counters data instead of kernel_dispatch data.
 
 ### Removed
 

@@ -24,11 +24,16 @@
 #pragma once
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
 
+#include "rocprofiler-sdk/cxx/details/mpl.hpp"
+
+#include <string_view>
 #include <tuple>
 
 #define ROCPROFILER_CXX_DECLARE_OPERATORS(TYPE)                                                    \
@@ -88,6 +93,37 @@ less(Tp lhs, Tp rhs)
     static_assert(sizeof(Tp) == sizeof(uint64_t), "error! only for opaque handle types");
     return lhs.handle < rhs.handle;
 }
+
+namespace detail
+{
+template <typename Tp>
+struct sv_trait
+{
+    static constexpr auto is_string_type() noexcept
+    {
+        return mpl::is_string_type<mpl::unqualified_identity_t<Tp>>::value;
+    }
+
+    using type = std::conditional_t<is_string_type(), std::string_view, Tp&>;
+
+    constexpr type operator()(Tp& v) noexcept
+    {
+        if constexpr(is_string_type())
+            return std::string_view{v};
+        else
+            return v;
+    }
+};
+}  // namespace detail
+
+// tie_sv(): deduce each Tp from your lvalues, then build tuple<...> out of
+// either Tp& or std::string_view, calling operator() on each.
+template <typename... Tp>
+constexpr auto
+tie_sv(Tp&... vs) noexcept
+{
+    return std::make_tuple(detail::sv_trait<Tp>{}(vs)...);
+}
 }  // namespace operators
 }  // namespace sdk
 }  // namespace rocprofiler
@@ -110,7 +146,10 @@ ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_dim3_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_region_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_amd_memory_pool_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_record_dimension_info_t&)
+ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_record_dimension_instance_info_t&)
+ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_counter_dimension_info_t&)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_thread_trace_decoder_id_t)
 
 // definitions of operator==
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -127,6 +166,7 @@ ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 inline bool
 operator==(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
@@ -141,11 +181,43 @@ operator==(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
 }
 
 inline bool
-operator==(rocprofiler_counter_record_dimension_info_t lhs,
-           rocprofiler_counter_record_dimension_info_t rhs)
+operator==(const rocprofiler_counter_record_dimension_info_t& lhs,
+           const rocprofiler_counter_record_dimension_info_t& rhs)
 {
-    return std::tie(lhs.id, lhs.instance_size, lhs.name) ==
-           std::tie(rhs.id, rhs.instance_size, rhs.name);
+    namespace op = ::rocprofiler::sdk::operators;
+    return op::tie_sv(lhs.id, lhs.instance_size, lhs.name) ==
+           op::tie_sv(rhs.id, rhs.instance_size, rhs.name);
+}
+
+inline bool
+operator==(const rocprofiler_counter_dimension_info_t& lhs,
+           const rocprofiler_counter_dimension_info_t& rhs)
+{
+    namespace op = ::rocprofiler::sdk::operators;
+    return op::tie_sv(lhs.dimension_name, lhs.index, lhs.size) ==
+           op::tie_sv(rhs.dimension_name, rhs.index, rhs.size);
+}
+
+inline bool
+operator==(const rocprofiler_counter_record_dimension_instance_info_t& lhs,
+           const rocprofiler_counter_record_dimension_instance_info_t& rhs)
+{
+    if(std::tie(lhs.instance_id, lhs.counter_id, lhs.dimensions_count) !=
+       std::tie(rhs.instance_id, rhs.counter_id, rhs.dimensions_count))
+    {
+        return false;
+    }
+
+    for(uint64_t i = 0; i < lhs.dimensions_count; ++i)
+    {
+        if(lhs.dimensions[i] == nullptr && rhs.dimensions[i] == nullptr) continue;
+        if(!lhs.dimensions[i] || !rhs.dimensions[i] || *lhs.dimensions[i] != *rhs.dimensions[i])
+        {
+            return false;
+        }
+    }
+
+    return true;
 }
 
 inline bool
@@ -172,6 +244,7 @@ ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_dim3_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_amd_memory_pool_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 // definitions of operator<
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -188,13 +261,41 @@ ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_thread_trace_decoder_id_t)
 
 inline bool
 operator<(const rocprofiler_counter_record_dimension_info_t& lhs,
           const rocprofiler_counter_record_dimension_info_t& rhs)
 {
-    return std::tie(lhs.id, lhs.instance_size, lhs.name) <
-           std::tie(rhs.id, rhs.instance_size, rhs.name);
+    namespace op = ::rocprofiler::sdk::operators;
+    return op::tie_sv(lhs.id, lhs.instance_size, lhs.name) <
+           op::tie_sv(rhs.id, rhs.instance_size, rhs.name);
+}
+
+inline bool
+operator<(const rocprofiler_counter_dimension_info_t& lhs,
+          const rocprofiler_counter_dimension_info_t& rhs)
+{
+    namespace op = ::rocprofiler::sdk::operators;
+    return op::tie_sv(lhs.dimension_name, lhs.index, lhs.size) <
+           op::tie_sv(rhs.dimension_name, rhs.index, rhs.size);
+}
+
+inline bool
+operator<(const rocprofiler_counter_record_dimension_instance_info_t& lhs,
+          const rocprofiler_counter_record_dimension_instance_info_t& rhs)
+{
+    if(lhs.instance_id != rhs.instance_id) return lhs.instance_id < rhs.instance_id;
+    if(lhs.counter_id != rhs.counter_id) return lhs.counter_id < rhs.counter_id;
+    if(lhs.dimensions_count != rhs.dimensions_count)
+        return lhs.dimensions_count < rhs.dimensions_count;
+
+    for(uint64_t i = 0; i < lhs.dimensions_count; ++i)
+    {
+        if(!lhs.dimensions[i] || !rhs.dimensions[i]) return *lhs.dimensions[i] < *rhs.dimensions[i];
+    }
+
+    return false;
 }
 
 inline bool
@@ -238,6 +339,7 @@ ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_dim3_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_region_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_amd_memory_pool_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_version_triplet_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_thread_trace_decoder_id_t)
 
 // cleanup defines
 #undef ROCPROFILER_CXX_DECLARE_OPERATORS

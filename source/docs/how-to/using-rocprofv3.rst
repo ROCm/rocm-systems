@@ -780,6 +780,12 @@ To see the counters available on the GPU, use:
 
    rocprofv3 --list-avail
 
+Sample output for the list-avail command:
+
+.. file:: /data/list-avail.txt
+   :width: 100%
+   :align: center
+
 You can also customize the counters according to the requirement. Such counters are named :ref:`extra-counters`.
 
 For a comprehensive list of counters available on MI200, see `MI200 performance counters and metrics <https://rocm.docs.amd.com/en/latest/conceptual/gpu-arch/mi300-mi200-performance-counters.html>`_.
@@ -1522,16 +1528,16 @@ The following table lists the various fields or the columns in the output CSV fi
     - The group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched.
 
   * - Workgroup_Size
-    - Size of the workgroup as declared by the compute shader.
+    - The total number of work-items (or, threads) in each workgroup (or, block) launched as part of the kernel dispatch. In HIP, this is equivalent to the total block size.
 
   * - Workgroup_Size_n
     - Size of the workgroup in the nth dimension as declared by the compute shader, where n = X, Y, or Z.
 
   * - Grid_Size
-    - Number of thread blocks required to launch the kernel.
+    - The total number of work-items (or, threads) launched as a part of the kernel dispatch. In HIP, this is equivalent to the total grid size multiplied by the total workgroup (or, block) size.
 
   * - Grid_Size_n
-    - Number of thread blocks in the nth dimension required to launch the kernel, where n = X, Y, or Z.
+    - Number of work-items (or, threads) in the nth dimension required to launch the kernel, where n = X, Y, or Z.
 
   * - LDS_Block_Size
     - Thread block size for the kernel's Local Data Share (LDS) memory.

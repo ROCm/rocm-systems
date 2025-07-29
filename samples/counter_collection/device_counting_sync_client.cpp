@@ -294,7 +294,7 @@ counter_sampler::get_counter_size(rocprofiler_counter_id_t counter)
     ROCPROFILER_CALL(rocprofiler_query_counter_info(
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
                      "Could not query info for counter");
-    return info.instance_ids_count;
+    return info.dimensions_instances_count;
 }
 
 std::unordered_map<std::string, rocprofiler_counter_id_t>
@@ -339,7 +339,7 @@ counter_sampler::get_counter_dimensions(rocprofiler_counter_id_t counter)
                          counter, ROCPROFILER_COUNTER_INFO_VERSION_1, static_cast<void*>(&info)),
                      "Could not query info for counter");
     return std::vector<rocprofiler_counter_record_dimension_info_t>{
-        info.dimensions, info.dimensions + info.dimensions_count};
+        *info.dimensions, *info.dimensions + info.dimensions_count};
 }
 
 std::atomic<bool>&
