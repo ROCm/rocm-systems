@@ -78,6 +78,10 @@ TEST_CASE("Unit_test_compressed_codeobject") {
           HIP_CHECK(hipErrorUnknown);
       }
   }
+  HIP_CHECK(hipFree(A_d));
+  HIP_CHECK(hipFree(C_d));
+  free(A_h);
+  free(C_h);
   printf("PASSED!\n");
   REQUIRE(true);
 }

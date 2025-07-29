@@ -172,6 +172,7 @@ TEMPLATE_TEST_CASE("Unit_unsafe_atomic_add_half_and_bfloat", "", __half2, __hip_
 
   REQUIRE(hout.x == 32.0f);
   REQUIRE(hout.y == 64.0f);
+  HIP_CHECK(hipFree(out));
 }
 
 /**
