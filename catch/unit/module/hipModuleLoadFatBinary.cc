@@ -18,37 +18,46 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include "hip_module_common.hh"
+#include <hip_test_defgroups.hh>
+/**
+ * @addtogroup hipModuleLoadFatBinary hipModuleLoadFatBinary
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin)` -
+ * Loads fatbin object
+ */
 
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies the negative cases of hipModuleLoadFatBinary API.
+ * Test source
+ * ------------------------
+ * - catch/unit/module/hipModuleLoadFatBinary.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.1
+ */
 TEST_CASE("Unit_hipModuleLoadFatBinary_NegativeTsts") {
   hipModule_t Module;
   SECTION("fatCubin as nullptr") {
     HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, nullptr), hipErrorInvalidValue);
-
   }
   SECTION("Fatbin as Empty String") {
     HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, ""), hipErrorInvalidImage);
   }
-  SECTION("Load compiled module from file") {
+  SECTION("Invalid fatbin") {
+    HIP_CHECK_ERROR(hipModuleLoadFatBinary(&Module, "sample.txt"), hipErrorInvalidImage);
+  }
+  SECTION("Load Module with No Kernel function") {
     const auto loaded_module = LoadModuleIntoBuffer("emptyModuleCount.code");
     HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-    REQUIRE(Module!= nullptr);
+    REQUIRE(Module != nullptr);
     HIP_CHECK(hipModuleUnload(Module));
   }
 }
 #if HT_AMD
-TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
-  /*if (!isGenericTargetSupported()) {
-    fprintf(stderr, "Generic target test is skipped\n");
-    return;
-  }*/
-  hipModule_t Module;
-  //const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
-  const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
-  HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
-  REQUIRE(Module != nullptr);
-  hipFunction_t kernel = nullptr;
-  HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
-  REQUIRE(kernel != nullptr);
+void loadKernelData(hipFunction_t kernel) {
   constexpr int LEN = 64;
   constexpr int SIZE = LEN << 2;
   float *A, *B, *Ad, *Bd;
@@ -79,11 +88,10 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
   args.size = SIZE;
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, LEN, 1, 1, 0,
-               stream, NULL, reinterpret_cast<void**>(&config)));
+  HIP_CHECK(hipModuleLaunchKernel(kernel, 1, 1, 1, LEN, 1, 1, 0, stream, NULL,
+                                  reinterpret_cast<void**>(&config)));
 
   HIP_CHECK(hipStreamDestroy(stream));
 
@@ -92,10 +100,68 @@ TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
   for (uint32_t i = 0; i < LEN; i++) {
     REQUIRE(A[i] == B[i]);
   }
-  delete [] A;
-  delete [] B;
+  delete[] A;
+  delete[] B;
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
-  HIP_CHECK(hipModuleUnload(Module));
+}
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies the below positive cases of hipModuleLoadFatBinary API.
+ * case-1 : Loads Compiled module with regular target in compressed fatbin
+ * case-2 : Loads Compiled module with Generic target in regular fatbin
+ * case-3 : Loads Compiled module with Generic target in compressed fatbin
+ * Test source
+ * ------------------------
+ * - catch/unit/module/hipModuleLoadFatBinary.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipModuleLoadFatBinary_PosiiveTsts") {
+  hipModule_t Module;
+  SECTION("Compiled module with regular target in compressed fatbin") {
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
+    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+    REQUIRE(Module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+    loadKernelData(kernel);
+    REQUIRE(kernel != nullptr);
+    HIP_CHECK(hipModuleUnload(Module));
+  }
+  SECTION("Compiled module with Generic target in regular fatbin") {
+    if (!isGenericTargetSupported()) {
+      fprintf(stderr, "Generic target test is skipped\n");
+      return;
+    }
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTarget.code");
+    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+    REQUIRE(Module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+    REQUIRE(kernel != nullptr);
+    loadKernelData(kernel);
+    HIP_CHECK(hipModuleUnload(Module));
+  }
+  SECTION("Compiled module with Generic target in compressed fatbin") {
+    if (!isGenericTargetSupported()) {
+      fprintf(stderr, "Generic target test is skipped\n");
+      return;
+    }
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelGenericTargetCompressed.code");
+    HIP_CHECK(hipModuleLoadFatBinary(&Module, loaded_module.data()));
+    REQUIRE(Module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, Module, "copy_ker"));
+    REQUIRE(kernel != nullptr);
+    loadKernelData(kernel);
+    HIP_CHECK(hipModuleUnload(Module));
+  }
 }
 #endif
+/**
+ * End doxygen group ModuleTest.
+ * @}
+ */
