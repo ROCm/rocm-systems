@@ -49,6 +49,14 @@
       "auto_subtree_push": false
     },
     {
+      "name": "rocprofiler-compute",
+      "url": "ROCm/rocprofiler-compute",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
       "name": "rocprofiler-register",
       "url": "ROCm/rocprofiler-register",
       "branch": "amd-staging",
@@ -59,6 +67,14 @@
     {
       "name": "rocprofiler-sdk",
       "url": "ROCm/rocprofiler-sdk",
+      "branch": "amd-staging",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler-systems",
+      "url": "ROCm/rocprofiler-systems",
       "branch": "amd-staging",
       "category": "projects",
       "auto_subtree_pull": true,
