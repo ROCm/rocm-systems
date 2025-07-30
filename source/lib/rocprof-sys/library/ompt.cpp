@@ -82,7 +82,9 @@ struct ompt : comp::base<ompt, void>
     {
         category_region<category::ompt>::start<tim::quirk::timemory>(_ctx_info.label);
 
-        auto _ts       = tracing::now();
+        auto     _ts = tracing::now();
+        uint64_t _cid =
+            (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
         auto _annotate = [&](::perfetto::EventContext ctx) {
             if(config::get_perfetto_annotations())
             {
@@ -92,8 +94,17 @@ struct ompt : comp::base<ompt, void>
             }
         };
 
-        category_region<category::ompt>::start<tim::quirk::perfetto>(
-            _ctx_info.label, _ts, std::move(_annotate));
+        if(_cid > 0)
+        {
+            category_region<category::ompt>::start<tim::quirk::perfetto>(
+                _ctx_info.label, _ts, ::perfetto::Flow::ProcessScoped(_cid),
+                std::move(_annotate));
+        }
+        else
+        {
+            category_region<category::ompt>::start<tim::quirk::perfetto>(
+                _ctx_info.label, _ts, std::move(_annotate));
+        }
     }
 
     template <typename... Args>
