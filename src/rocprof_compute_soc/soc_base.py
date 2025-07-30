@@ -170,7 +170,14 @@ class OmniSoC_Base:
         # Parse json from amd-smi static --clock
         amd_smi_mclk = run(["amd-smi", "static", "--clock", "--json"], exit_on_error=True)
         amd_smi_mclk = json.loads(amd_smi_mclk)
-        amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"]["frequency_levels"]
+
+        if isinstance(amd_smi_mclk, dict):
+            # The output of `amd-smi static --clock --json` is a dict with amd-smi>=26.0.0.
+            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"]["frequency_levels"]
+        else:
+            # For backward compatibility: the output of `amd-smi static --clock --json` used to be a list for amd-smi<26.0.0.
+            amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
+
         # Choose the highest level of memory clock frequency
         amd_smi_mclk = amd_smi_mclk[sorted(amd_smi_mclk.keys())[-1]]
         # 100 Mhz -> 100
@@ -510,6 +517,14 @@ class OmniSoC_Base:
                 rocprof_counters.update(counters)
 
         elif str(rocprof_cmd) == "rocprofiler-sdk":
+            # Point to rocprofiler sdk counter definition
+            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+            os.environ["ROCPROFILER_METRICS_PATH"] = str(
+                Path(self.get_args().rocprofiler_sdk_library_path)
+                .resolve()
+                .parent.parent.joinpath("share", "rocprofiler-sdk")
+            )
+
             sys.path.append(
                 str(
                     Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
@@ -520,7 +535,7 @@ class OmniSoC_Base:
 
             avail.loadLibrary.libname = str(
                 Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                / "libexec"
+                / "lib"
                 / "rocprofiler-sdk"
                 / "librocprofv3-list-avail.so"
             )
@@ -542,6 +557,12 @@ class OmniSoC_Base:
                     counter_defs_contents = fp.read()
                 counters, _ = self.parse_counters_text(counter_defs_contents)
                 rocprof_counters.update(counters)
+
+            # Reset env. var.
+            if old_rocprofiler_metrics_path is None:
+                del os.environ["ROCPROFILER_METRICS_PATH"]
+            else:
+                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         else:
             console_error(
