@@ -199,11 +199,44 @@ def write_memory_copy_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_memory_copy_trace")
 
+def write_memory_allocation_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            A.guid AS Guid,
+            'MEMORY_ALLOCATION' AS Kind,
+            'MEMORY_ALLOCATION_' || A.type AS Operation,
+            CASE
+                WHEN A.type != "FREE"
+                THEN 'Agent ' || A.agent_log_index
+                ELSE '"'
+            END AS Agent_Id,
+            A.size AS Allocation_Size,
+            '0x' || printf('%016X', A.address) AS Address,
+            A.stack_id AS Correlation_Id,
+            A.start AS Start_Timestamp,
+            A.end AS End_Timestamp
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN memory_allocations AS A
+            ON A.guid = P.guid
+            AND A.nid = P.nid
+            AND A.pid = P.pid
+        ORDER BY
+            A.start ASC, A.end DESC
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_memory_allocation_trace")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
     write_kernel_csv(importData, config.output_path)
     write_memory_copy_csv(importData, config.output_path)
+    write_memory_allocation_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
