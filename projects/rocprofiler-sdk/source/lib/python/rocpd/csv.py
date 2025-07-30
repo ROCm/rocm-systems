@@ -131,9 +131,49 @@ def write_agent_info_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_agent_info")
 
+def write_kernel_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            K.guid AS Guid,
+            'KERNEL_DISPATCH' AS Kind,
+            'Agent ' || K.agent_log_index AS Agent_Id,
+            K.queue_id AS Queue_Id,
+            K.stream_id AS Stream_Id,
+            K.tid AS Thread_Id,
+            K.dispatch_id AS Dispatch_Id,
+            K.kernel_Id AS Kernel_Id,
+            K.name AS Kernel_Name,
+            K.stack_id AS Correlation_Id,
+            K.start AS Start_Timestamp,
+            K.end AS End_Timestamp,
+            K.scratch_size AS Private_Segment_Size,
+            K.lds_size AS Group_Segment_Size,
+            K.workgroup_x AS Workgroup_Size_X,
+            K.workgroup_y AS Workgroup_Size_Y,
+            K.workgroup_z AS Workgroup_Size_Z,
+            K.grid_x AS Grid_Size_X,
+            K.grid_y AS Grid_Size_Y,
+            K.grid_z AS Grid_Size_Z
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN kernels AS K
+            ON K.guid = P.guid
+            AND K.nid = P.nid
+            AND K.pid = P.pid
+        ORDER BY
+            K.start ASC, K.end DESC
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_kernel_trace")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
+    write_kernel_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
