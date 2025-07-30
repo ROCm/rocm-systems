@@ -53,7 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi300']
+        runner: ['navi4', 'navi3', 'mi300a']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
