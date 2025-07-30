@@ -57,11 +57,11 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300a']
+        runner: ['mi300']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: ${{ matrix.runner }}-emu-runner-set
+    runs-on: rocprofiler-ubuntu-22
 
     # define this for containers
     env:

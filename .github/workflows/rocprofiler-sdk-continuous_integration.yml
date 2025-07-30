@@ -53,13 +53,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        system: [
-          {gpu: 'navi3', runner: 'navi3-emu-runner-set', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy'},
-          {gpu: 'navi4', runner: 'navi4-emu-runner-set', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy'},
-          {gpu: 'mi3xx', runner: 'rocprof-ubuntu-22', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy'}
-        ]
+        runner: ['navi4', 'navi3', 'mi300']
+        os: ['ubuntu-22.04']
+        build-type: ['RelWithDebInfo']
 
-    runs-on: ${{ matrix.system.runner }}
+    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
 
     # define this for containers
     env:
@@ -276,7 +274,7 @@ jobs:
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-ubuntu-22' || matrix.runner }}
+    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
 
     # define this for containers
     env:
@@ -290,7 +288,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run: 
+      run:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev
