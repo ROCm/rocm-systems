@@ -97,20 +97,3 @@ set_tests_properties(
     PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-# Test large buffer sizes. 5120 == 5GB
-add_test(NAME thread-trace-api-large-buffer-test
-         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
-
-set_tests_properties(
-    thread-trace-api-large-buffer-test
-    PROPERTIES TIMEOUT
-               10
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${PRELOAD_ENV};ATT_BUFFER_SIZE_MB=5120"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})

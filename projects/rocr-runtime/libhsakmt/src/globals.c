@@ -28,7 +28,6 @@
 // HSAKMT global data
 
 int hsakmt_kfd_fd = -1;
-int hsakmt_udmabuf_dev_fd = -1;
 unsigned long hsakmt_kfd_open_count;
 unsigned long hsakmt_system_properties_count;
 pthread_mutex_t hsakmt_mutex = PTHREAD_MUTEX_INITIALIZER;

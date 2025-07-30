@@ -23,7 +23,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rdc`                  | EMU             | Pending          |                                       |                                       |
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
 | `rocminfo`             | EMU             | Pending          |                                       |                                       |
-| `rocm-smi-lib`         | EMU             | Pending          |                                       |                                       |
+| `rocm-smi-lib`           | EMU             | Pending          |                                       |                                       |
 | `rocprofiler`          | EMU             | Pending          |                                       |                                       |
 | `rocprofiler-compute`  | Public          | Pending          |                                       |                                       |
 | `rocprofiler-register` | EMU             | Pending          |                                       |                                       |
@@ -45,15 +45,12 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocprofiler-sdk`      | 8/5            |
 | `rocprofiler-systems`  | 8/5            |
 | `roctracer`            | 8/5            |
+| `amdsmi`               | 8/8            |
 | `rdc`                  | 8/8            |
-| `rocm-smi-lib`         | 8/8            |
+| `rocm-smi-lib`           | 8/8            |
 | `rocminfo`             | 8/11           |
 | `rocr-runtime`         | 8/11           |
 | `rocm-core`            | 8/12           |
-| `clr`                  | 8/21           |
-| `hip`                  | 8/21           |
-| `hipother`             | 8/21           |
-| `hip-tests`            | 8/21           |
 
 *Remaining schedule to be determined.
 

@@ -108,19 +108,11 @@ if (HSA_DEP_ROCPROFILER_REGISTER)
   string(APPEND CPACK_RPM_BINARY_PACKAGE_REQUIRES " rocprofiler-register")
 endif()
 
-if (NOT DEFINED BUILD_THUNK_VIRTIO)
-  set(BUILD_THUNK_VIRTIO OFF)
-endif()
-
 add_rocm_subdir(libhsakmt "${THUNK_DEFINITIONS}")
 set_target_properties(hsakmt PROPERTIES
                                 ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/archive"
                                 LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/lib"
                                 RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/libhsakmt/runtime")
-
-if (BUILD_THUNK_VIRTIO)
-  add_rocm_subdir(libhsakmt/src/virtio "${THUNK_VIRTIO_DEFINITIONS}")
-endif()
 
 if (BUILD_ROCR)
   add_rocm_subdir(runtime/hsa-runtime "${ROCR_DEFINITIONS}")
@@ -131,9 +123,6 @@ if (BUILD_ROCR)
 
   if (BUILD_SHARED_LIBS)
     add_dependencies(hsa-runtime64 hsakmt)
-    if (BUILD_THUNK_VIRTIO)
-      add_dependencies(hsa-runtime64 hsakmt_virtio)
-    endif()
   else()
     add_dependencies(hsa-runtime64 hsakmt-staticdrm)
   endif()

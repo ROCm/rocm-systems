@@ -1079,7 +1079,7 @@ class MemChart:
         wires_E_GLV.vl1_rd = metric_dict["VL1 Rd"]
         wires_E_GLV.vl1_wr = metric_dict["VL1 Wr"]
         wires_E_GLV.vl1_atomic = metric_dict["VL1 Atomic"]
-        wires_E_GLV.sl1_rd = metric_dict["sL1D Rd"]
+        wires_E_GLV.sl1_rd = metric_dict["VL1D Rd"]
 
         wires_E_GLV.draw(canvas)
 
@@ -1146,8 +1146,8 @@ class MemChart:
         block_const_L1.y_max = block_vector_L1.y_min - 3
         block_const_L1.y_min = block_const_L1.y_max - 5
 
-        block_const_L1.hit = metric_dict["sL1D Hit"]
-        block_const_L1.latency = metric_dict["sL1D Lat"]
+        block_const_L1.hit = metric_dict["VL1D Hit"]
+        block_const_L1.latency = metric_dict["VL1D Lat"]
 
         block_const_L1.draw(canvas)
 
@@ -1174,9 +1174,9 @@ class MemChart:
         wires_L1_L2.vl1_l2_rd = metric_dict["VL1_L2 Rd"]
         wires_L1_L2.vl1_l2_wr = metric_dict["VL1_L2 Wr"]
         wires_L1_L2.vl1_l2_atomic = metric_dict["VL1_L2 Atomic"]
-        wires_L1_L2.sl1_l2_rd = metric_dict["sL1D_L2 Rd"]
-        wires_L1_L2.sl1_l2_wr = metric_dict["sL1D_L2 Wr"]
-        wires_L1_L2.sl1_l2_atomic = metric_dict["sL1D_L2 Atomic"]
+        wires_L1_L2.sl1_l2_rd = metric_dict["VL1D_L2 Rd"]
+        wires_L1_L2.sl1_l2_wr = metric_dict["VL1D_L2 Wr"]
+        wires_L1_L2.sl1_l2_atomic = metric_dict["VL1D_L2 Atomic"]
         wires_L1_L2.il1_l2_req = metric_dict["IL1_L2 Rd"]
 
         wires_L1_L2.draw(canvas)
@@ -1331,9 +1331,9 @@ if __name__ == "__main__":
     metric_dict["VL1 Coalesce"] = 27
     metric_dict["VL1 Stall"] = 28
 
-    metric_dict["sL1D Rd"] = 29
-    metric_dict["sL1D Hit"] = 30
-    metric_dict["sL1D Lat"] = 31
+    metric_dict["VL1D Rd"] = 29
+    metric_dict["VL1D Hit"] = 30
+    metric_dict["VL1D Lat"] = 31
 
     metric_dict["IL1 Fetch"] = 32
     metric_dict["IL1 Hit"] = 33
@@ -1344,9 +1344,9 @@ if __name__ == "__main__":
     metric_dict["VL1_L2 Wr"] = 37
     metric_dict["VL1_L2 Atomic"] = 38
 
-    metric_dict["sL1D_L2 Rd"] = 39
-    metric_dict["sL1D_L2 Wr"] = 40
-    metric_dict["sL1D_L2 Atomic"] = 41
+    metric_dict["VL1D_L2 Rd"] = 39
+    metric_dict["VL1D_L2 Wr"] = 40
+    metric_dict["VL1D_L2 Atomic"] = 41
     metric_dict["IL1_L2 Rd"] = 42
 
     metric_dict["L2 Hit"] = 43

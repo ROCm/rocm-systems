@@ -45,7 +45,6 @@ import pandas as pd
 import yaml
 
 import config
-from utils import rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -245,6 +244,14 @@ def detect_rocprof(args):
             "rocprofiler_sdk_path is {}".format(args.rocprofiler_sdk_library_path)
         )
         return rocprof_cmd
+
+    console_warning(
+        "rocprof v1 / v2 / v3 interfaces will be deprecated in favor of "
+        "rocprofiler-sdk interface in a future release. To use rocprofiler-sdk "
+        "interface, please set the environment variable ROCPROF to 'rocprofiler-sdk' "
+        "and optionally provide the path to librocprofiler-sdk.so library via the "
+        "--rocprofiler-sdk-library-path option."
+    )
 
     # detect rocprof
     if not "ROCPROF" in os.environ.keys():
@@ -708,14 +715,9 @@ def parse_text(text_file):
 
 
 def run_prof(
-    fname,
-    profiler_options,
-    workload_dir,
-    mspec,
-    loglevel,
-    format_rocprof_output,
-    retain_rocpd_output=False,
+    fname, profiler_options, workload_dir, mspec, loglevel, format_rocprof_output
 ):
+    time_0 = time.time()
     fbase = path(fname).stem
 
     console_debug("pmc file: %s" % path(fname).name)
@@ -837,29 +839,7 @@ def run_prof(
 
     results_files = []
 
-    if format_rocprof_output == "rocpd":
-        if rocprof_cmd == "rocprofiler-sdk" or rocprof_cmd.endswith("v3"):
-            # Write results_fbase.csv
-            rocpd_data.convert_db_to_csv(
-                glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                workload_dir + f"/results_{fbase}.csv",
-            )
-            if retain_rocpd_output:
-                shutil.copyfile(
-                    glob.glob(workload_dir + "/out/pmc_1/*/*.db")[0],
-                    workload_dir + "/" + fbase + ".db",
-                )
-                console_warning(
-                    f"Retaining large raw rocpd database: {workload_dir}/{fbase}.db"
-                )
-            # Remove temp directory
-            shutil.rmtree(workload_dir + "/" + "out")
-            return
-        else:
-            console_error(
-                "rocpd output format is only supported with rocprofiler-sdk or rocprofv3."
-            )
-    elif rocprof_cmd.endswith("v2"):
+    if rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
         results_files = glob.glob(workload_dir + "/out/pmc_1/results_*.csv")
 
@@ -1086,6 +1066,7 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
         else:
             # when the input is not for timestamps, and counter csv file is not generated, we assume failed rocprof run and will completely bypass the file generation and merging for current pmc
             results_files_csv = []
+
     else:
         console_error("The output file of rocprofv3 can only support json or csv!!!")
 
@@ -1161,7 +1142,9 @@ def replace_timestamps(workload_dir):
         )
 
 
-def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc):
+def gen_sysinfo(
+    workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec, soc
+):
     console_debug("[gen_sysinfo]")
     df = mspec.get_class_members()
 
@@ -1169,7 +1152,12 @@ def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc):
     df["command"] = app_cmd
     df["workload_name"] = workload_name
 
-    blocks = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
+    blocks = []
+    if not ip_blocks:
+        t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
+        blocks += t
+    else:
+        blocks += ip_blocks
     if hasattr(soc, "roofline_obj") and (not skip_roof):
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
@@ -1555,48 +1543,15 @@ def merge_counters_spatial_multiplex(df_multi_index):
     return final_df
 
 
-def convert_metric_id_to_panel_info(metric_id):
-    """
-    Convert metric id into panel information.
-    Output is a tuples of the form (file_id, panel_id, metric_id).
-
-    For example:
-
-    Input: "2"
-    Output: ("0200", None, None)
-
-    Input: "11"
-    Output: ("1100", None, None)
-
-    Input: "11.1"
-    Output: ("1100", 1101, None)
-
-    Input: "11.1.1"
-    Output: ("1100", 1101, 1)
-
-    Raises exception for invalid metric id.
-    """
+def convert_metric_id_to_panel_idx(metric_id):
+    # "4.02" -> 402
+    # "4.23" -> 423
+    # "4" -> 400
     tokens = metric_id.split(".")
-    if 0 < len(tokens) < 4:
-        # File id
-        file_id = str(int(tokens[0]))
-        # 4 -> 04
-        if len(file_id) == 1:
-            file_id = f"0{file_id}"
-        # Multiply integer by 100
-        file_id = f"{file_id}00"
-        # Panel id
-        if len(tokens) > 1:
-            panel_id = int(tokens[0]) * 100
-            panel_id += int(tokens[1])
-        else:
-            panel_id = None
-        # Metric id
-        if len(tokens) > 2:
-            metric_id = int(tokens[2])
-        else:
-            metric_id = None
-        return (file_id, panel_id, metric_id)
+    if len(tokens) == 1:
+        return int(tokens[0]) * 100
+    elif len(tokens) == 2:
+        return int(tokens[0]) * 100 + int(tokens[1])
     else:
         raise Exception(f"Invalid metric id: {metric_id}")
 

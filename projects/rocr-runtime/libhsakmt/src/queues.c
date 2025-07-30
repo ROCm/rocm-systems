@@ -541,7 +541,7 @@ static int handle_concrete_asic(struct queue *q,
 			void *addr = hsakmt_mmap_allocate_aligned(PROT_READ | PROT_WRITE,
 						     MAP_ANONYMOUS | MAP_PRIVATE,
 						     size, GPU_HUGE_PAGE_SIZE, 0,
-						     0, (void *)LONG_MAX, -1);
+						     0, (void *)LONG_MAX);
 			if (!addr) {
 				pr_err("mmap failed to alloc ctx area size 0x%x: %s\n",
 					size, strerror(errno));

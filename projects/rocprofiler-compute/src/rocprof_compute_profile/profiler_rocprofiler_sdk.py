@@ -55,9 +55,12 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCP_TOOL_LIBRARIES": rocprofiler_sdk_tool_path,
             "LD_LIBRARY_PATH": rocm_libdir,
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": self.get_args().format_rocprof_output,
+            "ROCPROF_OUTPUT_FORMAT": "json",
             "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
         }
+
+        if self.get_args().format_rocprof_output == "csv":
+            options["ROCPROF_OUTPUT_FORMAT"] = "csv"
 
         if self.get_args().kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.

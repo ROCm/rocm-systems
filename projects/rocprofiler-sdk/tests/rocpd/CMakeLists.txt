@@ -22,7 +22,7 @@ set(rocpd-env
 #
 #########################################################################################
 
-foreach(_SUBPARSER "" "-convert" "-query" "-summary")
+foreach(_SUBPARSER "" "-convert")
     string(REPLACE "-" "" _CMD "${_SUBPARSER}")
     add_test(NAME rocpd${_SUBPARSER}-help COMMAND ${Python3_EXECUTABLE} -m rocpd ${_CMD}
                                                   --help)
@@ -34,7 +34,7 @@ foreach(_SUBPARSER "" "-convert" "-query" "-summary")
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 endforeach()
 
-foreach(_MODULE "csv" "pftrace" "otf2" "query" "summary")
+foreach(_MODULE "csv" "pftrace" "otf2")
     add_test(NAME rocpd-module-${_MODULE}-help COMMAND ${Python3_EXECUTABLE} -m
                                                        rocpd.${_MODULE} --help)
 

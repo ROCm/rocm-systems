@@ -10,9 +10,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - How-to document for VCN and JPEG activity sampling and tracing.
 - Support for tracing Fortran applications.
 - Support for tracing MPI API in Fortran.
-- Initial support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
-- By default, group "kernel dispatch" and "memory copy" events by HIP stream ID in Perfetto traces.
-  - Add the "ROCPROFSYS_ROCM_GROUP_BY_QUEUE" configuration setting to group events by queue, instead.
 
 ### Changed
 

@@ -68,9 +68,6 @@
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/runtime.h"
 #include "core/util/utils.h"
-#ifdef HSAKMT_VIRTIO_ENABLED
-#include "core/inc/amd_virtio_driver.h"
-#endif
 
 extern r_debug _amdgpu_r_debug;
 
@@ -78,21 +75,16 @@ namespace rocr {
 namespace AMD {
 // Anonymous namespace.
 namespace {
-
-const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>,
 #if _WIN32
-                 0
+constexpr size_t num_drivers = 0;
 #elif __linux__
-                 static_cast<size_t>(core::DriverType::NUM_DRIVER_TYPES)
+constexpr size_t num_drivers = 2;
 #endif
-                 >
+
+const std::array<std::function<hsa_status_t(std::unique_ptr<core::Driver>&)>, num_drivers>
     discover_driver_funcs = {
 #ifdef __linux__
-        KfdDriver::DiscoverDriver,
-        XdnaDriver::DiscoverDriver,
-#ifdef HSAKMT_VIRTIO_ENABLED
-        KfdVirtioDriver::DiscoverDriver,
-#endif
+        KfdDriver::DiscoverDriver, XdnaDriver::DiscoverDriver
 #endif
 };
 
@@ -118,14 +110,14 @@ bool InitializeDriver(std::unique_ptr<core::Driver>& driver) {
   return true;
 }
 
-void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop, core::DriverType driver_type) {
-  CpuAgent* cpu = new CpuAgent(node_id, node_prop, driver_type);
+void DiscoverCpu(HSAuint32 node_id, HsaNodeProperties& node_prop) {
+  CpuAgent* cpu = new CpuAgent(node_id, node_prop);
   cpu->Enable();
   core::Runtime::runtime_singleton_->RegisterAgent(cpu, true);
 }
 
 GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnack_mode,
-                      bool enabled, core::DriverType driver_type) {
+                      bool enabled) {
   GpuAgent* gpu = nullptr;
   if (node_prop.NumFComputeCores == 0) {
       // Ignore non GPUs.
@@ -133,7 +125,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
   }
   try {
     gpu = new GpuAgent(node_id, node_prop, xnack_mode,
-                       core::Runtime::runtime_singleton_->gpu_agents().size(), driver_type);
+                       core::Runtime::runtime_singleton_->gpu_agents().size());
 
     const HsaVersionInfo& kfd_version = core::Runtime::runtime_singleton_->KfdVersion().version;
 
@@ -160,7 +152,7 @@ GpuAgent* DiscoverGpu(HSAuint32 node_id, HsaNodeProperties& node_prop, bool xnac
         node_prop.Capability.ui32.SRAM_EDCSupport = 1;
         delete gpu;
         gpu = new GpuAgent(node_id, node_prop, xnack_mode,
-                           core::Runtime::runtime_singleton_->gpu_agents().size(), driver_type);
+                           core::Runtime::runtime_singleton_->gpu_agents().size());
       }
     }
   } catch (const hsa_exception& e) {
@@ -265,29 +257,24 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
   const int32_t invalidIdx = -1;
   int32_t list_sz = gpu_list.size();
   HsaNodeProperties node_prop = {0};
-  for (const auto& gpu_driver : core::Runtime::runtime_singleton_->AgentDrivers()) {
-    if (!core::Runtime::IsGPUDriver(gpu_driver->kernel_driver_type_)) {
-      continue;
+  const auto& gpu_driver = core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD);
+  for (int32_t idx = 0; idx < list_sz; idx++) {
+    if (gpu_list[idx] == invalidIdx) {
+      break;
     }
 
-    for (int32_t idx = 0; idx < list_sz; idx++) {
-      if (gpu_list[idx] == invalidIdx) {
-        break;
-      }
+    // Obtain properties of the node
+    hsa_status_t ret = gpu_driver.GetNodeProperties(node_prop, gpu_list[idx]);
+    assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
 
-      // Obtain properties of the node
-      hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, gpu_list[idx]);
-      assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
+    // disable interrupt signal for DTIF platform
+    if (core::Runtime::runtime_singleton_->flag().enable_dtif())
+      core::g_use_interrupt_wait = false;
 
-      // disable interrupt signal for DTIF platform
-      if (core::Runtime::runtime_singleton_->flag().enable_dtif())
-        core::g_use_interrupt_wait = false;
-
-      // Instantiate a Gpu device. The IO links
-      // of this node have already been registered
-      assert((node_prop.NumFComputeCores != 0) && "Improper node used for GPU device discovery.");
-      DiscoverGpu(gpu_list[idx], node_prop, xnack_mode, enabled, gpu_driver->kernel_driver_type_);
-    }
+    // Instantiate a Gpu device. The IO links
+    // of this node have already been registered
+    assert((node_prop.NumFComputeCores != 0) && "Improper node used for GPU device discovery.");
+    DiscoverGpu(gpu_list[idx], node_prop, xnack_mode, enabled);
   }
 }
 
@@ -348,7 +335,7 @@ bool BuildTopology() {
     /// @todo: Add support for AIEs.
     // Query if env ROCR_VISIBLE_DEVICES is defined. If defined
     // determine number and order of GPU devices to be surfaced.
-    if (filter && (core::Runtime::IsGPUDriver(driver->kernel_driver_type_))) {
+    if (filter && driver->kernel_driver_type_ == core::DriverType::KFD) {
       rvdFilter.BuildRvdTokenList();
       rvdFilter.BuildDeviceUuidList(node_props_vec);
       visibleCnt = rvdFilter.BuildUsrDeviceList();
@@ -363,7 +350,7 @@ bool BuildTopology() {
     for (auto& node_props : node_props_vec) {
       if (node_props.NumCPUCores) {
         // Node has CPU cores so instantiate a CPU agent.
-        DiscoverCpu(node_id, node_props, driver->kernel_driver_type_);
+        DiscoverCpu(node_id, node_props);
       }
 
       if (node_props.NumNeuralCores) {

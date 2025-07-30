@@ -57,7 +57,7 @@ Common filters to customize data collection include:
    Enables filtering based on dispatch ID.
 
 ``-b``, ``--block``
-   Enables collection metrics for only the specified analysis report blocks.
+   Enables collection metrics for only the specified hardware report blocks.
 
 See :ref:`Filtering <filtering>` for an in-depth walkthrough.
 
@@ -80,7 +80,7 @@ interface with profiling results. View different metrics derived from your
 profiled results and get immediate access all metrics organized by hardware
 blocks.
 
-If you don't apply kernel, dispatch, or analysis report block filters at this stage,
+If you don't apply kernel, dispatch, or hardware report block filters at this stage,
 analysis is reflective of the entirety of the profiling data.
 
 To interact with profiling results from a different session, provide the

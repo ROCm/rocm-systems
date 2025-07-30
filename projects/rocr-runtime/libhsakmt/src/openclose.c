@@ -46,7 +46,6 @@
 int (*hsakmt_fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
 
 static const char kfd_device_name[] = "/dev/kfd";
-static const char kfd_udmabuf_device_name[] = "/dev/udmabuf";
 static pid_t parent_pid = -1;
 int hsakmt_debug_level;
 bool hsakmt_forked;
@@ -109,10 +108,6 @@ static void clear_after_fork(void)
 		close(hsakmt_kfd_fd);
 		hsakmt_kfd_fd = -1;
 	}
-	if (hsakmt_udmabuf_dev_fd > 0) {
-		close(hsakmt_udmabuf_dev_fd);
-		hsakmt_udmabuf_dev_fd = -1;
-	}
 	hsakmt_kfd_open_count = 0;
 	parent_pid = -1;
 	hsakmt_forked = false;
@@ -157,7 +152,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 	HsaSystemProperties sys_props;
 	char *error;
 	char *useSvmStr;
-	char *useUdmaBuf;
 
 	pthread_mutex_lock(&hsakmt_mutex);
 
@@ -200,18 +194,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void)
 		result = hsakmt_init_kfd_version();
 		if (result != HSAKMT_STATUS_SUCCESS)
 			goto kfd_version_failed;
-
-		/* check if udmabuf is enabled by env HSA_USE_UDMABUF */
-		useUdmaBuf = getenv("HSA_USE_UDMABUF");
-		if (useUdmaBuf && atoi(useUdmaBuf)) {
-			/* open udmabuf device */
-			hsakmt_udmabuf_dev_fd = open(kfd_udmabuf_device_name, 0);
-			if (hsakmt_udmabuf_dev_fd < 0)
-				pr_debug("running kernel does not support udmabuf\n");
-			else
-				pr_debug("udmabuf is enabled\n");
-		} else
-			pr_debug("udmabuf is not enabled\n");
 
 		useSvmStr = getenv("HSA_USE_SVM");
 		hsakmt_is_svm_api_supported = !(useSvmStr && !strcmp(useSvmStr, "0"));

@@ -42,6 +42,8 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 find_package(rocprofiler-sdk REQUIRED)
 
+set(IS_DISABLED ON)
+
 find_library(
     attdecoder_LIBRARY
     NAMES rocprof-trace-decoder
@@ -56,43 +58,43 @@ endif()
 find_package_handle_standard_args(attdecoder REQUIRED_VARS attdecoder_LIB_DIR
                                                            attdecoder_LIBRARY)
 
-set(COMMON_PARAMS_NO_LIB ${PRELOAD_ARGS} --att --output-format json --log-level env -d
-                         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/)
-
-set(IS_DISABLED ON)
 if(attdecoder_FOUND)
     set(IS_DISABLED OFF)
-    set(COMMON_PARAMS --att-library-path ${attdecoder_LIB_DIR} ${COMMON_PARAMS_NO_LIB})
+    set(LIB_PATH_ENV "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}")
 endif()
 
 # hsa multiqueue dependency test with lib path
 add_test(
-    NAME rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path-execute
+    NAME rocprofv3-test-hsa-multiqueue-att-cmd-env-att-lib-path-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-        --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
-        --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -o out --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --advanced-thread-trace
+        1 --att-target-cu 1 --att-shader-engine-mask 0x11 --kernel-include-regex copyD
+        --att-buffer-size 0x6000000 --att-simd-select 0x3 --att-serialize-all 1 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o out --output-format json
+        ${PRELOAD_ARGS} --att-library-path ${attdecoder_LIB_DIR} --att-activity 8 --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-cmd-env-att-lib-path-execute
+    rocprofv3-test-hsa-multiqueue-att-cmd-env-att-lib-path-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
 
 # hsa multiqueue dependency test with json input
 add_test(
-    NAME rocprofv3-test-att-hsa-multiqueue-json-execute
+    NAME rocprofv3-test-hsa-multiqueue-att-json-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/json_input -i
-        ${CMAKE_CURRENT_BINARY_DIR}/att_input.json --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --att-library-path
+        ${attdecoder_LIB_DIR} -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/json_input -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input.json ${PRELOAD_ARGS} --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-json-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
+    rocprofv3-test-hsa-multiqueue-att-json-execute
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} ENVIRONMENT
+               "${LIB_PATH_ENV}")
 
 # validate output
 add_test(
-    NAME rocprofv3-test-att-hsa-multiqueue-cmd-validate
+    NAME rocprofv3-test-hsa-multiqueue-att-cmd-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input/out_results.json
@@ -100,7 +102,7 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/cmd_input)
 
 add_test(
-    NAME rocprofv3-test-att-hsa-multiqueue-json-validate
+    NAME rocprofv3-test-hsa-multiqueue-att-json-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input/out_results.json
@@ -108,46 +110,46 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/hsa_code_object_testapp-trace/json_input)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-cmd-validate
+    rocprofv3-test-hsa-multiqueue-att-cmd-validate
     PROPERTIES TIMEOUT
                45
                LABELS
                "integration-tests"
                DEPENDS
-               "rocprofv3-test-att-hsa-multiqueue-cmd-ld-lib-path-execute"
+               "rocprofv3-test-hsa-multiqueue-att-cmd-ld-lib-path-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
                ${IS_DISABLED})
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-json-validate
+    rocprofv3-test-hsa-multiqueue-att-json-validate
     PROPERTIES TIMEOUT
                45
                LABELS
                "integration-tests"
                DEPENDS
-               "rocprofv3-test-att-hsa-multiqueue-json-execute"
+               "rocprofv3-test-hsa-multiqueue-att-json-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                DISABLED
                ${IS_DISABLED})
 
-function(configure_att_input _FILENAME)
-    set(LIB_PATH_LOC "${attdecoder_LIB_DIR}")
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}//${_FILENAME}.in
+function(configure_att_input _FILENAME _OUTDIR)
+    set(LIBRARY_OUTPUT_DIR ${_OUTDIR})
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/att_input.yml.in
                    ${CMAKE_CURRENT_BINARY_DIR}/${_FILENAME} @ONLY)
 endfunction()
 
-configure_att_input(att_input.yml)
-configure_att_input(att_input_will_fail.yml)
+configure_att_input(att_input.yml "${attdecoder_LIB_DIR}")
+configure_att_input(att_input_will_fail.yml "${CMAKE_RUNTIME_OUTPUT_DIRECTORY}")
 
 # test yaml input
 add_test(
     NAME rocprofv3-test-att-yaml-input
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/yaml -i
-        ${CMAKE_CURRENT_BINARY_DIR}/att_input.yml --echo --
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+        ${CMAKE_CURRENT_BINARY_DIR}/att_input.yml --log-level env --echo --
         $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
@@ -164,7 +166,7 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-att-yaml-input-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED True)
 
 add_test(NAME rocprofv3-test-att-library-path-cmd-line-will-fail
          COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --att-library-path .
@@ -172,12 +174,11 @@ add_test(NAME rocprofv3-test-att-library-path-cmd-line-will-fail
 
 set_tests_properties(
     rocprofv3-test-att-library-path-cmd-line-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED ${IS_DISABLED})
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" WILL_FAIL ON DISABLED True)
 
-add_test(
-    NAME rocprofv3-test-att-library-path-env-var-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envfail
-            --att-library-path . --echo -- $<TARGET_FILE:hsa_code_object_testapp>)
+add_test(NAME rocprofv3-test-att-library-path-env-var-will-fail
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --att --log-level env --echo
+                 -- $<TARGET_FILE:hsa_code_object_testapp>)
 
 set_tests_properties(
     rocprofv3-test-att-library-path-env-var-will-fail
@@ -186,70 +187,65 @@ set_tests_properties(
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}"
+               "ROCPROF_ATT_LIBRARY_PATH=."
                WILL_FAIL
                ON
                DISABLED
-               ${IS_DISABLED})
-
-add_test(NAME rocprofv3-test-att-env-var
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS_NO_LIB}/envvar
-                 -- $<TARGET_FILE:hsa_code_object_testapp>)
-
-set_tests_properties(
-    rocprofv3-test-att-env-var
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "ROCPROF_ATT_LIBRARY_PATH=${attdecoder_LIB_DIR}" DISABLED ${IS_DISABLED})
+               True)
 
 #
 # Uses ATT and Counter Collection at the same time
 #
-add_test(NAME rocprofv3-test-att-hsa-multiqueue-plus-pmc-execute
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-                 --pmc SQ_WAVES -o out -- $<TARGET_FILE:vector-ops>)
+add_test(
+    NAME rocprofv3-test-hsa-multiqueue-att-plus-pmc-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --pmc SQ_WAVES
+        --advanced-thread-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
+        out --output-format json ${PRELOAD_ARGS} -- $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-plus-pmc-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
+    rocprofv3-test-hsa-multiqueue-att-plus-pmc-execute
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} ENVIRONMENT
+               "${LIB_PATH_ENV}")
 
 # Check for conflict PMC + activity
-add_test(NAME rocprofv3-test-att-hsa-multiqueue-activity-pmc-will-fail
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-                 --pmc SQ_WAVES -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>)
+add_test(
+    NAME rocprofv3-test-hsa-multiqueue-att-activity-pmc-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --pmc SQ_WAVES
+        --advanced-thread-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
+        out --att-activity 8 ${PRELOAD_ARGS} -- $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-activity-pmc-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} WILL_FAIL ON)
+    rocprofv3-test-hsa-multiqueue-att-activity-pmc-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DISABLED
+               ${IS_DISABLED}
+               ENVIRONMENT
+               "${LIB_PATH_ENV}"
+               WILL_FAIL
+               ON)
 
 # Check for conflict Perfcounters + activity
 add_test(
-    NAME rocprofv3-test-att-hsa-multiqueue-activity-perf-will-fail
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-            --att-perfcounter-ctrl 8 -o out --att-activity 8 -- $<TARGET_FILE:vector-ops>)
+    NAME rocprofv3-test-hsa-multiqueue-att-activity-perf-will-fail
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --log-level env --att
+        --att-perfcounter-ctrl 8 -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace/cmd_input -o
+        out --att-activity 8 ${PRELOAD_ARGS} -- $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
-    rocprofv3-test-att-hsa-multiqueue-activity-perf-will-fail
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED} WILL_FAIL ON)
-
-# ATT plus PC sampling
-
-rocprofiler_sdk_pc_sampling_stochastic_disabled(IS_PC_SAMPLING_STOCHASTIC_DISABLED)
-
-set(ATT_PLUS_PCS_DISABLE ${IS_DISABLED})
-if(${IS_PC_SAMPLING_STOCHASTIC_DISABLED})
-    set(ATT_PLUS_PCS_DISABLE ON)
-endif()
-if(${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
-    set(ATT_PLUS_PCS_DISABLE ON)
-endif()
-set(PCS_ARGS --pc-sampling-beta-enabled 1 --pc-sampling-unit cycles
-             --pc-sampling-interval 16384 --pc-sampling-method stochastic)
-
-add_test(NAME rocprofv3-test-att-plus-pc-sampling
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input
-                 ${PCS_ARGS} -o out -- $<TARGET_FILE:vector-ops>)
-
-set_tests_properties(
-    rocprofv3-test-att-plus-pc-sampling
-    PROPERTIES TIMEOUT 90 LABELS "integration-tests;thread-trace;pc-sampling" DISABLED
-               ${ATT_PLUS_PCS_DISABLE})
+    rocprofv3-test-hsa-multiqueue-att-activity-perf-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DISABLED
+               ${IS_DISABLED}
+               ENVIRONMENT
+               "${LIB_PATH_ENV}"
+               WILL_FAIL
+               ON)

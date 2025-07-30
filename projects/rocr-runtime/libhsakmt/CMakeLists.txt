@@ -211,7 +211,7 @@ install ( TARGETS ${HSAKMT_TARGET}
 
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-  COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
+  COMPONENT dev PATTERN "linux" EXCLUDE )
 
 # Record our usage data for clients find_package calls.
 install ( EXPORT ${HSAKMT_TARGET}Targets

@@ -26,6 +26,11 @@
 #endif
 
 #include "trace_callbacks.hpp"
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+
+#ifdef ENABLE_ATT_FILES
+#    include <nlohmann/json.hpp>
+#endif
 
 #include <unistd.h>
 #include <cassert>
@@ -33,78 +38,135 @@
 
 namespace Callbacks
 {
-rocprofiler_thread_trace_decoder_id_t decoder{};
-std::atomic<size_t>                   latency{0};
+using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
+using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t* /* user_data */,
-                              void* /* userdata */)
+                              void* userdata)
 {
+    C_API_BEGIN
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
+    if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
 
-    auto* data = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-    if(data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE) return;
+    assert(userdata && "Dispatch callback passed null!");
+    auto& tool = *reinterpret_cast<Callbacks::ToolData*>(userdata);
 
-    if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD)
+    if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        DECODER_CALL(
-            rocprofiler_thread_trace_decoder_codeobj_unload(decoder, data->code_object_id));
-        return;
+        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+        tool.kernel_id_to_kernel_name.emplace(data->kernel_id, data->kernel_name);
     }
 
-    DECODER_CALL(rocprofiler_thread_trace_decoder_codeobj_load(
-        decoder,
-        data->code_object_id,
-        data->load_delta,
-        data->load_size,
-        reinterpret_cast<const void*>(data->memory_base),
-        data->memory_size));
-}
+    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
 
-typedef void (*rocprofiler_thread_trace_decoder_callback_t)(
-    rocprofiler_thread_trace_decoder_record_type_t record_type_id,
-    void*                                          trace_events,
-    uint64_t                                       trace_size,
-    void*                                          userdata);
+    auto* data = static_cast<code_obj_load_data_t*>(record.payload);
 
-void
-shader_data_callback(rocprofiler_agent_id_t /* agent */,
-                     int64_t /* se_id */,
-                     void*  se_data,
-                     size_t data_size,
-                     rocprofiler_user_data_t /* userdata */)
-{
-    auto parse = [](rocprofiler_thread_trace_decoder_record_type_t record_type_id,
-                    void*                                          trace_events,
-                    uint64_t                                       trace_size,
-                    void* /* userdata */) {
-        if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
+    static std::atomic<int> filecnt{0};
+    std::string             name = "codeobj_" + std::to_string(filecnt.fetch_add(1)) + ".out";
 
-        for(size_t w = 0; w < trace_size; w++)
-        {
-            auto* wave = static_cast<rocprofiler_thread_trace_decoder_wave_t*>(trace_events);
-            for(size_t i = 0; i < wave->instructions_size; i++)
-                latency += wave->instructions_array[i].duration;
-        }
-    };
-    DECODER_CALL(rocprofiler_trace_decode(decoder, parse, se_data, data_size, nullptr));
+#ifdef ENABLE_ATT_FILES
+    if(std::string_view(data->uri).find("file:///") == 0)
+    {
+        rocprofiler::sdk::codeobj::disassembly::CodeObjectBinary binary(data->uri);
+
+        std::ofstream file(tool.out_dir + name, std::ios::binary);
+        assert(file.is_open() && "Could not open codeobj file for writing");
+        file.write((char*) binary.buffer.data(), binary.buffer.size());
+    }
+    else
+    {
+        std::ofstream file(tool.out_dir + name, std::ios::binary);
+        file.write((char*) data->memory_base, data->memory_size);
+    }
+#endif
+
+    auto _lk = std::unique_lock{tool.mut};
+    tool.codeobjs.push_back(
+        {data->load_delta, data->load_size, data->code_object_id, name, data->uri});
+
+    C_API_END
 }
 
 void
-init()
+shader_data_callback(rocprofiler_agent_id_t  agent,
+                     int64_t                 se_id,
+                     void*                   se_data,
+                     size_t                  data_size,
+                     rocprofiler_user_data_t userdata)
 {
-    // const char* decoder_lib = std::getenv("ROCPROF_TRACE_DECODER_PATH");
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+    C_API_BEGIN
+
+    assert(userdata.ptr && "Dispatch callback passed null!");
+    auto& tool = *reinterpret_cast<Callbacks::ToolData*>(userdata.ptr);
+
+    std::string name = "agent_" + std::to_string(agent.handle) + "_shader_engine_" +
+                       std::to_string(se_id) + "_" + std::to_string(agent.handle) + ".att";
+
+#ifdef ENABLE_ATT_FILES
+    {
+        std::ofstream file(tool.out_dir + name, std::ios::binary);
+        assert(file.is_open() && "Could not open ATT file for writing");
+        file.write((char*) se_data, data_size);
+    }
+#endif
+
+    assert(se_data);
+    assert(data_size);
+
+    auto _lk = std::unique_lock{tool.mut};
+    tool.att_files.push_back(name);
+
+    C_API_END
 }
 
 void
-finalize(void* /* tool_data */)
+finalize_json(void* userdata)
 {
-    rocprofiler_thread_trace_decoder_destroy(decoder);
+    assert(userdata && "Dispatch callback passed null!");
 
-    if(latency.load() == 0) std::cerr << "Error: No latency was assigned to the trace!";
+    auto& tool = *reinterpret_cast<Callbacks::ToolData*>(userdata);
+    auto  _lk  = std::unique_lock{tool.mut};
+    assert(!tool.att_files.empty());
+
+#ifdef ENABLE_ATT_FILES
+    nlohmann::json att_json;
+    for(auto& file : tool.att_files)
+        att_json.push_back(file);
+
+    nlohmann::json codeobj_json;
+    nlohmann::json snapshot_json;
+    for(auto& file : tool.codeobjs)
+    {
+        nlohmann::json codeobj;
+        codeobj["code_object_id"] = file.id;
+        codeobj["load_delta"]     = file.addr;
+        codeobj["load_size"]      = file.size;
+        codeobj["uri"]            = file.uri;
+        codeobj["filename"]       = file.filename;
+        codeobj_json.push_back(codeobj);
+
+        nlohmann::json pair_json;
+        pair_json["key"]   = file.id;
+        pair_json["value"] = file.filename;
+        snapshot_json.push_back(pair_json);
+    }
+    nlohmann::json tool_json;
+    tool_json["strings"]["att_files"]                  = att_json;
+    tool_json["code_objects"]                          = codeobj_json;
+    tool_json["strings"]["code_object_snapshot_files"] = snapshot_json;
+
+    nlohmann::json array;
+    array.push_back(tool_json);
+
+    nlohmann::json sdk_json;
+    sdk_json["rocprofiler-sdk-tool"] = array;
+
+    std::ofstream json_file(tool.out_dir + (std::to_string(getpid()) + "_results.json"));
+    assert(json_file.is_open() && "Could not open json file for writing!");
+    json_file << sdk_json;
+#endif
 }
 
 }  // namespace Callbacks

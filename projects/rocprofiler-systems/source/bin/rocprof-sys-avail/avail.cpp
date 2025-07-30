@@ -118,7 +118,7 @@ write_hw_counter_info(std::ostream&, const array_t<bool, N>& = {},
 namespace
 {
 // initialize HIP before main so that librocprof-sys is not HSA_TOOLS_LIB
-int gpu_count = 0;
+int gpu_count = rocprofsys::gpu::device_count();
 
 // statically allocated shared_ptrs to prevent use after free errors
 auto timemory_manager      = tim::manager::master_instance();
@@ -138,7 +138,6 @@ main(int argc, char** argv)
     tim::unwind::set_bfd_verbose(3);
     tim::set_env("ROCPROFSYS_INIT_TOOLING", "OFF", 1);
     rocprofsys_init_library();
-    gpu_count = rocprofsys::gpu::device_count();
 
     std::set<std::string> _category_options = component_categories{}();
     {

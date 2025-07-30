@@ -26,22 +26,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS WITH
 // THE SOFTWARE.
 
-#include "core/agent.hpp"
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
 
-#include "core/agent_manager.hpp"
+#include "library/amd_smi.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/gpu.hpp"
-#include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/rocpd/data_processor.hpp"
 #include "core/state.hpp"
-#include "library/amd_smi.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -53,11 +49,13 @@
 #include <timemory/utility/locking.hpp>
 
 #include <cassert>
-#include <optional>
+#include <chrono>
+#include <ios>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <sys/resource.h>
+#include <thread>
 
 #define ROCPROFSYS_AMD_SMI_CALL(...)                                                     \
     ::rocprofsys::amd_smi::check_error(__FILE__, __LINE__, __VA_ARGS__)
@@ -71,115 +69,6 @@ using sampler_instances = thread_data<bundle_t, category::amd_smi>;
 
 namespace
 {
-int64_t
-get_tid()
-{
-    static thread_local auto _v = threading::get_id();
-    return _v;
-}
-
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
-}
-
-void
-rocpd_initialize_category()
-{
-    get_data_processor().insert_category(ROCPROFSYS_CATEGORY_AMD_SMI,
-                                         trait::name<category::amd_smi>::value);
-}
-
-void
-rocpd_initialize_smi_tracks()
-{
-    auto&      data_processor = get_data_processor();
-    auto&      n_info         = node_info::get_instance();
-    const auto thread_id      = std::nullopt;  // Internal thread ID for amd-smi
-
-    data_processor.insert_track(trait::name<category::amd_smi_mm_busy>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_power>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_temp>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_memory_usage>::value,
-                                n_info.id, getpid(), thread_id);
-}
-
-void
-rocpd_initialize_smi_pmc(size_t gpu_id)
-{
-    auto& data_processor = get_data_processor();
-    // find the proper values for a following definitions
-    size_t      EVENT_CODE       = 0;
-    size_t      INSTANCE_ID      = 0;
-    const char* LONG_DESCRIPTION = "";
-    const char* COMPONENT        = "";
-    const char* BLOCK            = "";
-    const char* EXPRESSION       = "";
-    const char* CELSIUS_DEGREES  = "\u00B0C";
-    auto        ni               = node_info::get_instance();
-    const auto* TARGET_ARCH      = "GPU";
-
-    auto& _agent_manager = agent_manager::get_instance();
-    auto  base_id = _agent_manager.get_agent_by_id(gpu_id, agent_type::GPU).base_id;
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_mm_busy>::value, "Busy",
-        trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION, COMPONENT,
-        "%", "ABS", BLOCK, EXPRESSION, 0, 0);
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_temp>::value, "Temp",
-        trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
-        CELSIUS_DEGREES, "ABS", BLOCK, EXPRESSION, 0, 0);
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_power>::value, "Pow",
-        trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
-        "w", "ABS", BLOCK, EXPRESSION, 0, 0);
-
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
-        trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-        COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0);
-}
-
-void
-rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& settings,
-                             uint64_t timestamp, double busy, double temp, double power,
-                             double usage)
-{
-    if(!(settings.busy || settings.temp || settings.power || settings.mem_usage)) return;
-
-    auto& data_processor = get_data_processor();
-    auto  event_id = data_processor.insert_event(ROCPROFSYS_CATEGORY_AMD_SMI, 0, 0, 0);
-
-    auto& _agent_manager = agent_manager::get_instance();
-    auto  base_id = _agent_manager.get_agent_by_id(device_id, agent_type::GPU).base_id;
-
-    auto insert_event_and_sample = [&](bool enabled, const char* name, double value) {
-        if(!enabled) return;
-        data_processor.insert_pmc_event(event_id, base_id, name, value);
-        data_processor.insert_sample(name, timestamp, event_id);
-    };
-
-    insert_event_and_sample(settings.busy, trait::name<category::amd_smi_mm_busy>::value,
-                            busy);
-    insert_event_and_sample(settings.temp, trait::name<category::amd_smi_temp>::value,
-                            temp);
-    insert_event_and_sample(settings.power, trait::name<category::amd_smi_power>::value,
-                            power);
-    insert_event_and_sample(settings.mem_usage,
-                            trait::name<category::amd_smi_memory_usage>::value, usage);
-}
-
 auto&
 get_settings(uint32_t _dev_id)
 {
@@ -251,8 +140,6 @@ data::data(uint32_t _dev_id) { sample(_dev_id); }
 void
 data::sample(uint32_t _dev_id)
 {
-    if(is_child_process()) return;
-
     auto _ts = tim::get_clock_real_now<size_t, std::nano>();
     assert(_ts < std::numeric_limits<int64_t>::max());
     amdsmi_gpu_metrics_t _gpu_metrics;
@@ -281,6 +168,7 @@ data::sample(uint32_t _dev_id)
     }
 
     amdsmi_processor_handle sample_handle = gpu::get_handle_from_id(_dev_id);
+
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).busy, amdsmi_get_gpu_activity,
                           sample_handle, &m_busy_perc);
     ROCPROFSYS_AMDSMI_GET(get_settings(m_dev_id).temp, amdsmi_get_temp_metric,
@@ -388,15 +276,10 @@ config()
                 *_bundle_data.at(i) = unique_ptr_t<bundle_t>{ new bundle_t{} };
         }
     }
+
     data::get_initial().resize(data::device_count);
     for(auto itr : data::device_list)
         data::get_initial().at(itr).sample(itr);
-
-    if(get_use_rocpd())
-    {
-        rocpd_initialize_category();
-        rocpd_initialize_smi_tracks();
-    }
 }
 
 void
@@ -480,194 +363,192 @@ data::post_process(uint32_t _dev_id)
 
     auto _settings = get_settings(_dev_id);
 
-    auto use_perfetto = get_use_perfetto();
-    auto use_rocpd    = get_use_rocpd();
+    auto _process_perfetto = [&]() {
+        constexpr uint8_t AMD_SMI_METRICS_COUNT = 8;
+        auto              _idx = std::array<uint64_t, AMD_SMI_METRICS_COUNT>{};
 
-    if(use_rocpd)
-    {
-        rocpd_initialize_smi_pmc(_dev_id);
-    }
-
-    for(auto& itr : _amd_smi)
-    {
-        using counter_track = perfetto_counter_track<data>;
-        if(itr.m_dev_id != _dev_id) continue;
-
-        uint64_t _ts = itr.m_ts;
-        if(!_thread_info->is_valid_time(_ts)) continue;
-
-        double _gfxbusy = itr.m_busy_perc.gfx_activity;
-        double _umcbusy = itr.m_busy_perc.umc_activity;
-        double _mmbusy  = itr.m_busy_perc.mm_activity;
-        double _temp    = itr.m_temp;
-        double _power   = itr.m_power.current_socket_power;
-        double _usage   = itr.m_mem_usage / static_cast<double>(units::megabyte);
-
-        auto setup_perfetto_counter_tracks = [&]() {
-            if(counter_track::exists(_dev_id)) return;
-
-            auto addendum = [&](const char* _v) {
-                return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
-            };
-
-            auto addendum_blk = [&](std::size_t _i, const char* _metric,
-                                    std::size_t xcp_idx = SIZE_MAX) {
-                if(xcp_idx != SIZE_MAX)
-                {
-                    return JOIN(
-                        " ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                        JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""), _i, ']'),
-                        "(S)");
-                }
-                else
-                {
-                    return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
-                                JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
-                }
-            };
-
+        {
+            _idx.fill(_idx.size());
+            uint64_t nidx = 0;
             if(_settings.busy)
             {
-                counter_track::emplace(_dev_id, addendum("GFX Busy"), "%");
-                counter_track::emplace(_dev_id, addendum("UMC Busy"), "%");
-                counter_track::emplace(_dev_id, addendum("MM Busy"), "%");
+                _idx.at(0) = nidx++;  // GFX Busy
+                _idx.at(1) = nidx++;  // UMC Busy
+                _idx.at(2) = nidx++;  // MM Busy
             }
-            if(_settings.temp)
+            if(_settings.temp) _idx.at(3) = nidx++;
+            if(_settings.power) _idx.at(4) = nidx++;
+            if(_settings.mem_usage) _idx.at(5) = nidx++;
+            if(_settings.vcn_activity) _idx.at(6) = nidx++;
+            if(_settings.jpeg_activity) _idx.at(7) = nidx++;
+        }
+
+        for(auto& itr : _amd_smi)
+        {
+            using counter_track = perfetto_counter_track<data>;
+            if(itr.m_dev_id != _dev_id) continue;
+            if(!counter_track::exists(_dev_id))
             {
-                counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");
-            }
-            if(_settings.power)
-            {
-                counter_track::emplace(_dev_id, addendum("Current Power"), "watts");
-            }
-            if(_settings.mem_usage)
-            {
-                counter_track::emplace(_dev_id, addendum("Memory Usage"), "megabytes");
-            }
-            if(_settings.vcn_activity)
-            {
-                if(itr.m_xcp_metrics.empty())
-                {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No VCN activity data collected from device %u\n", _dev_id);
-                }
-                else if(gpu::is_vcn_activity_supported(_dev_id))
-                {
-                    // For VCN activity, use simple indexing
-                    for(std::size_t i = 0; i < std::size(itr.m_xcp_metrics[0].vcn_busy);
-                        ++i)
-                        counter_track::emplace(_dev_id, addendum_blk(i, "VCN Activity"),
-                                               "%");
-                }
-                else
-                {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics); ++xcp)
+                auto addendum = [&](const char* _v) {
+                    return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
+                };
+                auto addendum_blk = [&](std::size_t _i, const char* _metric,
+                                        std::size_t xcp_idx = SIZE_MAX) {
+                    if(xcp_idx != SIZE_MAX)
                     {
+                        return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
+                                    JOIN("", "XCP_", xcp_idx, ": [", (_i < 10 ? "0" : ""),
+                                         _i, ']'),
+                                    "(S)");
+                    }
+                    else
+                    {
+                        return JOIN(" ", "GPU", JOIN("", '[', _dev_id, ']'), _metric,
+                                    JOIN("", "[", (_i < 10 ? "0" : ""), _i, ']'), "(S)");
+                    }
+                };
+
+                if(_settings.busy)
+                {
+                    counter_track::emplace(_dev_id, addendum("GFX Busy"), "%");
+                    counter_track::emplace(_dev_id, addendum("UMC Busy"), "%");
+                    counter_track::emplace(_dev_id, addendum("MM Busy"), "%");
+                }
+                if(_settings.temp)
+                    counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");
+                if(_settings.power)
+                    counter_track::emplace(_dev_id, addendum("Current Power"), "watts");
+                if(_settings.mem_usage)
+                    counter_track::emplace(_dev_id, addendum("Memory Usage"),
+                                           "megabytes");
+                if(_settings.vcn_activity)
+                {
+                    if(itr.m_xcp_metrics.empty())
+                    {
+                        ROCPROFSYS_VERBOSE(
+                            1, "No VCN activity data collected from device %u\n",
+                            _dev_id);
+                    }
+                    else if(gpu::is_vcn_activity_supported(_dev_id))
+                    {
+                        // For VCN activity, use simple indexing
                         for(std::size_t i = 0;
-                            i < std::size(itr.m_xcp_metrics[xcp].vcn_busy); ++i)
+                            i < std::size(itr.m_xcp_metrics[0].vcn_busy); ++i)
+                            counter_track::emplace(_dev_id,
+                                                   addendum_blk(i, "VCN Activity"), "%");
+                    }
+                    else
+                    {
+                        for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics);
+                            ++xcp)
                         {
-                            counter_track::emplace(
-                                _dev_id, addendum_blk(i, "VCN Activity", xcp), "%");
+                            for(std::size_t i = 0;
+                                i < std::size(itr.m_xcp_metrics[xcp].vcn_busy); ++i)
+                            {
+                                counter_track::emplace(
+                                    _dev_id, addendum_blk(i, "VCN Activity", xcp), "%");
+                            }
+                        }
+                    }
+                }
+                if(_settings.jpeg_activity)
+                {
+                    if(itr.m_xcp_metrics.empty())
+                    {
+                        ROCPROFSYS_VERBOSE(
+                            1, "No JPEG activity data collected from device %u\n",
+                            _dev_id);
+                    }
+                    else if(gpu::is_jpeg_activity_supported(_dev_id))
+                    {
+                        // For JPEG activity, use simple indexing
+                        for(std::size_t i = 0;
+                            i < std::size(itr.m_xcp_metrics[0].jpeg_busy); ++i)
+                            counter_track::emplace(_dev_id,
+                                                   addendum_blk(i, "JPEG Activity"), "%");
+                    }
+                    else
+                    {
+                        for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics);
+                            ++xcp)
+                        {
+                            for(std::size_t i = 0;
+                                i < std::size(itr.m_xcp_metrics[xcp].jpeg_busy); ++i)
+                                counter_track::emplace(
+                                    _dev_id, addendum_blk(i, "JPEG Activity", xcp), "%");
                         }
                     }
                 }
             }
-            if(_settings.jpeg_activity)
-            {
-                if(itr.m_xcp_metrics.empty())
-                {
-                    ROCPROFSYS_VERBOSE(
-                        1, "No JPEG activity data collected from device %u\n", _dev_id);
-                }
-                else if(gpu::is_jpeg_activity_supported(_dev_id))
-                {
-                    for(std::size_t i = 0; i < std::size(itr.m_xcp_metrics[0].jpeg_busy);
-                        ++i)
-                        counter_track::emplace(_dev_id, addendum_blk(i, "JPEG Activity"),
-                                               "%");
-                }
-                else
-                {
-                    for(std::size_t xcp = 0; xcp < std::size(itr.m_xcp_metrics); ++xcp)
-                    {
-                        for(std::size_t i = 0;
-                            i < std::size(itr.m_xcp_metrics[xcp].jpeg_busy); ++i)
-                            counter_track::emplace(
-                                _dev_id, addendum_blk(i, "JPEG Activity", xcp), "%");
-                    }
-                }
-            }
-        };
+            uint64_t _ts = itr.m_ts;
+            if(!_thread_info->is_valid_time(_ts)) continue;
 
-        auto write_perfetto_metrics = [&]() {
-            size_t track_index = 0;
+            double _gfxbusy = itr.m_busy_perc.gfx_activity;
+            double _umcbusy = itr.m_busy_perc.umc_activity;
+            double _mmbusy  = itr.m_busy_perc.mm_activity;
+            double _temp    = itr.m_temp;
+            double _power   = itr.m_power.current_socket_power;
+            double _usage   = itr.m_mem_usage / static_cast<double>(units::megabyte);
 
             if(_settings.busy)
             {
-                TRACE_COUNTER("device_busy_gfx",
-                              counter_track::at(_dev_id, track_index++), _ts, _gfxbusy);
-                TRACE_COUNTER("device_busy_umc",
-                              counter_track::at(_dev_id, track_index++), _ts, _umcbusy);
-                TRACE_COUNTER("device_busy_mm", counter_track::at(_dev_id, track_index++),
+                TRACE_COUNTER("device_busy_gfx", counter_track::at(_dev_id, _idx.at(0)),
+                              _ts, _gfxbusy);
+                TRACE_COUNTER("device_busy_umc", counter_track::at(_dev_id, _idx.at(1)),
+                              _ts, _umcbusy);
+                TRACE_COUNTER("device_busy_mm", counter_track::at(_dev_id, _idx.at(2)),
                               _ts, _mmbusy);
             }
             if(_settings.temp)
-            {
-                TRACE_COUNTER("device_temp", counter_track::at(_dev_id, track_index++),
-                              _ts, _temp);
-            }
+                TRACE_COUNTER("device_temp", counter_track::at(_dev_id, _idx.at(3)), _ts,
+                              _temp);
             if(_settings.power)
-            {
-                TRACE_COUNTER("device_power", counter_track::at(_dev_id, track_index++),
-                              _ts, _power);
-            }
+                TRACE_COUNTER("device_power", counter_track::at(_dev_id, _idx.at(4)), _ts,
+                              _power);
             if(_settings.mem_usage)
-            {
                 TRACE_COUNTER("device_memory_usage",
-                              counter_track::at(_dev_id, track_index++), _ts, _usage);
-            }
-
+                              counter_track::at(_dev_id, _idx.at(5)), _ts, _usage);
             if(_settings.vcn_activity && !itr.m_xcp_metrics.empty())
             {
+                uint64_t idx = _idx.at(6);
                 // Iterate over all XCPs and their VCN busy/activity values
                 for(const auto& metrics : itr.m_xcp_metrics)
                 {
                     for(const auto& vcn_val : metrics.vcn_busy)
                     {
                         TRACE_COUNTER("device_vcn_activity",
-                                      counter_track::at(_dev_id, track_index++), _ts,
-                                      vcn_val);
+                                      counter_track::at(_dev_id, idx), _ts, vcn_val);
+                        ++idx;
                     }
                 }
             }
 
             if(_settings.jpeg_activity && !itr.m_xcp_metrics.empty())
             {
+                uint64_t idx = _idx.at(7);
+                // Calculate total VCN metrics to properly offset JPEG metrics index
+                if(_settings.vcn_activity)
+                {
+                    size_t total_vcn_metrics = 0;
+                    for(const auto& metrics : itr.m_xcp_metrics)
+                        total_vcn_metrics += metrics.vcn_busy.size();
+                    if(total_vcn_metrics > 0) idx += (total_vcn_metrics - 1);
+                }
                 // Iterate over all XCPs and their JPEG busy/activity values
                 for(const auto& metrics : itr.m_xcp_metrics)
                 {
                     for(const auto& jpeg_val : metrics.jpeg_busy)
                     {
                         TRACE_COUNTER("device_jpeg_activity",
-                                      counter_track::at(_dev_id, track_index++), _ts,
-                                      jpeg_val);
+                                      counter_track::at(_dev_id, idx), _ts, jpeg_val);
+                        ++idx;
                     }
                 }
             }
-        };
-
-        if(use_perfetto)
-        {
-            setup_perfetto_counter_tracks();
-            write_perfetto_metrics();
         }
+    };
 
-        if(use_rocpd)
-        {
-            rocpd_process_smi_pmc_events(_dev_id, _settings, _ts, _mmbusy, _temp, _power,
-                                         _usage);
-        }
-    }
+    if(get_use_perfetto()) _process_perfetto();
 }
 
 //--------------------------------------------------------------------------------------//
@@ -692,7 +573,7 @@ setup()
     ROCPROFSYS_VERBOSE_F(0, "AMD SMI version: %u.%u.%u - str: %s.\n", _version.major,
                          _version.minor, _version.release, _version.build);
 
-    data::device_count = gpu::device_count();
+    data::device_count = gpu::get_processor_count();
 
     auto _devices_v = get_sampling_gpus();
     for(auto& itr : _devices_v)
@@ -787,6 +668,7 @@ setup()
         }
 
         is_initialized() = true;
+
         data::setup();
     } catch(std::runtime_error& _e)
     {
@@ -823,10 +705,7 @@ void
 post_process()
 {
     for(auto itr : data::device_list)
-    {
-        ROCPROFSYS_VERBOSE(2, "Post-processing amd-smi data for device: %d", itr);
         data::post_process(itr);
-    }
 }
 
 uint32_t

@@ -43,7 +43,7 @@ static const std::vector<uint32_t> TargetList = {
     0x090009,
     0x09000a,
     0x09000c,
-    0x090402,
+    0x090400,
     0x0a0100,
     0x0a0101,
     0x0a0102,

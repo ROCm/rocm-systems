@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "agent.hpp"
 #define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                           \
     namespace tim                                                                        \
     {                                                                                    \
@@ -41,10 +40,6 @@
 #include "gpu.hpp"
 
 #include <timemory/manager.hpp>
-
-#include <string>
-
-#include "core/agent_manager.hpp"
 
 #if ROCPROFSYS_USE_ROCM > 0
 #    include <amd_smi/amdsmi.h>
@@ -113,31 +108,18 @@ amdsmi_init()
 }
 #endif  // ROCPROFSYS_USE_ROCM > 0
 
-size_t
-query_rocm_agents()
+int32_t
+query_rocm_gpu_agents()
 {
-    size_t _dev_cnt = 0;
+    int32_t _dev_cnt = 0;
 #if ROCPROFSYS_USE_ROCM > 0
-    auto iterator = []([[maybe_unused]] rocprofiler_agent_version_t version,
-                       const void** agents, size_t num_agents,
-                       [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
-        auto& _agent_manager = agent_manager::get_instance();
+    auto iterator = [](rocprofiler_agent_version_t /*version*/, const void** agents,
+                       size_t num_agents, void* user_data) -> rocprofiler_status_t {
+        auto* _cnt = static_cast<int32_t*>(user_data);
         for(size_t i = 0; i < num_agents; ++i)
         {
-            const auto* _agent    = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
-            auto        cur_agent = agent{
-                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                                   : agent_type::CPU),
-                _agent->device_id,
-                _agent->node_id,
-                _agent->logical_node_id,
-                _agent->logical_node_type_id,
-                std::string(_agent->name),
-                std::string(_agent->vendor_name),
-                std::string(_agent->product_name),
-                std::string(_agent->model_name),
-            };
-            _agent_manager.insert_agent(cur_agent);
+            const auto* _agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+            if(_agent && _agent->type == ROCPROFILER_AGENT_TYPE_GPU) *_cnt += 1;
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
@@ -145,14 +127,15 @@ query_rocm_agents()
     try
     {
         rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0, iterator,
-                                           sizeof(rocprofiler_agent_v0_t), nullptr);
+                                           sizeof(rocprofiler_agent_v0_t), &_dev_cnt);
     } catch(std::exception& _e)
     {
         ROCPROFSYS_BASIC_VERBOSE(
-            1, "Exception thrown getting the rocm agents: %s. _dev_cnt=%ld\n", _e.what(),
+            1, "Exception thrown getting the rocm agents: %s. _dev_cnt=%d\n", _e.what(),
             _dev_cnt);
     }
-    _dev_cnt = agent_manager::get_instance().get_gpu_agents_count();
+    // rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0, iterator,
+    //                                sizeof(rocprofiler_agent_v0_t), &_dev_cnt);
 #endif
     return _dev_cnt;
 }
@@ -162,7 +145,7 @@ int
 device_count()
 {
 #if ROCPROFSYS_USE_ROCM > 0
-    static int _num_devices = query_rocm_agents();
+    static int _num_devices = query_rocm_gpu_agents();
     return _num_devices;
 #else
     return 0;
@@ -191,31 +174,20 @@ add_device_metadata(ArchiveT& ar)
 #if ROCPROFSYS_USE_ROCM > 0
     using agent_vec_t = std::vector<rocprofiler_agent_v0_t>;
 
-    auto iterator_cb = []([[maybe_unused]] rocprofiler_agent_version_t version,
-                          const void** agents, size_t num_agents,
-                          [[maybe_unused]] void* user_data) -> rocprofiler_status_t {
-        auto* agents_vec = static_cast<agent_vec_t*>(user_data);
+    auto _agents_vec = agent_vec_t{};
+    auto iterator    = [](rocprofiler_agent_version_t /*version*/, const void** agents,
+                       size_t num_agents, void* user_data) -> rocprofiler_status_t {
+        auto* _agents_vec_v = static_cast<agent_vec_t*>(user_data);
+        _agents_vec_v->reserve(num_agents);
         for(size_t i = 0; i < num_agents; ++i)
         {
             const auto* _agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-            {
-                agents_vec->push_back(*_agent);
-            }
+            if(_agent) _agents_vec_v->emplace_back(*_agent);
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
-
-    auto _agents_vec = agent_vec_t{};
-    try
-    {
-        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0, iterator_cb,
-                                           sizeof(rocprofiler_agent_v0_t), &_agents_vec);
-    } catch(std::exception& _e)
-    {
-        ROCPROFSYS_BASIC_VERBOSE(1, "Exception thrown getting the rocm agents: %s.\n",
-                                 _e.what());
-    }
+    rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0, iterator,
+                                       sizeof(rocprofiler_agent_v0_t), &_agents_vec);
 
     ar(make_nvp("rocm_agents", _agents_vec));
 #else
@@ -256,7 +228,6 @@ get_processor_handles()
 {
     uint32_t socket_count;
     uint32_t processor_count;
-    processors::processors_list.clear();
 
     // Passing nullptr will return us the number of sockets available for read in this
     // system

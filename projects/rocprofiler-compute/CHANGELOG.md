@@ -6,26 +6,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Added
 
-* Add `rocpd` choice for `--format-rocprof-output` option in profile mode
-* Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
-
-### Changed
-
-* Add notice for change in default output format to `rocpd` in a future release
-  * This is displayed when `--format-rocprof-output rocpd` is not used in profile mode
-
-* When `--format-rocprof-output rocpd` is used, only pmc_perf.csv will be written to workload directory instead of mulitple csv files.
-
-### Resolved issues
-
-### Known issues
-
-### Removed
-
-## ROCm Compute Profiler 3.2.0 for ROCm 7.0.0
-
-### Added
-
 * Support Roofline plot on CLI (single run)
 
 * Stochastic (hardware-based) PC sampling has been enabled for AMD Instinct MI300X series and later accelerators.
@@ -86,9 +66,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add deprecation warning for database update mode.
 
-* Show description of metrics during analysis
-  * Use `--include-cols Description` to show `Description` column which is excluded by default from cli output
-
 ### Changed
 
 * Change the default rocprof version to rocprofv3, this is used when environment variable "ROCPROF" is not set
@@ -104,15 +81,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Update Roofline binaries
   * Rebuild using latest ROCm stack
   * OS distribution support minimum for roofline feature is now Ubuntu22.04, RHEL9, and SLES15SP6
-* Improve analysis block based filtering to accept metric id level filtering
-  * This can be used to collect individual metrics from various sections of analysis config
-* CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
-  * Remove metrics from analysis configuration files which are explicitly marked as empty or None
 
 ### Optimized
 
 * ROCm Compute Profiler CLI has been improved to better display the GPU architecture analytics
-* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
 
 ### Resolved issues
 
@@ -121,10 +93,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed kernel name and kernel dispatch filtering when using rocprof v3
 * Fixed not collecting TCC channel counters in rocprof v3
 * Fixed peak FLOPS of F8 I8 F16 and BF16 on MI300
-* Fixed not detecting memory clock issue when using amd-smi
-* Fixed standalone GUI crashing
-* Fixed L2 read/write/atomic bandwidths on MI350
-* Update metric names for better alignment between analysis configuration and documentation
 
 ### Known issues
 
@@ -147,8 +115,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline support for Ubuntu 20.04 and SLES below 15.6
 * Usage of rocm-smi
-* Remove support for MI50/MI60 in accordance with the documentation
-* Hardware IP block based filtering has been removed in favor of analysis report block based filtering
 
 ## ROCm Compute Profiler 3.1.0 for ROCm 6.4.0
 

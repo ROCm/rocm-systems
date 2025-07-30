@@ -93,8 +93,8 @@ namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
-                   uint32_t index, core::DriverType driver_type)
-    : GpuAgentInt(node, driver_type),
+                   uint32_t index)
+    : GpuAgentInt(node),
       properties_(node_props),
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),
@@ -106,6 +106,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_max_frequency_(0),
       enum_index_(index),
       ape1_base_(0),
+      ape1_size_(0),
       pending_copy_req_ref_(0),
       pending_copy_stat_check_ref_(0),
       sdma_blit_used_mask_(0),
@@ -711,6 +712,10 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   const size_t copy_size_overrides[2] = {0x3fffff, 0x3fffffff};
 
   switch (isa_->GetMajorVersion()) {
+    case 7:
+    case 8:
+      sdma = new BlitSdmaV2V3();
+      break;
     case 9:
       sdma = new BlitSdmaV4();
       copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10) ?
@@ -2563,10 +2568,6 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
   if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
   for (uint32_t i = 0; i < size; i++) {
-    if ((isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) &&
-        sampleInfoList[i].method == HSA_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1) {
-      continue;
-    }
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
     if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) == HSA_STATUS_SUCCESS
         && cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
@@ -2613,10 +2614,6 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
     pcs_data = &pcs_hosttrap_data_;
   } else if (sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
-    if (isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
     pcs_data = &pcs_stochastic_data_;
   } else {
     // Unsupported sampling method
@@ -3096,7 +3093,6 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   const uint32_t atomic_ex_cmd_sz = 9;
   const uint32_t wait_reg_mem_cmd_sz = 7;
-  const uint32_t acquire_mem_cmd_sz = 8;
   const uint32_t dma_data_cmd_sz = 7;
   const uint32_t copy_data_cmd_sz = 6;
   const uint32_t write_data_cmd_sz = 5;
@@ -3228,20 +3224,6 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = 0xFFFFFFFF;
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
-
-  // For GFX1200 and GFX1201 only - add an ACQUIRE_MEM packet to flush L2 cache before DMA.
-  // This ensures that any data written by the trap handler is visible to the DMA engine.
-  if ((isa_->GetMajorVersion() == 12) && (isa_->GetMinorVersion() == 0)) {
-    cmd_data[i++] =
-        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
-    cmd_data[i++] = 0;                                // DW1: COHER_CNTL
-    cmd_data[i++] = 0;                                // DW2: COHER_SIZE
-    cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
-    cmd_data[i++] = 0;                                // DW4: COHER_BASE_LO
-    cmd_data[i++] = 0;                                // DW5: COHER_BASE_HI
-    cmd_data[i++] = 4;                                // DW6: POLL_INTERVAL
-    cmd_data[i++] = PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB;  // DW7: GCR_CNTL (GL2_WB=1, RANGE=ALL)
-  }
 
   uint8_t* buffer_temp = buffer[which_buffer];
 

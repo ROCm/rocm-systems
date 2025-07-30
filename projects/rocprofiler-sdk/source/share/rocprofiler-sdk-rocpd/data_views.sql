@@ -596,7 +596,6 @@ SELECT
     JSON_EXTRACT(M.extdata, '$.flags') AS alloc_flags,
     M.start,
     M.end,
-    (M.end - M.start) AS duration,
     M.size,
     M.address,
     E.correlation_id,

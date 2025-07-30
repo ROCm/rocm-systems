@@ -1721,14 +1721,6 @@ main(int argc, char** argv)
             use_mpi = true;
             break;
         }
-        else if(find_undefined_function_symbol(app_image, itr) != nullptr)
-        {
-            verbprintf(0,
-                       "Found undefined symbol '%s' in '%s'. Enabling MPI support...\n",
-                       itr, _cmdv[0]);
-            use_mpi = true;
-            break;
-        }
     }
 #endif
 

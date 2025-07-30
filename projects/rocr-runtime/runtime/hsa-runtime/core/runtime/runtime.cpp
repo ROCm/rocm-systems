@@ -54,7 +54,9 @@
 #include <sys/mman.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <iostream>
 #include <thread>
+#include <chrono>
 
 #include "core/inc/runtime.h"
 #include "core/inc/hsa_table_interface.h"
@@ -3076,8 +3078,8 @@ Agent* Runtime::GetSVMPrefetchAgent(void* ptr, size_t size) {
   return agents_by_node_[prefetch_node][0];
 }
 
-hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, uint64_t* offset,
-                                   uint64_t flags) {
+hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf,
+                                           uint64_t* offset, uint64_t flags) {
 #ifdef __linux__
   ScopedAcquire<KernelSharedMutex::Shared> lock(memory_lock_.shared());
   // Lookup containing allocation.
@@ -3088,23 +3090,18 @@ hsa_status_t Runtime::DmaBufExport(const void* ptr, size_t size, int* dmabuf, ui
         (ptr < reinterpret_cast<const uint8_t*>(mem->first) + mem->second.size)) {
       // Check size is in bounds.
       if (uintptr_t(ptr) - uintptr_t(mem->first) + size <= mem->second.size) {
-        switch (mem->second.region->owner()->device_type()) {
-          case Agent::kAmdGpuDevice: {
-            auto* owner = static_cast<AMD::GpuAgent*>(mem->second.region->owner());
+        // Check allocation is on GPU
+        if (mem->second.region->owner()->device_type() != Agent::kAmdGpuDevice)
+          return HSA_STATUS_ERROR_INVALID_AGENT;
 
-            if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE && !owner->is_xgmi_cpu_gpu() &&
-                !owner->LargeBarEnabled()) {
-              return static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED);
-            }
-          } break;
-          case Agent::kAmdCpuDevice:
-            return HSA_STATUS_ERROR_INVALID_AGENT;
-          case Agent::kAmdAieDevice:
-            break;
-          case Agent::kUnknownDevice:
-            return HSA_STATUS_ERROR_INVALID_AGENT;
+        rocr::AMD::GpuAgent* owner =
+                    static_cast<AMD::GpuAgent*>(mem->second.region->owner());
+
+        if (flags & HSA_AMD_DMABUF_MAPPING_TYPE_PCIE &&
+            !owner->is_xgmi_cpu_gpu() &&
+            !owner->LargeBarEnabled()) {
+            return (hsa_status_t)HSA_STATUS_ERROR_NOT_SUPPORTED;
         }
-
         int fd;
         uint64_t off;
         hsa_status_t err = mem->second.region->owner()->driver().ExportDMABuf(
@@ -3197,11 +3194,10 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
 
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
-  if (it->second.registered) {
+  if (it->second.registered)
     if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
-  } else {
+  else
     if (munmap(it->second.os_addr, size)) return HSA_STATUS_ERROR;
-  }
 
   reserved_address_map_.erase(it);
   return HSA_STATUS_SUCCESS;
@@ -3217,7 +3213,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
-  ThunkHandle user_mode_driver_handle;
+  void *user_mode_driver_handle;
   hsa_status_t status =
       region->Allocate(size, alloc_flags, &user_mode_driver_handle, 0);
   if (status == HSA_STATUS_SUCCESS) {
@@ -3234,7 +3230,7 @@ hsa_status_t Runtime::VMemoryHandleCreate(const MemoryRegion* region, size_t siz
 
 hsa_status_t Runtime::VMemoryHandleRelease(hsa_amd_vmem_alloc_handle_t memoryOnlyHandle) {
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
-  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
+  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(memoryOnlyHandle.handle));
 
   if (memoryHandleIt == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
@@ -3289,7 +3285,7 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
     if (reinterpret_cast<uint8_t*>(va) + size > lowerMappedHandleIt->first) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(memoryOnlyHandle));
+  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(memoryOnlyHandle.handle));
   if (memoryHandleIt == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -3652,7 +3648,7 @@ hsa_status_t Runtime::VMemoryExportShareableHandle(int* dmabuf_fd,
                                                    hsa_amd_vmem_alloc_handle_t handle,
                                                    uint64_t flags) {
   *dmabuf_fd = -1;
-  auto memoryHandle = memory_handle_map_.find(MemoryHandle::Convert(handle));
+  auto memoryHandle = memory_handle_map_.find((void*)handle.handle);
   if (memoryHandle == memory_handle_map_.end()) {
     debug_warning(false && "Can't find memory handle");
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
@@ -3748,7 +3744,7 @@ hsa_status_t Runtime::VMemoryRetainAllocHandle(hsa_amd_vmem_alloc_handle_t* mapp
 hsa_status_t Runtime::VMemoryGetAllocPropertiesFromHandle(hsa_amd_vmem_alloc_handle_t allocHandle,
                                                           const core::MemoryRegion** mem_region,
                                                           hsa_amd_memory_type_t* type) {
-  auto memoryHandleIt = memory_handle_map_.find(MemoryHandle::Convert(allocHandle));
+  auto memoryHandleIt = memory_handle_map_.find(reinterpret_cast<void*>(allocHandle.handle));
   if (memoryHandleIt == memory_handle_map_.end()) return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
   *mem_region = memoryHandleIt->second.region;

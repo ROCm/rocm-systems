@@ -21,10 +21,26 @@
 // SOFTWARE.
 
 #include "library/rocprofiler-sdk/counters.hpp"
+#include "common/synchronized.hpp"
+#include "core/debug.hpp"
+#include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 
-#include <memory>
 #include <timemory/utility/types.hpp>
+
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
+
+#include <memory>
+#include <unordered_map>
+#include <vector>
 
 namespace rocprofsys
 {

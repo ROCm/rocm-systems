@@ -145,8 +145,7 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);
     uint32_t simd               = static_cast<uint32_t>(params.simd_select);
-    uint32_t buffer_size_lo     = static_cast<uint32_t>(params.buffer_size);
-    uint32_t buffer_size_hi     = static_cast<uint32_t>(params.buffer_size >> 32);
+    uint32_t buffer_size        = static_cast<uint32_t>(params.buffer_size);
     uint32_t perf_ctrl          = static_cast<uint32_t>(params.perfcounter_ctrl);
 
     aql_params.clear();
@@ -154,10 +153,7 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, {cu}});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, {shader_engine_mask}});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, {simd}});
-    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, {buffer_size_lo}});
-
-    if(buffer_size_hi != 0) aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
-        AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH), {buffer_size_hi}});
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, {buffer_size}});
 
     if(perf_ctrl != 0 && !params.perfcounters.empty())
     {

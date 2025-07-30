@@ -119,23 +119,10 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
     case RDC_DIAG_RVS_GST_TEST:
     case RDC_DIAG_RVS_MEMBW_TEST:
     case RDC_DIAG_RVS_H2DD2H_TEST:
+    case RDC_DIAG_RVS_IET_TEST:
     case RDC_DIAG_RVS_GST_LONG_TEST:
     case RDC_DIAG_RVS_MEMBW_LONG_TEST:
-    case RDC_DIAG_RVS_H2DD2H_LONG_TEST: {
-      const std::string test_name = "Finished running " + test_to_name.at(test_case);
-      if (test_to_conf.find(test_case) == test_to_conf.end()) {
-        RDC_LOG(RDC_ERROR, "cannot find test " << test_to_name.at(test_case));
-        return RDC_ST_NOT_FOUND;
-      }
-      const std::string predefined_config = test_to_conf.at(test_case);
-      //  +1 to copy null
-      strncpy_with_null(result->info, test_name.c_str(), test_name.length() + 1);
-      rvs_status =
-          rvs_p->run_rvs_app(predefined_config.c_str(), predefined_config.length() + 1, callback);
-      break;
-    }
-      // IET tests don't work with callback, give it nullptr
-    case RDC_DIAG_RVS_IET_TEST:
+    case RDC_DIAG_RVS_H2DD2H_LONG_TEST:
     case RDC_DIAG_RVS_IET_LONG_TEST: {
       const std::string test_name = "Finished running " + test_to_name.at(test_case);
       if (test_to_conf.find(test_case) == test_to_conf.end()) {
@@ -146,7 +133,7 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
       //  +1 to copy null
       strncpy_with_null(result->info, test_name.c_str(), test_name.length() + 1);
       rvs_status =
-          rvs_p->run_rvs_app(predefined_config.c_str(), predefined_config.length() + 1, nullptr);
+          rvs_p->run_rvs_app(predefined_config.c_str(), predefined_config.length() + 1, callback);
       break;
     }
     case RDC_DIAG_RVS_CUSTOM:

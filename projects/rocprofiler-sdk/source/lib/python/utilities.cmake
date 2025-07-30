@@ -97,7 +97,7 @@ function(rocprofiler_roctx_python_bindings _VERSION)
 
     foreach(_SOURCE ${roctx_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} @ONLY)
+                       ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)
         install(
             FILES ${roctx_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${roctx_PYTHON_INSTALL_DIRECTORY}
@@ -154,14 +154,12 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         output_config.py
         otf2.py
         pftrace.py
-        query.py
         schema.py
-        summary.py
         time_window.py)
 
     foreach(_SOURCE ${rocpd_PYTHON_SOURCES})
         configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
-                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} @ONLY)
+                       ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)
         install(
             FILES ${rocpd_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
             DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}

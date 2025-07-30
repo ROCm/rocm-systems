@@ -5,7 +5,6 @@ cmake>=3.21.0
 cmake-format
 dataclasses
 flake8
-jinja2
 numpy
 otf2
 pandas
@@ -13,4 +12,3 @@ perfetto
 pycobertura
 pytest
 pyyaml
-reportlab

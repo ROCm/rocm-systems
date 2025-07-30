@@ -970,45 +970,46 @@ write_rocpd(
         }
     };
 
-    auto insert_kernel_dispatch_data = [&, node_id, this_pid](auto& dispatch_evt_ids) {
+    auto insert_kernel_dispatch_data = [&conn, &tool_metadata, &string_entries, node_id, this_pid](
+                                           const auto& _gen, auto& dispatch_evt_ids) {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_kernel_dispatch");
 
-        auto process_dispatch = [&](uint64_t    dispatch_id,
-                                    uint64_t    kernel_id,
-                                    const auto& corr_id,
-                                    const auto& info,
-                                    const auto& kind,
-                                    uint32_t    thread_id,
-                                    uint64_t    queue_id,
-                                    uint64_t    stream_id,
-                                    uint64_t    start_timestamp,
-                                    uint64_t    end_timestamp,
-                                    const auto& grid,
-                                    const auto& workgroup,
-                                    bool        enable_duplicate_check) {
-            // Skip if we've already processed this dispatch_id
-            if(dispatch_evt_ids.size() > dispatch_id && dispatch_evt_ids[dispatch_id] != 0) return;
-
-            auto kern_name = (kernel_id > 0)
-                                 ? tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name
-                                 : "unknown_kernel";
-
-            auto evt_id = create_event(conn,
-                                       {
-                                           insert_value("category_id", string_entries.at(kind)),
-                                           insert_value("stack_id", corr_id.internal),
-                                           insert_value("parent_stack_id", corr_id.internal),
-                                           insert_value("correlation_id", corr_id.external.value),
-                                       });
-
-            // Ensure dispatch_evt_ids is large enough
-            if(dispatch_evt_ids.size() < dispatch_id + 1)
-                common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
-
-            // Check for duplicates if requested
-            if(enable_duplicate_check && dispatch_evt_ids.at(dispatch_id) != 0)
+        for(auto pitr : _gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(auto itr : _gen.get(pitr))
             {
-                ROCP_CI_LOG(WARNING)
+                // insert thread info if it doesn't already exist
+                get_thread_id(itr.thread_id);
+
+                auto kind        = tool_metadata.buffer_names.at(itr.kind);
+                auto info        = itr.dispatch_info;
+                auto kernel_id   = info.kernel_id;
+                auto dispatch_id = info.dispatch_id;
+                auto corr_id     = itr.correlation_id;
+                auto grid        = info.grid_size;
+                auto workgroup   = info.workgroup_size;
+                auto kern_name = tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name;
+                auto stream_id = get_stream_id(itr.stream_id);
+                auto queue_id  = get_queue_id(info.queue_id);
+                auto region_name =
+                    (corr_id.external.value > 0)
+                        ? tool_metadata.get_kernel_name(kernel_id, corr_id.external.value)
+                        : std::string_view{};
+
+                auto evt_id =
+                    create_event(conn,
+                                 {
+                                     insert_value("category_id", string_entries.at(kind)),
+                                     insert_value("stack_id", corr_id.internal),
+                                     insert_value("parent_stack_id", corr_id.internal),
+                                     insert_value("correlation_id", corr_id.external.value),
+                                 });
+
+                if(dispatch_evt_ids.size() < dispatch_id + 1)
+                    common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
+
+                ROCP_CI_LOG_IF(WARNING, dispatch_evt_ids.at(dispatch_id) != 0)
                     << fmt::format("duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
                                    "corr_id={}, name='{}'",
                                    dispatch_id,
@@ -1016,115 +1017,45 @@ write_rocpd(
                                    kernel_id,
                                    corr_id.internal,
                                    kern_name);
-            }
 
-            dispatch_evt_ids.at(dispatch_id) = evt_id;
+                dispatch_evt_ids.at(dispatch_id) = evt_id;
 
-            auto region_name =
-                (corr_id.external.value > 0 &&
-                 (enable_duplicate_check || kernel_id > 0))
-                    ? tool_metadata.get_kernel_name(kernel_id, corr_id.external.value)
-                    : std::string_view{};
+                auto stmt = get_insert_statement(
+                    "rocpd_kernel_dispatch{{uuid}}",
+                    {
+                        insert_value("id", dispatch_id),
+                        insert_value("nid", node_id),
+                        insert_value("pid", this_pid),
+                        insert_value("tid", itr.thread_id),
+                        insert_value("agent_id", tool_metadata.get_agent(info.agent_id)->node_id),
+                        insert_value("kernel_id", kernel_id),
+                        insert_value("dispatch_id", dispatch_id),
+                        insert_value("queue_id", queue_id),
+                        insert_value("stream_id", stream_id),
+                        insert_value("start", itr.start_timestamp),
+                        insert_value("end", itr.end_timestamp),
+                        insert_value("private_segment_size", info.private_segment_size),
+                        insert_value("group_segment_size", info.group_segment_size),
+                        insert_value("workgroup_size_x", workgroup.x),
+                        insert_value("workgroup_size_y", workgroup.y),
+                        insert_value("workgroup_size_z", workgroup.z),
+                        insert_value("grid_size_x", grid.x),
+                        insert_value("grid_size_y", grid.y),
+                        insert_value("grid_size_z", grid.z),
+                        insert_value("region_name_id", string_entries.at(region_name)),
+                        insert_value("event_id", evt_id),
+                    });
 
-            auto agent_node_id = tool_metadata.get_agent(info.agent_id)->node_id;
-
-            // Insert into kernel dispatch table
-            auto stmt = get_insert_statement(
-                "rocpd_kernel_dispatch{{uuid}}",
-                {
-                    insert_value("id", dispatch_id),
-                    insert_value("nid", node_id),
-                    insert_value("pid", this_pid),
-                    insert_value("tid", thread_id),
-                    insert_value("agent_id", agent_node_id),
-                    insert_value("kernel_id", kernel_id),
-                    insert_value("dispatch_id", dispatch_id),
-                    insert_value("queue_id", queue_id),
-                    insert_value("stream_id", stream_id),
-                    insert_value("start", start_timestamp),
-                    insert_value("end", end_timestamp),
-                    insert_value("private_segment_size", info.private_segment_size),
-                    insert_value("group_segment_size", info.group_segment_size),
-                    insert_value("workgroup_size_x", workgroup.x),
-                    insert_value("workgroup_size_y", workgroup.y),
-                    insert_value("workgroup_size_z", workgroup.z),
-                    insert_value("grid_size_x", grid.x),
-                    insert_value("grid_size_y", grid.y),
-                    insert_value("grid_size_z", grid.z),
-                    insert_value("region_name_id", string_entries.at(region_name)),
-                    insert_value("event_id", evt_id),
-                });
-
-            execute_raw_sql_statements(conn, stmt);
-        };
-
-        if(kernel_dispatch_gen.empty())
-        {
-            for(auto pctr : counter_collection_gen)
-            {
-                auto _deferred = sql::deferred_transaction{conn};
-                for(const auto& record : counter_collection_gen.get(pctr))
-                {
-                    const auto& dispatch_data = record.dispatch_data;
-                    const auto& info          = dispatch_data.dispatch_info;
-
-                    // Register thread ID
-                    get_thread_id(record.thread_id);
-
-                    // Use buffer category for kernel dispatches
-                    auto kind =
-                        tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
-
-                    // Process this dispatch
-                    process_dispatch(info.dispatch_id,                 // dispatch_id
-                                     info.kernel_id,                   // kernel_id
-                                     dispatch_data.correlation_id,     // corr_id
-                                     info,                             // info
-                                     kind,                             // kind
-                                     record.thread_id,                 // thread_id
-                                     get_queue_id(info.queue_id),      // queue_id
-                                     get_stream_id(record.stream_id),  // stream_id
-                                     dispatch_data.start_timestamp,    // start_timestamp
-                                     dispatch_data.end_timestamp,      // end_timestamp
-                                     info.grid_size,                   // grid
-                                     info.workgroup_size,              // workgroup
-                                     false  // enable_duplicate_check
-                    );
-                }
-            }
-        }
-        else
-        {
-            for(auto pitr : kernel_dispatch_gen)
-            {
-                auto _deferred = sql::deferred_transaction{conn};
-                for(auto itr : kernel_dispatch_gen.get(pitr))
-                {
-                    // Register thread ID
-                    get_thread_id(itr.thread_id);
-
-                    // Process this dispatch
-                    process_dispatch(itr.dispatch_info.dispatch_id,             // dispatch_id
-                                     itr.dispatch_info.kernel_id,               // kernel_id
-                                     itr.correlation_id,                        // corr_id
-                                     itr.dispatch_info,                         // info
-                                     tool_metadata.buffer_names.at(itr.kind),   // kind
-                                     itr.thread_id,                             // thread_id
-                                     get_queue_id(itr.dispatch_info.queue_id),  // queue_id
-                                     get_stream_id(itr.stream_id),              // stream_id
-                                     itr.start_timestamp,                       // start_timestamp
-                                     itr.end_timestamp,                         // end_timestamp
-                                     itr.dispatch_info.grid_size,               // grid
-                                     itr.dispatch_info.workgroup_size,          // workgroup
-                                     true  // enable_duplicate_check
-                    );
-                }
+                execute_raw_sql_statements(conn, stmt);
             }
         }
     };
 
-    auto insert_pmc_event_data = [&conn, &tool_metadata, &counter_collection_gen](
-                                     auto& dispatch_evt_ids) {
+    auto insert_pmc_event_data = [&conn,
+                                  &tool_metadata,
+                                  &string_entries,
+                                  &counter_collection_gen,
+                                  &kernel_dispatch_gen](auto& dispatch_evt_ids) {
         auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event");
         size_t idx               = tool_metadata.pmc_event_offset;
         for(auto ditr : counter_collection_gen)
@@ -1134,6 +1065,39 @@ write_rocpd(
             {
                 const auto& info        = record.dispatch_data.dispatch_info;
                 auto        dispatch_id = info.dispatch_id;
+
+                if(kernel_dispatch_gen.empty())
+                {
+                    auto kind =
+                        tool_metadata.buffer_names.at(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+                    auto kernel_id = info.kernel_id;
+                    auto corr_id   = record.dispatch_data.correlation_id;
+                    auto kern_name =
+                        tool_metadata.get_kernel_symbol(kernel_id)->formatted_kernel_name;
+
+                    auto evt_id =
+                        create_event(conn,
+                                     {
+                                         insert_value("category_id", string_entries.at(kind)),
+                                         insert_value("stack_id", corr_id.internal),
+                                         insert_value("parent_stack_id", corr_id.internal),
+                                         insert_value("correlation_id", corr_id.external.value),
+                                     });
+
+                    if(dispatch_evt_ids.size() < dispatch_id + 1)
+                        common::container::resize(dispatch_evt_ids, dispatch_id + 1, 0UL);
+
+                    ROCP_CI_LOG_IF(WARNING, dispatch_evt_ids.at(dispatch_id) != 0) << fmt::format(
+                        "duplicate kernel dispatch id {} :: event_id={}, kernel_id={}, "
+                        "corr_id={}, name='{}'",
+                        dispatch_id,
+                        evt_id,
+                        kernel_id,
+                        corr_id.internal,
+                        kern_name);
+
+                    dispatch_evt_ids.at(dispatch_id) = evt_id;
+                }
 
                 auto evt_id = dispatch_evt_ids.at(dispatch_id);
                 for(const auto& count : record.read())
@@ -1413,7 +1377,7 @@ write_rocpd(
         insert_api_data(rocdecode_api_gen);
     }
 
-    insert_kernel_dispatch_data(dispatch_to_evt_id);
+    insert_kernel_dispatch_data(kernel_dispatch_gen, dispatch_to_evt_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
 

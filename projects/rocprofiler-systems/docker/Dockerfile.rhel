@@ -16,7 +16,7 @@ ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
     yum install -y --allowerasing chrpath cmake curl dpkg-devel iproute libdrm-devel \
-        ninja-build numactl-devel openmpi-devel papi-devel python3-pip sqlite-devel texinfo \
+        numactl-devel openmpi-devel papi-devel python3-pip sqlite-devel texinfo \
         wget which zlib-devel && \
     yum clean all && \
     python3 -m pip install 'cmake==3.21' && \

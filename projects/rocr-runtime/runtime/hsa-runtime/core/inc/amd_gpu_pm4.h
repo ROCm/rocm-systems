@@ -89,7 +89,7 @@
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GLV_INV                 (1 << 8)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GL1_INV                 (1 << 9)
 #  define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_INV                 (1 << 14)
-#  define PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB                  (1 << 15)
+
 #define PM4_RELEASE_MEM_DW1_EVENT_INDEX(x)                 (((x) & 0xF) << 8)
 #  define PM4_RELEASE_MEM_EVENT_INDEX_AQL                  0x7
 

@@ -21,6 +21,24 @@
 # --------------------------------------------------------------------------------
 
 mi_gpu_spec:
+  - gpu_series: mi50
+    gpu_archs:
+      - gpu_arch: gfx906
+        perfmon_config:
+          SQ: 8
+          TA: 2
+          TD: 2
+          TCP: 4
+          TCC: 4
+          CPC: 2
+          CPF: 2
+          SPI: 6
+          GRBM: 2
+          GDS: 4
+        models:
+          - gpu_model: mi50
+          - gpu_model: mi60
+
   - gpu_series: mi100
     gpu_archs:
       - gpu_arch: gfx908

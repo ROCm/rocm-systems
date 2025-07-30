@@ -57,7 +57,3 @@ Please see the [pre-commit documentation](https://pre-commit.com/#quick-start) f
 Below are some repository specific guidelines which are followed througout the repository.
 Any future contributions should adhere to these guidelines:
 * Use the `pathlib` library functions instead of `os.path` for manipulating the file paths.
-
-## Build and test documentation changes
-
-For instructions on how to build and test documentation changes (files under docs folder), please see https://rocm.docs.amd.com/en/latest/contribute/contributing.html

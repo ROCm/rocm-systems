@@ -35,7 +35,6 @@ import plotext as plt
 import plotly.graph_objects as go
 from dash import dcc, html
 
-from utils import file_io, rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -674,9 +673,6 @@ class Roofline:
             console_error("roofline", "{} does not exist".format(pmc_perf_csv))
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
-        profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
         color_scheme = {
             "HBM": "blue+",
@@ -865,9 +861,6 @@ class Roofline:
             console_error("roofline", "{} does not exist".format(app_path))
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(app_path)
-        profiling_config = file_io.load_profiling_config(self.__args.path)
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
         self.empirical_roofline(ret_df=t_df)
 
     @abstractmethod

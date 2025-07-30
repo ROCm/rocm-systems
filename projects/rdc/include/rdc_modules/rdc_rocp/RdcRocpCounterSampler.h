@@ -79,7 +79,7 @@ class CounterSampler {
   size_t get_counter_size(rocprofiler_counter_id_t counter);
 
   // Get the dimensions of a counter
-  std::vector<rocprofiler_counter_record_dimension_info_t> get_counter_dimensions(
+  std::vector<rocprofiler_record_dimension_info_t> get_counter_dimensions(
       rocprofiler_counter_id_t counter);
 
   static std::vector<std::shared_ptr<CounterSampler>> samplers_;

@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
+#include <cassert>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
@@ -39,21 +40,60 @@
 #include <unordered_map>
 #include <vector>
 
-#define ROCPROFILER_CALL(result, msg)                                                              \
-    if((result) != ROCPROFILER_STATUS_SUCCESS)                                                     \
-    {                                                                                              \
-        std::cerr << "Error: " << msg << std::endl;                                                \
-        abort();                                                                                   \
-    }
+#define ROCPROFILER_VAR_NAME_COMBINE(X, Y) X##Y
+#define ROCPROFILER_VARIABLE(X, Y)         ROCPROFILER_VAR_NAME_COMBINE(X, Y)
 
-#define DECODER_CALL(result)                                                                       \
-    if((result) != ROCPROFILER_STATUS_SUCCESS)                                                     \
+#define C_API_BEGIN                                                                                \
+    try                                                                                            \
+    {
+#define C_API_END                                                                                  \
+    }                                                                                              \
+    catch(std::exception & e)                                                                      \
     {                                                                                              \
-        std::cerr << "Error: Generic decoder error" << std::endl;                                  \
+        std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << std::endl;   \
+    }                                                                                              \
+    catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
+
+#define ROCPROFILER_CALL(result, msg)                                                              \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
+                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
+                      << std::endl;                                                                \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
+                   << status_msg << ")";                                                           \
+            throw std::runtime_error(errmsg.str());                                                \
+        }                                                                                          \
     }
 
 namespace Callbacks
 {
+struct CodeobjInfo
+{
+    int64_t     addr = 0;
+    size_t      size = 0;
+    size_t      id   = 0;
+    std::string filename{};
+    std::string uri{};
+};
+
+struct ToolData
+{
+    ToolData(const char* out)
+    : out_dir(out){};
+
+    std::string              out_dir{};
+    std::mutex               mut{};
+    std::vector<CodeobjInfo> codeobjs{};
+    std::vector<std::string> att_files{};
+
+    std::unordered_map<uint64_t, std::string> kernel_id_to_kernel_name = {};
+};
+
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               rocprofiler_user_data_t*,
@@ -67,9 +107,6 @@ shader_data_callback(rocprofiler_agent_id_t  agent,
                      rocprofiler_user_data_t userdata);
 
 void
-init();
-
-void
-finalize(void* /* tool_data */);
+finalize_json(void* userdata);
 
 }  // namespace Callbacks

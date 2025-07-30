@@ -24,7 +24,8 @@
 
 import os
 import shutil
-from unittest.mock import Mock, patch
+from importlib.machinery import SourceFileLoader
+from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -38,11 +39,8 @@ indirs = [
     "tests/workloads/vcopy/MI200",
     "tests/workloads/vcopy/MI300A_A1",
     "tests/workloads/vcopy/MI300X_A1",
-    "tests/workloads/vcopy/MI300X_A1_rocpd",
     "tests/workloads/vcopy/MI350",
 ]
-
-time_units = {"s": 10 ** 9, "ms": 10 ** 6, "us": 10 ** 3, "ns": 1}
 
 
 @pytest.mark.misc
@@ -75,6 +73,21 @@ def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute(
             ["analyze", "--path", workload_dir, "--list-metrics", "gfx90a"]
+        )
+        assert code == 0
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.list_metrics
+def test_list_metrics_gfx906(binary_handler_analyze_rocprof_compute):
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx906"])
+    assert code == 1
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+        code = binary_handler_analyze_rocprof_compute(
+            ["analyze", "--path", workload_dir, "--list-metrics", "gfx906"]
         )
         assert code == 0
 
@@ -267,11 +280,7 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 @pytest.mark.misc
 def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
-        # if dir.endswith("MI350") or dir.endswith("MI300X_A1_rocpd"):
-        if dir in (
-            "tests/workloads/vcopy/MI350",
-            "tests/workloads/vcopy/MI300X_A1_rocpd",
-        ):
+        if dir.endswith("MI350"):
             gpu_id = "0"
         else:
             gpu_id = "2"
@@ -475,11 +484,35 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
         assert code == 0
 
         files_in_workload = os.listdir(output_path)
+        single_row_tables = [
+            "0.1_Top_Kernels.csv",
+            "13.3_Instruction_Cache_-_L2_Interface.csv",
+            "18.1_Aggregate_Stats_(All_channels).csv",
+        ]
         for file_name in files_in_workload:
             df = pd.read_csv(output_path + "/" + file_name)
-            assert len(df.index) >= 1
+            if file_name in single_row_tables:
+                assert len(df.index) == 1
+            else:
+                assert len(df.index) >= 3
 
         shutil.rmtree(output_path)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    for dir in indirs:
+        workload_dir = test_utils.setup_workload_dir(dir)
+    code = binary_handler_analyze_rocprof_compute(
+        ["analyze", "--path", workload_dir, "--save-dfs", output_path]
+    )
+    assert code == 0
+
+    files_in_workload = os.listdir(output_path)
+    for file_name in files_in_workload:
+        df = pd.read_csv(output_path + "/" + file_name)
+        if file_name in single_row_tables:
+            assert len(df.index) == 1
+        else:
+            assert len(df.index) >= 3
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -500,15 +533,7 @@ def test_col_2(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute(
-            [
-                "analyze",
-                "--path",
-                workload_dir,
-                "--cols",
-                "2",
-                "--include-cols",
-                "Description",
-            ]
+            ["analyze", "--path", workload_dir, "--cols", "2"]
         )
         assert code == 0
 
@@ -796,12 +821,12 @@ def test_parser_error_handling():
     from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
 
     try:
-        build_eval_string("AVG(SQ_WAVES)", None, config={})
+        build_eval_string("AVG(SQ_WAVES)", None)
         assert False, "Should have raised exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
 
-    assert build_eval_string("", "pmc_perf", config={}) == ""
+    assert build_eval_string("", "pmc_perf") == ""
     assert update_denom_string("", "per_wave") == ""
 
     class MockSysInfo:
@@ -826,12 +851,12 @@ def test_parser_error_handling():
     from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
 
     try:
-        build_eval_string("AVG(SQ_WAVES)", None, config={})
+        build_eval_string("AVG(SQ_WAVES)", None)
         assert False, "Should have raised exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
 
-    assert build_eval_string("", "pmc_perf", config={}) == ""
+    assert build_eval_string("", "pmc_perf") == ""
     assert update_denom_string("", "per_wave") == ""
 
     class MockSysInfo:
@@ -956,7 +981,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     }
 
     try:
-        eval_metric(mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True, config={})
+        eval_metric(mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True)
     except Exception as e:
         pass
 
@@ -1145,256 +1170,3 @@ def test_update_functions_coverage():
     result = update_normUnit_string("(Prefix + $normUnit)", "per_wave")
     assert "per wave" in result.lower()
     assert result[0].isupper()
-
-
-@pytest.fixture
-def sample_time_data():
-    return pd.DataFrame(
-        {
-            "Metric_ID": ["7.2.0", "7.2.1", "7.2.2"],
-            "Metric": [
-                "Kernel Time",
-                "Kernel Time (Cycles)",
-                "Non-Time Metric",
-            ],
-            "Avg": [3446.64, 64499.39, 1000.0],
-            "Min": [1769.25, 17269.25, 500.0],
-            "Max": [12532.12, 337030.50, 2000.0],
-            "Unit": ["ns", "Cycle", "Count"],
-        }
-    )
-
-
-@pytest.fixture
-def original_ns_values():
-    return {"Avg": 3446.64, "Min": 1769.25, "Max": 12532.12}
-
-
-@pytest.mark.time_unit_conversion
-def test_has_time_data_detection(sample_time_data):
-    from utils.tty import has_time_data
-
-    assert has_time_data(sample_time_data)
-
-    no_time_data = pd.DataFrame(
-        {"Metric": ["Non-Time Metric"], "Avg": [1000.0], "Unit": ["Count"]}
-    )
-    assert not has_time_data(no_time_data)
-
-    no_unit_column = pd.DataFrame({"Metric": ["Some Metric"], "Avg": [1000.0]})
-    assert not has_time_data(no_unit_column)
-
-
-@pytest.mark.time_unit_conversion
-def test_default_unit_is_nanoseconds(sample_time_data):
-    time_rows = sample_time_data["Unit"].str.lower().str.contains("ns", na=False)
-    assert time_rows.any()
-    assert sample_time_data.loc[0, "Unit"] == "ns"
-
-
-@pytest.mark.time_unit_conversion
-def test_time_unit_conversion_to_seconds(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    converted_df = convert_time_columns(sample_time_data, "s")
-
-    assert converted_df.loc[0, "Unit"] == "s"
-
-    expected_avg = original_ns_values["Avg"] / time_units["s"]
-    expected_min = original_ns_values["Min"] / time_units["s"]
-    expected_max = original_ns_values["Max"] / time_units["s"]
-
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
-
-    assert converted_df.loc[1, "Unit"] == "Cycle"
-    assert converted_df.loc[2, "Unit"] == "Count"
-
-
-@pytest.mark.time_unit_conversion
-def test_time_unit_conversion_to_milliseconds(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    converted_df = convert_time_columns(sample_time_data, "ms")
-
-    assert converted_df.loc[0, "Unit"] == "ms"
-
-    expected_avg = original_ns_values["Avg"] / time_units["ms"]
-    expected_min = original_ns_values["Min"] / time_units["ms"]
-    expected_max = original_ns_values["Max"] / time_units["ms"]
-
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-6
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-6
-
-
-@pytest.mark.time_unit_conversion
-def test_time_unit_conversion_to_microseconds(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    converted_df = convert_time_columns(sample_time_data, "us")
-
-    assert converted_df.loc[0, "Unit"] == "us"
-
-    expected_avg = original_ns_values["Avg"] / time_units["us"]
-    expected_min = original_ns_values["Min"] / time_units["us"]
-    expected_max = original_ns_values["Max"] / time_units["us"]
-
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-3
-    assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-3
-    assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-3
-
-
-@pytest.mark.time_unit_conversion
-def test_time_unit_conversion_to_nanoseconds(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    converted_df = convert_time_columns(sample_time_data, "ns")
-
-    assert converted_df.loc[0, "Unit"] == "ns"
-
-    assert abs(converted_df.loc[0, "Avg"] - original_ns_values["Avg"]) < 1e-10
-    assert abs(converted_df.loc[0, "Min"] - original_ns_values["Min"]) < 1e-10
-    assert abs(converted_df.loc[0, "Max"] - original_ns_values["Max"]) < 1e-10
-
-
-@pytest.mark.time_unit_conversion
-def test_non_time_rows_unchanged(sample_time_data):
-    from utils.tty import convert_time_columns
-
-    converted_df = convert_time_columns(sample_time_data, "ms")
-
-    assert converted_df.loc[1, "Unit"] == "Cycle"
-    assert converted_df.loc[2, "Unit"] == "Count"
-    assert converted_df.loc[1, "Avg"] == 64499.39
-    assert converted_df.loc[2, "Avg"] == 1000.0
-
-
-@pytest.mark.time_unit_conversion
-def test_invalid_time_unit_handling(sample_time_data):
-    from utils.tty import convert_time_columns
-
-    original_df = sample_time_data.copy()
-    converted_df = convert_time_columns(sample_time_data, "invalid_unit")
-
-    pd.testing.assert_frame_equal(converted_df, original_df)
-
-
-@pytest.mark.time_unit_conversion
-def test_missing_unit_column():
-    from utils.tty import convert_time_columns
-
-    df_no_unit = pd.DataFrame({"Metric": ["Test Metric"], "Avg": [1000.0]})
-    converted_df = convert_time_columns(df_no_unit, "ms")
-
-    pd.testing.assert_frame_equal(converted_df, df_no_unit)
-
-
-@pytest.mark.time_unit_conversion
-def test_conversion_with_missing_columns(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    df_partial = sample_time_data[["Metric_ID", "Metric", "Avg", "Unit"]].copy()
-    converted_df = convert_time_columns(df_partial, "ms")
-
-    assert converted_df.loc[0, "Unit"] == "ms"
-    expected_avg = original_ns_values["Avg"] / time_units["ms"]
-    assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-6
-
-
-@pytest.mark.time_unit_conversion
-def test_mathematical_correctness_all_units(sample_time_data, original_ns_values):
-    from utils.tty import convert_time_columns
-
-    test_cases = [
-        ("s", 10 ** 9),  # 1 second = 10^9 nanoseconds
-        ("ms", 10 ** 6),  # 1 millisecond = 10^6 nanoseconds
-        ("us", 10 ** 3),  # 1 microsecond = 10^3 nanoseconds
-        ("ns", 1),  # 1 nanosecond = 1 nanosecond
-    ]
-
-    for target_unit, divisor in test_cases:
-        converted_df = convert_time_columns(sample_time_data, target_unit)
-
-        expected_avg = original_ns_values["Avg"] / divisor
-        expected_min = original_ns_values["Min"] / divisor
-        expected_max = original_ns_values["Max"] / divisor
-
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-        assert abs(converted_df.loc[0, "Min"] - expected_min) < 1e-10
-        assert abs(converted_df.loc[0, "Max"] - expected_max) < 1e-10
-        assert converted_df.loc[0, "Unit"] == target_unit
-
-
-# Integration tests with show_all functionality
-@pytest.mark.time_unit_integration
-def test_integration_conversion_flow():
-    from utils.tty import convert_time_columns, has_time_data
-
-    mock_args = Mock()
-    mock_args.time_unit = "ms"
-    mock_args.decimal = 2
-
-    sample_df = pd.DataFrame(
-        {
-            "Metric_ID": ["7.2.0"],
-            "Metric": ["Kernel Time"],
-            "Avg": [3446640.0],  # 3.44664 ms in nanoseconds
-            "Min": [1769250.0],  # 1.76925 ms in nanoseconds
-            "Max": [12532120.0],  # 12.53212 ms in nanoseconds
-            "Unit": ["ns"],
-        }
-    )
-
-    if has_time_data(sample_df):
-        converted_df = convert_time_columns(sample_df, mock_args.time_unit)
-    else:
-        converted_df = sample_df
-
-    assert converted_df.loc[0, "Unit"] == "ms"
-    assert abs(converted_df.loc[0, "Avg"] - 3.44664) < 1e-5
-    assert abs(converted_df.loc[0, "Min"] - 1.76925) < 1e-5
-    assert abs(converted_df.loc[0, "Max"] - 12.53212) < 1e-5
-
-
-@pytest.mark.time_unit_integration
-def test_show_all_with_time_unit_conversion():
-    from utils.tty import convert_time_columns
-
-    test_data = pd.DataFrame(
-        {
-            "Metric_ID": ["7.2.0"],
-            "Metric": ["Kernel Time"],
-            "Avg": [3446.64],
-            "Min": [1769.25],
-            "Max": [12532.12],
-            "Unit": ["Ns"],
-        }
-    )
-
-    for time_unit in ["s", "ms", "us", "ns"]:
-        converted_df = convert_time_columns(test_data, time_unit)
-
-        assert converted_df.loc[0, "Unit"] == time_unit
-
-        expected_avg = 3446.64 / time_units[time_unit]
-        assert abs(converted_df.loc[0, "Avg"] - expected_avg) < 1e-10
-
-
-@pytest.mark.time_unit_edge_cases
-def test_edge_cases_and_error_handling():
-    from utils.tty import convert_time_columns
-
-    empty_df = pd.DataFrame()
-    result = convert_time_columns(empty_df, "ms")
-    assert result.empty
-
-    nan_df = pd.DataFrame({"Avg": [float("nan"), 1000.0], "Unit": ["ns", "Count"]})
-    result = convert_time_columns(nan_df, "ms")
-    assert result.loc[0, "Unit"] == "ms"
-
-    mixed_case_df = pd.DataFrame({"Avg": [1000.0, 2000.0], "Unit": ["ns", "NS"]})
-    result = convert_time_columns(mixed_case_df, "ms")
-    assert result.loc[0, "Unit"] == "ms"
-    assert result.loc[1, "Unit"] == "ms"

@@ -306,15 +306,13 @@ def process_panels_to_dataframes(
     """
 
     comparable_columns = build_comparable_columns(args.time_unit)
-    filter_panel_ids = profiling_config.get("filter_blocks", [])
-    if isinstance(filter_panel_ids, dict):
-        # For backward compatibility
-        filter_panel_ids = [
-            name for name, type in filter_panel_ids.items() if type == "metric_id"
-        ]
     filter_panel_ids = [
-        int(convert_metric_id_to_panel_info(metric_id)[0])
-        for metric_id in filter_panel_ids
+        convert_metric_id_to_panel_idx(section)
+        for section in [
+            name
+            for name, type in profiling_config.get("filter_blocks", {}).items()
+            if type == "metric_id"
+        ]
     ]
 
     # Initialize the result structure
@@ -563,48 +561,15 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def convert_metric_id_to_panel_info(metric_id):
-    """
-    Convert metric id into panel information.
-    Output is a tuples of the form (file_id, panel_id, metric_id).
-
-    For example:
-
-    Input: "2"
-    Output: ("0200", None, None)
-
-    Input: "11"
-    Output: ("1100", None, None)
-
-    Input: "11.1"
-    Output: ("1100", 1101, None)
-
-    Input: "11.1.1"
-    Output: ("1100", 1101, 1)
-
-    Raises exception for invalid metric id.
-    """
+def convert_metric_id_to_panel_idx(metric_id):
+    # "4.02" -> 402
+    # "4.23" -> 423
+    # "4" -> 400
     tokens = metric_id.split(".")
-    if 0 < len(tokens) < 4:
-        # File id
-        file_id = str(int(tokens[0]))
-        # 4 -> 04
-        if len(file_id) < 2:
-            file_id = f"0{file_id}"
-        # Multiply integer by 100
-        file_id = f"{file_id}00"
-        # Panel id
-        if len(tokens) > 1:
-            panel_id = int(tokens[0]) * 100
-            panel_id += int(tokens[1])
-        else:
-            panel_id = None
-        # Metric id
-        if len(tokens) > 2:
-            metric_id = int(tokens[2])
-        else:
-            metric_id = None
-        return (file_id, panel_id, metric_id)
+    if len(tokens) == 1:
+        return int(tokens[0]) * 100
+    elif len(tokens) == 2:
+        return int(tokens[0]) * 100 + int(tokens[1])
     else:
         raise Exception(f"Invalid metric id: {metric_id}")
 

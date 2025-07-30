@@ -46,13 +46,108 @@ processor’s metrics therefore are focused on reporting, for example:
 Command processor fetcher (CPF)
 ===============================
 
-.. jinja:: cpf-metrics
-   :file: _templates/metrics_table.j2
+.. list-table::
+   :header-rows: 1
+
+   * - Metric
+
+     - Description
+
+     - Unit
+
+   * - CPF Utilization
+
+     - Percent of total cycles where the CPF was busy actively doing any work.
+       The ratio of CPF busy cycles over total cycles counted by the CPF.
+
+     - Percent
+
+   * - CPF Stall
+
+     - Percent of CPF busy cycles where the CPF was stalled for any reason.
+
+     - Percent
+
+   * - CPF-L2 Utilization
+
+     - Percent of total cycles counted by the CPF-:doc:`L2 <l2-cache>` interface
+       where the CPF-L2 interface was active doing any work. The ratio of CPF-L2
+       busy cycles over total cycles counted by the CPF-L2.
+
+     - Percent
+
+   * - CPF-L2 Stall
+
+     - Percent of CPF-:doc:`L2 <l2-cache>` L2 busy cycles where the CPF-L2
+       interface was stalled for any reason.
+
+     - Percent
+
+   * - CPF-UTCL1 Stall
+
+     - Percent of CPF busy cycles where the CPF was stalled by address
+       translation.
+
+     - Percent
 
 .. _cpc-metrics:
 
 Command processor packet processor (CPC)
 ========================================
 
-.. jinja:: cpc-metrics
-   :file: _templates/metrics_table.j2
+.. list-table::
+   :header-rows: 1
+
+   * - Metric
+
+     - Description
+
+     - Unit
+
+   * - CPC Utilization
+
+     - Percent of total cycles where the CPC was busy actively doing any work.
+       The ratio of CPC busy cycles over total cycles counted by the CPC.
+
+     - Percent
+
+   * - CPC Stall
+
+     - Percent of CPC busy cycles where the CPC was stalled for any reason.
+
+     - Percent
+
+   * - CPC Packet Decoding Utilization
+
+     - Percent of CPC busy cycles spent decoding commands for processing.
+
+     - Percent
+
+   * - CPC-Workgroup Manager Utilization
+
+     - Percent of CPC busy cycles spent dispatching workgroups to the
+       :ref:`workgroup manager <desc-spi>`.
+
+     - Percent
+
+   * - CPC-L2 Utilization
+
+     - Percent of total cycles counted by the CPC-:doc:`L2 <l2-cache>` interface
+       where the CPC-L2 interface was active doing any work.
+
+     - Percent
+
+   * - CPC-UTCL1 Stall
+
+     - Percent of CPC busy cycles where the CPC was stalled by address
+       translation.
+
+     - Percent
+
+   * - CPC-UTCL2 Utilization
+
+     - Percent of total cycles counted by the CPC's :doc:`L2 <l2-cache>` address
+       translation interface where the CPC was busy doing address translation
+       work.
+
+     - Percent

@@ -242,11 +242,6 @@ List metrics
 
      $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
 
-Show Description column which is excluded by default in cli output
-  .. code-block:: shell
-
-     $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a --include-cols Description
-
 Show System Speed-of-Light and CS_Busy blocks only
   .. code-block:: shell
 

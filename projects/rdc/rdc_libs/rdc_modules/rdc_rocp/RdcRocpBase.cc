@@ -110,6 +110,7 @@ static const std::map<rdc_field_t, const char*> temp_field_map_k = {
     {RDC_FI_PROF_CPF_CPF_TCIU_IDLE, "CPF_CPF_TCIU_IDLE"},
     {RDC_FI_PROF_CPF_CPF_TCIU_STALL, "CPF_CPF_TCIU_STALL"},
     {RDC_FI_PROF_SIMD_UTILIZATION, "SIMD_UTILIZATION"},
+    {RDC_FI_PROF_UUID, "SQ_WAVES"},    // dummy value,
     {RDC_FI_PROF_KFD_ID, "SQ_WAVES"},  // dummy value,
 };
 
@@ -162,6 +163,21 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
   }
   return field_ids;
 }
+
+rocprofiler_uuid_t asic_serial_to_uuid(const char* asic_serial) {
+  rocprofiler_uuid_t uuid = {0};
+  // have to cast to stoull as a workaround for amdsmi ignoring leading zeroes
+  uuid.value = std::stoull(asic_serial, nullptr, 16);
+  return uuid;
+}
+
+std::string uuid_to_string(const uint64_t uuid) {
+  std::ostringstream oss;
+  oss << "0x" << std::hex << std::setw(16) << std::setfill('0') << uuid;
+  return oss.str();
+}
+
+std::string uuid_to_string(const rocprofiler_uuid_t& uuid) { return uuid_to_string(uuid.value); }
 
 rdc_status_t RdcRocpBase::map_entity_to_profiler() {
   // std::map<uint32_t, uint32_t> entity_to_index_map;
@@ -403,8 +419,15 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, rdc_field_value
       // FLOPS/clock/CU
       data->dbl = divided_dbl / (256.0F / static_cast<double>(agents[agent_index].simd_per_cu));
       break;
+    case RDC_FI_PROF_UUID: {
+      // do not care what RDC_FI_PROF_UUID is mapped to. read value from agents
+      *type = STRING;
+      std::string uuid_str = uuid_to_string(agents[agent_index].uuid);
+      strncpy_with_null(data->str, uuid_str.c_str(), uuid_str.length());
+      break;
+    }
     case RDC_FI_PROF_KFD_ID: {
-      // do not care what it is mapped to. read value from agents
+      // do not care what RDC_FI_PROF_UUID is mapped to. read value from agents
       *type = INTEGER;
       data->l_int = agents[agent_index].gpu_id;
       break;

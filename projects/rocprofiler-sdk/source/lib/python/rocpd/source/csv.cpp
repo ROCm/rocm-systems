@@ -109,7 +109,7 @@ CsvManager::CsvManager(rocprofiler::tool::output_config output_cfg)
         {CsvType::ROCJPEG_API, {"rocjpeg_api_trace.csv", API_TRACE_HEADER}},
 
         {CsvType::COUNTER,
-         {"counter_collection.csv",
+         {"counter_trace.csv",
           "\"Pid\",\"Correlation_Id\",\"Dispatch_Id\",\"Agent_Id\",\"Queue_Id\","
           "\"Process_Id\","
           "\"Thread_Id\","

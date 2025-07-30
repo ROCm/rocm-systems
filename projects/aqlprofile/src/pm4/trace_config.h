@@ -54,7 +54,7 @@ struct TraceConfig {
   void* control_buffer_ptr = nullptr;
   uint32_t control_buffer_size = 0;
   void* data_buffer_ptr = nullptr;
-  uint64_t data_buffer_size = 0;
+  uint32_t data_buffer_size = 0;
 
   // concurrent kernels mode
   uint32_t concurrent = 0;

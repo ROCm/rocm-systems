@@ -47,7 +47,6 @@ class cli_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
-                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
@@ -73,11 +72,7 @@ class cli_analysis(OmniAnalyze_Base):
 
             # create the loaded table
             parser.load_table_data(
-                workload=self._runs[d[0]],
-                dir=d[0],
-                is_gui=False,
-                args=self.get_args(),
-                config=self._profiling_config,
+                workload=self._runs[d[0]], dir=d[0], is_gui=False, args=self.get_args()
             )
 
     @demarcate

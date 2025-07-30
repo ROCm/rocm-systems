@@ -403,11 +403,11 @@ def test_normal_functionality_still_works():
     """Ensure that normal paths still work after adding error handling tests"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_gpu_model("gfx90a", None)
+    result = MIGPUSpecs.get_gpu_model("gfx906", None)
     assert result is not None
 
-    result = MIGPUSpecs.get_gpu_series("gfx90a")
+    result = MIGPUSpecs.get_gpu_series("gfx906")
     assert result is not None
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx90a")
+    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx906")
     assert result == 1

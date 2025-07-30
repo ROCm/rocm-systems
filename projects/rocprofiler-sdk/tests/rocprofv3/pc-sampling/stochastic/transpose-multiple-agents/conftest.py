@@ -93,14 +93,7 @@ def input_kernel_trace_csv(request):
 def input_agent_info_csv(request):
     filename = request.config.getoption("--input-agent-info-csv")
     with open(filename, "r") as inp:
-        return pd.read_csv(
-            inp,
-            na_filter=False,  # parse empty fields as ""
-            keep_default_na=False,  # parse empty fields as ""
-            dtype={
-                "Name": str,
-            },
-        )
+        return pd.read_csv(inp)
 
 
 @pytest.fixture

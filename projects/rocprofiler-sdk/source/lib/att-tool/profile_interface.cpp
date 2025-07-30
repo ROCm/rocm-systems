@@ -103,9 +103,9 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     C_API_END
 }
 
-ToolData::ToolData(std::vector<char>&                    _data,
-                   WaveConfig&                           _config,
-                   rocprofiler_thread_trace_decoder_id_t _decoder)
+ToolData::ToolData(std::vector<char>&                        _data,
+                   WaveConfig&                               _config,
+                   rocprofiler_thread_trace_decoder_handle_t _decoder)
 : cfile(_config.code)
 , config(_config)
 , decoder(_decoder)

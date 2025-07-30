@@ -29,6 +29,17 @@
 
 #include <set>
 
+#define C_API_BEGIN                                                                                \
+    try                                                                                            \
+    {
+#define C_API_END                                                                                  \
+    }                                                                                              \
+    catch(std::exception & e)                                                                      \
+    {                                                                                              \
+        std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << std::endl;   \
+    }                                                                                              \
+    catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
+
 namespace ATTTest
 {
 namespace Agent
@@ -47,16 +58,19 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     assert(record.payload);
     auto* rdata = static_cast<rocprofiler_callback_tracing_kernel_dispatch_data_t*>(record.payload);
-    auto  dispatch_id = rdata->dispatch_info.dispatch_id;
+    int   dispatch_id = (int) rdata->dispatch_info.dispatch_id;
 
-    // Choose two dispatches to begin(6) and end(10) the trace
-    constexpr uint64_t       begin_dispatch = 6;
-    constexpr uint64_t       end_dispatch   = 10;
+    auto get_int_var = [](const char* var_name, int def) {
+        const char* var = getenv(var_name);
+        if(var) return atoi(var);
+        return def;
+    };
+    static int               begin_dispatch = get_int_var("ROCPROFILER_THREAD_TRACE_BEGIN", 1);
+    static int               end_dispatch   = get_int_var("ROCPROFILER_THREAD_TRACE_END", 4);
     static std::atomic<bool> isprofiling{false};
-    static std::atomic<bool> stop_profiling{false};
 
-    static std::mutex    mut{};
-    static std::set<int> captured_ids{};
+    static std::mutex    mut;
+    static std::set<int> captured_ids;
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
@@ -70,7 +84,6 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
             std::unique_lock<std::mutex> lk(mut);
             captured_ids.insert(dispatch_id);
         }
-        if(dispatch_id > end_dispatch) stop_profiling.store(true);
         return;
     }
 
@@ -80,7 +93,7 @@ dispatch_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     std::unique_lock<std::mutex> lk(mut);
     captured_ids.erase(dispatch_id);
-    if(!captured_ids.empty() || stop_profiling == false) return;
+    if(!captured_ids.empty()) return;
 
     bool _exp = true;
     if(!isprofiling.compare_exchange_strong(_exp, false, std::memory_order_relaxed)) return;
@@ -102,15 +115,11 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
-        // Check if we are testing for large buffers
-        static const char* var            = getenv("ATT_BUFFER_SIZE_MB");
-        static uint64_t    buffer_size_mb = (var ? atoi(var) : 96) * 1024ul * 1024ul;
-
         std::vector<rocprofiler_thread_trace_parameter_t> parameters;
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU, 1});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, buffer_size_mb});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x1});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, 0x6000000});
+        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x11});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, 0});
 
         ROCPROFILER_CALL(
@@ -126,10 +135,9 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
 }
 
 int
-tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
+tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
-    Callbacks::init();
-
+    (void) fini_func;
     ROCPROFILER_CALL(rocprofiler_create_context(&tracing_ctx), "context creation");
     ROCPROFILER_CALL(rocprofiler_create_context(&agent_ctx), "context creation");
 
@@ -139,7 +147,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr,
                                                        0,
                                                        Callbacks::tool_codeobj_tracing_callback,
-                                                       nullptr),
+                                                       tool_data),
         "code object tracing service configure");
 
     ROCPROFILER_CALL(
@@ -148,13 +156,13 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr,
                                                        0,
                                                        dispatch_tracing_callback,
-                                                       nullptr),
+                                                       tool_data),
         "dispatch tracing service configure");
 
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
                                                         &query_available_agents,
                                                         sizeof(rocprofiler_agent_t),
-                                                        nullptr),
+                                                        tool_data),
                      "Failed to find GPU agents");
 
     int valid_ctx = 0;
@@ -167,6 +175,13 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 
     // no errors
     return 0;
+}
+
+void
+tool_fini(void* tool_data)
+{
+    Callbacks::finalize_json(tool_data);
+    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Agent
@@ -191,8 +206,8 @@ rocprofiler_configure(uint32_t /* version */,
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &ATTTest::Agent::tool_init,
-                                            &Callbacks::finalize,
-                                            nullptr};
+                                            &ATTTest::Agent::tool_fini,
+                                            new Callbacks::ToolData{"att_agent_test/"}};
 
     // return pointer to configure data
     return &cfg;

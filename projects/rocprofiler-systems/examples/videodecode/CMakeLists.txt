@@ -54,48 +54,8 @@ function(videodecode_message _MSG_TYPE)
 endfunction()
 
 # Find RocDecode
-find_path(
-    rocdecode_ROOT_DIR
-    NAMES include/rocdecode/rocdecode.h
-    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-)
-
-mark_as_advanced(rocdecode_ROOT_DIR)
-
-find_path(
-    rocdecode_INCLUDE_DIR
-    NAMES rocdecode/rocdecode.h
-    HINTS ${rocdecode_ROOT_DIR}
-    PATHS ${rocdecode_ROOT_DIR}
-    PATH_SUFFIXES include
-)
-
-find_library(
-    rocdecode_LIBRARY
-    NAMES rocdecode
-    HINTS ${rocdecode_ROOT_DIR}
-    PATHS ${rocdecode_ROOT_DIR}
-    PATH_SUFFIXES lib
-)
-
-include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(
-    rocdecode
-    FOUND_VAR rocdecode_FOUND
-    REQUIRED_VARS rocdecode_INCLUDE_DIR rocdecode_LIBRARY
-)
-
-if(rocdecode_FOUND)
-    if(NOT TARGET rocdecode::rocdecode)
-        add_library(rocdecode::rocdecode INTERFACE IMPORTED)
-        target_link_libraries(rocdecode::rocdecode INTERFACE ${rocdecode_LIBRARY})
-        target_include_directories(
-            rocdecode::rocdecode
-            INTERFACE ${rocdecode_INCLUDE_DIR}
-        )
-    endif()
-else()
+find_package(rocdecode QUIET)
+if(NOT rocdecode_FOUND)
     videodecode_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RocDecode...")
     return()
 endif()

@@ -48,17 +48,15 @@ dispatch_callback(rocprofiler_agent_id_t /* agent */,
     static std::atomic<size_t> count{0};
     if(count.fetch_add(1) > NUM_KERNELS) return ROCPROFILER_THREAD_TRACE_CONTROL_NONE;
 
-    assert(dispatch_userdata && "Dispatch callback passed null!");
+    assert(userdata && "Dispatch callback passed null!");
     dispatch_userdata->ptr = userdata;
 
     return ROCPROFILER_THREAD_TRACE_CONTROL_START_AND_STOP;
 }
 
 int
-tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
+tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 {
-    Callbacks::init();
-
     static rocprofiler_context_id_t client_ctx = {0};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
@@ -69,7 +67,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                        nullptr,
                                                        0,
                                                        Callbacks::tool_codeobj_tracing_callback,
-                                                       nullptr),
+                                                       tool_data),
         "code object tracing service configure");
 
     std::vector<rocprofiler_thread_trace_parameter_t> params{};
@@ -102,7 +100,7 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
                                                                 params.size(),
                                                                 dispatch_callback,
                                                                 Callbacks::shader_data_callback,
-                                                                nullptr),
+                                                                tool_data),
             "thread trace service configure");
     }
 
@@ -121,6 +119,13 @@ tool_init(rocprofiler_client_finalize_t /* fini_func */, void* /* tool_data */)
 
     // no errors
     return 0;
+}
+
+void
+tool_fini(void* tool_data)
+{
+    Callbacks::finalize_json(tool_data);
+    delete static_cast<Callbacks::ToolData*>(tool_data);
 }
 
 }  // namespace Multi
@@ -142,11 +147,11 @@ rocprofiler_configure(uint32_t /* version */,
     ATTTest::Multi::client_id = id;
 
     // create configure data
-    static auto cfg =
-        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            &ATTTest::Multi::tool_init,
-                                            &Callbacks::finalize,
-                                            nullptr};
+    static auto cfg = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t),
+        &ATTTest::Multi::tool_init,
+        &ATTTest::Multi::tool_fini,
+        reinterpret_cast<void*>(new Callbacks::ToolData{"att_multi_test/"})};
 
     // return pointer to configure data
     return &cfg;

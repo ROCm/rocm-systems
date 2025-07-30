@@ -53,6 +53,7 @@ The tests use mocks instead of a real MongoDB server for speed and reliability.
 
 
 class TestDatabaseConnector:
+
     @pytest.fixture
     def mock_args_import(self):
         """Mock arguments for import operation"""
@@ -209,9 +210,9 @@ class TestDatabaseConnector:
 
         with patch.object(connector, "prep_import") as mock_prep:
             mock_prep.return_value = None
-            connector.connection_info[
-                "db"
-            ] = "rocprofiler-compute_test_team_test_workload_MI100"
+            connector.connection_info["db"] = (
+                "rocprofiler-compute_test_team_test_workload_MI100"
+            )
 
             connector.db_import()
 

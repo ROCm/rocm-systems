@@ -60,47 +60,7 @@ if(ROCPROFSYS_DISABLE_EXAMPLES)
     endif()
 endif()
 
-# find rocJPEG - library and headers
-find_path(
-    rocjpeg_ROOT_DIR
-    NAMES include/rocjpeg/rocjpeg.h
-    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
-    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
-)
-
-mark_as_advanced(rocjpeg_ROOT_DIR)
-
-find_path(
-    rocjpeg_INCLUDE_DIR
-    NAMES rocjpeg/rocjpeg.h
-    HINTS ${rocjpeg_ROOT_DIR}
-    PATHS ${rocjpeg_ROOT_DIR}
-    PATH_SUFFIXES include
-)
-
-find_library(
-    rocjpeg_LIBRARY
-    NAMES rocjpeg
-    HINTS ${rocjpeg_ROOT_DIR}
-    PATHS ${rocjpeg_ROOT_DIR}
-    PATH_SUFFIXES lib
-)
-
-include(FindPackageHandleStandardArgs)
-find_package_handle_standard_args(
-    rocjpeg
-    FOUND_VAR rocjpeg_FOUND
-    REQUIRED_VARS rocjpeg_INCLUDE_DIR rocjpeg_LIBRARY
-)
-
-if(rocjpeg_FOUND)
-    if(NOT TARGET rocjpeg::rocjpeg)
-        add_library(rocjpeg::rocjpeg INTERFACE IMPORTED)
-        target_link_libraries(rocjpeg::rocjpeg INTERFACE ${rocjpeg_LIBRARY})
-        target_include_directories(rocjpeg::rocjpeg INTERFACE ${rocjpeg_INCLUDE_DIR})
-    endif()
-endif()
-
+find_package(rocjpeg QUIET)
 find_package(rocprofiler-register QUIET)
 
 # Copy image files to build directory
@@ -147,7 +107,7 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
 
     # rocJPEG
-    message(STATUS "RocJPEG library found: ${rocjpeg_LIBRARY}")
+    message(STATUS "RocJPEG library found: ${rocjpeg_LIBRARIES}")
     include_directories(${rocjpeg_INCLUDE_DIR})
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocjpeg::rocjpeg)
     list(APPEND SOURCES ${PROJECT_SOURCE_DIR} jpegdecodeperf.cpp)
@@ -176,11 +136,11 @@ else()
         message(WARNING "-- ERROR!: rocJPEG Not Found! - please install rocJPEG!")
     endif()
     if(NOT Threads_FOUND)
-        message(WARNING "-- ERROR!: Threads Not Found! - please install Threads!")
+        message(FATAL_ERROR "-- ERROR!: Threads Not Found! - please insatll Threads!")
     endif()
     if(NOT rocprofiler-register_FOUND)
         message(
-            WARNING
+            FATAL_ERROR
             "-- ERROR!: rocprofiler-register Not Found! - please install rocprofiler-register!"
         )
     endif()

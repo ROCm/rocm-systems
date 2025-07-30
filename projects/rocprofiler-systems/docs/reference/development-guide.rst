@@ -32,7 +32,7 @@ rocprof-sys-sample: `source/bin/rocprof-sys-sample <https://github.com/ROCm/rocp
 * Adds ``librocprof-sys-dl.so`` to ``LD_PRELOAD``
 * Is launched by using ``execvpe`` with ``<command> <command-args>`` and a modified environment
 
-rocprof-sys-causal: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-causal>`_
+rocprof-sys-casual: `source/bin/rocprof-sys-causal <https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/source/bin/rocprof-sys-causal>`_
 ---------------------------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),

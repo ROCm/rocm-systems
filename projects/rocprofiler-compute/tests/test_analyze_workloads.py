@@ -45,13 +45,6 @@ def test_analyze_vcopy_MI200(binary_handler_analyze_rocprof_compute):
     assert code == 0
 
 
-def test_analyze_vcopy_MI300_rocpd(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(
-        ["analyze", "--path", "tests/workloads/vcopy/MI300X_A1_rocpd"]
-    )
-    assert code == 0
-
-
 def test_analyze_ipblocks_TCP_MI300X_A1(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute(
         ["analyze", "--path", "tests/workloads/ipblocks_TCP/MI300X_A1"]

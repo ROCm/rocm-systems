@@ -25,6 +25,7 @@
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
+from config import HIDDEN_COLUMNS
 from utils.logger import console_error
 
 
@@ -311,7 +312,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D Rd"],
+                children=format_value_for_display(memchart_values["VL1D Rd"]),
             ),
             Text(
                 x="838",
@@ -319,7 +320,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["sL1D Hit"],
+                children=memchart_values["VL1D Hit"],
             ),
             Text(
                 x="838",
@@ -327,7 +328,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["sL1D Lat"],
+                children=memchart_values["VL1D Lat"],
             ),
             Text(
                 x="1000",
@@ -335,7 +336,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Rd"],
+                children=format_value_for_display(memchart_values["VL1D_L2 Rd"]),
             ),
             Text(
                 x="1000",
@@ -343,7 +344,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Wr"],
+                children=format_value_for_display(memchart_values["VL1D_L2 Wr"]),
             ),
             Text(
                 x="1008",
@@ -351,7 +352,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["sL1D_L2 Atomic"],
+                children=memchart_values["VL1D_L2 Atomic"],
             ),
             # ----------------------------------------
             # Instr L1  Cache Block

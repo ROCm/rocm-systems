@@ -1,0 +1,338 @@
+name: RocProfiler-SDK Code Coverage
+
+permissions:
+  contents: read
+  pull-requests: write
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/**'
+      - '!projects/rocprofiler-sdk/CODEOWNERS'
+      - '!projects/rocprofiler-sdk/source/docs/**'
+      - '!projects/rocprofiler-sdk/*.md'
+      - '!projects/rocprofiler-sdk/**/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
+  ROCM_PATH: "/opt/rocm"
+  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  PATH: "/usr/bin:$PATH"
+  ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
+  ## A task should be assigned directly to fix the issue
+  ## Scratch memory tests need to be fixed for ROCm 7.0 release
+  navi3_EXCLUDE_TESTS_REGEX: ""
+  vega20_EXCLUDE_TESTS_REGEX: ""
+  mi200_EXCLUDE_TESTS_REGEX: ""
+  mi300_EXCLUDE_TESTS_REGEX: ""
+  mi300a_EXCLUDE_TESTS_REGEX: ""
+  mi325_EXCLUDE_TESTS_REGEX: ""
+  mi3xx_EXCLUDE_TESTS_REGEX: ""
+  navi4_EXCLUDE_TESTS_REGEX: ""
+  navi3_EXCLUDE_LABEL_REGEX: ""
+  vega20_EXCLUDE_LABEL_REGEX: ""
+  mi200_EXCLUDE_LABEL_REGEX: ""
+  mi300_EXCLUDE_LABEL_REGEX: ""
+  mi300a_EXCLUDE_LABEL_REGEX: ""
+  mi325_EXCLUDE_LABEL_REGEX: ""
+  mi3xx_EXCLUDE_LABEL_REGEX: ""
+  navi4_EXCLUDE_LABEL_REGEX: ""
+  GLOBAL_CMAKE_OPTIONS: ""
+
+jobs:
+  code-coverage:
+    if: ${{ contains(github.event_name, 'pull_request') }}
+    strategy:
+      # fail-fast: false
+      matrix:
+        runner: ['mi300']
+        os: ['ubuntu-22.04']
+        build-type: ['Release']
+
+    runs-on: rocprofiler-ubuntu-22
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GCC_COMPILER_VERSION: 11
+      ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        submodules: true
+
+    - name: Load Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      id: load-coverage
+      uses: actions/cache@v4
+      with:
+        key: ${{ github.event.pull_request.base.sha }}-codecov
+        path: .codecov/**
+
+    - name: Copy Existing XML Code Coverage
+      if: github.event_name == 'pull_request'
+      shell: bash
+      run: |
+        if [ -d .codecov ]; then cp -r .codecov .codecov.ref; fi
+
+    - name: Configure Env
+      shell: bash
+      run: |
+        echo "${PATH}:/usr/local/bin:${HOME}/.local/bin" >> $GITHUB_PATH
+        echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
+
+    - name: Install requirements
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        cd projects/rocprofiler-sdk
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev
+        python3 -m pip install -U --user -r requirements.txt
+        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+
+    - name: Sync gcov with compilers
+      timeout-minutes: 10
+      shell: bash
+      run:
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} &&
+        update-alternatives
+            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500
+            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+            --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
+
+    - name: List Files
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat /opt/rocm/.info/version
+        ls -la
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
+    - name: Configure, Build, and Test (Total Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
+          --build-jobs 16
+          --site ${RUNNER_HOSTNAME}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage all
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Configure, Build, and Test (Tests Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
+          --build-jobs 16
+          --site ${RUNNER_HOSTNAME}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage tests
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Configure, Build, and Test (Samples Code Coverage)
+      timeout-minutes: 30
+      shell: bash
+      run:
+        find build -type f | egrep '\.gcda$' | xargs rm &&
+        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
+          --build-jobs 16
+          --site ${RUNNER_HOSTNAME}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --coverage samples
+          --run-attempt ${{ github.run_attempt }}
+          --
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DPython3_EXECUTABLE=$(which python3)
+          ${{ env.GLOBAL_CMAKE_OPTIONS }}
+          --
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+
+    - name: Save XML Code Coverage
+      id: save-coverage
+      uses: actions/cache/save@v4
+      with:
+        key: ${{ github.sha }}-codecov
+        path: |
+          .codecov/*.xml
+
+    - id: generatereport
+      name: Generate Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      shell: bash
+      run: |
+        cd projects/rocprofiler-sdk
+        echo "PWD: ${PWD}"
+        ls -la
+
+        for i in "all" "tests" "samples"; do
+            wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
+        done
+        ls -la .codecov
+        which -a git
+        git --version
+
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+
+        echo -e "\n${PWD}:"
+        ls -la .
+
+        echo -e "\n.codecov:"
+        ls -la .codecov
+
+        get-base-md-contents() { cat .codecov/${1}.png.md; }
+        get-full-md-contents() { cat .codecov/${1}.png.md .codecov/${1}.md; }
+        cat << EOF > .codecov/report.md
+        # Code Coverage Report
+
+        ## Tests Only
+        $(get-base-md-contents tests)
+
+        ## Samples Only
+        $(get-base-md-contents samples)
+
+        ## Tests + Samples
+        $(get-base-md-contents all)
+
+        <!-- code-coverage-comment-identifier -->
+        EOF
+
+        echo 'CODECOVERAGE_REPORT<<EOF' > $GITHUB_OUTPUT
+        cat .codecov/report.md >> $GITHUB_OUTPUT
+        echo 'EOF' >> $GITHUB_OUTPUT
+
+    - name: Write Code Coverage Comment
+      if: github.event_name == 'pull_request'
+      timeout-minutes: 5
+      uses: actions/github-script@v6
+      env:
+        COMMENT_BODY: |
+          <details>
+          <summary><h2>Code Coverage Report</h2></summary>
+
+          <!-- Keep the empty line above to render markdown properly -->
+          ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
+          </details>
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
+            const commentBody = process.env.COMMENT_BODY;
+
+            // Fetch existing comments
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            // Check for an existing comment
+            const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
+
+            if (existingComment) {
+              // Update the existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+              core.info(`Updated comment with ID: ${existingComment.id}`);
+            } else {
+              // Create a new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: commentBody,
+              });
+              core.info('Created a new comment.');
+            }
+
+    - name: Archive Code Coverage Data
+      if: ${{ github.event_name == 'workflow_dispatch' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: code-coverage-details
+        path: |
+          ${{github.workspace}}/.codecov/*
+
+    - name: Verify Test Labels
+      timeout-minutes: 5
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        pushd build
+        #
+        # if following fails, there is a test that does not have
+        # a label identifying it as sample or test (unit or integration).
+        # Recommended labels are:
+        #   - samples
+        #   - unittests
+        #   - integration-tests
+        #
+        ctest -N -LE 'samples|tests' -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" -O ctest.mislabeled.log
+        grep 'Total Tests: 0' ctest.mislabeled.log
+        #
+        # if following fails, then there is overlap between the labels.
+        # A test cannot both be a sample and (unit/integration) test.
+        #
+        ctest -N -O ctest.all.log
+        ctest -N -O ctest.samples.log -L samples
+        ctest -N -O ctest.tests.log -L tests
+        NUM_ALL=$(grep 'Total Tests:' ctest.all.log | awk '{print $NF}')
+        NUM_SAMPLE=$(grep 'Total Tests:' ctest.samples.log | awk '{print $NF}')
+        NUM_TEST=$(grep 'Total Tests:' ctest.tests.log | awk '{print $NF}')
+        NUM_SUM=$((${NUM_SAMPLE} + ${NUM_TEST}))
+        echo "Total tests: ${NUM_ALL}"
+        echo "Total labeled tests: ${NUM_SUM}"
+        if [ ${NUM_ALL} != ${NUM_SUM} ]; then
+            echo "Test label overlap"
+            exit 1
+        fi
+        popd

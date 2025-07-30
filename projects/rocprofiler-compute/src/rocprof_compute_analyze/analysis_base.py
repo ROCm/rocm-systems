@@ -25,7 +25,6 @@
 import copy
 import os
 import sys
-import textwrap
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -97,28 +96,15 @@ class OmniAnalyze_Base:
                     sys_info.iloc[0],
                 )
 
-            metric_descriptions = {
-                k: v
-                for dfs in self._arch_configs[args.list_metrics].dfs.values()
-                for k, v in dfs.to_dict().get("Description", {}).items()
-            }
             for key, value in self._arch_configs[args.list_metrics].metric_list.items():
                 prefix = ""
-                description = ""
                 if "." not in str(key):
                     prefix = ""
                 elif str(key).count(".") == 1:
                     prefix = "\t"
                 else:
                     prefix = "\t\t"
-                    description = metric_descriptions.get(key, "")
-                print(prefix + key, "->", value + "\n")
-                if description:
-                    print(
-                        prefix
-                        + f"\n{prefix}".join(textwrap.wrap(description, width=40))
-                        + "\n"
-                    )
+                print(prefix + key, "->", value)
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -128,13 +114,11 @@ class OmniAnalyze_Base:
         if not normalization_filter:
             for k, v in self._arch_configs.items():
                 parser.build_metric_value_string(
-                    v.dfs, v.dfs_type, self.__args.normal_unit, self._profiling_config
+                    v.dfs, v.dfs_type, self.__args.normal_unit
                 )
         else:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(
-                    v.dfs, v.dfs_type, normalization_filter, self._profiling_config
-                )
+                parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
 
         args = self.__args
         # Error checking for multiple runs and multiple kernel filters
