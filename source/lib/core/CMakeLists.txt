@@ -1,3 +1,25 @@
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
 #
 configure_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/defines.hpp.in
@@ -25,6 +47,16 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd/data_processor.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd/json.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/database.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_manager.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/metadata_storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_storage_parser.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/rocpd_post_processing.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
 )
 
 set(core_headers
@@ -53,6 +85,9 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/state.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/agent_manager.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/node_info.hpp
 )
 
 add_library(rocprofiler-systems-core-library STATIC)
@@ -94,6 +129,7 @@ target_link_libraries(
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sqlite3>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
         $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm>

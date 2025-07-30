@@ -495,6 +495,9 @@ get_buffered_domains()
     const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+#    if(ROCPROFILER_VERSION >= 600)
+        ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+#    endif
 #    if(ROCPROFILER_VERSION < 10000)
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
@@ -539,6 +542,16 @@ get_buffered_domains()
         else if(itr == "marker_api" || itr == "roctx")
         {
             _data.emplace(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API);
+        }
+#    if(ROCPROFILER_VERSION >= 600)
+        else if(itr == "memory_allocation")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION);
+        }
+#    endif
+        else if(itr == "memory_copy")
+        {
+            _data.emplace(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY);
         }
         else
         {

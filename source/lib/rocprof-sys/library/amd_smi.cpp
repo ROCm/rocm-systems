@@ -27,6 +27,7 @@
 // THE SOFTWARE.
 
 #include "core/agent.hpp"
+#include "core/sample_cache/cache_manager.hpp"
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
@@ -40,6 +41,7 @@
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/data_processor.hpp"
+#include "core/sample_cache/metadata_storage.hpp"
 #include "core/state.hpp"
 #include "library/amd_smi.hpp"
 #include "library/runtime.hpp"
@@ -85,34 +87,38 @@ get_data_processor()
 }
 
 void
-rocpd_initialize_category()
+metadata_initialize_category()
 {
-    get_data_processor().insert_category(ROCPROFSYS_CATEGORY_AMD_SMI,
-                                         trait::name<category::amd_smi>::value);
+    sample_cache::get_cache_metadata().add_string(trait::name<category::amd_smi>::value);
 }
 
 void
-rocpd_initialize_smi_tracks()
+metadata_initialize_smi_tracks()
 {
-    auto&      data_processor = get_data_processor();
-    auto&      n_info         = node_info::get_instance();
-    const auto thread_id      = std::nullopt;  // Internal thread ID for amd-smi
+    const auto thread_id = std::nullopt;
 
-    data_processor.insert_track(trait::name<category::amd_smi_mm_busy>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_power>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_temp>::value, n_info.id,
-                                getpid(), thread_id);
-    data_processor.insert_track(trait::name<category::amd_smi_memory_usage>::value,
-                                n_info.id, getpid(), thread_id);
-}
+    sample_cache::get_cache_metadata().add_track(
+        { .track_name = trait::name<category::amd_smi_mm_busy>::value,
+          .thread_id  = thread_id,
+          .extdata    = "{}" });
+    sample_cache::get_cache_metadata().add_track(
+        { .track_name = trait::name<category::amd_smi_power>::value,
+          .thread_id  = thread_id,
+          .extdata    = "{}" });
+    sample_cache::get_cache_metadata().add_track(
+        { .track_name = trait::name<category::amd_smi_temp>::value,
+          .thread_id  = thread_id,
+          .extdata    = "{}" });
+    sample_cache::get_cache_metadata().add_track(
+        { .track_name = trait::name<category::amd_smi_memory_usage>::value,
+          .thread_id  = thread_id,
+          .extdata    = "{}" });
+};
 
 void
-rocpd_initialize_smi_pmc(size_t gpu_id)
+metadata_initialize_smi_pmc(size_t gpu_id)
 {
-    auto& data_processor = get_data_processor();
-    // find the proper values for a following definitions
+    // TODO: Find the proper values for a following definitions
     size_t      EVENT_CODE       = 0;
     size_t      INSTANCE_ID      = 0;
     const char* LONG_DESCRIPTION = "";
@@ -121,35 +127,36 @@ rocpd_initialize_smi_pmc(size_t gpu_id)
     const char* EXPRESSION       = "";
     const char* CELSIUS_DEGREES  = "\u00B0C";
     auto        ni               = node_info::get_instance();
-    const auto* TARGET_ARCH      = "GPU";
+    const char* TARGET_ARCH      = "GPU";
 
-    auto& _agent_manager = agent_manager::get_instance();
-    auto  base_id = _agent_manager.get_agent_by_id(gpu_id, agent_type::GPU).base_id;
+    auto& agent_mngr = agent_manager::get_instance();
+    auto  agent_handle =
+        agent_mngr.get_agent_by_type_index(gpu_id, agent_type::GPU).handle;
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_mm_busy>::value, "Busy",
-        trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION, COMPONENT,
-        "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+    sample_cache::get_cache_metadata().add_pmc_info(
+        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_mm_busy>::value, "Busy",
+          trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
+          COMPONENT, "$", "ABS", BLOCK, EXPRESSION, 0, 0, "{}" });
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_temp>::value, "Temp",
-        trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
-        CELSIUS_DEGREES, "ABS", BLOCK, EXPRESSION, 0, 0);
+    sample_cache::get_cache_metadata().add_pmc_info(
+        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_temp>::value, "Temp",
+          trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
+          CELSIUS_DEGREES, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_power>::value, "Pow",
-        trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
-        "w", "ABS", BLOCK, EXPRESSION, 0, 0);
+    sample_cache::get_cache_metadata().add_pmc_info(
+        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_power>::value, "Pow",
+          trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
+          "w", "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
-        trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-        COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0);
-}
+    sample_cache::get_cache_metadata().add_pmc_info(
+        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
+          trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
+          COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0 });
+};
 
 void
 rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& settings,
@@ -159,10 +166,14 @@ rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& 
     if(!(settings.busy || settings.temp || settings.power || settings.mem_usage)) return;
 
     auto& data_processor = get_data_processor();
-    auto  event_id = data_processor.insert_event(ROCPROFSYS_CATEGORY_AMD_SMI, 0, 0, 0);
+
+    const auto* _name            = trait::name<category::amd_smi>::value;
+    auto        name_primary_key = data_processor.insert_string(_name);
+    auto        event_id         = data_processor.insert_event(name_primary_key, 0, 0, 0);
 
     auto& _agent_manager = agent_manager::get_instance();
-    auto  base_id = _agent_manager.get_agent_by_id(device_id, agent_type::GPU).base_id;
+    auto  base_id =
+        _agent_manager.get_agent_by_type_index(device_id, agent_type::GPU).base_id;
 
     auto insert_event_and_sample = [&](bool enabled, const char* name, double value) {
         if(!enabled) return;
@@ -392,10 +403,12 @@ config()
     for(auto itr : data::device_list)
         data::get_initial().at(itr).sample(itr);
 
-    if(get_use_rocpd())
+    metadata_initialize_category();
+    metadata_initialize_smi_tracks();
+
+    for(const auto& _dev_id : data::device_list)
     {
-        rocpd_initialize_category();
-        rocpd_initialize_smi_tracks();
+        metadata_initialize_smi_pmc(_dev_id);
     }
 }
 
@@ -482,11 +495,6 @@ data::post_process(uint32_t _dev_id)
 
     auto use_perfetto = get_use_perfetto();
     auto use_rocpd    = get_use_rocpd();
-
-    if(use_rocpd)
-    {
-        rocpd_initialize_smi_pmc(_dev_id);
-    }
 
     for(auto& itr : _amd_smi)
     {
@@ -788,6 +796,7 @@ setup()
 
         is_initialized() = true;
         data::setup();
+
     } catch(std::runtime_error& _e)
     {
         ROCPROFSYS_VERBOSE(0, "Exception thrown when initializing amd-smi: %s\n",

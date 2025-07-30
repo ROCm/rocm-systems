@@ -20,16 +20,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocpd_sources
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/json.cpp
+set(benchmark_sources)
+
+set(benchmark_headers
+    ${CMAKE_CURRENT_LIST_DIR}/benchmark.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/category.hpp
 )
 
-set(rocpd_headers
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/json.hpp
+target_sources(
+    rocprofiler-systems-core-library
+    PRIVATE ${benchmark_sources} ${benchmark_headers}
 )
-
-target_sources(rocprofiler-systems-core-library PRIVATE ${rocpd_sources} ${rocpd_headers})
-
-add_subdirectory(data_storage)

@@ -69,8 +69,7 @@ data_processor::initialize_metadata()
 size_t
 data_processor::insert_string(const char* str)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
-    auto                        it = _string_map.find(str);
+    auto it = _string_map.find(str);
     if(it != _string_map.end()) return _string_map.at(str);
 
     data_storage::queries::table_insert_query query;
@@ -242,24 +241,12 @@ data_processor::insert_sample(const char* track, uint64_t timestamp, size_t even
 }
 
 size_t
-data_processor::insert_event(size_t category_id, size_t stack_id, size_t parent_stack_id,
-                             size_t correlation_id, const char* call_stack,
-                             const char* line_info, const char* extdata)
+data_processor::insert_event(size_t string_primary_key, size_t stack_id,
+                             size_t parent_stack_id, size_t correlation_id,
+                             const char* call_stack, const char* line_info,
+                             const char* extdata)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
-    auto                        it = _category_map.find(category_id);
-    if(it == _category_map.end())
-    {
-        std::ostringstream oss;
-        oss << "Insert event failed! Error: Unknown category id: " << category_id
-            << " for UPID: " << _upid;
-        throw std::runtime_error(oss.str());
-    }
-
-    ROCPROFSYS_VERBOSE(3, "Insert event category id: %ld, string id: %ld\n", category_id,
-                       it->second);
-
-    _insert_event_statement(_upid.c_str(), it->second, stack_id, parent_stack_id,
+    _insert_event_statement(_upid.c_str(), string_primary_key, stack_id, parent_stack_id,
                             correlation_id, call_stack, line_info, extdata);
     return data_storage::database::get_instance().get_last_insert_id();
 }
@@ -456,7 +443,6 @@ void
 data_processor::insert_args(size_t event_id, size_t position, const char* type,
                             const char* name, const char* value, const char* extdata)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
     _insert_args_statement(_upid.c_str(), event_id, position, type, name, value, extdata);
 }
 
@@ -464,40 +450,24 @@ void
 data_processor::insert_stream_info(size_t stream_id, size_t node_id, size_t process_id,
                                    const char* name, const char* extdata)
 {
-    if(_stream_ids.count(stream_id) > 0)
-    {
-        // ROCPROFSYS_WARNING(
-        //     1, "Insert stream info failed! Error: Stream ID %ld already exists!\n",
-        //     stream_id);
-        return;
-    }
     data_storage::queries::table_insert_query query;
     data_storage::database::get_instance().execute_query(
         query.set_table_name("rocpd_info_stream_" + _upid)
             .set_columns("id", "guid", "nid", "pid", "name", "extdata")
             .set_values(stream_id, _upid, node_id, process_id, name, extdata)
             .get_query_string());
-    _stream_ids.insert(stream_id);
 }
 
 void
 data_processor::insert_queue_info(size_t queue_id, size_t node_id, size_t process_id,
                                   const char* name, const char* extdata)
 {
-    if(_queue_ids.count(queue_id) > 0)
-    {
-        // ROCPROFSYS_WARNING(
-        //     1, "Insert queue info failed! Error: Queue ID %ld already exists!\n",
-        //     queue_id);
-        return;
-    }
     data_storage::queries::table_insert_query query;
     data_storage::database::get_instance().execute_query(
         query.set_table_name("rocpd_info_queue_" + _upid)
             .set_columns("id", "guid", "nid", "pid", "name", "extdata")
             .set_values(queue_id, _upid, node_id, process_id, name, extdata)
             .get_query_string());
-    _queue_ids.insert(queue_id);
 }
 
 void
@@ -506,20 +476,9 @@ data_processor::insert_code_object(size_t id, size_t node_id, size_t process_id,
                                    uint64_t ld_size, uint64_t ld_delta,
                                    const char* storage_type, const char* extdata)
 {
-    if(_code_object_ids.count(id) > 0)
-    {
-        // ROCPROFSYS_WARNING(
-        //     1,
-        //     "Insert code object info failed! Error: Code object ID %ld already
-        //     exists!\n", id);
-        return;
-    }
     ROCPROFSYS_VERBOSE(2, "Insert code object with ID: %ld\n", id);
-    std::lock_guard<std::mutex> lock(_data_mutex);
     _insert_code_object_statement(id, _upid.c_str(), node_id, process_id, agent_id, uri,
                                   ld_base, ld_size, ld_delta, storage_type, extdata);
-
-    _code_object_ids.insert(id);
 }
 
 void
@@ -530,40 +489,11 @@ data_processor::insert_kernel_symbol(
     uint32_t private_segment_size, uint32_t sgrp_count, uint32_t arch_vgrp_count,
     uint32_t accum_vgrp_count, const char* extdata)
 {
-    if(_kernel_sym_ids.count(id) > 0)
-    {
-        // ROCPROFSYS_WARNING(
-        //     1,
-        //     "Insert kernel symbol failed! Error: Kernel symbol ID %ld already
-        //     exists!\n", id);
-        return;
-    }
-
     ROCPROFSYS_VERBOSE(2, "Insert kernel symbol: %s with ID: %ld\n", name, id);
-    std::lock_guard<std::mutex> lock(_data_mutex);
     _insert_kernel_symbol_statement(
         id, _upid.c_str(), node_id, process_id, code_obj_id, name, display_name,
         kernel_obj, kernarg_segmnt_size, kernarg_segment_alignment, group_segment_size,
         private_segment_size, sgrp_count, arch_vgrp_count, accum_vgrp_count, extdata);
-
-    _kernel_sym_ids.insert(id);
-}
-
-void
-data_processor::insert_category(size_t category_id, const char* name)
-{
-    auto it = _category_map.find(category_id);
-    if(it != _category_map.end())
-    {
-        // ROCPROFSYS_WARNING(
-        //     1, "Insert category failed! Error: Category %s already exist!\n", name);
-        return;
-    }
-    auto                        name_id = insert_string(name);
-    std::lock_guard<std::mutex> lock(_data_mutex);
-    ROCPROFSYS_VERBOSE(2, "Insert category: name: %s, id: %ld, name id: %ld\n", name,
-                       category_id, name_id);
-    _category_map.emplace(category_id, name_id);
 }
 
 void
@@ -571,7 +501,6 @@ data_processor::insert_region(size_t node_id, size_t process_id, size_t thread_i
                               uint64_t start, uint64_t end, size_t name_id,
                               size_t event_id, const char* extdata)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
     ROCPROFSYS_VERBOSE(2, "Insert region for event id: %ld\n", event_id);
 
     _insert_region_statement(_upid.c_str(), node_id, process_id, thread_id, start, end,
@@ -587,8 +516,6 @@ data_processor::insert_kernel_dispatch(
     size_t grid_size_x, size_t grid_size_y, size_t grid_size_z, size_t region_name_id,
     size_t event_id, const char* extdata)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
-
     ROCPROFSYS_VERBOSE(2, "Insert kernel dispatch for event id: %ld\n", event_id);
 
     _insert_kernel_dispatch_statement(
@@ -607,8 +534,6 @@ data_processor::insert_memory_copy(size_t node_id, size_t process_id, size_t thr
                                    size_t region_name_id, size_t event_id,
                                    const char* extdata)
 {
-    std::lock_guard<std::mutex> lock(_data_mutex);
-
     _insert_memory_copy_statement(_upid.c_str(), node_id, process_id, thread_id, start,
                                   end, name_id, dst_agent_id, dst_addr, src_agent_id,
                                   src_addr, size, queue_id, stream_id, region_name_id,
@@ -661,6 +586,18 @@ data_processor::insert_thread_info(size_t node_id, size_t parent_process_id,
     auto thread_idx = data_storage::database::get_instance().get_last_insert_id();
     _thread_id_map.emplace(thread_id, thread_idx);
     return thread_idx;
+}
+
+size_t
+data_processor::map_thread_id_to_primary_key(size_t thread_id)
+{
+    auto it = _thread_id_map.find(thread_id);
+
+    if(it == _thread_id_map.end())
+    {
+        throw std::invalid_argument("Given thread id don't exist");
+    }
+    return _thread_id_map.at(thread_id);
 }
 
 void
