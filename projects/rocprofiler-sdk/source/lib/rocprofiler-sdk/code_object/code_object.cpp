@@ -34,7 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include "lib/rocprofiler-sdk-prestore/queue_registration_controller.hpp"
+#include "lib/rocprofiler-sdk-prestore/code_object_registration.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1179,9 +1179,9 @@ initialize(HsaApiTable* table)
         std::vector<hsa_executable_t> exported_executables;
         uint64_t exported_executables_count;
 
-        ROCP_FATAL_IF(rocprofiler_queue_export_all_code_object_registrations(nullptr, &exported_executables_count) != 0);
+        ROCP_FATAL_IF(rocprofiler_prestore_export_all_code_objects(nullptr, &exported_executables_count) != 0);
         exported_executables.resize(exported_executables_count);
-        ROCP_FATAL_IF(rocprofiler_queue_export_all_code_object_registrations(exported_executables.data(), &exported_executables_count) != 0);
+        ROCP_FATAL_IF(rocprofiler_prestore_export_all_code_objects(exported_executables.data(), &exported_executables_count) != 0);
         ROCP_INFO << "Got " << exported_executables_count << " executables from the queue library";
         for (auto& exec : exported_executables)
         {

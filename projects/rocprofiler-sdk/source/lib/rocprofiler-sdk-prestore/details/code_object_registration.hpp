@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "code_object_registration.hpp"
+
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <hsa/hsa.h>
@@ -30,32 +32,37 @@
 
 #include <cstdint>
 
-using hsa_amd_queue_intercept_packet_writer_t = void(*)(const void*, uint64_t);
-using write_interceptor_t = void(*)(const void*, uint64_t, uint64_t, void*, hsa_amd_queue_intercept_packet_writer_t);
-
 namespace rocprofiler {
 namespace prestore {
-    
-struct queue_prestore_export_t {
-    hsa_agent_t agent;
-    hsa_queue_t* queue;
+
+class CodeObjectRegistration {
+    using hsa_executable_freeze_t = decltype(CoreApiTable::hsa_executable_freeze_fn);
+    using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
+    using code_object_prestore_t = hsa_executable_t;
+    using code_object_collection_t = std::vector<code_object_prestore_t>;
+
+public:
+    CodeObjectRegistration()  = default;
+    ~CodeObjectRegistration() = default;
+    // Initializes the CodeObjectRegistration. This must be delayed until
+    // HSA has been inited.
+    void init(CoreApiTable& core_table, AmdExtTable& ext_table);
+
+    void add_code_object(code_object_prestore_t);
+    void remove_code_object(code_object_prestore_t);
+
+    const code_object_collection_t& get_all_code_objects() { return m_code_objects; };
+    hsa_executable_freeze_t get_hsa_executable_freeze_fn() const { return m_hsa_executable_freeze_fn; }
+    hsa_executable_destroy_t get_hsa_executable_destroy_fn() const { return m_hsa_executable_destroy_fn; }
+
+private:
+    code_object_collection_t m_code_objects;
+
+    hsa_executable_freeze_t m_hsa_executable_freeze_fn;
+    hsa_executable_destroy_t m_hsa_executable_destroy_fn;
 };
 
-void
-queue_registration_init(HsaApiTable* table);
+CodeObjectRegistration*
+get_code_object_registration();
 
 }}
-
-extern "C" {
-
-int
-rocprofiler_prestore_export_all_queues(
-    rocprofiler::prestore::queue_prestore_export_t* queues,
-    uint64_t* num_queues) ROCPROFILER_PUBLIC_API;
-
-int rocprofiler_prestore_set_write_interceptor(
-    hsa_queue_t* queue,
-    write_interceptor_t func,
-    void* data) ROCPROFILER_PUBLIC_API;
-
-}

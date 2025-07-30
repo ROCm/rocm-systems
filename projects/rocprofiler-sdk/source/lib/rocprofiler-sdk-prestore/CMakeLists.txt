@@ -11,9 +11,8 @@ add_library(rocprofiler-sdk-prestore::rocprofiler-sdk-prestore-shared-library AL
 
 target_sources(rocprofiler-sdk-prestore-shared-library
     PRIVATE queue_registration.cpp
-            queue_registration.hpp
-            queue_registration_controller.cpp
-            queue_registration_controller.hpp)
+            code_object_registration.cpp
+            prestore.cpp)
 
 target_include_directories(
     rocprofiler-sdk-prestore-shared-library

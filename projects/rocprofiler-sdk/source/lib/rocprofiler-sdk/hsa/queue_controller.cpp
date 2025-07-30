@@ -27,7 +27,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include "lib/rocprofiler-sdk-prestore/queue_registration_controller.hpp"
+#include "lib/rocprofiler-sdk-prestore/queue_registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
@@ -272,18 +272,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
         // TODO: finalize name
         if (common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
         {
-            std::vector<queue_registration_export_t> exported_registrations;
-            uint64_t exported_registrations_count;
+            std::vector<rocprofiler::prestore::queue_prestore_export_t> exported_queues;
+            uint64_t exported_queues_count;
 
-            ROCP_FATAL_IF(rocprofiler_queue_export_all_queue_registrations(nullptr, &exported_registrations_count) != 0);
-            exported_registrations.resize(exported_registrations_count);
-            ROCP_FATAL_IF(rocprofiler_queue_export_all_queue_registrations(exported_registrations.data(), &exported_registrations_count) != 0);
+            ROCP_FATAL_IF(rocprofiler_prestore_export_all_queues(nullptr, &exported_queues_count) != 0);
+            exported_queues.resize(exported_queues_count);
+            ROCP_FATAL_IF(rocprofiler_prestore_export_all_queues(exported_queues.data(), &exported_queues_count) != 0);
 
-            ROCP_INFO << "Got " << exported_registrations_count << " queues from the queue library";
-            for (uint64_t iter = 0; iter < exported_registrations.size(); ++iter)
+            ROCP_INFO << "Got " << exported_queues_count << " queues from the queue library";
+            for (uint64_t iter = 0; iter < exported_queues.size(); ++iter)
             {
                 bool registration_consumed = false;
-                auto qr = exported_registrations[iter];
+                auto qr = exported_queues[iter];
                 auto agent = qr.agent;
 
                 for(const auto& [_, agent_info] : get_supported_agents())
@@ -292,7 +292,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                     {
                         auto set_write_interceptor = [&qr](write_interceptor_t wi, void* data)
                         {
-                            rocprofiler_queue_set_write_interceptor(qr.queue, wi, data);
+                            rocprofiler_prestore_set_write_interceptor(qr.queue, wi, data);
                         };
 
                         hsa_queue_t* queue = qr.queue;
