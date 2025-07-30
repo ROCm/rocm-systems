@@ -2,11 +2,10 @@ name: Documentation
 
 on:
   push:
-    branches: [ amd-mainline ]
     paths:
-      - 'docs/archive/docs-2.x/**'
-      - 'docs/archive/docs-1.x/**'
-      - '.github/workflows/docs.yml'
+      - 'projects/rocprofiler-compute/docs/archive/docs-2.x/**'
+      - 'projects/rocprofiler-compute/docs/archive/docs-1.x/**'
+      - '.github/workflows/rocprofiler-compute-docs.yml'
 
   workflow_dispatch:
 
@@ -29,8 +28,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+            sparse-checkout: projects/rocprofiler-compute
       - name: Additional python packages
-        run: pip3 install -r docs/archive/requirements-doc.txt
+        run: |
+          cd projects/rocprofiler-compute
+          pip3 install -r docs/archive/requirements-doc.txt
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Build 1.x docs
