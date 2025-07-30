@@ -1,0 +1,4 @@
+[submodule "include/unified_amdsmi"]
+	path = include/unified_amdsmi
+	url = git@github.com:AMD-ROCm-Internal/amdsmi_unified.git
+	branch = amd-mainline

@@ -252,6 +252,88 @@ be found at `build/tests/amd_smi_test/`.
 To build the documentation, follow the instructions at
 [Building documentation](https://rocm.docs.amd.com/en/latest/contribute/building.html).
 
+## Development only
+
+This section describes the prerequisites and steps to build Unified Header from source.
+
+### The Unified Header submodule in the Linux BM repository
+
+The steps needed to setup and initialize the Unified Header submodule is as follows:
+
+   1. The script has the command line option, --help, which displays all command line options and defaults.
+
+      Ex. tools/config_unified_header_submodule.sh --help
+      ``` shell
+      Usage: tools/config_unified_header_submodule.sh --option --opt <value>
+          option
+              --help   : Prints usage and exit
+              --remove : Removes existing Unified Header submodule
+
+          opt <value>
+              --dir <value>  : Directory that contains the Unified Header dir
+                               Default is "include"
+              --name <value> : Directory Name of the Unified Header
+                               Default is "unified_amdsmi"
+          Note:
+              Must run script from repository root directory
+      ```
+
+   2. Initialize submodule
+
+      Ex. Use command line options to specify Unified Header directory
+      ``` shell
+      tools/config_unified_header_submodule.sh --dir include --name unified_amdsmi
+      ```
+
+      Ex. The arguments in the above example are the defaults, so running the script with no arguments will produce the same results
+      ``` shell
+      tools/config_unified_header_submodule.sh
+      ```
+
+   3. Un-initialize submodule when no longer needed
+      ``` shell
+      tools/config_unified_header_submodule.sh --remove
+      ```
+
+>[!NOTE]
+>Complete this section only if the User needs to create the Unified Header amdsmi.h file and use
+>this header when building.  Otherwise, the build will use the existing amdsmi.h file which is 
+>already included in the repository.
+
+### Build and install the Unified Header amdsmi.h
+
+If the User has initialized the Unified Header submodule, the Unified Header amdsmi.h will automatically be generated
+and used when the Linux driver is being built.  The User can also explicitly use the Unified Header by setting the
+command line option when building via cmake.
+
+Building with the unified header using CMAKE flag:
+   Ex. Building without a cmake command line option builds and uses the Unified Header amdsmi.h
+
+      ```bash
+      mkdir -p build
+      cd build
+      cmake ..
+      make -j $(nproc)
+      ```
+
+   OR Building with a cmake command line option. Change BUILD_HEADER Option to either On or OFF:
+      -DBUILD_HEADER=On builds and uses the Unified Header amdsmi.h
+      -DBUILD_HEADER=OFF uses the existing include/amd_smi/amdsmi.h
+
+      ```bash
+      mkdir -p build
+      cd build
+      cmake -DBUILD_HEADER=[ON|OFF] ..
+      make -j $(nproc)
+      ```
+
+Once the build successfully completes:
+   1. Commit any changes in the Unified Header submodule
+   2. Commit any changes in the amd-smi repo as needed for fixes or new feature submissions
+
+>[!NOTE]
+>Prerequisite: Install the Unified Header submodule in the Linux BM repository
+
 ## DISCLAIMER
 
 The information contained herein is for informational purposes only, and is subject to change without notice. In

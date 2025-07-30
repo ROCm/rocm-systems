@@ -216,6 +216,27 @@ set(CMN_INC_LIST
 add_subdirectory("rocm_smi")
 add_subdirectory("src")
 
+# By default, try to build amdsmi.h header file from the Unified Header repository.
+# Allow the User to bypass building amdsmi.h by setting BUILD_HEADER=OFF on the
+# command line.  Cannot build amdsmi.h if the Unified Header submodule # has not
+# been initiated.
+set(UH_DIR "${PROJECT_SOURCE_DIR}/include/unified_amdsmi/scripts")
+if(NOT DEFINED BUILD_HEADER)
+    if(EXISTS "${UH_DIR}")
+        set(BUILD_HEADER "ON")
+    endif()
+elseif(${BUILD_HEADER} STREQUAL "OFF")
+    unset(BUILD_HEADER CACHE)
+elseif(NOT EXISTS "${UH_DIR}")
+    message("Unified Header will not be generated")
+    message("Must initiate Unified Header submodule")
+    unset(BUILD_HEADER CACHE)
+endif()
+
+if(BUILD_HEADER)
+    add_subdirectory("include")
+endif()
+
 if(BUILD_TESTS)
     set(TESTS_COMPONENT "tests")
     #add_subdirectory("tests/rocm_smi_test")
@@ -270,12 +291,12 @@ install(
 
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 if(ENABLE_ASAN_PACKAGING)
-# install license file in share/doc/amd_smi-asan folder
-install(
-    FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}-asan
-    RENAME LICENSE.txt
-    COMPONENT asan)
+    # install license file in share/doc/amd_smi-asan folder
+    install(
+        FILES ${CPACK_RESOURCE_FILE_LICENSE}
+        DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/doc/${CPACK_PACKAGE_NAME}-asan
+        RENAME LICENSE.txt
+        COMPONENT asan)
 endif()
 # docs are installed into different share directory from tests and examples
 install(
