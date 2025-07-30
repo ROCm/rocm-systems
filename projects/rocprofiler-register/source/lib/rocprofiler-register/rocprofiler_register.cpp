@@ -47,7 +47,7 @@
 extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
-#pragma weak rocprofiler_queue_set_api_table
+#pragma weak rocprofiler_prestore_set_api_table
 #pragma weak rocprofiler_register_import_hip
 #pragma weak rocprofiler_register_import_hip_static
 #pragma weak rocprofiler_register_import_hip_compiler
@@ -85,7 +85,7 @@ extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern int
-rocprofiler_queue_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
+rocprofiler_prestore_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
 extern void
 rocprofv3_attach(void);
@@ -125,7 +125,7 @@ using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
 using rocp_set_api_table_data_t   = std::tuple<void*, rocprofiler_set_api_table_t>;
 using rocprofv3_attach_t = decltype(::rocprofv3_attach)*;
 using rocprofv3_detach_t = decltype(::rocprofv3_detach)*;
-using rocprofiler_queue_set_api_table_t = decltype(::rocprofiler_queue_set_api_table)*;
+using rocprofiler_prestore_set_api_table_t = decltype(::rocprofiler_prestore_set_api_table)*;
 using bitset_t = std::bitset<sizeof(rocprofiler_register_library_indentifier_t::handle)>;
 
 static_assert(sizeof(bitset_t) ==
@@ -135,8 +135,8 @@ static_assert(sizeof(bitset_t) ==
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
 
-constexpr auto rocprofiler_queue_lib_name                = "librocprofiler-sdk-queue.so";
-constexpr auto rocprofiler_queue_lib_register_entrypoint = "rocprofiler_queue_set_api_table";
+constexpr auto rocprofiler_prestore_lib_name                = "librocprofiler-sdk-prestore.so";
+constexpr auto rocprofiler_prestore_lib_register_entrypoint = "rocprofiler_prestore_set_api_table";
 
 constexpr auto rocprofiler_tool_lib_name              = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
 constexpr auto rocprofiler_tool_lib_attach_entrypoint = "rocprofv3_attach";
@@ -678,27 +678,27 @@ rocprofiler_register_library_api_table(
         // TODO: finalize envvar name
         common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
     {
-        void* queuelibrary = rocp_load_rocprofiler_other_lib(rocprofiler_queue_lib_name);
-        if (!queuelibrary)
+        void* prestorelibrary = rocp_load_rocprofiler_other_lib(rocprofiler_prestore_lib_name);
+        if (!prestorelibrary)
         {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but the queue library was not found or able to be loaded. The attaching profiler will not be able to profile anything that requires proxy queues.";
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library was not found or able to be loaded. The attaching profiler will not be able to profile anything that requires proxy queues.";
             return ROCP_REG_NO_TOOLS;
         }
-        rocprofiler_queue_set_api_table_t rocprofiler_queue_set_api_table_fn;
-        *(void**) (&rocprofiler_queue_set_api_table_fn) =
-            dlsym(queuelibrary, rocprofiler_queue_lib_register_entrypoint);
+        rocprofiler_prestore_set_api_table_t rocprofiler_prestore_set_api_table_fn;
+        *(void**) (&rocprofiler_prestore_set_api_table_fn) =
+            dlsym(prestorelibrary, rocprofiler_prestore_lib_register_entrypoint);
         
-        if (!rocprofiler_queue_set_api_table_fn)
+        if (!rocprofiler_prestore_set_api_table_fn)
         {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but the queue library's entry point was not found. The attaching profiler will not be able to profile anything that requires proxy queues.";
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library's entry point was not found. The attaching profiler will not be able to profile anything that requires proxy queues.";
             return ROCP_REG_NO_TOOLS;
         }
 
-        auto _ret = rocprofiler_queue_set_api_table_fn(
+        auto _ret = rocprofiler_prestore_set_api_table_fn(
             common_name, lib_version, _instance_val, api_tables, api_table_length);
         if (_ret != 0)
         {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but queue library registration returned an error: " << _ret << ". The attaching profiler may not be able to profile anything that requires proxy queues.";
+            LOG(ERROR) << "Proxy queues for attachment are enabled, but prestore library registration returned an error: " << _ret << ". The attaching profiler may not be able to profile anything that requires proxy queues.";
             return ROCP_REG_ROCPROFILER_ERROR;
         }
 
