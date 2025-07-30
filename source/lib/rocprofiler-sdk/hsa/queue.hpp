@@ -42,10 +42,13 @@
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <fmt/format.h>
+
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -151,6 +154,9 @@ public:
     queue_state                     get_state() const;
     void                            set_state(queue_state state);
 
+    // Returns a string containing all class variable data
+    std::string to_string() const;
+
 private:
     std::atomic<int>                     _notifiers            = {0};
     std::atomic<int64_t>                 _active_async_packets = {0};
@@ -186,3 +192,23 @@ Queue::lock_queue(FuncT&& func)
 }
 }  // namespace hsa
 }  // namespace rocprofiler
+
+namespace fmt
+{
+// fmt::format support for Queue
+template <>
+struct formatter<rocprofiler::hsa::Queue>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(rocprofiler::hsa::Queue const& queue, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{}", queue.to_string());
+    }
+};
+}  // namespace fmt

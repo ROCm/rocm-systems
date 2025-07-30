@@ -28,9 +28,12 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 
+#include <fmt/format.h>
+
 #include <cstdint>
 #include <functional>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
@@ -98,6 +101,9 @@ public:
     // serialization related signals if not compiled in debug mode.
     void print_debug_signals() const;
 
+    // Returns a string containing all class variable data
+    std::string to_string() const;
+
 #if !defined(NDEBUG)
     // Tracks the creation of all signals in queues, used for debugging and disabled
     // in release mode (adds locking around signal creation).
@@ -139,3 +145,34 @@ void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
 }  // namespace hsa
 }  // namespace rocprofiler
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Debug function to print QueueController state to ROCP_ERROR log
+void rocprofiler_debug_print_queue_controller_state();
+
+#ifdef __cplusplus
+}
+#endif
+
+namespace fmt
+{
+// fmt::format support for QueueController
+template <>
+struct formatter<rocprofiler::hsa::QueueController>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(rocprofiler::hsa::QueueController const& controller, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{}", controller.to_string());
+    }
+};
+}  // namespace fmt

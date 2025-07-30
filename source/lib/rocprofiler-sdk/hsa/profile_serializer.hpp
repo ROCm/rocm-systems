@@ -29,7 +29,10 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
+#include <fmt/format.h>
+
 #include <deque>
+#include <string>
 #include <unordered_map>
 
 namespace rocprofiler
@@ -84,12 +87,37 @@ public:
 
     static void add_queue(hsa_queue_t** hsa_queues, const Queue& queue);
 
+    // Returns a string containing all class variable data
+    std::string to_string() const;
+
 private:
     const Queue*                   _dispatch_queue{nullptr};
     std::deque<const Queue*>       _dispatch_ready;
     std::atomic<Status>            _serializer_status{Status::DISABLED};
     std::deque<barrier_with_state> _barrier;
+    mutable std::atomic<int64_t> _enqueued_packets{0};
+    mutable std::atomic<int64_t> _completed_packets{0};
 };
 
 }  // namespace hsa
 }  // namespace rocprofiler
+
+namespace fmt
+{
+// fmt::format support for profiler_serializer
+template <>
+struct formatter<rocprofiler::hsa::profiler_serializer>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(rocprofiler::hsa::profiler_serializer const& serializer, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{}", serializer.to_string());
+    }
+};
+}  // namespace fmt

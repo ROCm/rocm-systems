@@ -24,6 +24,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
+#include <sstream>
+
 namespace rocprofiler
 {
 namespace hsa
@@ -80,7 +82,7 @@ profiler_serializer::kernel_completion_signal(const Queue& completed)
 {
     // We do not want to track kernel compleiton signals before we have reached the barrier
     clear_complete_barriers(_barrier);
-
+    _completed_packets++;
     // Find the state of this barrier
     auto state = _serializer_status.load();
     bool found = false;
@@ -143,9 +145,11 @@ profiler_serializer::queue_ready(hsa_queue_t* hsa_queue, const Queue& queue)
     }
 
     ROCP_TRACE << "setting queue ready signal to 1...";
+
     CHECK_NOTNULL(get_queue_controller())
         ->get_core_table()
         .hsa_signal_store_screlease_fn(queue.ready_signal, 1);
+
 
     if(_dispatch_queue == nullptr)
     {
@@ -177,7 +181,7 @@ profiler_serializer::kernel_dispatch(const Queue& queue) const
         if(completion_signal != nullptr) barrier.barrier_and.completion_signal = *completion_signal;
         return barrier;
     };
-
+    _enqueued_packets++;
     if(!_barrier.empty())
     {
         if(auto maybe_barrier = _barrier.back().barrier->enqueue_packet(&queue))
@@ -282,6 +286,71 @@ profiler_serializer::disable(const hsa_barrier::queue_map_ptr_t& queues)
 
     _barrier.back().barrier->set_barrier(queues);
     ROCP_INFO << "Profiler serialization disabled";
+}
+
+std::string
+profiler_serializer::to_string() const
+{
+    std::ostringstream oss;
+    oss << "profiler_serializer{";
+    
+    // _dispatch_queue
+    oss << "_dispatch_queue: ";
+    if(_dispatch_queue) {
+        oss << "{id: " << _dispatch_queue->get_id().handle << "}";
+    } else {
+        oss << "null";
+    }
+    oss << ", ";
+    
+    // _dispatch_ready
+    oss << "_dispatch_ready: {";
+    oss << "count: " << _dispatch_ready.size();
+    if(!_dispatch_ready.empty()) {
+        oss << ", queue_ids: [";
+        bool first = true;
+        for(const auto* queue : _dispatch_ready) {
+            if(!first) oss << ", ";
+            oss << (queue ? queue->get_id().handle : 0);
+            first = false;
+        }
+        oss << "]";
+    }
+    oss << "}, ";
+    
+    // _serializer_status
+    oss << "_serializer_status: ";
+    switch(_serializer_status.load()) {
+        case Status::ENABLED: oss << "ENABLED"; break;
+        case Status::DISABLED: oss << "DISABLED"; break;
+        default: oss << "UNKNOWN"; break;
+    }
+    oss << ", ";
+    
+    // _barrier
+    oss << "_barrier: {";
+    oss << "count: " << _barrier.size();
+    if(!_barrier.empty()) {
+        oss << ", barriers: [";
+        bool first = true;
+        for(const auto& barrier : _barrier) {
+            if(!first) oss << ", ";
+            oss << "{state: ";
+            switch(barrier.state) {
+                case Status::ENABLED: oss << "ENABLED"; break;
+                case Status::DISABLED: oss << "DISABLED"; break;
+                default: oss << "UNKNOWN"; break;
+            }
+            oss << ", complete: " << (barrier.barrier ? barrier.barrier->complete() : false) << "}";
+            first = false;
+        }
+        oss << "]";
+    }
+    oss << "}";
+    oss << " Completed Packets: " << _completed_packets.load() << ", ";
+    oss << "Enqueued Packets: " << _enqueued_packets.load();
+    oss << "}";
+    return oss.str();
 }
 
 }  // namespace hsa
