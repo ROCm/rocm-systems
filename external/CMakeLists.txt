@@ -339,7 +339,11 @@ else()
     endif()
 endif()
 
-if(ROCPROFILER_BUILD_RE2)
+find_package(re2 QUIET)
+if(re2_FOUND AND NOT ROCPROFILER_BUILD_RE2)
+    message(STATUS "Found re2: ${re2_INCLUDE_DIRS}")
+    target_link_libraries(rocprofiler-sdk-re2 INTERFACE re2::re2)
+else()
     # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RECURSIVE
@@ -370,9 +374,6 @@ if(ROCPROFILER_BUILD_RE2)
     add_re2_subdirectory()
 
     target_link_libraries(rocprofiler-sdk-re2 INTERFACE $<BUILD_INTERFACE:re2::re2>)
-else()
-    find_package(re2 REQUIRED)
-    target_link_libraries(rocprofiler-sdk-re2 INTERFACE re2::re2)
 endif()
 
 cmake_policy(POP)
