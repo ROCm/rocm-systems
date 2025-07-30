@@ -223,6 +223,12 @@ rocprofiler_systems_add_option(ROCPROFSYS_BUILD_CODECOV "Build for code coverage
 rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
                                "Install perfetto tools (i.e. traced, perfetto, etc.)" OFF
 )
+rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
+                               "Enable building sqlite3 library internally" OFF
+)
+rocprofiler_systems_add_option(ROCPROFSYS_ENABLE_BENCHMARK
+                               "Enable performance benchmarking capabilities for the project" OFF
+)
 
 if(ROCPROFSYS_USE_PAPI)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PAPI "Build PAPI from submodule" ON)
@@ -328,6 +334,10 @@ endif()
 if(ROCPROFSYS_BUILD_TESTING OR "$ENV{ROCPROFSYS_CI}" MATCHES "[1-9]+|ON|on|y|yes")
     enable_testing()
     include(CTest)
+endif()
+
+if(ROCPROFSYS_ENABLE_BENCHMARK)
+    add_compile_definitions(-DROCPROFSYS_USE_BENCHMARK=1)
 endif()
 
 # ------------------------------------------------------------------------------#

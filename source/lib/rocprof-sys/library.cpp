@@ -27,17 +27,22 @@
 #include "api.hpp"
 #include "common/setup.hpp"
 #include "common/static_object.hpp"
+#include "core/agent.hpp"
+#include "core/agent_manager.hpp"
 #include "core/categories.hpp"
 #include "core/components/fwd.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
 #include "core/constraint.hpp"
+#include "core/cpu.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
 #include "core/dynamic_library.hpp"
 #include "core/gpu.hpp"
 #include "core/locking.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto_fwd.hpp"
+#include "core/rocpd/data_processor.hpp"
 #include "core/timemory.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
@@ -77,6 +82,10 @@
 #include <timemory/utility/join.hpp>
 #include <timemory/utility/procfs/maps.hpp>
 
+#if ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/agent.h>
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -86,6 +95,7 @@
 #include <pthread.h>
 #include <stdexcept>
 #include <string_view>
+#include <unistd.h>
 #include <utility>
 
 using namespace rocprofsys;
@@ -297,6 +307,66 @@ namespace
 bool                  _set_mpi_called   = false;
 std::function<void()> _preinit_callback = []() { get_preinit_bundle()->start(); };
 
+std::vector<std::string>
+read_command_line(pid_t _pid)
+{
+    auto _cmdline = std::vector<std::string>{};
+    auto fcmdline = std::stringstream{};
+    fcmdline << "/proc/" << _pid << "/cmdline";
+    auto ifs = std::ifstream{ fcmdline.str().c_str() };
+    if(ifs)
+    {
+        std::string sarg;
+        while(std::getline(ifs, sarg, '\0'))
+        {
+            _cmdline.push_back(sarg);
+        }
+        ifs.close();
+    }
+
+    return _cmdline;
+}
+
+void
+rocprofsys_preinit_rocpd()
+{
+    auto&       _data_processor = rocpd::data_processor::get_instance();
+    const auto& _n_info         = node_info::get_instance();
+    auto        _cmd_line       = read_command_line(getpid());
+    auto&       _agent_manager  = agent_manager::get_instance();
+
+    if(_cmd_line.empty())
+    {
+        _cmd_line.emplace_back("rocprofiler-systems");
+    }
+
+    _data_processor.insert_node_info(
+        _n_info.id, _n_info.hash, _n_info.machine_id.c_str(), _n_info.system_name.c_str(),
+        _n_info.node_name.c_str(), _n_info.release.c_str(), _n_info.version.c_str(),
+        _n_info.machine.c_str(), _n_info.domain_name.c_str());
+    _data_processor.insert_process_info(_n_info.id, getppid(), getpid(), 0, 0, 0, 0,
+                                        _cmd_line[0].c_str(), "{}");
+
+    const auto& agents = _agent_manager.get_agents();
+    for(const auto& rocpd_agent : agents)
+    {
+        auto _base_id = rocpd::data_processor::get_instance().insert_agent(
+            _n_info.id, getpid(),
+            ((rocpd_agent->type == agent_type::GPU) ? "GPU" : "CPU"),
+            rocpd_agent->node_id, rocpd_agent->logical_node_id,
+            rocpd_agent->logical_node_type_id, rocpd_agent->id, rocpd_agent->name.c_str(),
+            rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
+            rocpd_agent->product_name.c_str(), "");
+        rocpd_agent->base_id = _base_id;
+    }
+}
+
+void
+rocprofsys_preinit_cpu_agents()
+{
+    cpu::query_cpu_agents();
+}
+
 void
 rocprofsys_preinit_hidden()
 {
@@ -423,17 +493,17 @@ rocprofsys_init_tooling_hidden(void)
                                                  { ROCPROFSYS_DEFAULT_ROCM_PATH }) };
 #endif
 
-    static bool _once       = false;
-    static auto _debug_init = get_debug_init();
+    static pid_t _once       = 0;
+    static auto  _debug_init = get_debug_init();
 
     ROCPROFSYS_CONDITIONAL_BASIC_PRINT_F(_debug_init, "State is %s...\n",
                                          std::to_string(get_state()).c_str());
 
-    if(get_state() != State::PreInit || get_state() == State::Init || _once)
+    if(get_state() != State::PreInit || get_state() == State::Init || _once == getpid())
     {
         return false;
     }
-    _once = true;
+    _once = getpid();
 
     ROCPROFSYS_SCOPED_THREAD_STATE(ThreadState::Internal);
 
@@ -460,6 +530,12 @@ rocprofsys_init_tooling_hidden(void)
     auto _dtor = scope::destructor{ []() {
         // if set to finalized, don't continue
         if(get_state() > State::Active) return;
+
+#if !(ROCPROFSYS_USE_ROCM > 0)
+        rocprofsys_preinit_cpu_agents();
+#endif
+        if(get_use_rocpd()) rocprofsys_preinit_rocpd();
+
         if(get_use_process_sampling())
         {
             ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
@@ -681,7 +757,6 @@ rocprofsys_finalize_hidden(void)
     threading::remove_callback(&ensure_initialization);
 
     bool _is_child = is_child_process();
-
     set_thread_state(ThreadState::Completed);
 
     // return if not active
@@ -693,6 +768,18 @@ rocprofsys_finalize_hidden(void)
     }
     else if(_is_child)
     {
+#if defined(ROCPROFSYS_USE_ROCM) && ROCPROFSYS_USE_ROCM > 0
+        // Flush buffered traces in case of child process
+        if(get_use_rocm())
+        {
+            ROCPROFSYS_VERBOSE_F(1, "Shutting down ROCm...\n");
+            rocprofiler_sdk::shutdown();
+        }
+#endif
+        if(get_use_rocpd())
+        {
+            rocpd::data_processor::get_instance().flush();
+        }
         set_state(State::Finalized);
         std::quick_exit(EXIT_SUCCESS);
         return;
@@ -983,6 +1070,10 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+    if(get_use_rocpd())
+    {
+        rocpd::data_processor::get_instance().flush();
+    }
 }
 
 //======================================================================================//
