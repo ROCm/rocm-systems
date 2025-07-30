@@ -178,50 +178,23 @@ Examples:
         help="\t\t\tDispatch ID filtering.",
     )
 
-    class AggregateDict(argparse.Action):
-        def __call__(self, parser, namespace, values, option_string=None):
-            aggregated_dict = getattr(namespace, self.dest, {})
-            if aggregated_dict is None:
-                aggregated_dict = {}
-            for key, value in values:
-                aggregated_dict[key] = value
-            setattr(namespace, self.dest, aggregated_dict)
-
     def validate_block(value):
-        # Metric id regex, for example, 10, 4, 4.3, 4.32
-        # Dont allow more than two digits after decimal point
-        metric_id_pattern = re.compile(r"^\d+$|^\d+\.\d$|^\d+\.\d\d$")
-        # Allow only the following hardware blocks
-        hardware_block_pattern = re.compile(r"^(SQ|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF)$")
+        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
+        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
         if metric_id_pattern.match(value):
-            return (str(value), "metric_id")
-        if hardware_block_pattern.match(value):
-            return (str(value), "hardware_block")
-        raise argparse.ArgumentTypeError(f"Invalid hardware block or metric id: {value}")
+            return value
+        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
 
     profile_group.add_argument(
         "-b",
         "--block",
         type=validate_block,
-        action=AggregateDict,
         dest="filter_blocks",
         metavar="",
         nargs="+",
         required=False,
-        default={},
-        help="""\t\t\tSpecify metric id(s) from --list-metrics for filtering (e.g. 10, 4, 4.3).
-    \t\t\tCan provide multiple space separated arguments.
-    \t\t\tCan also accept Hardware blocks.
-    \t\t\tHardware block filtering (to be deprecated soon):
-    \t\t\t   SQ
-    \t\t\t   SQC
-    \t\t\t   TA
-    \t\t\t   TD
-    \t\t\t   TCP
-    \t\t\t   TCC
-    \t\t\t   SPI
-    \t\t\t   CPC
-    \t\t\t   CPF""",
+        default=[],
+        help="""\t\t\tSpecify metric id(s) from --list-metrics for filtering (e.g. 12, 12.1, 12.1.1).\n\t\t\tCan provide multiple space separated arguments.""",
     )
     profile_group.add_argument(
         "--list-metrics",
@@ -229,7 +202,7 @@ Examples:
         nargs="?",
         const="",
         # Argument to --list-metrics is optional
-        choices=[""] + list(supported_archs.keys()),  # ["gfx906", "gfx908", "gfx90a"],
+        choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
     profile_group.add_argument(
@@ -276,7 +249,7 @@ Examples:
         required=False,
         metavar="",
         dest="format_rocprof_output",
-        choices=["json", "csv"],
+        choices=["json", "csv", "rocpd"],
         default="csv",
         help="\t\t\tSet the format of output file of rocprof.",
     )
@@ -306,6 +279,13 @@ Examples:
         required=False,
         default="/opt/rocm/lib/librocprofiler-sdk.so",
         help="\t\t\tSet the path to rocprofiler SDK library.",
+    )
+    profile_group.add_argument(
+        "--retain-rocpd-output",
+        required=False,
+        default=False,
+        action="store_true",
+        help="\t\t\tRetain the large raw rocpd database in workload directory.\n\t\t\tThis option requires --format-rocprof-output rocpd.",
     )
 
     ## Roofline Command Line Options
@@ -622,7 +602,7 @@ Examples:
         metavar="",
         default="ns",
         choices=["s", "ms", "us", "ns"],
-        help="\t\tSpecify display time unit in kernel top stats: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
+        help="\t\tSpecify display time unit: (DEFAULT: ns)\n\t\t   s\n\t\t   ms\n\t\t   us\n\t\t   ns",
     )
     analyze_advanced_group.add_argument(
         "--decimal",
@@ -650,7 +630,18 @@ Examples:
         dest="cols",
         metavar="",
         nargs="+",
-        help="\t\tSpecify column indices to display.",
+        help="\t\tSpecify column indices to display.\n\t\tDefaults to display all columns.",
+    )
+    analyze_advanced_group.add_argument(
+        "--include-cols",
+        dest="include_cols",
+        metavar="",
+        nargs="+",
+        help=(
+            "\t\tSpecify which hidden column names should be included in cli output.\n"
+            "\t\tFor example, to show 'Description' column which is hidden by default in cli output,\n"
+            "\t\tuse the option --include-cols Description."
+        ),
     )
     analyze_advanced_group.add_argument(
         "-g", dest="debug", action="store_true", help="\t\tDebug single metric."

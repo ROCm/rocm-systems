@@ -332,10 +332,24 @@ hsa_status_t XdnaDriver::AllocQueueGWS(HSA_QUEUEID queue_id, uint32_t num_gws,
   return HSA_STATUS_ERROR_INVALID_QUEUE;
 }
 
-hsa_status_t XdnaDriver::ExportDMABuf(void *mem, size_t size, int *dmabuf_fd,
-                                      size_t *offset) {
-  // Not implemented yet.
-  return HSA_STATUS_ERROR;
+hsa_status_t XdnaDriver::ExportDMABuf(void* mem, size_t size, int* dmabuf_fd, size_t* offset) {
+  auto bo_handle = FindBOHandle(mem);
+  if (!bo_handle.IsValid()) {
+    return HSA_STATUS_ERROR_INVALID_ALLOCATION;
+  }
+
+  drm_prime_handle export_params = {};
+  export_params.handle = bo_handle.handle;
+  export_params.flags = DRM_RDWR;
+  export_params.fd = -1;
+  if (ioctl(fd_, DRM_IOCTL_PRIME_HANDLE_TO_FD, &export_params) < 0) {
+    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+  }
+
+  *dmabuf_fd = export_params.fd;
+  *offset = reinterpret_cast<uintptr_t>(mem) - reinterpret_cast<uintptr_t>(bo_handle.vaddr);
+
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::ImportDMABuf(int dmabuf_fd, core::Agent &agent,

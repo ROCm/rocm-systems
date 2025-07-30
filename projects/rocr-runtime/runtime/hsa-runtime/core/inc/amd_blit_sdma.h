@@ -73,11 +73,7 @@ class BlitSdmaBase : public core::Blit {
                                              core::Signal& out_signal) = 0;
 };
 
-// RingIndexTy: 32/64-bit monotonic ring index, counting in bytes.
-// HwIndexMonotonic: true if SDMA HW index is monotonic, false if it wraps at end of ring.
-// SizeToCountOffset: value added to size (in bytes) to form SDMA command count field.
-template <typename RingIndexTy, bool HwIndexMonotonic, int SizeToCountOffset, bool useGCR>
-class BlitSdma : public BlitSdmaBase {
+template <bool useGCR> class BlitSdma : public BlitSdmaBase {
  public:
   BlitSdma();
 
@@ -163,9 +159,9 @@ class BlitSdma : public BlitSdmaBase {
   /// could be written. NULL if input size is greater than the size of queue
   /// buffer.
 
-  char* AcquireWriteAddress(uint32_t cmd_size, RingIndexTy& curr_index);
+  char* AcquireWriteAddress(uint32_t cmd_size, uint64_t& curr_index);
 
-  void UpdateWriteAndDoorbellRegister(RingIndexTy curr_index, RingIndexTy new_index);
+  void UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint64_t new_index);
 
   /// @brief Updates the Write Register of compute device to the end of
   /// SDMA packet written into queue buffer. The update to Write Register
@@ -178,16 +174,16 @@ class BlitSdma : public BlitSdmaBase {
   /// @param curr_index Index passed back from AcquireWriteAddress.
   ///
   /// @param cmd_size Command packet size in bytes.
-  void ReleaseWriteAddress(RingIndexTy curr_index, uint32_t cmd_size);
+  void ReleaseWriteAddress(uint64_t curr_index, uint32_t cmd_size);
 
   /// @brief Writes NO-OP words into queue buffer in case writing a command
   /// causes the queue buffer to wrap.
   ///
   /// @param curr_index Index to begin padding from.
-  void PadRingToEnd(RingIndexTy curr_index);
+  void PadRingToEnd(uint64_t curr_index);
 
-  uint32_t WrapIntoRing(RingIndexTy index);
-  bool CanWriteUpto(RingIndexTy upto_index);
+  uint32_t WrapIntoRing(uint64_t index);
+  bool CanWriteUpto(uint64_t upto_index);
 
   /// @brief Build fence command
   void BuildFenceCommand(char* fence_command_addr, uint32_t* fence,
@@ -265,8 +261,8 @@ class BlitSdma : public BlitSdmaBase {
   HsaQueueResource queue_resource_;
 
   // Monotonic ring indices, in bytes, tracking written and submitted commands.
-  RingIndexTy cached_reserve_index_;
-  RingIndexTy cached_commit_index_;
+  uint64_t cached_reserve_index_;
+  uint64_t cached_commit_index_;
 
   static const uint32_t linear_copy_command_size_;
 
@@ -314,21 +310,11 @@ class BlitSdma : public BlitSdmaBase {
   size_t min_submission_size_;
 };
 
-// Ring indices are 32-bit.
-// HW ring indices are not monotonic (wrap at end of ring).
-// Count fields of SDMA commands are 0-based.
-typedef BlitSdma<uint32_t, false, 0, false> BlitSdmaV2V3;
 
-// Ring indices are 64-bit.
-// HW ring indices are monotonic (do not wrap at end of ring).
-// Count fields of SDMA commands are 1-based.
-typedef BlitSdma<uint64_t, true, -1, false> BlitSdmaV4;
+typedef BlitSdma<false> BlitSdmaV4;
 
-// Ring indices are 64-bit.
-// HW ring indices are monotonic (do not wrap at end of ring).
-// Count fields of SDMA commands are 1-based.
 // SDMA is connected to gL2.
-typedef BlitSdma<uint64_t, true, -1, true> BlitSdmaV5;
+typedef BlitSdma<true> BlitSdmaV5;
 
 }  // namespace amd
 }  // namespace rocr

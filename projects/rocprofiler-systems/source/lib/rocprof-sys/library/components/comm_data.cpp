@@ -21,15 +21,15 @@
 // SOFTWARE.
 
 #include "library/components/comm_data.hpp"
+#include "core/agent_manager.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
+#include "core/node_info.hpp"
 #include "core/perfetto.hpp"
+#include "core/rocpd/data_processor.hpp"
 #include "library/tracing.hpp"
 
-#include <timemory/backends/mpi.hpp>
-#include <timemory/manager.hpp>
 #include <timemory/units.hpp>
-#include <timemory/utility/locking.hpp>
 
 namespace rocprofsys
 {
@@ -74,6 +74,138 @@ write_perfetto_counter_track(uint64_t _val)
 }
 }  // namespace
 
+namespace
+{
+rocpd::data_processor&
+get_data_processor()
+{
+    return rocpd::data_processor::get_instance();
+}
+
+void
+rocpd_initialize_comm_data_categories()
+{
+    static bool _is_initialized = false;
+    if(_is_initialized) return;
+
+    get_data_processor().insert_category(category_enum_id<category::comm_data>::value,
+                                         trait::name<category::comm_data>::value);
+#if defined(ROCPROFSYS_USE_MPI)
+    get_data_processor().insert_category(category_enum_id<category::mpi>::value,
+                                         trait::name<category::mpi>::value);
+#endif
+#if defined(ROCPROFSYS_USE_RCCL)
+    get_data_processor().insert_category(category_enum_id<category::rocm_rccl>::value,
+                                         trait::name<category::rocm_rccl>::value);
+#endif
+    _is_initialized = true;
+}
+
+template <typename Track>
+void
+rocpd_initialize_track()
+{
+    auto& n_info      = node_info::get_instance();
+    auto  thread_id   = std::nullopt;
+    auto  _init_track = [&](const char* label) {
+        ROCPROFSYS_VERBOSE(3, "INSERT_TRACK label: %s, node ID: %d, Process ID: %d",
+                            label, n_info.id, getpid());
+        get_data_processor().insert_track(label, n_info.id, getpid(), thread_id);
+    };
+
+    static std::once_flag _once{};
+    std::call_once(_once, _init_track, Track::label);
+}
+
+void
+rocpd_initialize_comm_data_pmc()
+{
+    [[maybe_unused]] auto& data_processor = get_data_processor();
+    // find the proper values for a following definitions
+    [[maybe_unused]] size_t                EVENT_CODE       = 0;
+    [[maybe_unused]] size_t                INSTANCE_ID      = 0;
+    [[maybe_unused]] constexpr const char* LONG_DESCRIPTION = "";
+    [[maybe_unused]] constexpr const char* COMPONENT        = "";
+    [[maybe_unused]] constexpr const char* BLOCK            = "";
+    [[maybe_unused]] constexpr const char* EXPRESSION       = "";
+    [[maybe_unused]] constexpr const char* MSG              = "bytes";
+    [[maybe_unused]] constexpr const auto* TARGET_ARCH      = "CPU";
+    auto                                   ni               = node_info::get_instance();
+    constexpr const auto                   DEVICE_ID = 0;  // Assuming CPU device ID is 0
+
+    auto&                 _agent_manager = agent_manager::get_instance();
+    [[maybe_unused]] auto base_id =
+        _agent_manager.get_agent_by_id(DEVICE_ID, agent_type::CPU).base_id;
+
+#if defined(ROCPROFSYS_USE_MPI)
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        comm_data::mpi_send::label, "Tracks MPI Send communication data sizes",
+        trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG, "ABS",
+        BLOCK, EXPRESSION, 0, 0);
+
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        comm_data::mpi_recv::label, "Tracks MPI Receive communication data sizes",
+        trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG, "ABS",
+        BLOCK, EXPRESSION, 0, 0);
+#endif
+#if defined(ROCPROFSYS_USE_RCCL)
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, rccl_send::label,
+        "Tracks RCCL Send communication data sizes",
+        trait::name<category::rocm_rccl>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+        "ABS", BLOCK, EXPRESSION, 0, 0);
+
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, rccl_recv::label,
+        "Tracks RCCL Receive communication data sizes",
+        trait::name<category::rocm_rccl>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+        "ABS", BLOCK, EXPRESSION, 0, 0);
+#endif
+}
+
+template <typename Track>
+void
+rocpd_process_cpu_usage_events(const uint32_t device_id, int bytes)
+{
+    auto& data_processor = get_data_processor();
+    auto  event_id       = data_processor.insert_event(
+        category_enum_id<category::comm_data>::value, 0, 0, 0);
+
+    auto& agents = agent_manager::get_instance();
+    auto  agent  = agents.get_agent_by_id(device_id, agent_type::CPU);
+
+    auto insert_event_and_sample = [&](const char* name, uint64_t timestamp,
+                                       double value) {
+        data_processor.insert_pmc_event(event_id, agent.device_id, name, value);
+        data_processor.insert_sample(name, timestamp, event_id);
+    };
+
+    static std::mutex _mutex{};
+    static uint64_t   value = 0;
+    uint64_t          _now  = 0;
+    {
+        std::unique_lock<std::mutex> _lk{ _mutex };
+        _now  = rocprofsys::tracing::now<uint64_t>();
+        bytes = (value += bytes);
+    }
+
+    insert_event_and_sample(Track::label, _now, bytes);
+}
+
+}  // namespace
+
+void
+comm_data::start()
+{
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_comm_data_categories();
+        rocpd_initialize_comm_data_pmc();
+    }
+}
+
 void
 comm_data::preinit()
 {
@@ -116,13 +248,22 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
 
     write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _a{ _name };
-    add(_a, count * _size);
-    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
-    add(_b, count * _size);
-    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_send>();
+        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _a{ _name };
+        add(_a, count * _size);
+        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        add(_b, count * _size);
+        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
+            count * _size);
+    }
 }
 
 // MPI_Recv
@@ -133,15 +274,24 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     int _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_recv>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _a{ _name };
-    add(_a, count * _size);
-    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
-    add(_b, count * _size);
-    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_recv>();
+        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _a{ _name };
+        add(_a, count * _size);
+        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        add(_b, count * _size);
+        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
+            count * _size);
+    }
 }
 
 // MPI_Isend
@@ -152,15 +302,24 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int cou
     int _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _a{ _name };
-    add(_a, count * _size);
-    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
-    add(_b, count * _size);
-    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_send>();
+        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _a{ _name };
+        add(_a, count * _size);
+        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        add(_b, count * _size);
+        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
+            count * _size);
+    }
 }
 
 // MPI_Irecv
@@ -171,15 +330,24 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     int _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_recv>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<mpi_recv>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _a{ _name };
-    add(_a, count * _size);
-    tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
-    add(_b, count * _size);
-    add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)), count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_recv>();
+        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _a{ _name };
+        add(_a, count * _size);
+        tracker_t _b{ JOIN('/', _name, JOIN('=', "dst", dst)) };
+        add(_b, count * _size);
+        add(JOIN('/', _name, JOIN('=', "dst", dst), JOIN('=', "tag", tag)),
+            count * _size);
+    }
 }
 
 // MPI_Bcast
@@ -190,13 +358,21 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, void*, int count,
     int _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<mpi_send>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, count * _size);
-    add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_send>();
+        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count * _size);
+        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+    }
 }
 
 // MPI_Allreduce
@@ -207,11 +383,21 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, void*, 
     int _size = mpi_type_size(datatype);
     if(_size == 0) return;
 
-    write_perfetto_counter_track<mpi_recv>(count * _size);
-    write_perfetto_counter_track<mpi_send>(count * _size);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<mpi_recv>(count * _size);
+        write_perfetto_counter_track<mpi_send>(count * _size);
+    }
 
-    if(!rocprofsys::get_use_timemory()) return;
-    add(_data, count * _size);
+    if(get_use_rocpd())
+    {
+        rocpd_initialize_track<mpi_send>();
+        rocpd_initialize_track<mpi_recv>();
+        rocpd_process_cpu_usage_events<mpi_recv>(0, count * _size);
+        rocpd_process_cpu_usage_events<mpi_send>(0, count * _size);
+    }
+
+    if(rocprofsys::get_use_timemory()) add(_data, count * _size);
 }
 
 // MPI_Sendrecv
@@ -224,30 +410,43 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-    write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
-
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, sendcount * _send_size + recvcount * _recv_size);
+    if(get_use_perfetto())
     {
-        tracker_t _b{ JOIN('/', _name, "send") };
-        add(_b, sendcount * _send_size);
-        tracker_t _c{ JOIN('/', _name, JOIN('=', "send", dst)) };
-        add(_b, sendcount * _send_size);
-        add(JOIN('/', _name, "send", JOIN('=', "tag", sendtag)), sendcount * _send_size);
-        add(JOIN('/', _name, JOIN('=', "send", dst), JOIN('=', "tag", sendtag)),
-            sendcount * _send_size);
+        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
+        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
     }
+
+    if(get_use_rocpd())
     {
-        tracker_t _b{ JOIN('/', _name, "recv") };
-        add(_b, recvcount * _recv_size);
-        tracker_t _c{ JOIN('/', _name, JOIN('=', "recv", src)) };
-        add(_b, recvcount * _recv_size);
-        add(JOIN('/', _name, "recv", JOIN('=', "tag", recvtag)), recvcount * _recv_size);
-        add(JOIN('/', _name, JOIN('=', "recv", src), JOIN('=', "tag", recvtag)),
-            recvcount * _recv_size);
+        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
+        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _send_size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, sendcount * _send_size + recvcount * _recv_size);
+        {
+            tracker_t _b{ JOIN('/', _name, "send") };
+            add(_b, sendcount * _send_size);
+            tracker_t _c{ JOIN('/', _name, JOIN('=', "send", dst)) };
+            add(_b, sendcount * _send_size);
+            add(JOIN('/', _name, "send", JOIN('=', "tag", sendtag)),
+                sendcount * _send_size);
+            add(JOIN('/', _name, JOIN('=', "send", dst), JOIN('=', "tag", sendtag)),
+                sendcount * _send_size);
+        }
+        {
+            tracker_t _b{ JOIN('/', _name, "recv") };
+            add(_b, recvcount * _recv_size);
+            tracker_t _c{ JOIN('/', _name, JOIN('=', "recv", src)) };
+            add(_b, recvcount * _recv_size);
+            add(JOIN('/', _name, "recv", JOIN('=', "tag", recvtag)),
+                recvcount * _recv_size);
+            add(JOIN('/', _name, JOIN('=', "recv", src), JOIN('=', "tag", recvtag)),
+                recvcount * _recv_size);
+        }
     }
 }
 
@@ -262,17 +461,28 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-    write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
+        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
+    }
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, sendcount * _send_size + recvcount * _recv_size);
-    tracker_t _r(JOIN('/', _name, JOIN('=', "root", root)));
-    add(_r, sendcount * _send_size + recvcount * _recv_size);
-    add(JOIN('/', _name, JOIN('=', "root", root), "send"), sendcount * _send_size);
-    add(JOIN('/', _name, JOIN('=', "root", root), "recv"), recvcount * _recv_size);
+    if(get_use_rocpd())
+    {
+        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
+        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _send_size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, sendcount * _send_size + recvcount * _recv_size);
+        tracker_t _r(JOIN('/', _name, JOIN('=', "root", root)));
+        add(_r, sendcount * _send_size + recvcount * _recv_size);
+        add(JOIN('/', _name, JOIN('=', "root", root), "send"), sendcount * _send_size);
+        add(JOIN('/', _name, JOIN('=', "root", root), "recv"), recvcount * _recv_size);
+    }
 }
 
 // MPI_Alltoall
@@ -285,15 +495,26 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, int sen
     int _recv_size = mpi_type_size(recvtype);
     if(_send_size == 0 || _recv_size == 0) return;
 
-    write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
-    write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
+    if(get_use_perfetto())
+    {
+        write_perfetto_counter_track<mpi_send>(sendcount * _send_size);
+        write_perfetto_counter_track<mpi_recv>(recvcount * _recv_size);
+    }
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, sendcount * _send_size + recvcount * _recv_size);
-    add(JOIN('/', _name, "send"), sendcount * _send_size);
-    add(JOIN('/', _name, "recv"), recvcount * _recv_size);
+    if(get_use_rocpd())
+    {
+        rocpd_process_cpu_usage_events<mpi_send>(0, sendcount * _send_size);
+        rocpd_process_cpu_usage_events<mpi_recv>(0, recvcount * _recv_size);
+    }
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, sendcount * _send_size + recvcount * _recv_size);
+        add(JOIN('/', _name, "send"), sendcount * _send_size);
+        add(JOIN('/', _name, "recv"), recvcount * _recv_size);
+    }
 }
 #endif
 
@@ -309,13 +530,17 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    write_perfetto_counter_track<rccl_recv>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, count * _size);
-    add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
+
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count * _size);
+        add(JOIN('/', _name, JOIN('=', "root", root)), count * _size);
+    }
 }
 
 // ncclSend
@@ -334,27 +559,32 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, size_t 
 
     if(_send_types.count(_data.tool_id) > 0)
     {
-        write_perfetto_counter_track<rccl_send>(count * _size);
+        if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
+        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
     }
     else if(_recv_types.count(_data.tool_id) > 0)
     {
-        write_perfetto_counter_track<rccl_recv>(count * _size);
+        if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
+        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
     }
     else
     {
         ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
 
-    write_perfetto_counter_track<rccl_recv>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
+    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto        _name  = std::string_view{ _data.tool_id };
-    std::string _label = "root";
-    if(_name.find("Send") != std::string::npos) _label = "peer";
+    if(rocprofsys::get_use_timemory())
+    {
+        auto        _name  = std::string_view{ _data.tool_id };
+        std::string _label = "root";
+        if(_name.find("Send") != std::string::npos) _label = "peer";
 
-    tracker_t _t{ _name };
-    add(_t, count * _size);
-    add(JOIN('/', _name, JOIN('=', _label, peer)), count * _size);
+        tracker_t _t{ _name };
+        add(_t, count * _size);
+        add(JOIN('/', _name, JOIN('=', _label, peer)), count * _size);
+    }
 }
 
 // ncclBroadcast
@@ -365,13 +595,16 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    write_perfetto_counter_track<rccl_send>(count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
+    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
 
-    if(!rocprofsys::get_use_timemory()) return;
-    auto      _name = std::string_view{ _data.tool_id };
-    tracker_t _t{ _name };
-    add(_t, count * _size);
-    add(JOIN('/', _data.tool_id, JOIN('=', "root", root)), count * _size);
+    if(rocprofsys::get_use_timemory())
+    {
+        auto      _name = std::string_view{ _data.tool_id };
+        tracker_t _t{ _name };
+        add(_t, count * _size);
+        add(JOIN('/', _data.tool_id, JOIN('=', "root", root)), count * _size);
+    }
 }
 
 // ncclAllReduce
@@ -389,19 +622,20 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
 
     if(_send_types.count(_data.tool_id) > 0)
     {
-        write_perfetto_counter_track<rccl_send>(count * _size);
+        if(get_use_perfetto()) write_perfetto_counter_track<rccl_send>(count * _size);
+        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_send>(0, count * _size);
     }
     else if(_recv_types.count(_data.tool_id) > 0)
     {
-        write_perfetto_counter_track<rccl_recv>(count * _size);
+        if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
+        if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
     }
     else
     {
         ROCPROFSYS_CI_THROW(true, "RCCL function not handled: %s", _data.tool_id.c_str());
     }
 
-    if(!rocprofsys::get_use_timemory()) return;
-    add(_data, count * _size);
+    if(rocprofsys::get_use_timemory()) add(_data, count * _size);
 }
 
 // ncclAllGather
@@ -413,10 +647,9 @@ comm_data::audit(const gotcha_data& _data, audit::incoming, const void*, const v
     int _size = rccl_type_size(datatype);
     if(_size <= 0) return;
 
-    write_perfetto_counter_track<rccl_recv>(count * _size);
-
-    if(!rocprofsys::get_use_timemory()) return;
-    add(_data, count * _size);
+    if(get_use_perfetto()) write_perfetto_counter_track<rccl_recv>(count * _size);
+    if(get_use_rocpd()) rocpd_process_cpu_usage_events<rccl_recv>(0, count * _size);
+    if(rocprofsys::get_use_timemory()) add(_data, count * _size);
 }
 #endif
 }  // namespace component

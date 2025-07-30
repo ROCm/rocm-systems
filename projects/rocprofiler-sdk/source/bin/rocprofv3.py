@@ -769,7 +769,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 96MB",
+        help="Thread trace buffer size. Default 256MB",
         default=None,
         type=str,
     )

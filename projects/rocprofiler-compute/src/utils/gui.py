@@ -49,12 +49,16 @@ def filter_df(column, df, filt):
 
 def multi_bar_chart(table_id, display_df):
     if table_id == 1604:
-        nested_bar = {"NC": {}, "UC": {}, "RW": {}, "CC": {}}
+        nested_bar = {}
         for index, row in display_df.iterrows():
+            if not row["Coherency"] in nested_bar:
+                nested_bar[row["Coherency"]] = {}
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
-    if table_id == 1704:
-        nested_bar = {"Read": {}, "Write": {}}
+    if table_id == 1705:  # L2 - Fabric Interface Stalls
+        nested_bar = {}
         for index, row in display_df.iterrows():
+            if not row["Transaction"] in nested_bar:
+                nested_bar[row["Transaction"]] = {}
             nested_bar[row["Transaction"]][row["Type"]] = row["Avg"]
 
     return nested_bar
@@ -197,9 +201,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [
-            x.astype(float) if x != "" else float(0) for x in display_df["Avg"]
-        ]
+        display_df["Avg"] = [float(x) if x != "" else float(0) for x in display_df["Avg"]]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(
@@ -309,14 +311,14 @@ def build_table_chart(
         else:
             formatted_columns.append(dict(id=col, name=col, type="text"))
 
-    # tooltip shows only on the 1st col for now if 'Tips' available
+    # tooltip shows only on the 1st col for now if 'Metric Description' available
     table_tooltip = (
         [
             {
                 column: {
                     "value": (
-                        str(row["Tips"])
-                        if column == display_columns[0] and row["Tips"]
+                        str(row["Description"])
+                        if column == display_columns[0] and row["Description"]
                         else ""
                     ),
                     "type": "markdown",
@@ -325,7 +327,7 @@ def build_table_chart(
             }
             for row in original_df.to_dict("records")
         ]
-        if "Tips" in original_df.columns.values.tolist()
+        if "Description" in original_df.columns.values.tolist()
         else None
     )
 
