@@ -1,11 +1,11 @@
 .. meta::
-  :description: Defined concepts commonly used in AQLprofile
+  :description: Defined terms commonly used in AQLprofile
   :keywords: AQLprofile, ROCm
 
-AQLprofile glossary
-===================
+AQLprofile terms
+================
 
-Learn the definitions of concepts commonly used in AQLprofile.
+Learn the definitions of terms commonly used in AQLprofile.
 
 Agents
 ------
@@ -56,7 +56,7 @@ Command buffers
 ---------------
 
 Command buffers are memory regions that store AQL packets and PM4
-commands, which control GPU profiling operations. They're allocated per
+commands which control GPU profiling operations. They're allocated per
 agent, and must meet alignment and size requirements dictated by the
 hardware.
 

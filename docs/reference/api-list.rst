@@ -1,3 +1,7 @@
+.. meta::
+  :description: A description of the APIs used with AQLprofile
+  :keywords: AQLprofile, ROCm, APIs
+
 AQLprofile APIs
 ===============
 

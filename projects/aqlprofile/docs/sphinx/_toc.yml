@@ -21,8 +21,8 @@ subtrees:
 
   - caption: Reference
     entries:
-    - file: reference/glossary.rst
-      title: Glossary  
+    - file: reference/terms.rst
+      title: Terms  
     - file: reference/supported-architectures.rst
       title: Supported architectures and counter blocks  
     - file: reference/api-list.rst
