@@ -43,11 +43,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def get_profiler_options(self, fname, soc):
         app_cmd = shlex.split(self.get_args().remaining)
         trace_option = "--kernel-trace"
-        rocprof_out_format = "json"
-
-        if self.get_args().format_rocprof_output == "csv":
-            rocprof_out_format = "csv"
-
         if self.get_args().kokkos_trace:
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -63,7 +58,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             self.get_args().path + "/" + "out",
             trace_option,
             "--output-format",
-            rocprof_out_format,
+            self.get_args().format_rocprof_output,
         ]
         # Kernel filtering
         if self.get_args().kernel:
