@@ -1,14 +1,14 @@
-name: Continuous Integration
+name: RocProfiler-Register Continuous Integration
 
 on:
   push:
-    branches: [ amd-mainline, amd-staging ]
-    paths-ignore:
-      - '*.md'
+    paths:
+      - 'projects/rocprofiler-register/**'
+      - '!projects/rocprofiler-register/*.md'
   pull_request:
-    branches: [ amd-mainline, amd-staging ]
-    paths-ignore:
-      - '*.md'
+    paths:
+      - 'projects/rocprofiler-register/**'
+      - '!projects/rocprofiler-register/*.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -54,10 +54,13 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+      with:
+        sparse-checkout: projects/rocprofiler-register
 
     - name: Install Packages
       timeout-minutes: 25
       run: |
+        cd projects/rocprofiler-register
         CC=${{ matrix.compiler }} &&
         CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1') &&
         apt-get update &&
@@ -72,18 +75,21 @@ jobs:
       timeout-minutes: 25
       if: ${{ matrix.compiler == 'gcc-12' }}
       run: |
+        cd projects/rocprofiler-register
         update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100
 
     - name: Setup Clang-Tidy
       timeout-minutes: 25
       if: ${{ matrix.compiler == 'clang-15' }}
       run: |
+        cd projects/rocprofiler-register
         apt-get install -y clang-tidy-15
         update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 100
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
+      working-directory: projects/rocprofiler-register
       run:
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
@@ -104,10 +110,12 @@ jobs:
 
     - name: Install
       timeout-minutes: 10
+      working-directory: projects/rocprofiler-register
       run:
         cmake --build build --target install --parallel 2
 
     - name: CPack and Install
+      working-directory: projects/rocprofiler-register
       run: |
         cd build
         cpack -G STGZ
@@ -119,6 +127,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
+        cd projects/rocprofiler-register
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-tests-deb --output-on-failure
@@ -127,6 +136,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        cd projects/rocprofiler-register
         set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use ${{ env.INSTALL_PREFIX }}/share/modulefiles
@@ -142,6 +152,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        cd projects/rocprofiler-register
         set -v
         source ${{ env.INSTALL_PREFIX }}/share/rocprofiler-register/setup-env.sh
         pushd samples/library-implementation
@@ -154,6 +165,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        cd projects/rocprofiler-register
         set -v
         source /usr/share/modules/init/$(basename ${SHELL})
         module use ${{ env.PACKAGING_INSTALL_PREFIX }}/share/modulefiles
@@ -169,6 +181,7 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
+        cd projects/rocprofiler-register
         set -v
         source ${{ env.PACKAGING_INSTALL_PREFIX }}/share/rocprofiler-register/setup-env.sh
         pushd samples/library-implementation
