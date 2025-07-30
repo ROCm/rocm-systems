@@ -90,11 +90,11 @@ private:
     template <typename... T>
     constexpr size_t get_size(T&... val)
     {
-        auto get_size_impl = [&](auto val) {
-            using Type = decltype(val);
+        auto get_size_impl = [&](auto& _val) {
+            using Type = decltype(_val);
             if constexpr(std::is_same_v<Type, const char*>)
             {
-                return strlen(val) + 1;
+                return strlen(_val) + 1;
             }
             else
             {
