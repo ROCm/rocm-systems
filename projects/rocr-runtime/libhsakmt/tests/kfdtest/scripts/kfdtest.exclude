@@ -325,22 +325,6 @@ FILTER[gfx1036]=\
 "$BLACKLIST_ALL_ASICS:"\
 "$BLACKLIST_GFX10_NV2X"
 
-FILTER[gfx940]=\
-"$BLACKLIST_ALL_ASICS:"\
-"KFDMemoryTest.LargestSysBufferTest:"\
-"KFDMemoryTest.BigSysBufferStressTest:"\
-"KFDMemoryTest.FlatScratchAccess:"\
-"KFDIPCTest.BasicTest:"\
-"KFDQMTest.QueueLatency"
-
-FILTER[gfx941]=\
-"$BLACKLIST_ALL_ASICS:"\
-"KFDMemoryTest.LargestSysBufferTest:"\
-"KFDMemoryTest.BigSysBufferStressTest:"\
-"KFDMemoryTest.FlatScratchAccess:"\
-"KFDIPCTest.BasicTest:"\
-"KFDQMTest.QueueLatency"
-
 FILTER[gfx942]=\
 "$BLACKLIST_ALL_ASICS:"\
 "KFDMemoryTest.LargestSysBufferTest:"\

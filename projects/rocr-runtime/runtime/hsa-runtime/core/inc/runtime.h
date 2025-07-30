@@ -510,6 +510,14 @@ class Runtime {
 
   std::vector<std::unique_ptr<Driver>>& AgentDrivers() { return agent_drivers_; }
 
+  static bool IsGPUDriver(DriverType driver_type) {
+    return driver_type == core::DriverType::KFD
+#ifdef HSAKMT_VIRTIO_ENABLED
+        || driver_type == core::DriverType::KFD_VIRTIO
+#endif
+        ;
+  }
+
  protected:
   static void AsyncEventsLoop(void*);
   static void AsyncIPCSockServerConnLoop(void*);
@@ -814,7 +822,6 @@ class Runtime {
   std::map<const void*, AddressHandle> reserved_address_map_;  // Indexed by VA
 
   struct MemoryHandle {
-    MemoryHandle() : region(NULL), size(0), ref_count(0), thunk_handle(NULL), alloc_flag(0) {}
     MemoryHandle(const MemoryRegion* region, size_t size, uint64_t flags_unused,
                  ThunkHandle thunk_handle, MemoryRegion::AllocateFlags alloc_flag)
         : region(region),
@@ -824,10 +831,14 @@ class Runtime {
           thunk_handle(thunk_handle),
           alloc_flag(alloc_flag) {}
 
-    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(void* handle) {
+    static __forceinline hsa_amd_vmem_alloc_handle_t Convert(ThunkHandle handle) {
       hsa_amd_vmem_alloc_handle_t ret_handle = {
           static_cast<uint64_t>(reinterpret_cast<uintptr_t>(handle))};
       return ret_handle;
+    }
+
+    static __forceinline ThunkHandle Convert(hsa_amd_vmem_alloc_handle_t handle) {
+      return reinterpret_cast<void*>(handle.handle);
     }
 
     __forceinline core::Agent* agentOwner() const { return region->owner(); }
@@ -836,7 +847,7 @@ class Runtime {
     size_t size;
     int ref_count;
     int use_count;
-    ThunkHandle thunk_handle;  // handle returned by hsaKmtAllocMemory(NoAddress = 1)
+    ThunkHandle thunk_handle;  // handle returned by Driver::Allocate(NoAddress = 1)
     MemoryRegion::AllocateFlags alloc_flag;
   };
   std::map<ThunkHandle, MemoryHandle> memory_handle_map_;
@@ -887,11 +898,6 @@ class Runtime {
   VMemorySetAccessPerHandle(void *va, MappedHandle &MappedHandle,
                             const hsa_amd_memory_access_desc_t *desc,
                             const size_t desc_cnt);
-
-  // Frees runtime memory when the runtime library is unloaded if safe to do so.
-  // Failure to release the runtime indicates an incorrect application but is
-  // common (example: calls library routines at process exit).
-  friend class RuntimeCleanup;
 
   void InitIPCDmaBufSupport();
   bool ipc_dmabuf_supported_;
