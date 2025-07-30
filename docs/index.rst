@@ -1,25 +1,25 @@
 .. meta::
-  :description: AQLProfile is an open source library that enables advanced GPU profiling and tracing on AMD platforms.
-  :keywords: AQLProfile, ROCm, tool, Instinct, accelerator, AMD
+  :description: AQLprofile is an open source library that enables advanced GPU profiling and tracing on AMD platforms.
+  :keywords: AQLprofile, ROCm, tool, Instinct, accelerator, AMD
 
 .. _index:
 
 ********************************
-AQLProfile documentation
+AQLprofile documentation
 ********************************
 
-This documentation provides a comprehensive overview of the AQLProfile library.
+This documentation provides a comprehensive overview of the AQLprofile library.
 
-If you're new to AQLProfile, see :doc:`What is AQLProfile? <what-is-aqlprofile>`.
+If you're new to AQLprofile, see :doc:`What is AQLprofile? <what-is-aqlprofile>`.
 
-AQLProfile is open source and hosted at `AQLProfile on GitHub <https://github.com/ROCm/aqlprofile>`_.
+AQLprofile is open source and hosted at `AQLprofile on GitHub <https://github.com/ROCm/aqlprofile>`_.
 
 .. grid:: 2
   :gutter: 3
 
   .. grid-item-card:: Install
 
-    * :doc:`Install AQLProfile <install/aqlprofile-install>`
+    * :doc:`Install AQLprofile <install/aqlprofile-install>`
   
   .. grid-item-card:: Examples
 

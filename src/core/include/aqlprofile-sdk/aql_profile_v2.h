@@ -222,7 +222,7 @@ hsa_status_t aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
                                             const void* agent_info,
                                             aqlprofile_agent_version_t version);
 /**
- * @brief AQLProfile struct containing information for perfmon events
+ * @brief AQLprofile struct containing information for perfmon events
  */
 typedef struct {
   aqlprofile_agent_handle_t agent;
@@ -261,7 +261,7 @@ typedef struct {
 } aqlprofile_att_parameter_t;
 
 /**
- * @brief AQLProfile struct containing information for Advanced Thread Trace
+ * @brief AQLprofile struct containing information for Advanced Thread Trace
  */
 typedef struct {
   hsa_agent_t agent;

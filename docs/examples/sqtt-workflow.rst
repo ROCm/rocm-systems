@@ -1,6 +1,6 @@
 .. meta::
   :description: A typical workflow for collecting detailed instruction-level traces
-  :keywords: AQLProfile, ROCm, API, how-to, SQTT
+  :keywords: AQLprofile, ROCm, API, how-to, SQTT
 
 *******************************
 SQ Thread Trace (SQTT) workflow
