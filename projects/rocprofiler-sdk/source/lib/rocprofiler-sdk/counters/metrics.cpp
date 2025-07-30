@@ -345,6 +345,41 @@ checkValidMetric(const std::string& agent, const Metric& metric)
     return agent_map != nullptr && agent_map->count(metric.id()) > 0;
 }
 
+const std::set<uint64_t>*
+getSupportedSPMCounters(const std::string& agent)
+{
+    static auto*& map =
+        common::static_object<std::unordered_map<std::string, std::set<uint64_t>>>::construct();
+
+    static std::mutex mut{};
+    auto              lock = std::unique_lock{mut};
+
+    if(map->find(agent) != map->end()) return &map->at(agent);
+
+    std::set<uint64_t> ret{};
+
+    auto metrics = getMetricsForAgent(agent);
+
+    std::vector<std::string_view> valid_blks = {
+        "SQ", "SQC", "SPI", "TCC", "TCA", "TD", "TA", "TCP", "TCC", "SQC", "CP", "CPC", "CPF"};
+
+    if(agent.find("gfx9") == 0)
+        for(auto& metric : metrics)
+        {
+            if(metric.event().empty()) continue;  // Skip derived
+
+            for(auto& valid : valid_blks)
+                if(metric.block().find(valid) == 0)
+                {
+                    ret.insert(metric.id());
+                    break;
+                }
+        }
+
+    map->emplace(agent, std::move(ret));
+    return &map->at(agent);
+}
+
 bool
 operator<(Metric const& lhs, Metric const& rhs)
 {

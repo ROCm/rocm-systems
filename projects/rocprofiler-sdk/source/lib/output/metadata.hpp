@@ -27,6 +27,7 @@
 #include "host_symbol_info.hpp"
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
+#include "spm_info.hpp"
 
 #include "lib/att-tool/att_lib_wrapper.hpp"
 #include "lib/common/container/small_vector.hpp"
@@ -102,6 +103,9 @@ using code_obj_decoder_t    = rocprofiler::sdk::codeobj::disassembly::CodeobjAdd
 using instruction_t         = rocprofiler::sdk::codeobj::disassembly::Instruction;
 using att_agent_filenames_t = std::pair<rocprofiler_agent_id_t, std::vector<std::string>>;
 using att_filenames_map_t   = std::unordered_map<rocprofiler_dispatch_id_t, att_agent_filenames_t>;
+using spm_output_pair_t     = std::pair<rocprofiler_agent_id_t, std::vector<std::ofstream>>;
+using spm_outputfiles_map_t = std::unordered_map<rocprofiler_dispatch_id_t, spm_output_pair_t>;
+using spm_descriptor_map_t  = std::unordered_map<rocprofiler_agent_id_t, spm_descriptor_info_t>;
 using code_object_load_info_vec_t = std::vector<rocprofiler::att_wrapper::CodeobjLoadInfo>;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
@@ -172,6 +176,10 @@ struct metadata
 
     // PMC event ids start at this number
     uint64_t pmc_event_offset = 1;
+
+    std::shared_mutex     spm_mut          = {};
+    spm_descriptor_map_t  spm_descriptors  = {};
+    spm_outputfiles_map_t spm_output_files = {};
 
     metadata() = default;
     metadata(inprocess);

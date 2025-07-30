@@ -16,7 +16,8 @@ set(ATT_TOOL_HEADER_FILES
     profile_interface.hpp
     util.hpp
     wave.hpp
-    wstates.hpp)
+    wstates.hpp
+    spm.cpp)
 
 add_library(rocprofiler-sdk-att-parser STATIC)
 add_library(rocprofiler-sdk::rocprofiler-sdk-att-parser ALIAS rocprofiler-sdk-att-parser)

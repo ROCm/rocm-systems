@@ -8,6 +8,7 @@ set(TOOL_OUTPUT_HEADERS
     agent_info.hpp
     buffered_output.hpp
     counter_info.hpp
+    spm_info.hpp
     csv.hpp
     csv_output_file.hpp
     domain_type.hpp

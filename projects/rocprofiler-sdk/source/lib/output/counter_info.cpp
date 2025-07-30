@@ -57,5 +57,23 @@ tool_counter_record_t::write(const tool_counter_record_t::container_type& _data)
     auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
     record.fpos     = _tmp_file.write<tool_counter_value_t>(_data.data(), _data.size());
 }
+
+tool_spm_counter_record_t::container_type
+tool_spm_counter_record_t::read() const
+{
+    if(!record.fpos) return container_type{};
+
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
+    return _tmp_file.read<tool_counter_value_t>(*record.fpos);
+}
+
+void
+tool_spm_counter_record_t::write(const tool_spm_counter_record_t::container_type& _data)
+{
+    if(_data.empty()) return;
+
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
+    record.fpos     = _tmp_file.write<tool_counter_value_t>(_data.data(), _data.size());
+}
 }  // namespace tool
 }  // namespace rocprofiler

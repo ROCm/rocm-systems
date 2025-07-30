@@ -26,6 +26,8 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_core.hpp"
+#include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/core.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -124,6 +126,27 @@ public:
 
 private:
     hsa::TraceMemoryPool tracepool;
+};
+
+class SPMPacketFactory
+{
+    using parameter_pack = SPM::spm_parameter_pack;
+
+public:
+    SPMPacketFactory(const hsa::AgentCache& agent,
+                     const parameter_pack&  pack,
+                     const CoreApiTable&    coreapi,
+                     const AmdExtTable&     ext);
+
+    std::unique_ptr<hsa::SPMPacket>          construct();
+    std::vector<SPM::spm_counter_instance_t> id_map{};
+
+private:
+    rocprofiler_agent_id_t                         agent_id{};
+    aqlprofile_spm_profile_t                       profile{};
+    std::vector<aqlprofile_pmc_event_t>            events{};
+    std::vector<aqlprofile_spm_parameter_t>        params{};
+    std::shared_ptr<hsa::SPMPacket::SPMMemoryPool> pool{};
 };
 
 }  // namespace aql

@@ -51,6 +51,14 @@ DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION,
                         "COUNTER_COLLECTION",
                         "counter_collection",
                         "counter_collection_stats")
+DEFINE_BUFFER_TYPE_NAME(SPM_ACCUMULATED_VALUES,
+                        "SPM_ACCUMULATED_VALUES",
+                        "spm_accumulated_values",
+                        "spm_accumulated_values_stats")
+DEFINE_BUFFER_TYPE_NAME(SPM_DISPATCH_RECORDS,
+                        "SPM_DISPATCH_RECORDS",
+                        "spm_dispatch_records",
+                        "spm_dispatch_records_stats")
 DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api_trace", "rccl_api_stats")
 DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "MEMORY_ALLOCATION",

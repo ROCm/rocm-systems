@@ -426,6 +426,40 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         nargs="*",
     )
 
+    spm_options = parser.add_argument_group("Streaming Perfmon options")
+
+    spm_options.add_argument(
+        "--spm",
+        help=(
+            "Specify SPM events to collect(comma OR space separated in case of more than 1 counters). "
+            "Note: job will fail if entire set of counters cannot be collected in single pass"
+        ),
+        default=None,
+        nargs="*",
+    )
+
+    spm_options.add_argument(
+        "--spm-buffer-size",
+        help="SPM Buffer size, in KB. default: 32 MB",
+        default=None,
+        type=int,
+        metavar="KB",
+    )
+
+    spm_options.add_argument(
+        "--spm-timeout-ms",
+        help="Timeout for SPM, in ms. Larger values may slow down the application, while smaller values may drop data. Default = 100.",
+        default=None,
+        type=int,
+    )
+
+    spm_options.add_argument(
+        "--spm-frequency-sclk",
+        help="SCLK Sample frequency, in Hz. Default: 100 KHz",
+        default=None,
+        type=int,
+    )
+
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
     add_parser_bool_argument(
@@ -1465,6 +1499,28 @@ def run(app_args, args, **kwargs):
         update_env(
             "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
         )
+    else:
+        update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
+
+    if args.spm:
+        update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
+        update_env(
+            "ROCPROF_SPM_COUNTERS", "spm: {}".format(" ".join(args.spm)), overwrite=True
+        )
+    else:
+        update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
+
+    if args.spm_buffer_size:
+        update_env("ROCPROF_SPM_BUFFER_SIZE", args.spm_buffer_size)
+
+    if args.spm_timeout_ms:
+        update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout_ms)
+
+    if args.spm_frequency_sclk:
+        update_env("ROCPROF_SPM_FREQUENCY_SCLK", args.spm_frequency_sclk)
+
+    if args.log_level in ("info", "trace", "env"):
+        log_config(app_env)
 
     if args.pmc_groups:
         group_env = ""
