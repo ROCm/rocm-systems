@@ -1,12 +1,14 @@
 
-name: Formatting
+name: RocProfiler-Systems Formatting
 run-name: formatting
 
 on:
   push:
-    branches: [ amd-mainline, amd-staging, release/** ]
+    paths:
+      - 'projects/rocprofiler-systems/**'
   pull_request:
-    branches: [ amd-mainline, amd-staging, release/** ]
+    paths:
+      - 'projects/rocprofiler-systems/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -26,17 +28,23 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install black
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
     - name: black format
       run: |
+        cd projects/rocprofiler-systems
         black --diff --check .
 
   cmake:
@@ -44,6 +52,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+
     - name: Install dependencies
       run: |
         sudo apt-get update
@@ -67,6 +78,9 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems
+
     - name: Install dependencies
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
@@ -90,6 +104,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems
     - name: check-includes
       run: |
         set +e
