@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -29,15 +30,19 @@
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 #include <rocprofiler-sdk/experimental/thread_trace.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <glog/logging.h>
 
+#include <atomic>
 #include <cstdint>
 
 namespace
 {
 using DL           = rocprofiler::thread_trace::DL;
 using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using LockedTable  = rocprofiler::common::Synchronized<AddressTable>;
 
 class DecoderInstance
 {
@@ -46,72 +51,72 @@ public:
     : dl(std::move(_dl))
     {}
 
-    std::unique_ptr<DL> dl{nullptr};
-    AddressTable        table{};
+    const std::unique_ptr<const DL> dl{nullptr};
+
+    LockedTable table{};
 };
 
-std::mutex map_mut;
+using DecoderMap =
+    std::unordered_map<rocprofiler_thread_trace_decoder_id_t, std::shared_ptr<DecoderInstance>>;
+using LockedMap = rocprofiler::common::Synchronized<DecoderMap>;
 
 auto&
-get_dlopens()
+get_dlmap()
 {
-    static auto*& _v = rocprofiler::common::static_object<
-        std::unordered_map<uint64_t, std::shared_ptr<DecoderInstance>>>::construct();
+    static auto*& _v = rocprofiler::common::static_object<LockedMap>::construct();
     return *CHECK_NOTNULL(_v);
 }
 
 std::shared_ptr<DecoderInstance>
-get_dl(rocprofiler_thread_trace_decoder_handle_t handle)
+get_dl(rocprofiler_thread_trace_decoder_id_t handle)
 {
-    auto lk = std::unique_lock{map_mut};
-    auto it = get_dlopens().find(handle.handle);
-    if(it == get_dlopens().end()) return nullptr;
-
-    return it->second;
+    return get_dlmap().rlock([&](const DecoderMap& map) -> std::shared_ptr<DecoderInstance> {
+        if(auto it = map.find(handle); it != map.end()) return it->second;
+        return nullptr;
+    });
 }
 }  // namespace
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_handle_t* handle,
-                                        const char*                                path)
+rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_id_t* handle,
+                                        const char*                            path)
 {
     auto dl = std::make_unique<DL>(path);
     if(dl->handle == nullptr) return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
     if(!dl->valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
 
-    auto            lk    = std::unique_lock{map_mut};
-    static uint64_t count = 1;
+    static std::atomic<uint64_t> count{1};
+    handle->handle = count.fetch_add(1);
 
-    auto instance = std::make_shared<DecoderInstance>(std::move(dl));
-
-    handle->handle                = count++;
-    get_dlopens()[handle->handle] = std::move(instance);
+    get_dlmap().wlock(
+        [&](DecoderMap& map) { map[*handle] = std::make_shared<DecoderInstance>(std::move(dl)); });
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
-rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_handle_t handle)
+rocprofiler_thread_trace_decoder_destroy(rocprofiler_thread_trace_decoder_id_t handle)
 {
-    auto lk = std::unique_lock{map_mut};
-    get_dlopens().erase(handle.handle);
+    get_dlmap().wlock([&](DecoderMap& map) { map.erase(handle); });
 }
 
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_handle_t handle,
-                                              uint64_t                                  load_id,
-                                              uint64_t                                  load_addr,
-                                              uint64_t                                  load_size,
-                                              const void*                               data,
-                                              uint64_t                                  size)
+rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_id_t handle,
+                                              uint64_t                              load_id,
+                                              uint64_t                              load_addr,
+                                              uint64_t                              load_size,
+                                              const void*                           data,
+                                              uint64_t                              size)
 {
     auto decoder = get_dl(handle);
     if(decoder == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     try
     {
-        decoder->table.addDecoder(data, size, load_id, load_addr, load_size);
+        decoder->table.wlock([&](AddressTable& table) {
+            table.addDecoder(data, size, load_id, load_addr, load_size);
+        });
     } catch(...)
     {
         return ROCPROFILER_STATUS_ERROR;
@@ -120,15 +125,17 @@ rocprofiler_thread_trace_decoder_codeobj_load(rocprofiler_thread_trace_decoder_h
 }
 
 rocprofiler_status_t
-rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder_handle_t handle,
-                                                uint64_t                                  load_id)
+rocprofiler_thread_trace_decoder_codeobj_unload(rocprofiler_thread_trace_decoder_id_t handle,
+                                                uint64_t                              load_id)
 {
     auto decoder = get_dl(handle);
     if(decoder == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     try
     {
-        if(decoder->table.removeDecoder(load_id)) return ROCPROFILER_STATUS_SUCCESS;
+        bool result =
+            decoder->table.wlock([&](AddressTable& table) { return table.removeDecoder(load_id); });
+        if(result) return ROCPROFILER_STATUS_SUCCESS;
     } catch(std::exception&)
     {}
 
@@ -169,32 +176,32 @@ isa_callback(char*                                 isa_instruction,
              void*                                 userdata)
 {
     ROCP_FATAL_IF(userdata == nullptr) << "Userdata is null!";
-    auto& table = static_cast<trace_data_t*>(userdata)->decoder->table;
-
-    std::unique_ptr<Instruction> instruction{nullptr};
+    auto decoder = static_cast<trace_data_t*>(userdata)->decoder;
+    ROCP_FATAL_IF(decoder == nullptr) << "decoder is null";
 
     try
     {
-        instruction = table.get(pc.marker_id, pc.addr);
+        auto instruction = decoder->table.wlock(
+            [&](AddressTable& table) { return table.get(pc.marker_id, pc.addr); });
+
+        if(!instruction) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        {
+            size_t tmp_isa_size = *isa_size;
+            *isa_size           = instruction->inst.size();
+
+            if(*isa_size > tmp_isa_size)
+                return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
+        }
+
+        memcpy(isa_instruction, instruction->inst.data(), *isa_size);
+        *isa_memory_size = instruction->size;
+
     } catch(std::exception& e)
     {
-        ROCP_WARNING << pc.marker_id << ":" << pc.addr << ' ' << e.what();
+        ROCP_CI_LOG(INFO) << pc.marker_id << ":" << pc.addr << ' ' << e.what();
         return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR;
     }
-
-    if(!instruction) return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    {
-        size_t tmp_isa_size = *isa_size;
-        *isa_size           = instruction->inst.size();
-
-        if(*isa_size > tmp_isa_size)
-            return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_ERROR_OUT_OF_RESOURCES;
-    }
-
-    memcpy(isa_instruction, instruction->inst.data(), *isa_size);
-    *isa_memory_size = instruction->size;
-
     return ROCPROFILER_THREAD_TRACE_DECODER_STATUS_SUCCESS;
 }
 
@@ -214,7 +221,7 @@ trace_callback(rocprofiler_thread_trace_decoder_record_type_t record_type_id,
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_handle_t   handle,
+rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_id_t       handle,
                          rocprofiler_thread_trace_decoder_callback_t user_callback,
                          void*                                       data,
                          uint64_t                                    size,
@@ -249,8 +256,8 @@ rocprofiler_trace_decode(rocprofiler_thread_trace_decoder_handle_t   handle,
 }
 
 const char*
-rocprofiler_thread_trace_decoder_info_string(rocprofiler_thread_trace_decoder_handle_t handle,
-                                             rocprofiler_thread_trace_decoder_info_t   info)
+rocprofiler_thread_trace_decoder_info_string(rocprofiler_thread_trace_decoder_id_t   handle,
+                                             rocprofiler_thread_trace_decoder_info_t info)
 {
     auto decoder = get_dl(handle);
     if(decoder == nullptr) return nullptr;
