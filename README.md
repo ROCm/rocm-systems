@@ -2,7 +2,10 @@
 
 Welcome to the ROCm Systems super-repo. This repository consolidates multiple ROCm systems projects into a single repository to streamline development, CI, and integration. The first set of projects focuses on requirements for building PyTorch.
 
-# Super-repo Status and CI Health
+> [!NOTE]
+> The published documentation is available at [AQLprofile documentation] in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `aqlprofile/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
+
+### Background
 
 This table provides the current status of the migration of specific ROCm systems projects as well as a pointer to their current CI health.
 
