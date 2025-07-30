@@ -1237,13 +1237,12 @@ write_rocpd(
                                 // Following should not occur
                                 ROCP_INFO << "Unpaired free operation occurred";
                             }
-                            continue;
                         }
                         else
                         {
                             auto [agent_abs_index, size] = address_to_agent_and_size[_address];
                             _node_id                     = agent_abs_index;
-                            _allocation_size             = size;
+                            _allocation_size             = 0;
                         }
                     }
                     else

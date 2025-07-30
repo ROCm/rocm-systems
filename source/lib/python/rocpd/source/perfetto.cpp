@@ -738,11 +738,7 @@ write_perfetto(
                                                rocprofiler_address_t{.handle = itr.address},
                                                rocprofiler_queue_id_t{.handle = itr.queue_id},
                                                true});
-                    }
 
-                    // Agent and allocation size are stored to pair with free memory operations
-                    if(itr.level == "REAL")
-                    {
                         address_to_agent_and_size.emplace(
                             rocprofiler_address_t{.handle = itr.address},
                             agent_and_size{itr.agent_abs_index, itr.size});
