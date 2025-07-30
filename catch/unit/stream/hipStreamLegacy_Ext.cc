@@ -731,9 +731,8 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsInTwoDevicesEachOneDiffOperation") {
   HIP_CHECK(hipSetDevice(0));
 
   std::thread dev0Thread(operationsInDev0, devArrDev0, devArrDev1);
-  std::thread dev1Thread(operationsInDev1, devArrDev1, hostArrDst);
-
   dev0Thread.join();
+  std::thread dev1Thread(operationsInDev1, devArrDev1, hostArrDst);
   dev1Thread.join();
 
   for ( int i = 0; i < N; i++ ) {
