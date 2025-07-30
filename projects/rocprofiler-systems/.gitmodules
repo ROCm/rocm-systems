@@ -24,3 +24,6 @@
 [submodule "external/pybind11"]
 	path = external/pybind11
 	url = https://github.com/jrmadsen/pybind11.git
+[submodule "external/sqlite"]
+	path = external/sqlite
+	url = https://github.com/sqlite/sqlite.git

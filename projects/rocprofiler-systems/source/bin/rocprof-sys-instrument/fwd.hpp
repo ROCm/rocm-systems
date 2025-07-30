@@ -360,6 +360,9 @@ insert_instr(address_space_t* mutatee, Tp traceFunc, procedure_loc_t traceLoc,
 procedure_t*
 find_function(image_t* appImage, const string_t& functionName, const strset_t& = {});
 
+symtab_symbol_t*
+find_undefined_function_symbol(image_t* app_image, const std::string& _name);
+
 void
 error_func_real(error_level_t level, int num, const char* const* params);
 
