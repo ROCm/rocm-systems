@@ -231,12 +231,42 @@ def write_memory_allocation_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_memory_allocation_trace")
 
+def write_hip_api_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            R.guid AS Guid,
+            R.category AS Domain,
+            R.name AS Function,
+            R.pid AS Process_Id,
+            R.tid AS Thread_Id,
+            R.stack_id AS Correlation_Id,
+            R.start AS Start_Timestamp,
+            R.end AS End_Timestamp
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN regions AS R
+            ON R.guid = P.guid
+            AND R.nid = P.nid
+            AND R.pid = P.pid
+        WHERE
+            R.category LIKE 'HIP_%'
+        ORDER BY
+            R.start ASC, R.end DESC
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_hip_api_trace")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
     write_kernel_csv(importData, config.output_path)
     write_memory_copy_csv(importData, config.output_path)
     write_memory_allocation_csv(importData, config.output_path)
+    write_hip_api_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
