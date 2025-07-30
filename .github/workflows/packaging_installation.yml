@@ -40,6 +40,18 @@ jobs:
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         env
 
+    - name: Install Packages
+      shell: bash
+      run: |
+          if [ $OS_VERSION_MAJOR -eq 8 ]; then
+            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+            chmod +x /opt/trace_processor/bin/trace_processor_shell
+          fi
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+
     - name: Setup ROCm (deb)
       if: ${{ matrix.system.package == 'DEB'}}
       timeout-minutes: 15
