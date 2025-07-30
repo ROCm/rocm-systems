@@ -95,8 +95,8 @@ private:
     std::deque<const Queue*>       _dispatch_ready;
     std::atomic<Status>            _serializer_status{Status::DISABLED};
     std::deque<barrier_with_state> _barrier;
-    mutable std::atomic<int64_t> _enqueued_packets{0};
-    mutable std::atomic<int64_t> _completed_packets{0};
+    mutable std::atomic<int64_t>   _enqueued_packets{0};
+    mutable std::atomic<int64_t>   _completed_packets{0};
 };
 
 }  // namespace hsa

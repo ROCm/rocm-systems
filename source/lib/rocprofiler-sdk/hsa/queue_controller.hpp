@@ -151,7 +151,8 @@ extern "C" {
 #endif
 
 // Debug function to print QueueController state to ROCP_ERROR log
-void rocprofiler_debug_print_queue_controller_state();
+void
+rocprofiler_debug_print_queue_controller_state();
 
 #ifdef __cplusplus
 }

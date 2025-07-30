@@ -150,7 +150,6 @@ profiler_serializer::queue_ready(hsa_queue_t* hsa_queue, const Queue& queue)
         ->get_core_table()
         .hsa_signal_store_screlease_fn(queue.ready_signal, 1);
 
-
     if(_dispatch_queue == nullptr)
     {
         CHECK_NOTNULL(get_queue_controller())
@@ -293,23 +292,28 @@ profiler_serializer::to_string() const
 {
     std::ostringstream oss;
     oss << "profiler_serializer{";
-    
+
     // _dispatch_queue
     oss << "_dispatch_queue: ";
-    if(_dispatch_queue) {
+    if(_dispatch_queue)
+    {
         oss << "{id: " << _dispatch_queue->get_id().handle << "}";
-    } else {
+    }
+    else
+    {
         oss << "null";
     }
     oss << ", ";
-    
+
     // _dispatch_ready
     oss << "_dispatch_ready: {";
     oss << "count: " << _dispatch_ready.size();
-    if(!_dispatch_ready.empty()) {
+    if(!_dispatch_ready.empty())
+    {
         oss << ", queue_ids: [";
         bool first = true;
-        for(const auto* queue : _dispatch_ready) {
+        for(const auto* queue : _dispatch_ready)
+        {
             if(!first) oss << ", ";
             oss << (queue ? queue->get_id().handle : 0);
             first = false;
@@ -317,26 +321,30 @@ profiler_serializer::to_string() const
         oss << "]";
     }
     oss << "}, ";
-    
+
     // _serializer_status
     oss << "_serializer_status: ";
-    switch(_serializer_status.load()) {
+    switch(_serializer_status.load())
+    {
         case Status::ENABLED: oss << "ENABLED"; break;
         case Status::DISABLED: oss << "DISABLED"; break;
         default: oss << "UNKNOWN"; break;
     }
     oss << ", ";
-    
+
     // _barrier
     oss << "_barrier: {";
     oss << "count: " << _barrier.size();
-    if(!_barrier.empty()) {
+    if(!_barrier.empty())
+    {
         oss << ", barriers: [";
         bool first = true;
-        for(const auto& barrier : _barrier) {
+        for(const auto& barrier : _barrier)
+        {
             if(!first) oss << ", ";
             oss << "{state: ";
-            switch(barrier.state) {
+            switch(barrier.state)
+            {
                 case Status::ENABLED: oss << "ENABLED"; break;
                 case Status::DISABLED: oss << "DISABLED"; break;
                 default: oss << "UNKNOWN"; break;

@@ -676,42 +676,44 @@ Queue::to_string() const
 {
     std::ostringstream oss;
     oss << "Queue{";
-    
+
     // _notifiers
     oss << "_notifiers: " << _notifiers.load() << ", ";
 
     // _active_async_packets
     oss << "_active_async_packets: " << _active_async_packets.load() << ", ";
-    
+
     // _callbacks (show count)
     oss << "_callbacks: {";
-    _callbacks.rlock([&](const auto& callbacks) {
-        oss << "count: " << callbacks.size();
-    });
+    _callbacks.rlock([&](const auto& callbacks) { oss << "count: " << callbacks.size(); });
     oss << "}, ";
-    
+
     // _intercept_queue (show ID if not null)
     oss << "_intercept_queue: ";
-    if(_intercept_queue) {
+    if(_intercept_queue)
+    {
         oss << "{id: " << _intercept_queue->id << "}";
-    } else {
+    }
+    else
+    {
         oss << "null";
     }
     oss << ", ";
-    
+
     // _state
     oss << "_state: ";
-    switch(_state) {
+    switch(_state)
+    {
         case queue_state::normal: oss << "normal"; break;
         case queue_state::to_destroy: oss << "to_destroy"; break;
         case queue_state::done_destroy: oss << "done_destroy"; break;
         default: oss << "unknown"; break;
     }
     oss << ", ";
-    
+
     // _active_kernels signal
     oss << "_active_kernels: {handle: " << _active_kernels.handle << "}, ";
-    
+
     // block_signal and ready_signal
     oss << "block_signal: {handle: " << block_signal.handle << "}, ";
     oss << "ready_signal: {handle: " << ready_signal.handle << "}";
