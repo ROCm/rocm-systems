@@ -60,13 +60,11 @@ private:
     using clock_type   = std::chrono::steady_clock;
     using time_point_t = std::chrono::time_point<clock_type, std::chrono::nanoseconds>;
 
-    static std::ostream* get_log_stream(int log_level);
-
-    std::string   m_label = {};
-    std::ostream* m_os    = nullptr;
-    time_point_t  m_beg   = {};
-    time_point_t  m_end   = {};
-    mutable bool  m_quiet = false;
+    std::string  m_label     = {};
+    time_point_t m_beg       = {};
+    time_point_t m_end       = {};
+    int          m_log_level = ROCP_LOG_LEVEL_WARNING;
+    mutable bool m_quiet     = false;
 };
 }  // namespace common
 }  // namespace rocprofiler

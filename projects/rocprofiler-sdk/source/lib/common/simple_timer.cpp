@@ -22,6 +22,7 @@
 
 #include "lib/common/simple_timer.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/synchronized.hpp"
 
 #include <fmt/format.h>
 
@@ -37,14 +38,14 @@ namespace common
 {
 simple_timer::simple_timer(std::string&& label, int log_level)
 : m_label{std::move(label)}
-, m_os{simple_timer::get_log_stream(log_level)}
+, m_log_level{log_level}
 {
     start();
 }
 
 simple_timer::simple_timer(std::string&& label, defer_start, int log_level)
 : m_label{std::move(label)}
-, m_os{simple_timer::get_log_stream(log_level)}
+, m_log_level{log_level}
 {}
 
 simple_timer::~simple_timer()
@@ -88,28 +89,46 @@ simple_timer::get_nsec() const
 simple_timer&
 simple_timer::report()
 {
-    if(m_os)
+    static auto max_width = Synchronized<uint64_t>{0};
+    max_width.wlock(
+        [](auto& _max_width, auto _w) {
+            if(_w > _max_width) _max_width = _w;
+            if(_max_width > 120) _max_width = 120;
+        },
+        m_label.size());
+
+    auto _width = max_width.get();
+
+    switch(m_log_level)
     {
-        (*m_os) << fmt::format("{} :: {:12.6f} sec", m_label, get());
+        case ROCP_LOG_LEVEL_WARNING:
+        {
+            ROCP_WARNING << fmt::format("{:<{}} :: {:12.6f} sec", m_label, _width, get());
+            break;
+        }
+        case ROCP_LOG_LEVEL_ERROR:
+        {
+            ROCP_ERROR << fmt::format("{:<{}} :: {:12.6f} sec", m_label, _width, get());
+            break;
+        }
+        case ROCP_LOG_LEVEL_INFO:
+        {
+            ROCP_INFO << fmt::format("{:<{}} :: {:12.6f} sec", m_label, _width, get());
+            break;
+        }
+        case ROCP_LOG_LEVEL_TRACE:
+        {
+            ROCP_TRACE << fmt::format("{:<{}} :: {:12.6f} sec", m_label, _width, get());
+            break;
+        }
+        case ROCP_LOG_LEVEL_NONE:
+        default:
+        {
+            break;
+        }
     }
+
     return *this;
-}
-
-std::ostream*
-simple_timer::get_log_stream(int log_level)
-{
-    switch(log_level)
-    {
-        case ROCP_LOG_LEVEL_NONE: return nullptr;
-        case ROCP_LOG_LEVEL_WARNING: return &ROCP_WARNING;
-        case ROCP_LOG_LEVEL_ERROR: return &ROCP_ERROR;
-        case ROCP_LOG_LEVEL_INFO: return &ROCP_INFO;
-        case ROCP_LOG_LEVEL_TRACE: return VLOG_IS_ON(log_level) ? &ROCP_INFO : nullptr;
-        default: break;
-    }
-
-    ROCP_CI_LOG(WARNING) << fmt::format("Unsupported log level for simple timer: {}", log_level);
-    return &ROCP_INFO;
 }
 
 std::ostream&
