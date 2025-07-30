@@ -93,9 +93,7 @@ database::initialize_schema()
                 return new_file_path;
             }
         }
-        return std::string(
-                   "rocprofiler-systems/source/lib/core/rocpd/data_storage/schema/")
-            .append(filename);
+        return std::string("source/lib/core/rocpd/data_storage/schema/").append(filename);
     };
 
     std::vector<std::string_view> schema_files = { "rocpd_tables.sql", "rocpd_views.sql",

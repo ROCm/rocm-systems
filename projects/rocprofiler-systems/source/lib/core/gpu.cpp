@@ -128,6 +128,7 @@ query_rocm_agents()
             auto        cur_agent = agent{
                 (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
                                                                    : agent_type::CPU),
+                _agent->id.handle,
                 _agent->device_id,
                 _agent->node_id,
                 _agent->logical_node_id,

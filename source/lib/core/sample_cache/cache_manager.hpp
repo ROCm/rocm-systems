@@ -22,42 +22,46 @@
 
 #pragma once
 
-#include <cstddef>
-#include <cstdint>
-#include <string>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#endif
+#include "cache_storage.hpp"
+#include "cache_storage_parser.hpp"
+#include "core/sample_cache/rocpd_post_processing.hpp"
+#include "metadata_storage.hpp"
 
 namespace rocprofsys
 {
-
-enum class agent_type : uint8_t
+namespace sample_cache
 {
-    CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
+
+class cache_manager
+{
+public:
+    static cache_manager& get_instance();
+    cache_storage&        get_cache() { return m_storage; }
+    metadata&             get_metadata() { return m_metadata; }
+    void                  shutdown();
+    void                  post_process();
+
+private:
+    void post_process_metadata();
+    cache_manager();
+
+    cache_storage         m_storage;
+    metadata              m_metadata;
+    storage_parser        m_parser;
+    rocpd_post_processing m_postprocessing;
 };
 
-struct agent
+inline metadata&
+get_cache_metadata()
 {
-    agent_type  type;
-    uint64_t    handle;
-    uint64_t    device_id;
-    uint32_t    node_id;
-    int32_t     logical_node_id;
-    int32_t     logical_node_type_id;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
+    return cache_manager::get_instance().get_metadata();
+}
 
-    size_t device_type_index{ 0 };
-    size_t base_id{ 0 };
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_processor_handle smi_handle = nullptr;
-#endif
-};
+inline cache_storage&
+get_cache_storage()
+{
+    return cache_manager::get_instance().get_cache();
+}
 
+}  // namespace sample_cache
 }  // namespace rocprofsys

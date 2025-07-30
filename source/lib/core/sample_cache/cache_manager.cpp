@@ -20,44 +20,60 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
-#include <cstddef>
-#include <cstdint>
-#include <string>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#endif
+#include "cache_manager.hpp"
+#include "core/config.hpp"
+#include "core/sample_cache/cache_storage_parser.hpp"
+#include "debug.hpp"
+#include "sample_cache/rocpd_post_processing.hpp"
 
 namespace rocprofsys
 {
-
-enum class agent_type : uint8_t
+namespace sample_cache
 {
-    CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
-};
 
-struct agent
+cache_manager&
+cache_manager::get_instance()
 {
-    agent_type  type;
-    uint64_t    handle;
-    uint64_t    device_id;
-    uint32_t    node_id;
-    int32_t     logical_node_id;
-    int32_t     logical_node_type_id;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
+    static cache_manager instance;
+    return instance;
+}
 
-    size_t device_type_index{ 0 };
-    size_t base_id{ 0 };
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_processor_handle smi_handle = nullptr;
-#endif
-};
+cache_manager::cache_manager()
+: m_postprocessing{ m_metadata }
+{
+    m_postprocessing.register_parser_callback(m_parser);
+}
 
+void
+cache_manager::post_process()
+{
+    if(m_storage.is_running())
+    {
+        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
+                              "cache storage. Calling shutdown explicitly..\n");
+        shutdown();
+    }
+
+    if(get_use_rocpd())
+    {
+        ROCPROFSYS_PRINT(
+            "Generating rocpd with collected data. This may take a while..\n");
+    }
+    post_process_metadata();
+    m_parser.consume_storage();
+}
+
+void
+cache_manager::post_process_metadata()
+{
+    m_postprocessing.post_process_metadata();
+}
+
+void
+cache_manager::shutdown()
+{
+    m_storage.shutdown();
+}
+
+}  // namespace sample_cache
 }  // namespace rocprofsys
