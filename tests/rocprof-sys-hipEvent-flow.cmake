@@ -41,13 +41,19 @@ rocprofiler_systems_add_test(
     SAMPLING_PASS_REGEX "${_ROCP_PASS_REGEX}"
 )
 
-# Validate the generated perfetto file.
-add_test(
-    NAME validate-transpose-hipEvent-flow-perfetto
-    COMMAND
-        ${ROCPROFSYS_VALIDATION_PYTHON}
-        ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -i
-        ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/transpose-hipEvent-flow-sampling/perfetto-trace.proto
-        --flow-events hipEventRecord -t /opt/trace_processor/bin/trace_processor_shell -p
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-)
+if(_VALID_GPU)
+    # Validate the generated perfetto file.
+    add_test(
+        NAME validate-transpose-hipEvent-flow-perfetto
+        COMMAND
+            ${ROCPROFSYS_VALIDATION_PYTHON}
+            ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -i
+            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/transpose-hipEvent-flow-sampling/perfetto-trace.proto
+            --flow-events hipEventRecord -t /opt/trace_processor/bin/trace_processor_shell -p
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+else()
+    rocprofiler_systems_message(
+        STATUS "validate-transpose-hipEvent-flow-perfetto requires a GPU and no valid GPUs were found"
+    )
+endif()
