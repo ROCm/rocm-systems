@@ -115,4 +115,5 @@ jobs:
     - name: Install
       timeout-minutes: 10
       run:
+        cd projects/rocprofiler-sdk
         cmake --build build --target install
