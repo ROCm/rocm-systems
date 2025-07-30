@@ -744,6 +744,8 @@
         "Unit_hipGetLastError_KernelFailure_ValidAndInvalidOperations",
         "Unit_hipGetLastError_KernelFailure_TwoDevices",
         "Unit_hipGetLastError_KernelFailure_TwoStreams",
+        "=== Enable the below test when multi-device graph launches are fully supported ===",
+        "Unit_hipGraphInstantiateWithFlags_DependencyGraphDeviceCtxtChg",
     #endif
     #if defined gfx90a || defined gfx942 || defined gfx950
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
