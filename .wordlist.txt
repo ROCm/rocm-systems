@@ -30,6 +30,8 @@ ppc
 proc
 proto
 Pthreads
+RCCL
+RCCLP
 rocDecode
 rocdecode
 ROCprofiler
