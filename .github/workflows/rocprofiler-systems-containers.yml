@@ -1,4 +1,4 @@
-name: Continuous Integration Containers
+name: RocProfiler-Systems Continuous Integration Containers
 run-name: ci-containers
 
 # nightly build
@@ -7,10 +7,9 @@ on:
   schedule:
     - cron: 0 5 * * *
   push:
-    branches: [amd-staging, amd-mainline]
     paths:
-      - '.github/workflows/containers.yml'
-      - 'docker/**'
+      - '.github/workflows/rocprofiler-systems-containers.yml'
+      - 'projects/rocprofiler-systems/docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,8 +20,6 @@ env:
 
 jobs:
   rocprofiler-systems-ci:
-    if: github.repository == 'ROCm/rocprofiler-systems'
-
     runs-on: ubuntu-latest
 
     strategy:
@@ -51,6 +48,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          sparse-checkout: projects/rocprofiler-systems
           submodules: recursive
 
       - name: Set up QEMU
@@ -73,12 +71,11 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd docker
+            projects/rocprofiler-systems/docker
             ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push --jobs 2 --elfutils-version 0.186 --boost-version 1.79.0
             popd
 
   rocprofiler-systems-release:
-    if: github.repository == 'ROCm/rocprofiler-systems'
 
     runs-on: ubuntu-latest
 
@@ -163,6 +160,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v2
@@ -184,6 +183,6 @@ jobs:
           timeout_minutes: 45
           max_attempts: 3
           command: |
-            pushd docker
+            pushd projects/rocprofiler-systems/docker
             ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
             popd
