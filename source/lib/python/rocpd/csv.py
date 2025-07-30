@@ -170,10 +170,40 @@ def write_kernel_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_kernel_trace")
 
+def write_memory_copy_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            M.guid AS Guid,
+            'MEMORY_COPY' AS Kind,
+            M.name AS Direction,
+            M.stream_id AS Stream_Id,
+            'Agent ' || M.src_agent_log_index AS Source_Agent_Id,
+            'Agent ' || M.dst_agent_log_index AS Destination_Agent_Id,
+            M.stack_id AS Correlation_Id,
+            M.start AS Start_Timestamp,
+            M.end AS End_Timestamp
+
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN memory_copies AS M
+            ON M.guid = P.guid
+            AND M.nid = P.nid
+            AND M.pid = P.pid
+        ORDER BY
+            M.start ASC, M.end DESC
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_memory_copy_trace")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
     write_kernel_csv(importData, config.output_path)
+    write_memory_copy_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
