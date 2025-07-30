@@ -193,6 +193,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Added `rocpd` output format documentation
   - Requires the ROCprof Trace Decoder plugin installed (see above)
 - Added perfetto support for scratch memory.
+- Added documentation for rocprofv3 advanced options
 
 ### Changed
 
