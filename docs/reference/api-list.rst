@@ -7,7 +7,7 @@ AQLprofile APIs
 
 Learn about the typical APIs used in AQLprofile.
 
-The APIs in ``aqlprofile_v2.h`` are designed for use with ``rocprofiler-sdk``, and are actively maintained and recommended for all new development.
+The APIs in ``aqlprofile_v2.h`` are designed for use with `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__, and are actively maintained and recommended for all new development.
 
 .. note::
 
@@ -23,7 +23,7 @@ From header ``aql_profile_v2.h``
 +------------------------------------+------------------------------------------------------------------------------------------+
 | ``aqlprofile_register_agent_info`` | Registers an agent for profiling using extended agent info and versioning.               |
 +------------------------------------+------------------------------------------------------------------------------------------+
-| ``aqlprofile_get_pmc_info``        | Retrieves information about PMC profiles (e.g., buffer sizes, counter data).             |
+| ``aqlprofile_get_pmc_info``        | Retrieves information about PMC profiles (for example, buffer sizes, counter data).             |
 +------------------------------------+------------------------------------------------------------------------------------------+
 | ``aqlprofile_validate_pmc_event``  | Checks if a given PMC event is valid for the specified agent.                            |
 +------------------------------------+------------------------------------------------------------------------------------------+

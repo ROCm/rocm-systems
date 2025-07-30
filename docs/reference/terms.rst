@@ -13,7 +13,7 @@ Agents
 Agents represent computational devices (CPUs, GPUs) in the Heterogeneous
 System Architecture (HSA) runtime. In AQLprofile, agents are discovered
 via HSA APIs and encapsulated in the ``AgentInfo`` structure. Each agent
-contains metadata such as device type, name, compute unit count, and
+contains metadata including device type, name, compute unit count, and
 memory pools.
 
 Agents are enumerated using HSA API ``hsa_iterate_agents``, and their
@@ -25,7 +25,7 @@ Counters and events
 -------------------
 
 Performance counters are special circuits on the hardware that count
-specific GPU events (e.g., cycles, instructions, cache hits). Events
+specific GPU events (for example, cycles, instructions, cache hits). Events
 specify which counters to collect, identified by block name, block
 index, and counter ID.
 
@@ -45,10 +45,10 @@ index, and counter ID.
 Counter blocks
 --------------
 
-Counter blocks correspond to hardware units on the GPU (e.g., SQ, TCC,
+Counter blocks correspond to hardware units on the GPU (for example, SQ, TCC,
 TCP). Each block exposes a set of counters/events.
 
--  Block names (e.g., ``HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ``) map to
+-  Block names (for example, ``HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ``) map to
    specific hardware blocks.
 -  Events specify both the block and the counter within that block.
 
@@ -56,7 +56,7 @@ Command buffers
 ---------------
 
 Command buffers are memory regions that store AQL packets and PM4
-commands which control GPU profiling operations. They're allocated per
+commands, which control GPU profiling operations. They're allocated per
 agent, and must meet alignment and size requirements dictated by the
 hardware.
 

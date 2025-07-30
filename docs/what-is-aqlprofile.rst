@@ -8,19 +8,19 @@ What is AQLprofile?
 The Architected Queuing Language profiling library (AQLprofile) is an
 open source library that enables advanced GPU profiling and tracing on
 AMD platforms. It works in conjunction with
-`rocprofiler-sdk <https://github.com/ROCm/rocprofiler-sdk>`__ to
+`ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ to
 support profiling methods such as `performance counters
 (PMC) <examples/pmc-workflow.rst>`__ and `SQ thread trace
 (SQTT) <examples/sqtt-workflow.rst>`__. AQLprofile provides the
 foundational mechanisms for constructing AQL packets and managing
 profiling operations across multiple AMD GPU architecture families. The
-development of AQLprofile is aligned with ``rocprofiler-sdk``, ensuring
+development of AQLprofile is aligned with ROCprofiler-SDK, ensuring
 compatibility and feature support for new GPU architectures and
 profiling requirements.
 
 AQLprofile builds on concepts from the Heterogeneous System Architecture
 (HSA) and the AQL, which define the foundations for GPU command
-processing and profiling on AMD platforms. For further reading, see:
+processing and profiling on AMD platforms. For more information, see:
 
 -  `HSA Platform System Architecture
    Specification <http://hsafoundation.com/wp-content/uploads/2021/02/HSA-SysArch-1.2.pdf>`__
@@ -41,7 +41,7 @@ Who should use this library?
 ----------------------------
 
 -  **End users**: If you want to profile AMD GPUs, use
-   `rocprofiler-sdk <https://github.com/ROCm/rocprofiler-sdk>`__ or
+   `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ or
    tools that depend on it. You do *not* need to use AQLprofile
    directly.
 -  **Developers/integrators**: If you're building profiling tools,
@@ -53,8 +53,8 @@ How does AQLprofile fit into the ROCm profiling stack?
 
 Here's the typical workflow:
 
-Application → ``rocprofiler-sdk`` ⇄ **AQLprofile** ⇄ ``rocprofiler-sdk`` → HSA/ROCR/KFD → AMD GPU hardware
+Application → ROCprofiler-SDK ⇄ **AQLprofile** ⇄ ROCprofiler-SDK → HSA/ROCR/KFD → AMD GPU hardware
 
-- **AQLprofile** generates profiling command packets (AQL/PM4) tailored to the GPU architecture. It does *not* interact with hardware or drivers directly; it only produces the packets and buffer requirements requested by ``rocprofiler-sdk``.
+- **AQLprofile** generates profiling command packets (AQL/PM4) tailored to the GPU architecture. It doesn't interact with hardware or drivers directly. It only produces the packets and buffer requirements requested by ``ROCprofiler-SDK``.
  
-- **rocprofiler-sdk** provides a higher-level API and user-facing tools, using AQLprofile internally. It manages profiling sessions, submits packets to the GPU via HSA/ROCR/KFD, and collects results.
+- **ROCprofiler-SDK** provides a higher-level API and user-facing tools, using AQLprofile internally. It manages profiling sessions, submits packets to the GPU via HSA/ROCR/KFD, and collects results.

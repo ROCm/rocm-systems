@@ -6,7 +6,7 @@
 Performance Monitor Control (PMC) workflow with AQLprofile
 **********************************************************
 
-This page describes a typical workflow for collecting PMC data using AQLprofile (as integrated in ``rocprofiler-sdk``). 
+This page describes a typical workflow for collecting PMC data using AQLprofile (as integrated in `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__). 
 This workflow relies on creating a profile object, generating command packets, and iterating over output buffers:
 
 1. **Intercept kernel dispatch**: The SDK intercepts kernel dispatch packets submitted to the GPU queue.
@@ -26,7 +26,7 @@ For new development, refer to the updated APIs in ``aql_profile_v2.h``.
 
 .. note::
 
-   The ``rocprofiler-sdk`` is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
+   The ROCprofiler-SDK is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
 
 Define the events and profile
 -----------------------------

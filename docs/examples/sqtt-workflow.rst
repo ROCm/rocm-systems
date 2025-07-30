@@ -24,11 +24,11 @@ Key API code snippets
 These API snippets use the legacy interfaces from ``hsa_ven_amd_aqlprofile.h``. These are provided for understanding purposes only.  
 For new development, refer to the updated APIs in ``aql_profile_v2.h``.  
 
-In the ``rocprofiler-sdk`` codebase, these APIs are wrapped and orchestrated in the ``aql``, ``hsa``, and ``thread_trace`` folders for queue interception, packet construction, and result iteration.
+In the `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ codebase, these APIs are wrapped and orchestrated in the ``aql``, ``hsa``, and ``thread_trace`` folders for queue interception, packet construction, and result iteration.
 
 .. note::
 
-   The ``rocprofiler-sdk`` is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
+   The`ROCprofiler-SDK is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
 
 Define parameters and profile
 ------------------------------
