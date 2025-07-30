@@ -56,7 +56,7 @@ Command buffers
 ---------------
 
 Command buffers are memory regions that store AQL packets and PM4
-commands which control GPU profiling operations. They're allocated per
+commands, which control GPU profiling operations. They're allocated per
 agent, and must meet alignment and size requirements dictated by the
 hardware.
 

@@ -28,7 +28,7 @@ In the `ROCprofiler-SDK <https://github.com/ROCm/rocprofiler-sdk>`__ codebase, t
 
 .. note::
 
-   The ``rocprofiler-sdk`` is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
+   The`ROCprofiler-SDK is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
 
 Define parameters and profile
 ------------------------------
