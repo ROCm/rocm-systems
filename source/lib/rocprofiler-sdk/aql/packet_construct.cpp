@@ -156,8 +156,10 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, {simd}});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, {buffer_size_lo}});
 
-    if(buffer_size_hi != 0) aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
-        AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH), {buffer_size_hi}});
+    if(buffer_size_hi != 0)
+        aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
+                                  AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH),
+                              {buffer_size_hi}});
 
     if(perf_ctrl != 0 && !params.perfcounters.empty())
     {
