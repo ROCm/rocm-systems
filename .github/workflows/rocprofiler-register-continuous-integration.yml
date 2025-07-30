@@ -45,7 +45,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: rocprof-azure-emu-runner-set
+    runs-on: rocprofiler-ubuntu-22
 
     env:
         BUILD_TYPE: RelWithDebInfo
@@ -131,7 +131,7 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-tests-deb --output-on-failure
-        
+
     - name: Test Install Modulefile
       timeout-minutes: 15
       shell: bash
