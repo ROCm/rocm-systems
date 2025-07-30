@@ -4,9 +4,13 @@
 
 .. _index:
 
-********************************
+************************
 AQLprofile documentation
-********************************
+************************
+
+The Architected Queuing Language profiling library (AQLprofile) is an
+open source library that enables advanced GPU profiling and tracing on
+AMD platforms.
 
 This documentation provides a comprehensive overview of the AQLprofile library.
 

@@ -1,5 +1,11 @@
-Terms
-=====
+.. meta::
+  :description: Defined terms commonly used in AQLprofile
+  :keywords: AQLprofile, ROCm
+
+AQLprofile terms
+================
+
+Learn the definitions of terms commonly used in AQLprofile.
 
 Agents
 ------
@@ -46,6 +52,14 @@ TCP). Each block exposes a set of counters/events.
    specific hardware blocks.
 -  Events specify both the block and the counter within that block.
 
+Command buffers
+---------------
+
+Command buffers are memory regions that store AQL packets and PM4
+commands which control GPU profiling operations. They're allocated per
+agent, and must meet alignment and size requirements dictated by the
+hardware.
+
 Command packets
 ---------------
 
@@ -60,6 +74,13 @@ the GPU via HSA queues.
    bool Queue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet) {
        // Write packet to queue and signal doorbell
    }
+
+Output buffer
+-------------
+
+Output buffers are memory regions that store outputs such as counter
+values and thread trace tokens. They're allocated using HSA memory pools
+associated with the agent.
 
 Profile object
 --------------
@@ -86,17 +107,3 @@ to AQLprofile APIs to start, stop, and read profiling data.
            0,
            0};
 
-Command buffers
----------------
-
-Command buffers are memory regions that store AQL packets and PM4
-commands which control GPU profiling operations. They're allocated per
-agent, and must meet alignment and size requirements dictated by the
-hardware.
-
-Output buffer
--------------
-
-Output buffers are memory regions that store outputs such as counter
-values and thread trace tokens. They're allocated using HSA memory pools
-associated with the agent.

@@ -22,11 +22,13 @@ subtrees:
   - caption: Reference
     entries:
     - file: reference/terms.rst
-      title: Terms    
+      title: Terms  
+    - file: reference/supported-architectures.rst
+      title: Supported architectures and counter blocks  
     - file: reference/api-list.rst
       title: APIs
   
-  - caption: License
+  - caption: About
     entries:
     - file: license.rst
       title: License

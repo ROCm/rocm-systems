@@ -1,6 +1,10 @@
-********************************
+.. meta::
+  :description: The standard MIT license for AQLprofile
+  :keywords: AQLprofile, ROCm, license
+
+*******
 License
-********************************
+*******
 
 MIT License
 

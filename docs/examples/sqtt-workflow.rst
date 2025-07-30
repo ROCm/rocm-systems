@@ -2,9 +2,9 @@
   :description: A typical workflow for collecting detailed instruction-level traces
   :keywords: AQLprofile, ROCm, API, how-to, SQTT
 
-*******************************
-SQ Thread Trace (SQTT) workflow
-*******************************
+***********************************************
+SQ Thread Trace (SQTT) workflow with AQLprofile
+***********************************************
 
 The SQ Thread Trace workflow focuses on collecting detailed instruction-level traces. 
 This workflow relies on creating a profile object, generating command packets, and iterating over output buffers: 
@@ -28,7 +28,7 @@ In the ``rocprofiler-sdk`` codebase, these APIs are wrapped and orchestrated in 
 
 .. note::
 
-    The ``rocprofiler-sdk`` is migrating to these newer interfaces; the old APIs may be deprecated in future releases.
+   The ``rocprofiler-sdk`` is migrating to these newer interfaces in ``aql_profile_v2.h``. You should use the APIs in ``aql_profile_v2.h`` to stay up-to-date.
 
 Define parameters and profile
 ------------------------------
