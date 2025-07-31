@@ -1,4 +1,4 @@
-name: packaging
+name: Packagings
 
 on:
   push:
