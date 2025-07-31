@@ -39,8 +39,6 @@ jobs:
         uses: actions/checkout@v4
         with:
             sparse-checkout: projects/rocprofiler-sdk
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
@@ -63,11 +61,6 @@ jobs:
           python3 -m pip install doxysphinx rocm-docs-core
           git config --global --add safe.directory '*'
           ../scripts/update-docs.sh
-      - name: Upload artifact
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: projects/rocprofiler-sdk/docs
 
   deploy-docs:
     if: github.ref == 'refs/heads/amd-mainline'
@@ -115,7 +108,7 @@ jobs:
           git config --global --add safe.directory '*'
           sudo apt-get update
           sudo apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
-          python3 -m pip install -r requirements.txt
+          python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
 
       - name: Configure, Build, Install, and Package
         timeout-minutes: 60
@@ -131,7 +124,7 @@ jobs:
             -DCPACK_GENERATOR='DEB;RPM;TGZ'
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
             -DPython3_EXECUTABLE=$(which python3)
-            .;
+            projects/rocprofiler-sdk;
           cmake --build build --target docs --parallel 4;
           cmake --build build --target all --parallel 12;
           sudo cmake --build build --target install --parallel 12;
