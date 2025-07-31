@@ -62,22 +62,6 @@ jobs:
           git config --global --add safe.directory '*'
           ../scripts/update-docs.sh
 
-  deploy-docs:
-    if: github.ref == 'refs/heads/amd-mainline'
-    runs-on: ubuntu-22.04
-    needs: build-docs
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
   build-docs-from-source:
     runs-on: ubuntu-latest
     container: rocm/dev-ubuntu-22.04:latest
@@ -96,10 +80,12 @@ jobs:
         with:
             sparse-checkout: projects/rocprofiler-sdk
       - name: Create Docs Directory
+        shell: bash
+        working-directory: projects/rocprofiler-sdk/
         run: |
           git config --global --add safe.directory '*'
-          mkdir -p projects/rocprofiler-sdk/source/docs/_doxygen/rocprofiler-sdk
-          mkdir -p projects/rocprofiler-sdk/source/docs/_doxygen/roctx
+          mkdir -p source/docs/_doxygen/rocprofiler-sdk
+          mkdir -p source/docs/_doxygen/roctx
       - name: Install requirements
         timeout-minutes: 10
         shell: bash
@@ -108,7 +94,7 @@ jobs:
           git config --global --add safe.directory '*'
           sudo apt-get update
           sudo apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
-          python3 -m pip install -r projects/rocprofiler-sdk/requirements.txt
+          python3 -m pip install -r requirements.txt
 
       - name: Configure, Build, Install, and Package
         timeout-minutes: 60
@@ -124,7 +110,7 @@ jobs:
             -DCPACK_GENERATOR='DEB;RPM;TGZ'
             -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
             -DPython3_EXECUTABLE=$(which python3)
-            projects/rocprofiler-sdk;
+            .;
           cmake --build build --target docs --parallel 4;
           cmake --build build --target all --parallel 12;
           sudo cmake --build build --target install --parallel 12;
