@@ -2,7 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
+## ROCm Compute Profiler 3.2.2 for ROCm 7.0.0
 
 ### Added
 
