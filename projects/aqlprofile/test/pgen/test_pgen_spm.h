@@ -67,9 +67,9 @@ hsa_status_t TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
   std::clog << string_format("SPM Callback: Data = %p Size = %zu\n", info_data->trace_data.ptr,
                              info_data->trace_data.size);
   if (callback_data) {
-    auto streams_ = (std::ofstream*)callback_data;
-    streams_[info_data->sample_id].write((const char*)info_data->trace_data.ptr,
-                                         info_data->trace_data.size);
+    auto* streams_ = (std::vector<std::ofstream>*)callback_data;
+    (*streams_)[info_data->sample_id].write((const char*)info_data->trace_data.ptr,
+                                            info_data->trace_data.size);
   }  return status;
 }
 
@@ -184,12 +184,13 @@ class TestPGenSpm : public TestPGen {
     status = api_->hsa_ven_amd_aqlprofile_stop(&profile_, PostPacket());
     TEST_ASSERT(status == HSA_STATUS_SUCCESS);
 
-    for (int i = 0; i < num_xcc_; i++) {
+    streams_.resize(num_xcc_);
+    for (uint32_t i = 0; i < num_xcc_; i++) {
       std::ostringstream oss;
       oss << "spm_buffer_" << i << ".bin";
       streams_[i].open(oss.str(), std::ofstream::binary | std::ofstream::out);
     }
-    api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, streams_);
+    api_->hsa_ven_amd_aqlprofile_iterate_data(&profile_, TestPGenSpmCallback, &streams_);
 
     return (status == HSA_STATUS_SUCCESS);
   }
@@ -302,7 +303,7 @@ class TestPGenSpm : public TestPGen {
   static const uint32_t spm_sample_rate_ = 10000;    // default SPM sample rate
 
   hsa_ven_amd_aqlprofile_profile_t profile_;
-  std::ofstream streams_[8];
+  std::vector<std::ofstream> streams_;
   uint32_t num_xcc_;
 };
 
