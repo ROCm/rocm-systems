@@ -31,6 +31,10 @@ namespace rocprofsys
 namespace gpu
 {
 #if ROCPROFSYS_USE_ROCM > 0
+
+constexpr uint64_t mi300_gfx_ver  = 0x940;
+constexpr uint64_t navi10_gfx_ver = 0x1010;
+
 void
 get_processor_handles();
 
@@ -52,6 +56,9 @@ is_vcn_busy_supported(uint32_t dev_id);
 bool
 is_jpeg_busy_supported(uint32_t dev_id);
 
+bool
+is_gpu_category_mi300(uint32_t dev_id);
+
 struct processors
 {
     static uint32_t                             total_processor_count;
@@ -60,6 +67,7 @@ struct processors
     static std::vector<bool>                    jpeg_activity_supported;
     static std::vector<bool>                    vcn_busy_supported;
     static std::vector<bool>                    jpeg_busy_supported;
+    static std::vector<bool>                    gpu_category_mi300;
 
 private:
     friend void                    rocprofsys::gpu::get_processor_handles();
@@ -69,6 +77,7 @@ private:
     friend bool rocprofsys::gpu::is_jpeg_activity_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_vcn_busy_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_jpeg_busy_supported(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_gpu_category_mi300(uint32_t dev_id);
 };
 #endif
 
