@@ -46,88 +46,85 @@ def write_agent_info_csv(
 
     query = """
         SELECT
-            A.guid AS Guid,
-            json_extract(A.extdata, '$.node_id') AS Node_Id,
-            json_extract(A.extdata, '$.logical_node_id') AS Logical_Node_Id,
-            A.type AS Agent_Type,
-            json_extract(A.extdata, '$.cpu_cores_count') AS Cpu_Cores_Count,
-            json_extract(A.extdata, '$.simd_count') AS Simd_Count,
-            json_extract(A.extdata, '$.cpu_core_id_base') AS Cpu_Core_Id_Base,
-            json_extract(A.extdata, '$.simd_id_base') AS Simd_Id_Base,
-            json_extract(A.extdata, '$.max_waves_per_simd') AS Max_Waves_Per_Simd,
-            json_extract(A.extdata, '$.lds_size_in_kb') AS Lds_Size_In_Kb,
-            json_extract(A.extdata, '$.gds_size_in_kb') AS Gds_Size_In_Kb,
-            json_extract(A.extdata, '$.num_gws') AS Num_Gws,
-            json_extract(A.extdata, '$.wave_front_size') AS Wave_Front_Size,
-            json_extract(A.extdata, '$.num_xcc') AS Num_Xcc,
-            json_extract(A.extdata, '$.cu_count') AS Cu_Count,
-            json_extract(A.extdata, '$.array_count') AS Array_Count,
-            json_extract(A.extdata, '$.num_shader_banks') AS Num_Shader_Banks,
-            json_extract(A.extdata, '$.simd_arrays_per_engine') AS Simd_Arrays_Per_Engine,
-            json_extract(A.extdata, '$.cu_per_simd_array') AS Cu_Per_Simd_Array,
-            json_extract(A.extdata, '$.simd_per_cu') AS Simd_Per_Cu,
-            json_extract(A.extdata, '$.max_slots_scratch_cu') AS Max_Slots_Scratch_Cu,
-            json_extract(A.extdata, '$.gfx_target_version') AS Gfx_Target_Version,
-            json_extract(A.extdata, '$.vendor_id') AS Vendor_Id,
-            json_extract(A.extdata, '$.device_id') AS Device_Id,
-            json_extract(A.extdata, '$.location_id') AS Location_Id,
-            json_extract(A.extdata, '$.domain') AS Domain,
-            json_extract(A.extdata, '$.drm_render_minor') AS Drm_Render_Minor,
-            json_extract(A.extdata, '$.num_sdma_engines') AS Num_Sdma_Engines,
-            json_extract(A.extdata, '$.num_sdma_xgmi_engines') AS Num_Sdma_Xgmi_Engines,
-            json_extract(A.extdata, '$.num_sdma_queues_per_engine') AS Num_Sdma_Queues_Per_Engine,
-            json_extract(A.extdata, '$.num_cp_queues') AS Num_Cp_Queues,
-            json_extract(A.extdata, '$.max_engine_clk_ccompute') AS Max_Engine_Clk_Ccompute,
-            json_extract(A.extdata, '$.max_engine_clk_fcompute')  AS Max_Engine_Clk_Fcompute,
-            json_extract(A.extdata, '$.sdma_fw_version.uCodeSDMA') AS Sdma_Fw_Version,
-            json_extract(A.extdata, '$.fw_version.uCode') AS Fw_Version,
-            (COALESCE(json_extract(A.extdata, '$.capability.HotPluggable'), 0) << 0x0) |
-            (COALESCE(json_extract(A.extdata, '$.capability.HSAMMUPresent'), 0) << 0x1) |
-            (COALESCE(json_extract(A.extdata, '$.capability.SharedWithGraphics'), 0) << 0x2) |
-            (COALESCE(json_extract(A.extdata, '$.capability.QueueSizePowerOfTwo'), 0) << 0x3) |
-            (COALESCE(json_extract(A.extdata, '$.capability.QueueSize32bit'), 0) << 0x4) |
-            (COALESCE(json_extract(A.extdata, '$.capability.QueueIdleEvent'), 0) << 0x5) |
-            (COALESCE(json_extract(A.extdata, '$.capability.VALimit'), 0) << 0x6) |
-            (COALESCE(json_extract(A.extdata, '$.capability.WatchPointsSupported'), 0) << 0x7) |
-            ((COALESCE(json_extract(A.extdata, '$.capability.WatchPointsTotalBits'), 0) & 0xF) << 0x8) |
-            ((COALESCE(json_extract(A.extdata, '$.capability.DoorbellType'), 0) & 0x3) << 0xC) |
-            (COALESCE(json_extract(A.extdata, '$.capability.AQLQueueDoubleMap'), 0) << 0xE) |
-            (COALESCE(json_extract(A.extdata, '$.capability.DebugTrapSupported'), 0) << 0xF) |
-            (COALESCE(json_extract(A.extdata, '$.capability.WaveLaunchTrapOverrideSupported'), 0) << 0x10) |
-            (COALESCE(json_extract(A.extdata, '$.capability.WaveLaunchModeSupported'), 0) << 0x11) |
-            (COALESCE(json_extract(A.extdata, '$.capability.PreciseMemoryOperationsSupported'), 0) << 0x12) |
-            (COALESCE(json_extract(A.extdata, '$.capability.DEPRECATED_SRAM_EDCSupport'), 0) << 0x13) |
-            (COALESCE(json_extract(A.extdata, '$.capability.Mem_EDCSupport'), 0) << 0x14) |
-            (COALESCE(json_extract(A.extdata, '$.capability.RASEventNotify'), 0) << 0x15) |
-            ((COALESCE(json_extract(A.extdata, '$.capability.ASICRevision'), 0) & 0xF) << 0x16) |
-            (COALESCE(json_extract(A.extdata, '$.capability.SRAM_EDCSupport'), 0) << 0x1A) |
-            (COALESCE(json_extract(A.extdata, '$.capability.SVMAPISupported'), 0) << 0x1B) |
-            (COALESCE(json_extract(A.extdata, '$.capability.CoherentHostAccess'), 0) << 0x1C) |
-            (COALESCE(json_extract(A.extdata, '$.capability.DebugSupportedFirmware'), 0) << 0x1D) |
-            (COALESCE(json_extract(A.extdata, '$.capability.PreciseALUOperationsSupported'), 0) << 0x1E) |
-            (COALESCE(json_extract(A.extdata, '$.capability.PerQueueResetSupported'), 0) << 0x1F) AS Capability,
-            json_extract(A.extdata, '$.cu_per_engine') AS Cu_Per_Engine,
-            json_extract(A.extdata, '$.max_waves_per_cu') AS Max_Waves_Per_Cu,
-            json_extract(A.extdata, '$.workgroup_max_size') AS Workgroup_Max_Size,
-            json_extract(A.extdata, '$.family_id') AS Family_Id,
-            json_extract(A.extdata, '$.grid_max_size') AS Grid_Max_Size,
-            json_extract(A.extdata, '$.local_mem_size') AS Local_Mem_Size,
-            json_extract(A.extdata, '$.hive_id') AS Hive_Id,
-            json_extract(A.extdata, '$.gpu_id') AS Gpu_Id,
-            json_extract(A.extdata, '$.workgroup_max_dim.x') AS Workgroup_Max_Dim_X,
-            json_extract(A.extdata, '$.workgroup_max_dim.y') AS Workgroup_Max_Dim_Y,
-            json_extract(A.extdata, '$.workgroup_max_dim.z') AS Workgroup_Max_Dim_Z,
-            json_extract(A.extdata, '$.grid_max_dim.x') AS Grid_Max_Dim_X,
-            json_extract(A.extdata, '$.grid_max_dim.y') AS Grid_Max_Dim_Y,
-            json_extract(A.extdata, '$.grid_max_dim.z') AS Grid_Max_Dim_Z,
-            A.name AS Name,
-            json_extract(A.extdata, '$.vendor_name') AS Vendor_Name,
-            json_extract(A.extdata, '$.product_name') AS Product_Name,
-            A.model_name AS Model_Name
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_agent as A
-            ON A.guid = N.guid
-            AND A.nid = N.id
+            guid AS Guid,
+            json_extract(extdata, '$.node_id') AS Node_Id,
+            json_extract(extdata, '$.logical_node_id') AS Logical_Node_Id,
+            type AS Agent_Type,
+            json_extract(extdata, '$.cpu_cores_count') AS Cpu_Cores_Count,
+            json_extract(extdata, '$.simd_count') AS Simd_Count,
+            json_extract(extdata, '$.cpu_core_id_base') AS Cpu_Core_Id_Base,
+            json_extract(extdata, '$.simd_id_base') AS Simd_Id_Base,
+            json_extract(extdata, '$.max_waves_per_simd') AS Max_Waves_Per_Simd,
+            json_extract(extdata, '$.lds_size_in_kb') AS Lds_Size_In_Kb,
+            json_extract(extdata, '$.gds_size_in_kb') AS Gds_Size_In_Kb,
+            json_extract(extdata, '$.num_gws') AS Num_Gws,
+            json_extract(extdata, '$.wave_front_size') AS Wave_Front_Size,
+            json_extract(extdata, '$.num_xcc') AS Num_Xcc,
+            json_extract(extdata, '$.cu_count') AS Cu_Count,
+            json_extract(extdata, '$.array_count') AS Array_Count,
+            json_extract(extdata, '$.num_shader_banks') AS Num_Shader_Banks,
+            json_extract(extdata, '$.simd_arrays_per_engine') AS Simd_Arrays_Per_Engine,
+            json_extract(extdata, '$.cu_per_simd_array') AS Cu_Per_Simd_Array,
+            json_extract(extdata, '$.simd_per_cu') AS Simd_Per_Cu,
+            json_extract(extdata, '$.max_slots_scratch_cu') AS Max_Slots_Scratch_Cu,
+            json_extract(extdata, '$.gfx_target_version') AS Gfx_Target_Version,
+            json_extract(extdata, '$.vendor_id') AS Vendor_Id,
+            json_extract(extdata, '$.device_id') AS Device_Id,
+            json_extract(extdata, '$.location_id') AS Location_Id,
+            json_extract(extdata, '$.domain') AS Domain,
+            json_extract(extdata, '$.drm_render_minor') AS Drm_Render_Minor,
+            json_extract(extdata, '$.num_sdma_engines') AS Num_Sdma_Engines,
+            json_extract(extdata, '$.num_sdma_xgmi_engines') AS Num_Sdma_Xgmi_Engines,
+            json_extract(extdata, '$.num_sdma_queues_per_engine') AS Num_Sdma_Queues_Per_Engine,
+            json_extract(extdata, '$.num_cp_queues') AS Num_Cp_Queues,
+            json_extract(extdata, '$.max_engine_clk_ccompute') AS Max_Engine_Clk_Ccompute,
+            json_extract(extdata, '$.max_engine_clk_fcompute')  AS Max_Engine_Clk_Fcompute,
+            json_extract(extdata, '$.sdma_fw_version.uCodeSDMA') AS Sdma_Fw_Version,
+            json_extract(extdata, '$.fw_version.uCode') AS Fw_Version,
+            (COALESCE(json_extract(extdata, '$.capability.HotPluggable'), 0) << 0x0) |
+            (COALESCE(json_extract(extdata, '$.capability.HSAMMUPresent'), 0) << 0x1) |
+            (COALESCE(json_extract(extdata, '$.capability.SharedWithGraphics'), 0) << 0x2) |
+            (COALESCE(json_extract(extdata, '$.capability.QueueSizePowerOfTwo'), 0) << 0x3) |
+            (COALESCE(json_extract(extdata, '$.capability.QueueSize32bit'), 0) << 0x4) |
+            (COALESCE(json_extract(extdata, '$.capability.QueueIdleEvent'), 0) << 0x5) |
+            (COALESCE(json_extract(extdata, '$.capability.VALimit'), 0) << 0x6) |
+            (COALESCE(json_extract(extdata, '$.capability.WatchPointsSupported'), 0) << 0x7) |
+            ((COALESCE(json_extract(extdata, '$.capability.WatchPointsTotalBits'), 0) & 0xF) << 0x8) |
+            ((COALESCE(json_extract(extdata, '$.capability.DoorbellType'), 0) & 0x3) << 0xC) |
+            (COALESCE(json_extract(extdata, '$.capability.AQLQueueDoubleMap'), 0) << 0xE) |
+            (COALESCE(json_extract(extdata, '$.capability.DebugTrapSupported'), 0) << 0xF) |
+            (COALESCE(json_extract(extdata, '$.capability.WaveLaunchTrapOverrideSupported'), 0) << 0x10) |
+            (COALESCE(json_extract(extdata, '$.capability.WaveLaunchModeSupported'), 0) << 0x11) |
+            (COALESCE(json_extract(extdata, '$.capability.PreciseMemoryOperationsSupported'), 0) << 0x12) |
+            (COALESCE(json_extract(extdata, '$.capability.DEPRECATED_SRAM_EDCSupport'), 0) << 0x13) |
+            (COALESCE(json_extract(extdata, '$.capability.Mem_EDCSupport'), 0) << 0x14) |
+            (COALESCE(json_extract(extdata, '$.capability.RASEventNotify'), 0) << 0x15) |
+            ((COALESCE(json_extract(extdata, '$.capability.ASICRevision'), 0) & 0xF) << 0x16) |
+            (COALESCE(json_extract(extdata, '$.capability.SRAM_EDCSupport'), 0) << 0x1A) |
+            (COALESCE(json_extract(extdata, '$.capability.SVMAPISupported'), 0) << 0x1B) |
+            (COALESCE(json_extract(extdata, '$.capability.CoherentHostAccess'), 0) << 0x1C) |
+            (COALESCE(json_extract(extdata, '$.capability.DebugSupportedFirmware'), 0) << 0x1D) |
+            (COALESCE(json_extract(extdata, '$.capability.PreciseALUOperationsSupported'), 0) << 0x1E) |
+            (COALESCE(json_extract(extdata, '$.capability.PerQueueResetSupported'), 0) << 0x1F) AS Capability,
+            json_extract(extdata, '$.cu_per_engine') AS Cu_Per_Engine,
+            json_extract(extdata, '$.max_waves_per_cu') AS Max_Waves_Per_Cu,
+            json_extract(extdata, '$.workgroup_max_size') AS Workgroup_Max_Size,
+            json_extract(extdata, '$.family_id') AS Family_Id,
+            json_extract(extdata, '$.grid_max_size') AS Grid_Max_Size,
+            json_extract(extdata, '$.local_mem_size') AS Local_Mem_Size,
+            json_extract(extdata, '$.hive_id') AS Hive_Id,
+            json_extract(extdata, '$.gpu_id') AS Gpu_Id,
+            json_extract(extdata, '$.workgroup_max_dim.x') AS Workgroup_Max_Dim_X,
+            json_extract(extdata, '$.workgroup_max_dim.y') AS Workgroup_Max_Dim_Y,
+            json_extract(extdata, '$.workgroup_max_dim.z') AS Workgroup_Max_Dim_Z,
+            json_extract(extdata, '$.grid_max_dim.x') AS Grid_Max_Dim_X,
+            json_extract(extdata, '$.grid_max_dim.y') AS Grid_Max_Dim_Y,
+            json_extract(extdata, '$.grid_max_dim.z') AS Grid_Max_Dim_Z,
+            name AS Name,
+            json_extract(extdata, '$.vendor_name') AS Vendor_Name,
+            json_extract(extdata, '$.product_name') AS Product_Name,
+            model_name AS Model_Name
+        FROM "rocpd_info_agent"
     """
     write_sql_query_to_csv(importData, query, output_path, "out_agent_info")
 
@@ -137,36 +134,29 @@ def write_kernel_csv(
 
     query = """
         SELECT
-            K.guid AS Guid,
+            guid AS Guid,
             'KERNEL_DISPATCH' AS Kind,
-            'Agent ' || K.agent_log_index AS Agent_Id,
-            K.queue_id AS Queue_Id,
-            K.stream_id AS Stream_Id,
-            K.tid AS Thread_Id,
-            K.dispatch_id AS Dispatch_Id,
-            K.kernel_Id AS Kernel_Id,
-            K.name AS Kernel_Name,
-            K.stack_id AS Correlation_Id,
-            K.start AS Start_Timestamp,
-            K.end AS End_Timestamp,
-            K.scratch_size AS Private_Segment_Size,
-            K.lds_size AS Group_Segment_Size,
-            K.workgroup_x AS Workgroup_Size_X,
-            K.workgroup_y AS Workgroup_Size_Y,
-            K.workgroup_z AS Workgroup_Size_Z,
-            K.grid_x AS Grid_Size_X,
-            K.grid_y AS Grid_Size_Y,
-            K.grid_z AS Grid_Size_Z
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN kernels AS K
-            ON K.guid = P.guid
-            AND K.nid = P.nid
-            AND K.pid = P.pid
+            'Agent ' || agent_log_index AS Agent_Id,
+            queue_id AS Queue_Id,
+            stream_id AS Stream_Id,
+            tid AS Thread_Id,
+            dispatch_id AS Dispatch_Id,
+            kernel_Id AS Kernel_Id,
+            name AS Kernel_Name,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp,
+            scratch_size AS Private_Segment_Size,
+            lds_size AS Group_Segment_Size,
+            workgroup_x AS Workgroup_Size_X,
+            workgroup_y AS Workgroup_Size_Y,
+            workgroup_z AS Workgroup_Size_Z,
+            grid_x AS Grid_Size_X,
+            grid_y AS Grid_Size_Y,
+            grid_z AS Grid_Size_Z
+        FROM "kernels"
         ORDER BY
-            K.start ASC, K.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_kernel_trace")
 
@@ -176,26 +166,18 @@ def write_memory_copy_csv(
 
     query = """
         SELECT
-            M.guid AS Guid,
+            guid AS Guid,
             'MEMORY_COPY' AS Kind,
-            M.name AS Direction,
-            M.stream_id AS Stream_Id,
-            'Agent ' || M.src_agent_log_index AS Source_Agent_Id,
-            'Agent ' || M.dst_agent_log_index AS Destination_Agent_Id,
-            M.stack_id AS Correlation_Id,
-            M.start AS Start_Timestamp,
-            M.end AS End_Timestamp
-
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN memory_copies AS M
-            ON M.guid = P.guid
-            AND M.nid = P.nid
-            AND M.pid = P.pid
+            name AS Direction,
+            stream_id AS Stream_Id,
+            'Agent ' || src_agent_log_index AS Source_Agent_Id,
+            'Agent ' || dst_agent_log_index AS Destination_Agent_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "memory_copies"
         ORDER BY
-            M.start ASC, M.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_memory_copy_trace")
 
@@ -205,29 +187,22 @@ def write_memory_allocation_csv(
 
     query = """
         SELECT
-            A.guid AS Guid,
+            guid AS Guid,
             'MEMORY_ALLOCATION' AS Kind,
-            'MEMORY_ALLOCATION_' || A.type AS Operation,
+            'MEMORY_ALLOCATION_' || type AS Operation,
             CASE
-                WHEN A.type != "FREE"
-                THEN 'Agent ' || A.agent_log_index
+                WHEN type != "FREE"
+                THEN 'Agent ' || agent_log_index
                 ELSE '"'
             END AS Agent_Id,
-            A.size AS Allocation_Size,
-            '0x' || printf('%016X', A.address) AS Address,
-            A.stack_id AS Correlation_Id,
-            A.start AS Start_Timestamp,
-            A.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN memory_allocations AS A
-            ON A.guid = P.guid
-            AND A.nid = P.nid
-            AND A.pid = P.pid
+            size AS Allocation_Size,
+            '0x' || printf('%016X', address) AS Address,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "memory_allocations"
         ORDER BY
-            A.start ASC, A.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_memory_allocation_trace")
 
@@ -237,26 +212,19 @@ def write_hip_api_csv(
 
     query = """
         SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
-            R.name AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            guid AS Guid,
+            category AS Domain,
+            name AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions"
         WHERE
-            R.category LIKE 'HIP_%'
+            category LIKE 'HIP_%'
         ORDER BY
-            R.start ASC, R.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_hip_api_trace")
 
@@ -266,26 +234,19 @@ def write_hsa_api_csv(
 
     query = """
         SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
-            R.name AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            guid AS Guid,
+            category AS Domain,
+            name AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions"
         WHERE
-            R.category LIKE 'HSA_%'
+            category LIKE 'HSA_%'
         ORDER BY
-            R.start ASC, R.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_hsa_api_trace")
 
@@ -295,30 +256,23 @@ def write_marker_api_csv(
 
     query = """
         SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
+            guid AS Guid,
+            category AS Domain,
             CASE
-                WHEN json_extract(R.extdata, '$.message') IS NOT NULL
-                THEN json_extract(R.extdata, '$.message')
-                ELSE R.name
+                WHEN json_extract(extdata, '$.message') IS NOT NULL
+                THEN json_extract(extdata, '$.message')
+                ELSE name
             END AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions_and_samples AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions_and_samples"
         WHERE
-            R.category LIKE 'MARKER_%'
+            category LIKE 'MARKER_%'
         ORDER BY
-            R.start ASC, R.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_marker_api_trace")
 
@@ -328,36 +282,29 @@ def write_counters_csv(
 
     query = """
         SELECT
-            C.guid AS Pid,
-            C.stack_id AS Correlation_Id,
-            C.dispatch_id AS Dispatch_Id,
-            'Agent ' || C.agent_log_index AS Agent_Id,
-            C.queue_id AS Queue_Id,
-            C.pid AS Process_Id,
-            C.tid AS Thread_Id,
-            C.grid_size AS Grid_Size,
-            C.kernel_id AS Kernel_Id,
-            C.kernel_name AS Kernel_Name,
-            C.workgroup_size AS Workgroup_Size,
-            C.lds_block_size AS LDS_Block_Size,
-            C.scratch_size AS Scratch_Size,
-            C.vgpr_count AS VGPR_Count,
-            C.accum_vgpr_count AS Accum_VGPR_Count,
-            C.sgpr_count AS SGPR_Count,
-            C.counter_name AS Counter_Name,
-            C.value AS Counter_Value,
-            C.start AS Start_Timestamp,
-            C.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN counters_collection AS C
-            ON C.guid = P.guid
-            AND C.nid = P.nid
-            AND C.pid = P.pid
+            guid AS Pid,
+            stack_id AS Correlation_Id,
+            dispatch_id AS Dispatch_Id,
+            'Agent ' || agent_log_index AS Agent_Id,
+            queue_id AS Queue_Id,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            grid_size AS Grid_Size,
+            kernel_id AS Kernel_Id,
+            kernel_name AS Kernel_Name,
+            workgroup_size AS Workgroup_Size,
+            lds_block_size AS LDS_Block_Size,
+            scratch_size AS Scratch_Size,
+            vgpr_count AS VGPR_Count,
+            accum_vgpr_count AS Accum_VGPR_Count,
+            sgpr_count AS SGPR_Count,
+            counter_name AS Counter_Name,
+            value AS Counter_Value,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "counters_collection"
         ORDER BY
-            C.start ASC, C.end DESC
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_counter_collection")
 
@@ -368,23 +315,16 @@ def write_scratch_memory_csv(
     query = """
         SELECT
             'SCRATCH_MEMORY' AS Kind,
-            'SCRATCH_MEMORY_' || S.operation AS Operation,
-            'Agent ' || S.agent_log_index AS Agent_Id,
-            S.queue_id AS Queue_Id,
-            S.tid AS Thread_Id,
-            S.alloc_flags AS Alloc_Flags,
-            S.start AS Start_Timestamp,
-            S.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN scratch_memory AS S
-            ON S.guid = P.guid
-            AND S.nid = P.nid
-            AND S.pid = P.pid
+            'SCRATCH_MEMORY_' || operation AS Operation,
+            'Agent ' || agent_log_index AS Agent_Id,
+            queue_id AS Queue_Id,
+            tid AS Thread_Id,
+            alloc_flags AS Alloc_Flags,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "scratch_memory"
         ORDER BY
-            S.start ASC, S.end
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_scratch_memory_trace")
 
@@ -394,26 +334,19 @@ def write_rccl_api_csv(
 
     query = """
          SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
-            R.name AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            guid AS Guid,
+            category AS Domain,
+            name AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions"
         WHERE
-            R.category LIKE 'RCCL_%'
+            category LIKE 'RCCL_%'
         ORDER BY
-            R.start ASC, R.end
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_rccl_api_trace")
 
@@ -423,26 +356,19 @@ def write_rocdecode_api_csv(
 
     query = """
          SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
-            R.name AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            guid AS Guid,
+            category AS Domain,
+            name AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions"
         WHERE
-            R.category LIKE 'ROCDECODE_%'
+            category LIKE 'ROCDECODE_%'
         ORDER BY
-            R.start ASC, R.end
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_rocdecode_api_trace")
 
@@ -452,26 +378,19 @@ def write_rocjpeg_api_csv(
 
     query = """
         SELECT
-            R.guid AS Guid,
-            R.category AS Domain,
-            R.name AS Function,
-            R.pid AS Process_Id,
-            R.tid AS Thread_Id,
-            R.stack_id AS Correlation_Id,
-            R.start AS Start_Timestamp,
-            R.end AS End_Timestamp
-        FROM "rocpd_info_node" AS N
-        INNER JOIN rocpd_info_process as P
-            ON P.guid = N.guid
-            AND P.nid = N.id
-        INNER JOIN regions AS R
-            ON R.guid = P.guid
-            AND R.nid = P.nid
-            AND R.pid = P.pid
+            guid AS Guid,
+            category AS Domain,
+            name AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions"
         WHERE
-            R.category LIKE 'ROCJPEG_%'
+            category LIKE 'ROCJPEG_%'
         ORDER BY
-            R.start ASC, R.end
+            start ASC, end DESC
     """
     write_sql_query_to_csv(importData, query, output_path, "out_rocjpeg_api_trace")
 
