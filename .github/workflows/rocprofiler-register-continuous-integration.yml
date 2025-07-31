@@ -45,7 +45,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: rocprof-azure-emu-runner-set
+    runs-on: rocprofiler-ubuntu-22
 
     env:
         BUILD_TYPE: RelWithDebInfo

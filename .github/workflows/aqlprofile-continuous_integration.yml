@@ -47,7 +47,7 @@ jobs:
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
-    runs-on: ${{ matrix.runner }}${{ github.ref == 'refs/heads/amd-npi' && '-npi' || '' }}-emu-runner-set
+    runs-on: rocprofiler-${{ matrix.runner == 'mi300' && 'ubuntu-22' || matrix.runner }}
     if: github.event.pull_request.head.repo.full_name == 'AMD-ROCm-Internal/aqlprofile'
 
     permissions:
@@ -112,7 +112,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
-    runs-on: ${{ matrix.os }}-emu-runner-set
+    runs-on: rocprofiler-${{ matrix.os }}
 
     permissions:
       contents: read

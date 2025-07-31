@@ -53,12 +53,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3', 'navi4', 'mi300a']
+        runner: ['navi4', 'navi3', 'mi300a']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
-        ci-flags: ['--linter clang-tidy']
 
-    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprof-ubuntu-22' || matrix.runner }}-emu-runner-set
+    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
 
     # define this for containers
     env:
@@ -93,7 +92,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
@@ -105,41 +104,41 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
-          ${{ matrix.ci-flags }}
+          ${{ matrix.system.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       run:
         cmake --build build --target install --parallel 16
 
     - name: Build Packaging
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       run:
         cmake --build build --target package --parallel 16
 
     - name: Test Install Build
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -149,11 +148,11 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-samples -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-tests -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Install Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 5
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -166,7 +165,7 @@ jobs:
         for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do dpkg --force-all -i ${i}; done;
 
     - name: Test Installed Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -175,11 +174,11 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-tests-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Archive production artifacts
-      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       uses: actions/upload-artifact@v4
       with:
         name: installers-deb
@@ -194,11 +193,11 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel', 'sles']
+        os: ['rhel-8', 'sles-15']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprofiler-${{ matrix.os }}
+    runs-on: rocprof-${{ matrix.os }}
 
     # define this for containers
     env:
@@ -214,7 +213,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         git config --global --add safe.directory '*'
-        if [ "${OS_TYPE}" == "rhel" ]; then
+        if [ "${OS_TYPE}" == "rhel-8" ]; then
           dnf makecache
           dnf groupinstall -y "Development Tools"
           dnf remove -y gcc-c++
@@ -269,13 +268,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi300']
+        runner: ['mi3xx']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner == 'mi3xx' && 'rocprofiler-ubuntu-22' || matrix.runner }}-emu-runner-set
+    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
 
     # define this for containers
     env:
@@ -289,7 +288,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run: 
+      run:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev
