@@ -18,7 +18,7 @@ concurrency:
 
 jobs:
   cmake:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -91,7 +91,7 @@ jobs:
         fi
 
   python:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ['3.10']
@@ -133,7 +133,7 @@ jobs:
         fi
 
   missing-new-line:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
     - uses: actions/checkout@v4

@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   regex:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     env:
       FOLDERS: "projects/rocprofiler-sdk/source/lib/common projects/rocprofiler-sdk/source/lib/rocprofiler-sdk projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-roctx"
 

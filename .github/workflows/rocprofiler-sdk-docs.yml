@@ -72,7 +72,7 @@ jobs:
 
   deploy-docs:
     if: github.ref == 'refs/heads/amd-mainline'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs: build-docs
     permissions:
       contents: read

@@ -197,7 +197,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprof-${{ matrix.os }}
+    runs-on: rocprofiler-${{ matrix.os }}
 
     # define this for containers
     env:
