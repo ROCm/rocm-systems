@@ -214,8 +214,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
-        submodules: true
-        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
