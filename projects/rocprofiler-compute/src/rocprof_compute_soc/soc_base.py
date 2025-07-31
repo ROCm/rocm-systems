@@ -396,11 +396,8 @@ class OmniSoC_Base:
             # Counters not supported in rocprof v1 / v2
             counters = counters - {"SQ_INSTS_VALU_MFMA_F8", "SQ_INSTS_VALU_MFMA_MOPS_F8"}
 
-        # Following counters are not supported
-        # TCP_TCP_LATENCY_sum (except for gfx950)
-        # SQC_DCACHE_INFLIGHT_LEVEL
-        counters = counters - {"SQC_DCACHE_INFLIGHT_LEVEL"}
-        if self.__arch != "gfx950":
+        # TCP_TCP_LATENCY_sum not supported for MI300 (gfx940, gfx941, gfx942)
+        if self.__arch in ("gfx940", "gfx941", "gfx942"):
             counters = counters - {"TCP_TCP_LATENCY_sum"}
 
         # SQ_ACCUM_PREV_HIRES will be injected for level counters later on
@@ -508,40 +505,15 @@ class OmniSoC_Base:
                     counters, _ = self.parse_counters_text(line.split(":")[2].strip())
                     rocprof_counters.update(counters)
 
-        elif str(rocprof_cmd).endswith("rocprofv3"):
-            command = [rocprof_cmd, "--list-avail"]
-            success, output = capture_subprocess_output(command, enable_logging=False)
-            # return code should be 0 so success should be True
-            if not success:
-                console_error(
-                    f"Failed to list rocprof supported counters using command: {command}"
-                )
-            for line in output.splitlines():
-                if "counter_name" in line:
-                    counters, _ = self.parse_counters_text(line.split(":")[1].strip())
-                    rocprof_counters.update(counters)
-            # Custom counter support for mi100 for rocprofv3
-            if self._mspec.gpu_model.lower() == "mi100":
-                counter_defs_path = (
-                    config.rocprof_compute_home
-                    / "rocprof_compute_soc"
-                    / "profile_configs"
-                    / "gfx908_counter_defs.yaml"
-                )
-                with open(counter_defs_path, "r") as fp:
-                    counter_defs_contents = fp.read()
-                counters, _ = self.parse_counters_text(counter_defs_contents)
-                rocprof_counters.update(counters)
-
-        elif str(rocprof_cmd) == "rocprofiler-sdk":
-            # Point to rocprofiler sdk counter definition
+        elif (
+            str(rocprof_cmd).endswith("rocprofv3")
+            or str(rocprof_cmd) == "rocprofiler-sdk"
+        ):
+            # Point to counter definition
             old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
             os.environ["ROCPROFILER_METRICS_PATH"] = str(
-                Path(self.get_args().rocprofiler_sdk_library_path)
-                .resolve()
-                .parent.parent.joinpath("share", "rocprofiler-sdk")
+                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
             )
-
             sys.path.append(
                 str(
                     Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
@@ -562,19 +534,6 @@ class OmniSoC_Base:
                 for counter in counters[list(counters.keys())[0]]
                 if hasattr(counter, "block") or hasattr(counter, "expression")
             }
-            # Custom counter support for mi100 for rocprofiler-sdk
-            if self._mspec.gpu_model.lower() == "mi100":
-                counter_defs_path = (
-                    config.rocprof_compute_home
-                    / "rocprof_compute_soc"
-                    / "profile_configs"
-                    / "gfx908_counter_defs.yaml"
-                )
-                with open(counter_defs_path, "r") as fp:
-                    counter_defs_contents = fp.read()
-                counters, _ = self.parse_counters_text(counter_defs_contents)
-                rocprof_counters.update(counters)
-
             # Reset env. var.
             if old_rocprofiler_metrics_path is None:
                 del os.environ["ROCPROFILER_METRICS_PATH"]
@@ -774,49 +733,55 @@ class OmniSoC_Base:
                 ]:
                     pmc.append(ctr)
                     if using_v3():
-                        # MI 100 accumulate counters dont work with rocprofiler sdk
-                        if self._mspec.gpu_model.lower() != "mi100":
-                            # Add accumulation counters definitions
-                            if ctr == "SQ_IFETCH_LEVEL":
-                                counter_def = add_counter_extra_config_input_yaml(
-                                    counter_def,
-                                    "SQ_IFETCH_LEVEL_ACCUM",
-                                    "SQ_IFETCH_LEVEL accumulation",
-                                    "accumulate(SQ_IFETCH_LEVEL, HIGH_RES)",
-                                    [self.__arch],
-                                )
-                            elif ctr == "SQ_INST_LEVEL_LDS":
-                                counter_def = add_counter_extra_config_input_yaml(
-                                    counter_def,
-                                    "SQ_INST_LEVEL_LDS_ACCUM",
-                                    "SQ_INST_LEVEL_LDS accumulation",
-                                    "accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)",
-                                    [self.__arch],
-                                )
-                            elif ctr == "SQ_INST_LEVEL_SMEM":
-                                counter_def = add_counter_extra_config_input_yaml(
-                                    counter_def,
-                                    "SQ_INST_LEVEL_SMEM_ACCUM",
-                                    "SQ_INST_LEVEL_SMEM accumulation",
-                                    "accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)",
-                                    [self.__arch],
-                                )
-                            elif ctr == "SQ_INST_LEVEL_VMEM":
-                                counter_def = add_counter_extra_config_input_yaml(
-                                    counter_def,
-                                    "SQ_INST_LEVEL_VMEM_ACCUM",
-                                    "SQ_INST_LEVEL_VMEM accumulation",
-                                    "accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)",
-                                    [self.__arch],
-                                )
-                            elif ctr == "SQ_LEVEL_WAVES":
-                                counter_def = add_counter_extra_config_input_yaml(
-                                    counter_def,
-                                    "SQ_LEVEL_WAVES_ACCUM",
-                                    "SQ_LEVEL_WAVES accumulation",
-                                    "accumulate(SQ_LEVEL_WAVES, HIGH_RES)",
-                                    [self.__arch],
-                                )
+                        # Add accumulation counters definitions
+                        if ctr == "SQ_IFETCH_LEVEL":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQ_IFETCH_LEVEL_ACCUM",
+                                "SQ_IFETCH_LEVEL accumulation",
+                                "accumulate(SQ_IFETCH_LEVEL, HIGH_RES)",
+                                [self.__arch],
+                            )
+                        elif ctr == "SQ_INST_LEVEL_LDS":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQ_INST_LEVEL_LDS_ACCUM",
+                                "SQ_INST_LEVEL_LDS accumulation",
+                                "accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)",
+                                [self.__arch],
+                            )
+                        elif ctr == "SQ_INST_LEVEL_SMEM":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQ_INST_LEVEL_SMEM_ACCUM",
+                                "SQ_INST_LEVEL_SMEM accumulation",
+                                "accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)",
+                                [self.__arch],
+                            )
+                        elif ctr == "SQ_INST_LEVEL_VMEM":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQ_INST_LEVEL_VMEM_ACCUM",
+                                "SQ_INST_LEVEL_VMEM accumulation",
+                                "accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)",
+                                [self.__arch],
+                            )
+                        elif ctr == "SQ_LEVEL_WAVES":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQ_LEVEL_WAVES_ACCUM",
+                                "SQ_LEVEL_WAVES accumulation",
+                                "accumulate(SQ_LEVEL_WAVES, HIGH_RES)",
+                                [self.__arch],
+                            )
+                        elif ctr == "SQC_DCACHE_INFLIGHT_LEVEL":
+                            counter_def = add_counter_extra_config_input_yaml(
+                                counter_def,
+                                "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
+                                "SQC_DCACHE_INFLIGHT_LEVEL accumulation",
+                                "accumulate(SQC_DCACHE_INFLIGHT_LEVEL, HIGH_RES)",
+                                [self.__arch],
+                            )
                         # Add TCC channel counters definitions
                         if is_tcc_channel_counter(ctr):
                             counter_name = ctr.split("[")[0]

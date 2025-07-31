@@ -737,41 +737,21 @@ def run_prof(
     new_env = os.environ.copy()
 
     if using_v3():
-        # Default counter definitions
-        if rocprof_cmd == "rocprofiler-sdk":
-            counter_defs_path = (
-                path(options["ROCP_TOOL_LIBRARIES"])
-                .resolve()
-                .parent.parent.parent.joinpath(
-                    "share", "rocprofiler-sdk", "counter_defs.yaml"
-                )
-            )
-        else:
-            counter_defs_path = (
-                path(shutil.which(rocprof_cmd))
-                .resolve()
-                .parent.parent.joinpath("share", "rocprofiler-sdk", "counter_defs.yaml")
-            )
-        # Custom counter definitions for MI 100
-        if mspec.gpu_model.lower() == "mi100":
-            counter_defs_path = (
-                config.rocprof_compute_home
-                / "rocprof_compute_soc"
-                / "profile_configs"
-                / "gfx908_counter_defs.yaml"
-            )
-        # Read counter definitions
-        with open(counter_defs_path, "r") as file:
+        # Counter definitions
+        with open(
+            config.rocprof_compute_home
+            / "rocprof_compute_soc"
+            / "profile_configs"
+            / f"counter_defs.yaml",
+            "r",
+        ) as file:
             counter_defs = yaml.safe_load(file)
-        # Get extra counter definitions
-        path_counter_config_yaml = path(fname).with_suffix(".yaml")
-        if path_counter_config_yaml.exists():
-            with open(path_counter_config_yaml, "r") as file:
-                extra_counter_defs = yaml.safe_load(file)
-            # Merge extra counter definitions
-            counter_defs["rocprofiler-sdk"]["counters"].extend(
-                extra_counter_defs["rocprofiler-sdk"]["counters"]
-            )
+        # Extra counter definitions
+        if path(fname).with_suffix(".yaml").exists():
+            with open(path(fname).with_suffix(".yaml"), "r") as file:
+                counter_defs["rocprofiler-sdk"]["counters"].extend(
+                    yaml.safe_load(file)["rocprofiler-sdk"]["counters"]
+                )
         # Write counter definitions to a temporary file
         tmpfile_path = (
             path(tempfile.mkdtemp(prefix="rocprof_counter_defs_", dir="/tmp"))
@@ -779,7 +759,7 @@ def run_prof(
         )
         with open(tmpfile_path, "w") as tmpfile:
             yaml.dump(counter_defs, tmpfile, default_flow_style=False, sort_keys=False)
-        # Set rocprofiler sdk counter definitions
+        # Set counter definitions
         new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
         console_debug(
             f"Adding env var for counter definitions: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"

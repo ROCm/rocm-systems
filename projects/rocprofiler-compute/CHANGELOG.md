@@ -7,10 +7,16 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
+
 * Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
+
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
+
+* Add missing counters based on register specification which enables missing metrics
+  * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
+  * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
 
 ### Changed
 
@@ -53,12 +59,15 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed standalone GUI crashing
 * Fixed L2 read/write/atomic bandwidths on MI350
 * Update metric names for better alignment between analysis configuration and documentation
+* Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100
 
 ### Known issues
 
 ### Optimized
 
 * Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
+
+* Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
 
 ### Removed
 
