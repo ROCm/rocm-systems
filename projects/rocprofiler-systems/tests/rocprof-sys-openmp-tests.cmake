@@ -26,6 +26,30 @@
 #
 # -------------------------------------------------------------------------------------- #
 
+if(ROCmVersion_DIR)
+    set(_rocm_root "${ROCmVersion_DIR}")
+elseif(DEFINED ENV{ROCM_PATH})
+    set(_rocm_root "$ENV{ROCM_PATH}")
+else()
+    set(_rocm_root "/opt/rocm")
+endif()
+
+set(_rocm_llvm_lib "${_rocm_root}/lib/llvm/lib")
+
+set(_rocm_ld_env
+    "LD_PRELOAD=libomptarget.so"
+    "LD_LIBRARY_PATH=${_rocm_llvm_lib}:$ENV{LD_LIBRARY_PATH}"
+)
+
+if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
+    message(
+        FATAL_ERROR
+        "libomptarget.so not found in ${_rocm_llvm_lib}. "
+        "Verify that ROCm is installed correctly and that _rocm_root "
+        "(${_rocm_root}) points at the right location."
+    )
+endif()
+
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
     set(_OMPT_PASS_REGEX "\\|_ompt_")
 else()
@@ -69,7 +93,7 @@ rocprofiler_systems_add_test(
     GPU ON
     LABELS "openmp;openmp-target"
     ENVIRONMENT
-        "${_ompt_environment};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
+        "${_ompt_environment};${_rocm_ld_env};ROCPROFSYS_ROCM_DOMAINS=hip_runtime_api,kernel_dispatch"
 )
 
 rocprofiler_systems_add_validation_test(
@@ -77,6 +101,7 @@ rocprofiler_systems_add_validation_test(
     PERFETTO_METRIC "rocm_kernel_dispatch"
     PERFETTO_FILE "perfetto-trace.proto"
     LABELS "openmp;openmp-target"
+    ENVIRONMENT "${_rocm_ld_env}"
     ARGS --label-substrings
          Z4vmulIiEvPT_S1_S1_i_l51.kd
          Z4vmulIfEvPT_S1_S1_i_l51.kd
