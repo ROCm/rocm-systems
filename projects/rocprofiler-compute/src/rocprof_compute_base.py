@@ -27,6 +27,7 @@
 import argparse
 import importlib
 import os
+import re
 import socket
 import sys
 import time
@@ -236,7 +237,22 @@ class RocProfCompute:
             )
             sys_info = self.__mspec.get_class_members().iloc[0] if for_current_arch else None
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+
+            pattern = r"(\d+)(?:\.(\d+))?(?:\.(\d+))?"
+            filtered_metrics = [re.fullmatch(pattern, metric) for metric in self.__args.filter_blocks]
+            filtered_metrics = {metric.group(1): metric.group(2) for metric in filtered_metrics if metric is not None}
+
             for key, value in ac.metric_list.items():
+                block = re.fullmatch(pattern, key)
+                top_level = block.group(1)
+                second_level = block.group(2)
+
+                if filtered_metrics:
+                    if top_level not in filtered_metrics.keys():
+                        continue
+                    if filtered_metrics.get(top_level) and second_level and second_level != filtered_metrics.get(top_level):
+                        continue
+
                 prefix = ""
                 if "." not in str(key):
                     prefix = ""

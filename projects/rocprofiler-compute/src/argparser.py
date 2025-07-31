@@ -37,6 +37,14 @@ def print_avail_arch(avail_arch: list):
     return ret_str
 
 
+def validate_block(value):
+        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
+        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
+        if metric_id_pattern.match(value):
+            return value
+        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
+
+
 def add_general_group(parser, rocprof_compute_version, supported_archs, rocprof_compute_home):
     general_group = parser.add_argument_group("General Options")
 
@@ -71,10 +79,18 @@ def add_general_group(parser, rocprof_compute_version, supported_archs, rocprof_
     )
     general_group.add_argument(
         "--list-supported-metrics",
-        #metavar="",
         help="List all available metrics for the current architecture.",
         action="count",
         default=0,
+    )
+    general_group.add_argument(
+        "--filter-blocks",
+        type=validate_block,
+        metavar="",
+        nargs="+",
+        required=False,
+        default=[],
+        help="""Specify metric id(s) from --list-metrics or --list-supported-metrics for filtering (e.g. 12, 12.1, 12.1.1).\nCan provide multiple space separated arguments.""",
     )
     # Nowhere to load specs from in db mode
     if "database" not in parser.usage:
@@ -198,13 +214,6 @@ Examples:
         required=False,
         help="\t\t\tDispatch ID filtering.",
     )
-
-    def validate_block(value):
-        # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
-        if metric_id_pattern.match(value):
-            return value
-        raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
 
     profile_group.add_argument(
         "-b",
