@@ -66,8 +66,15 @@ def add_general_group(parser, rocprof_compute_version, supported_archs, rocprof_
         "--config-path",
         dest="config_dir",
         metavar="",
-        help="\t\t\tSpecify the directory of customized report section configs.",
+        help="Specify the directory of customized report section configs.",
         default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
+    )
+    general_group.add_argument(
+        "--list-supported-metrics",
+        #metavar="",
+        help="List all available metrics for the current architecture.",
+        action="count",
+        default=0,
     )
     # Nowhere to load specs from in db mode
     if "database" not in parser.usage:

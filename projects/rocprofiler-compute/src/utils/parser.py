@@ -499,7 +499,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                         #   is a build-in var. It will be too late to do it in
                         #   eval_metric(). This is the only reason we need
                         #   sys_info at this stage.
-                        var = calc_builtin_var(r, sys_info) if sys_info else 0
+                        var = calc_builtin_var(r, sys_info) if sys_info is not None else 0
                         for i in range(var):
                             new_key = metric.replace(p, str(i))
                             new_val = {}
