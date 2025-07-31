@@ -92,7 +92,6 @@ ALL_CSVS_MI100 = sorted(
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 )
 
@@ -354,13 +353,7 @@ def gpu_soc():
 
 soc = gpu_soc()
 
-# Set rocprofv2 as profiler if MI300
-if "ROCPROF" not in os.environ.keys():
-    if soc == "MI100":
-        os.environ["ROCPROF"] = "rocprof"
-
-    else:
-        os.environ["ROCPROF"] = "rocprofv3"
+os.environ["ROCPROF"] = "rocprofv3"
 
 
 def using_v3():
@@ -717,29 +710,6 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
 
     finally:
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.misc
-def test_roofline_kernel_names_validation_error(binary_handler_profile_rocprof_compute):
-    """
-    Test validate_parameters() error: --roof-only is required for --kernel-names
-    This should trigger console_error("--roof-only is required for --kernel-names")
-    """
-    if soc in ("MI100"):
-        # roofline is not supported on MI100
-        pytest.skip("Skipping roofline test for MI100")
-        return
-
-    options = ["--device", "0", "--kernel-names"]  # missing --roof-only
-    workload_dir = test_utils.get_output_dir()
-
-    returncode = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=False, roof=True
-    )
-
-    assert returncode != 0
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.misc
@@ -1173,7 +1143,6 @@ def test_block_SQ(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -1191,7 +1160,6 @@ def test_block_SQ(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -1256,10 +1224,7 @@ def test_block_SQC(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
-    if using_v3():
-        expected_csvs.remove("timestamps.csv")
 
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
@@ -1290,11 +1255,7 @@ def test_block_TA(binary_handler_profile_rocprof_compute):
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
-
-    if using_v3():
-        expected_csvs.remove("timestamps.csv")
 
     if soc == "MI350":
         expected_csvs = [
@@ -1336,7 +1297,6 @@ def test_block_TD(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -1346,7 +1306,6 @@ def test_block_TD(binary_handler_profile_rocprof_compute):
             "pmc_perf_2.csv",
             "pmc_perf_3.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
         if using_v3():
             expected_csvs = [
@@ -1397,7 +1356,6 @@ def test_block_TCP(binary_handler_profile_rocprof_compute):
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 
     if using_v3():
@@ -1449,7 +1407,6 @@ def test_block_TCP(binary_handler_profile_rocprof_compute):
             "pmc_perf_8.csv",
             "pmc_perf_9.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -1501,7 +1458,6 @@ def test_block_TCC(binary_handler_profile_rocprof_compute):
         "pmc_perf_10.csv",
         "pmc_perf_11.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 
     if using_v3():
@@ -1563,7 +1519,6 @@ def test_block_TCC(binary_handler_profile_rocprof_compute):
             "pmc_perf_9.csv",
             "pmc_perf_10.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -1612,7 +1567,6 @@ def test_block_SPI(binary_handler_profile_rocprof_compute):
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 
     if using_v3():
@@ -1662,7 +1616,6 @@ def test_block_CPC(binary_handler_profile_rocprof_compute):
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 
     if using_v3():
@@ -1711,10 +1664,7 @@ def test_block_CPF(binary_handler_profile_rocprof_compute):
         "pmc_perf_2.csv",
         "pmc_perf_3.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
-    if using_v3():
-        expected_csvs.remove("timestamps.csv")
     assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
@@ -1744,7 +1694,6 @@ def test_block_SQ_CPC(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -1762,7 +1711,6 @@ def test_block_SQ_CPC(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -1832,7 +1780,6 @@ def test_block_SQ_TA(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -1850,7 +1797,6 @@ def test_block_SQ_TA(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -1916,7 +1862,6 @@ def test_block_SQ_SPI(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -1934,7 +1879,6 @@ def test_block_SQ_SPI(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -2005,7 +1949,6 @@ def test_block_SQ_SQC_TCP_CPC(binary_handler_profile_rocprof_compute):
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
     if soc == "MI200" or "MI300" in soc:
         expected_csvs = [
@@ -2023,7 +1966,6 @@ def test_block_SQ_SQC_TCP_CPC(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():
@@ -2089,7 +2031,6 @@ def test_block_SQ_SPI_TA_TCC_CPF(binary_handler_profile_rocprof_compute):
         "pmc_perf_1.csv",
         "pmc_perf_2.csv",
         "sysinfo.csv",
-        "timestamps.csv",
     ]
 
     if soc == "MI100":
@@ -2107,7 +2048,6 @@ def test_block_SQ_SPI_TA_TCC_CPF(binary_handler_profile_rocprof_compute):
             "pmc_perf_4.csv",
             "pmc_perf_5.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
     if soc == "MI200" or "MI300" in soc:
@@ -2126,7 +2066,6 @@ def test_block_SQ_SPI_TA_TCC_CPF(binary_handler_profile_rocprof_compute):
             "pmc_perf_5.csv",
             "pmc_perf_6.csv",
             "sysinfo.csv",
-            "timestamps.csv",
         ]
 
         if using_v3():

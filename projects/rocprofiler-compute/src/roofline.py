@@ -829,7 +829,7 @@ class Roofline:
 
         plt.xlabel("Arithmetic Intensity ({})s/Byte)".format(ops_flops))
         plt.ylabel("Performance (GFLOP/sec)")
-        plt.title("Roofline ({})".format(dtype))
+        plt.title("Roofline ({}) - {}".format(dtype, base_path))
 
         # Canvas config
         plt.theme("pro")

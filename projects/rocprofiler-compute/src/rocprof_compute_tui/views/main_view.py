@@ -122,6 +122,8 @@ class MainView(Horizontal):
 
     @work(thread=True)
     def run_analysis(self) -> None:
+        self.dfs = {}
+
         if not self.selected_path:
             error_msg = "No directory selected for analysis"
             self._update_view(error_msg, LogLevel.ERROR)
@@ -237,7 +239,7 @@ class MainView(Horizontal):
                 else:
                     self.app.call_from_thread(self.refresh_results)
                     self.logger.info("Step 8: Analysis completed successfully")
-                    if self.dfs["roofline"]:
+                    if self.dfs.get("4. Roofline"):
                         self.logger.info("Step 8: Roofline data available")
                     else:
                         self.logger.info("Step 8: Roofline data not available")

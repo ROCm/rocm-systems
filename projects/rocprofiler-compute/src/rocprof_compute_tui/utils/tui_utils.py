@@ -418,7 +418,7 @@ def process_panels_to_dataframes(
                         # Save to CSV if requested
                         if args.df_file_dir:
                             save_dataframe_to_csv(df, table_id_str, table_config, args)
-    result_structure["roofline"] = roof_plot
+    result_structure["4. Roofline"] = roof_plot
     return dict(result_structure)
 
 

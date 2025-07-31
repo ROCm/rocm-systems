@@ -164,20 +164,31 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocm_smi_compute_partition_pattern = r"Compute Partition:\s*(\S+)"
 
     vbios = search(vbios_pattern, amd_smi_output)
-    # 1. get compute partition from amd-smi
+
+    # Non-high-frequency System Patterns
+    # Option 1. Try amd-smi (default)
     compute_partition = search(compute_partition_pattern, amd_smi_output)
     console_debug(f"amd-smi compute partition: {compute_partition}")
-    # 2. get compute partition from rocm-smi
+    # Option 2. Try rocm-smi (DEPRECATION NOTE: rocm-smi removal in ROCm 7.1)
     if compute_partition is None:
         compute_partition = search(
             rocm_smi_compute_partition_pattern, rocm_smi_compute_partition_output
         )
+        if compute_partition:
+            console_warning(
+                "DEPRECATION WARNING: rocm-smi is deprecated in ROCm 7.0 and will be "
+                "removed from rocprof-compute in ROCm 7.1. Please migrate to amd-smi "
+                "for compute partition parsing. For migration help, see https://github.com/ROCm/amdsmi"
+            )
+
         console_debug(f"rocm-smi compute partition: {compute_partition}")
-    # 3. get compute partition from amd-smi using keyword accelerator
+
+    # High-frequency System Pattern using keyword accelerator
     if compute_partition is None:
         compute_partition = search(accelerator_partition_pattern, amd_smi_output)
         console_debug(f"amd-smi accelerator partition: {compute_partition}")
-    # 4. apply default compute partition
+
+    # Apply default compute partition is above fails
     if compute_partition is None:
         console_warning(
             f"Can not detect compute/accelerator partition from amd-smi and rocm-smi."

@@ -197,8 +197,8 @@ an Instinct MI210 vs an Instinct MI250.
    ``sysinfo.csv``, is created to reflect the target device settings. All
    profiling output is stored in ``log.txt``. Roofline-specific benchmark
    results are stored in ``roofline.csv`` and roofline plots are outputted into PDFs as
-   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].pdf`` where datatypes requested through
-    --roofline-data-type option are listed in the file name.
+   ``empirRoof_gpu-0_[datatype1]_..._[datatypeN].pdf`` where data types requested through
+   ``--roofline-data-type`` option are listed in the file name.
 
 .. code-block:: shell-session
 
@@ -457,9 +457,10 @@ of the application (note zero-based indexing).
 Standalone roofline
 ===================
 
-If you are only interested in generating roofline analysis data try using
-``--roof-only``. This will only collect counters relevant to roofline, as well
-as generate a standalone ``.pdf`` output of your roofline plot.
+Roofline analysis occurs on any profile mode run, provided ``--no-roof`` option is not included.
+You don't need to include any additional roofline-specific options for roofline analysis.
+If you want to focus only on roofline-specific performance data and reduce the time it takes to profile, you can use the ``--roof-only`` option.
+This option limits the profiling to just the roofline performance counters.
 
 Roofline options
 ----------------
@@ -477,7 +478,11 @@ Roofline options
    running a roofline benchmark on your system.
 
 ``--roofline-data-type <datatype>``
-   Allows you to specify datatypes that you want plotted in the roofline PDF output(s). Selecting more than one datatype will overlay the results onto the same plot. Default: FP32
+   Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
+
+.. note::
+
+  For more information on data types supported based on the GPU architecture, see :doc:`../../conceptual/performance-model`
 
 To distinguish different kernels in your ``.pdf`` roofline plot use
 ``--kernel-names``. This will give each kernel a unique marker identifiable from
@@ -521,7 +526,8 @@ successfully.
 
 .. note::
 
-   ROCm Compute Profiler currently captures roofline profiling for all data types, but has the ability to reduce clutter in the PDF outputs by selecting datatype(s). Selecting multiple datatypes will overlay the results into the same PDF. If the user would like separate PDFs for each datatype off of the same workload run, the user can run the profiling command again with the single datatype as long as the roofline.csv still exists in the workload folder.
+   * ROCm Compute Profiler currently captures roofline profiling for all data types, and you can reduce the clutter in the PDF outputs by filtering the data type(s). Selecting multiple data types will overlay the results into the same PDF. To generate results in separate PDFs for each data type from the same workload run, you can re-run the profiling command with each data type as long as the ``roofline.csv`` file still exists in the workload folder.
+   * Roofline feature is currently not enabled on AMD Instinct MI350.
 
 The following image is a sample ``empirRoof_gpu-0_FP32.pdf`` roofline
 plot.
