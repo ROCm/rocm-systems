@@ -1,7 +1,9 @@
-name: packaging
+name: RocProfiler-Compute Packaging
 
 on:
   push:
+    path:
+      - 'projects/rocprofiler-compute'
     tags:
       - "v[1-9].[0-9]+.[0-9]+*"
       - "rocm-[0-9]+.[0-9]+.[0-9]+*"
@@ -19,6 +21,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-compute
       - name: Verify VERSION file consistent with tag
         run: utils/ver_check.py --tag ${{github.ref_name}}
       - name: Install Python
@@ -26,26 +30,31 @@ jobs:
         with:
           python-version: '3.8'
       - name: Python dependency installs
+        working-directory: projects/rocprofiler-compute
         run: python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
       - name: Configure
+        working-directory: projects/rocprofiler-compute
         run: |
           mkdir build
           cd build
           cmake -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
       - name: Release tarball
+        working-directory: projects/rocprofiler-compute
         run: |
           cd build
           make package_source
       - name: Rename tarball
+        working-directory: projects/rocprofiler-compute
         run: mv build/rocprofiler-compute-*.tar.gz build/rocprofiler-compute-${{github.ref_name}}.tar.gz
       - name: Archive tarball
         uses: actions/upload-artifact@v4
         with:
           name: rocprofiler-compute-${{github.ref_name}}.tar.gz
-          path: build/rocprofiler-compute-${{github.ref_name}}.tar.gz
+          path: projects/rocprofiler-compute/build/rocprofiler-compute-${{github.ref_name}}.tar.gz
       - name: Set version
         run: echo "VERSION=$(cat VERSION)" >> $GITHUB_ENV
       - name: Determine release name
+        working-directory: projects/rocprofiler-compute
         run: |
           if [[ ${{github.ref_name}} == rocm-* ]]; then
             echo "RELEASE_NAME=rocprofiler-compute ${{ env.VERSION }} for ${{github.ref_name}}"
@@ -54,11 +63,11 @@ jobs:
           fi >> $GITHUB_ENV
       - name: Upload tarball Release Asset
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'ROCm/rocprofiler-compute'
+        if: startsWith(github.ref, 'refs/tags/')
         with:
           fail_on_unmatched: True
           generate_release_notes: True
           draft: False # toggle for debugging
           files: |
-            build/rocprofiler-compute-${{github.ref_name}}.tar.gz
+            projects/rocprofiler-computebuild/rocprofiler-compute-${{github.ref_name}}.tar.gz
           name: ${{ env.RELEASE_NAME }}
