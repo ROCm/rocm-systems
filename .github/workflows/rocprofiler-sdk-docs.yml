@@ -102,7 +102,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run:
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
-          git submodule update --init --recursive;
+          git submodule update --init -- .;
           cmake -B build
             -DROCPROFILER_DEP_ROCMCORE=ON
             -DROCPROFILER_BUILD_DOCS=ON
