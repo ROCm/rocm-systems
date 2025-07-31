@@ -65,7 +65,11 @@ jobs:
       CORE_EXT_RUNNER: mi3xx
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
@@ -197,7 +201,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprof-${{ matrix.os }}
+    runs-on: rocprofiler-${{ matrix.os }}
 
     # define this for containers
     env:
@@ -205,7 +209,11 @@ jobs:
       OS_TYPE: ${{ matrix.os }}
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
@@ -282,7 +290,11 @@ jobs:
       GCC_COMPILER_VERSION: 13
 
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
