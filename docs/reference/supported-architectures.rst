@@ -10,7 +10,7 @@ across multiple architectures.
 
 .. note::
 
-   The GFX versions refer to the major release versions (series), unless a minor version is specified.
+   The GFX versions (GFX9, GFX10, GFX11, GFX12) refer to the architecture families of the hardware for that version.
 
 Here's a summary of the counter blocks supported for each architecture:
 

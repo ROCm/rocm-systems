@@ -57,4 +57,4 @@ Application → ROCprofiler-SDK ⇄ **AQLprofile** ⇄ ROCprofiler-SDK → HSA/R
 
 - **AQLprofile** generates profiling command packets (AQL/PM4) tailored to the GPU architecture. It doesn't interact with hardware or drivers directly. It only produces the packets and buffer requirements requested by ``ROCprofiler-SDK``.
  
-- **ROCprofiler-SDK** provides a higher-level API and user-facing tools, using AQLprofile internally. It manages profiling sessions, submits packets to the GPU via HSA/ROCR/KFD, and collects results.
+- **ROCprofiler-SDK** provides a higher-level API and user-facing tools, using AQLprofile internally. It manages profiling sessions, submits packets to the GPU via `ROCr <https://rocm.docs.amd.com/projects/rocr_debug_agent/en/latest/index.html>`_/HSA/KFD, and collects results.
