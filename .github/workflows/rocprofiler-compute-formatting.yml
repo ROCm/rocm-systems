@@ -1,0 +1,87 @@
+
+name: RocProfiler-Compute Formatting
+
+on:
+  push:
+    path:
+      - 'projects/rocprofiler-compute'
+  pull_request:
+    path:
+      - 'projects/rocprofiler-compute'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-compute
+    - name: Set up Python '3.x'
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.x'
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-compute
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install black isort
+        if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
+    - name: Run black formatter
+      uses: psf/black@stable
+      with:
+        use_pyproject: true
+    - name: Run isort formatter
+      uses: isort/isort-action@master
+
+  cmake:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-compute
+    - name: Install dependencies
+      working-directory: projects/rocprofiler-compute
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        python3 -m pip install cmake-format
+    - name: cmake-format
+      working-directory: projects/rocprofiler-compute
+      run: |
+        set +e
+        cmake-format -i $(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        if [ $(git diff | wc -l) -gt 0 ]; then
+          echo -e "\nError! CMake code not formatted. Run cmake-format...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  python-bytecode:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-compute
+    - name: find-bytecode
+      working-directory: projects/rocprofiler-compute
+      run: |
+        set +e
+        FILES=$(find . -type f | egrep '__pycache__|\.pyc$')
+        if [ -n "${FILES}" ]; then
+          echo -e "\nError! Python bytecode included in commit\n"
+          echo -e "### FILES: ###"
+          echo -e "${FILES}"
+          echo -e "##############"
+          exit 1
+        fi
