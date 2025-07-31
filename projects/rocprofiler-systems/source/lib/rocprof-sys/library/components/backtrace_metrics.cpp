@@ -278,9 +278,9 @@ rocpd_process_backtrace_metrics_events(const uint32_t device_id, uint64_t timest
     auto& agent_mngr         = agent_manager::get_instance();
     auto  base_id = agent_mngr.get_agent_by_id(device_id, agent_type::CPU).base_id;
 
-    auto insert_event_and_sample = [&](const char* name, double value) {
-        data_processor.insert_pmc_event(event_id, base_id, name, value);
-        data_processor.insert_sample(name, timestamp, event_id);
+    auto insert_event_and_sample = [&](const char* _name, double _value) {
+        data_processor.insert_pmc_event(event_id, base_id, _name, _value);
+        data_processor.insert_sample(_name, timestamp, event_id);
     };
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
@@ -636,8 +636,10 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::post_process_rocpd(int64_t _tid, uint64_t _ts) const
+backtrace_metrics::post_process_rocpd([[maybe_unused]] int64_t  _tid,
+                                      [[maybe_unused]] uint64_t _ts) const
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
     if(is_category_enabled(category::thread_cpu_time{}))
@@ -670,6 +672,7 @@ backtrace_metrics::post_process_rocpd(int64_t _tid, uint64_t _ts) const
                                                hw_counter_data_t>(0, _ts, m_hw_counter,
                                                                   _tid);
     }
+#endif
 }
 }  // namespace component
 }  // namespace rocprofsys

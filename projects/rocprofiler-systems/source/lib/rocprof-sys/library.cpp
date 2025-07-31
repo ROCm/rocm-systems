@@ -760,10 +760,12 @@ rocprofsys_finalize_hidden(void)
         rocprofsys::sample_cache::cache_manager::get_instance().shutdown();
         rocprofsys::sample_cache::cache_manager::get_instance().post_process();
 
+#if ROCPROFSYS_USE_ROCM > 0
         if(get_use_rocpd())
         {
             rocpd::data_processor::get_instance().flush();
         }
+#endif
         set_state(State::Finalized);
         std::quick_exit(EXIT_SUCCESS);
         return;
@@ -1059,10 +1061,12 @@ rocprofsys_finalize_hidden(void)
         [](int) {});
 
     common::destroy_static_objects();
+#if ROCPROFSYS_USE_ROCM > 0
     if(get_use_rocpd())
     {
         rocpd::data_processor::get_instance().flush();
     }
+#endif
 }
 
 //======================================================================================//
