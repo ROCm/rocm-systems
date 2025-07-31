@@ -857,7 +857,10 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
       // flush cache
       i += cmd_util.BuildAcquireMem(major, cpu + i);
 
-      i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+      if (platform_atomic_support_)
+        i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+      else
+        signal_addr_ = signal_addr;
     }
   } else {
     if (packet->completion_signal.handle != 0) {
@@ -868,10 +871,12 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
   // The ring_rptr is used to record pm4 queue rptr value,
   // dispatch readptr position, this is used to share rptr with
   // aql queue.
-  i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  if (platform_atomic_support_)
+    i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  else
+    i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
 
   ib_size = i;
-
   cmdbuf_aql_frame_write_index++;
   packet->header = HSA_PACKET_TYPE_INVALID;
   return HSA_STATUS_SUCCESS;
