@@ -32,12 +32,13 @@ from . import output_config
 from . import libpyrocpd
 
 def write_sql_query_to_csv(
-    connection: RocpdImportData, query, output_path, filename=""
+    connection: RocpdImportData, query, output_path, output_file, filename=""
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
 
     # call query module to export to csv
-    export_path = os.path.join(output_path, f"{filename}.csv")
+    file_prefix = output_file + "_" if output_file else ""
+    export_path = os.path.join(output_path, f"{file_prefix}{filename}_trace.csv")
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 def write_agent_info_csv(
@@ -126,7 +127,7 @@ def write_agent_info_csv(
             model_name AS Model_Name
         FROM "rocpd_info_agent"
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_agent_info")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "agent_info")
 
 def write_kernel_csv(
     importData, config
@@ -167,7 +168,7 @@ def write_kernel_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_kernel_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "kernel")
 
 def write_memory_copy_csv(
     importData, config
@@ -201,7 +202,7 @@ def write_memory_copy_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_memory_copy_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "memory_copy")
 
 def write_memory_allocation_csv(
     importData, config
@@ -235,7 +236,7 @@ def write_memory_allocation_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_memory_allocation_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "memory_allocation")
 
 def write_hip_api_csv(
     importData, config
@@ -257,7 +258,7 @@ def write_hip_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_hip_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "hip_api")
 
 def write_hsa_api_csv(
     importData, config
@@ -279,7 +280,7 @@ def write_hsa_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_hsa_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "hsa_api")
 
 def write_marker_api_csv(
     importData, config
@@ -305,7 +306,7 @@ def write_marker_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_marker_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "marker_api")
 
 def write_counters_csv(
     importData, config
@@ -346,7 +347,7 @@ def write_counters_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_counter_collection")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "counter_collection")
 
 def write_scratch_memory_csv(
     importData, config
@@ -375,7 +376,7 @@ def write_scratch_memory_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_scratch_memory_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "scratch_memory")
 
 def write_rccl_api_csv(
     importData, config
@@ -397,7 +398,7 @@ def write_rccl_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_rccl_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "rccl_api")
 
 def write_rocdecode_api_csv(
     importData, config
@@ -419,7 +420,7 @@ def write_rocdecode_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_rocdecode_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "rocdecode_api")
 
 def write_rocjpeg_api_csv(
     importData, config
@@ -441,7 +442,7 @@ def write_rocjpeg_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, config.output_path, "out_rocjpeg_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, config.output_file, "rocjpeg_api")
 
 def write_csv(importData, config):
 
