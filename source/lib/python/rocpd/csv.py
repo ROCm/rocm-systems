@@ -361,6 +361,33 @@ def write_counters_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_counter_collection")
 
+def write_scratch_memory_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            'SCRATCH_MEMORY' AS Kind,
+            'SCRATCH_MEMORY_' || S.operation AS Operation,
+            'Agent ' || S.agent_log_index AS Agent_Id,
+            S.queue_id AS Queue_Id,
+            S.tid AS Thread_Id,
+            S.alloc_flags AS Alloc_Flags,
+            S.start AS Start_Timestamp,
+            S.end AS End_Timestamp
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN scratch_memory AS S
+            ON S.guid = P.guid
+            AND S.nid = P.nid
+            AND S.pid = P.pid
+        ORDER BY
+            S.start ASC, S.end
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_scratch_memory_trace")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
@@ -371,6 +398,7 @@ def write_csv(importData, config):
     write_hsa_api_csv(importData, config.output_path)
     write_marker_api_csv(importData, config.output_path)
     write_counters_csv(importData, config.output_path)
+    write_scratch_memory_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
