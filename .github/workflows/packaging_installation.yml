@@ -40,18 +40,6 @@ jobs:
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         env
 
-    - name: Install Packages
-      shell: bash
-      run: |
-          if [ $OS_VERSION_MAJOR -eq 8 ]; then
-            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-            chmod +x /opt/trace_processor/bin/trace_processor_shell
-          fi
-          python3 -m pip install --upgrade pip &&
-          python3 -m pip install --upgrade numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21' &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
-
     - name: Setup ROCm (deb)
       if: ${{ matrix.system.package == 'DEB'}}
       timeout-minutes: 15
@@ -94,22 +82,16 @@ jobs:
         cmake --preset release -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR
         cmake --build $BUILD_DIR --target all
 
-    - name: Build installer package
+    - name: Build and Install the Package
       timeout-minutes: 15
       shell: bash
       run: |
         set -v
         cd $BUILD_DIR
         cpack -G ${{ matrix.system.package }}
+        {{ matrix.system.package == 'DEB' && 'dpkg' || 'rpm'}} -i *.{{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
 
-    - name: Install the package
-      timeout-minutes: 15
-      shell: bash
-      run: |
-        set -v
-        dpkg -i *.{{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
-
-    - name: Verify installation
+    - name: Verify Installation
       timeout-minutes: 15
       shell: bash
       run: |
