@@ -17,8 +17,7 @@ You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing 
 
 The code is open and hosted at `<https://github.com/ROCm/rocprofiler-sdk>`_.
 
-AQLprofile generates profiling command packets (AQL/PM4) tailored to the GPU architecture. It does not interact with hardware or drivers directly; it only produces the packets and buffer requirements requested by rocprofiler-sdk.
-See the `AQLprofile docs` for more info.
+ROCprofiler-SDK uses a companion library called AQLprofile that generates profiling command packets (AQL/PM4) for performance counters and SQ thread trace. See the `AQLprofile docs` for more info.
 
 The documentation is structured as follows:
 
