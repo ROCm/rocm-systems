@@ -49,7 +49,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        compiler: ['g++-12'] # Must add -DCMAKE_CXX_FLAGS="-Wno-array-bounds" to fix false positive warnings
+        compiler: ['g++-12']
         rocm: ['OFF']
         mpi: ['OFF']
         ompt: ['OFF']
