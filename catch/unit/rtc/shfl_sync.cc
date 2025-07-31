@@ -89,8 +89,7 @@ void runTestShflSync(int option) {
   }
 
   hiprtcAddNameExpression(prog, str.c_str());
-  const char* options[] = { "-DHIP_ENABLE_WARP_SYNC_BUILTINS" };
-  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 0, nullptr)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
   if (logSize) {
