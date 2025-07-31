@@ -1675,7 +1675,7 @@ static void* udmabuf_allocation(uint32_t gpu_id, uint32_t node_id, uint64_t size
 	if (bind_mem_to_numa(numa_node_id, mem, size, mflags))
 		goto error_release_aperture;
 
-	node_size = numa_node_size(numa_node_id, &free_size);
+	node_size = numa_node_size64(numa_node_id, &free_size);
 	pr_debug("udmabuf_allocation: numa_node_id %d, node_size %lld, free_size %lld\n",
 		numa_node_id, node_size, free_size);
 	/* compare free size at numa_node_id with size */
