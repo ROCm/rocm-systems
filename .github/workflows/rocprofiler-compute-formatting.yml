@@ -33,13 +33,11 @@ jobs:
         python -m pip install black isort
         if [ -f requirements.txt ]; then python -m pip install -r requirements.txt; fi
     - name: Run black formatter
-      uses: psf/black@stable
       working-directory: projects/rocprofiler-compute
-      with:
-        use_pyproject: true
+      run: black .
     - name: Run isort formatter
       working-directory: projects/rocprofiler-compute
-      uses: isort/isort-action@master
+      run: isort .
 
   cmake:
     runs-on: ubuntu-22.04
