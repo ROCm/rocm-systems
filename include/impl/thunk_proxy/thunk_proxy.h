@@ -93,8 +93,6 @@ typedef struct {
   bool state_shadowing_by_cpfw;
   bool platform_atomic_support;
   void *adapter_info;
-  void *adapter_ex_info;
-  void *adapter_proxy_info;
   uint32_t kmd_version;
 } DeviceInfo;
 
