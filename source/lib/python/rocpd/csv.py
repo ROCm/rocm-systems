@@ -322,6 +322,45 @@ def write_marker_api_csv(
     """
     write_sql_query_to_csv(importData, query, output_path, "out_marker_api_trace")
 
+def write_counters_csv(
+    importData, output_path
+) -> None:
+
+    query = """
+        SELECT
+            C.guid AS Pid,
+            C.stack_id AS Correlation_Id,
+            C.dispatch_id AS Dispatch_Id,
+            'Agent ' || C.agent_log_index AS Agent_Id,
+            C.queue_id AS Queue_Id,
+            C.pid AS Process_Id,
+            C.tid AS Thread_Id,
+            C.grid_size AS Grid_Size,
+            C.kernel_id AS Kernel_Id,
+            C.kernel_name AS Kernel_Name,
+            C.workgroup_size AS Workgroup_Size,
+            C.lds_block_size AS LDS_Block_Size,
+            C.scratch_size AS Scratch_Size,
+            C.vgpr_count AS VGPR_Count,
+            C.accum_vgpr_count AS Accum_VGPR_Count,
+            C.sgpr_count AS SGPR_Count,
+            C.counter_name AS Counter_Name,
+            C.value AS Counter_Value,
+            C.start AS Start_Timestamp,
+            C.end AS End_Timestamp
+        FROM "rocpd_info_node" AS N
+        INNER JOIN rocpd_info_process as P
+            ON P.guid = N.guid
+            AND P.nid = N.id
+        INNER JOIN counters_collection AS C
+            ON C.guid = P.guid
+            AND C.nid = P.nid
+            AND C.pid = P.pid
+        ORDER BY
+            C.start ASC, C.end DESC
+    """
+    write_sql_query_to_csv(importData, query, output_path, "out_counter_collection")
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config.output_path)
@@ -331,6 +370,7 @@ def write_csv(importData, config):
     write_hip_api_csv(importData, config.output_path)
     write_hsa_api_csv(importData, config.output_path)
     write_marker_api_csv(importData, config.output_path)
+    write_counters_csv(importData, config.output_path)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
