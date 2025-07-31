@@ -260,6 +260,15 @@ add_upcoming_samples(const device_handle     device,
             auto                          dispatch_correlation_ids = corr_map->get(device, trap);
             pc_sample.dispatch_id    = dispatch_correlation_ids.dispatch_id;
             pc_sample.correlation_id = dispatch_correlation_ids.correlation_id;
+
+            if(pc_sample.pc.code_object_id == ROCPROFILER_CODE_OBJECT_ID_NONE &&
+               pc_sample.correlation_id.internal != ROCPROFILER_CORRELATION_ID_INTERNAL_NONE)
+            {
+                // We observed the stochastic sampling error samples, that was not being
+                // tag as the error sample due to high contention in the trap handler.
+                // Thus, we declare sample invalid, by setting its size to zero.
+                pc_sample.size = 0;
+            }
         } catch(std::exception& e)
         {
             // TODO: introduce ROCPROFILER_DISPATCH_ID_INTERNAL_NONE
