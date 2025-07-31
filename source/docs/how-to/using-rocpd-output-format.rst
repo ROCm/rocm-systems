@@ -1,6 +1,6 @@
 .. meta::
-    :description: "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
-    :keywords: "ROCprofiler-SDK, ROCProfiler-SDK output formats, rocpd, SQLite3, CSV, JSON, PFTrace, OTF2"
+    :description: "ROCprofiler-SDK rocpd output format documentation - comprehensive guide for SQLite3 database storage, format conversion utilities, and multi-format export capabilities for GPU profiling data analysis."
+    :keywords: "ROCprofiler-SDK, rocpd, SQLite3, profiling database, format conversion, CSV export, JSON export, PFTrace, OTF2, GPU profiling, trace analysis"
 
 .. _using-rocpd-output-format:
 
@@ -8,73 +8,76 @@
 Using rocpd Output Format
 =========================
 
-``rocprofv3`` supports the following output formats:
+``rocprofv3`` provides comprehensive support for multiple output formats to accommodate diverse analysis workflows:
 
-- **rocpd** (SQLite3 Database, Default)
-- **CSV**
-- **JSON** (Custom format for programmatic analysis only)
-- **PFTrace** (Perfetto trace for visualization with Perfetto)
-- **OTF2** (Open Trace Format for visualization with compatible third-party tools)
+- **rocpd** (SQLite3 Database) - Default format providing structured data storage
+- **CSV** (Comma-Separated Values) - Tabular format for spreadsheet applications and data analysis tools
+- **JSON** (JavaScript Object Notation) - Structured format optimized for programmatic analysis and integration
+- **PFTrace** (Perfetto Protocol Buffers) - Binary trace format for high-performance visualization using Perfetto
+- **OTF2** (Open Trace Format 2) - Standardized trace format for interoperability with third-party analysis tools
 
-The ``rocpd`` output format is the default for ``rocprofv3``. It stores profiling results in a SQLite3 database, providing a structured and efficient way to analyze and post-process profiling data. This format allows users to query and manipulate profiling data using SQL, making it easy to extract specific information or perform complex analyses.
+The ``rocpd`` output format serves as the primary data repository for ``rocprofv3`` profiling sessions. This format leverages SQLite3's ACID-compliant database engine to provide robust, structured storage of comprehensive profiling datasets. The relational schema enables efficient querying and manipulation of profiling data through standard SQL interfaces, facilitating complex analytical operations and custom reporting workflows.
 
 Features
 ++++++++
 
-- **Rich Data Model**: Stores all collected profiling data, including traces, counters, and metadata, in a single `.db` (SQLite3) file.
-- **Programmatic Access**: Can be queried using standard SQL tools or libraries (e.g., `sqlite3` CLI, Python's `sqlite3` module).
-- **Post-Processing**: Enables advanced analysis and visualization using custom scripts or third-party tools that support SQLite3.
+- **Comprehensive Data Model**: Consolidates all profiling artifacts including execution traces, performance counters, hardware metrics, and contextual metadata within a single SQLite3 database file (`.db` extension).
+- **Standards-Compliant Access**: Supports querying through industry-standard SQL interfaces including command-line tools (``sqlite3`` CLI), programming language bindings (Python ``sqlite3`` module, C/C++ SQLite API), and database management applications.
+- **Advanced Analytics Integration**: Facilitates sophisticated post-processing workflows through custom analytical scripts, automated reporting systems, and integration with third-party visualization and analysis frameworks that provide SQLite3 connectivity.
 
 Generating rocpd Output
 +++++++++++++++++++++++
 
-To generate output in rocpd format, simply use:
+To generate profiling data in the default rocpd format:
 
 .. code-block:: bash
 
    rocprofv3 --hip-trace -- <application>
 
-Or use the ``--output-format`` option with ``rocpd``:
+Alternatively, explicitly specify the rocpd output format using the ``--output-format`` parameter:
 
 .. code-block:: bash
 
    rocprofv3 --hip-trace --output-format rocpd -- <application>
 
-The output will be saved as ``%hostname%/%pid%_results.db``, where ``%hostname%`` is the name of the host machine and ``%pid%`` is the process ID of the application being profiled.
+The profiling session generates output files following the naming convention ``%hostname%/%pid%_results.db``, where ``%hostname%`` represents the system hostname and ``%pid%`` corresponds to the process identifier of the profiled application.
 
-Converting rocpd to Other Formats
-+++++++++++++++++++++++++++++++++
+Converting rocpd to Alternative Formats
++++++++++++++++++++++++++++++++++++++
 
-The ``rocpd`` output format can be converted to other formats for further analysis or visualization.  
-First, ensure the ``rocpd`` Python module is available in your environment:
+The ``rocpd`` database format supports conversion to alternative output formats for specialized analysis and visualization workflows.
 
-.. code-block:: bash
+The ``rocpd`` conversion utility is distributed as part of the ROCm installation package, located in ``/opt/rocm-<version>/bin``, and provides both executable and Python module interfaces for programmatic integration.
 
-   export PYTHONPATH=<install-path>/lib/pythonX.Y/site-packages:$PYTHONPATH
+Invoke the ``rocpd convert`` command with appropriate parameters to transform database files into target formats.
 
-where ``<install-path>`` is the ROCm installation path (usually ``/opt/rocm-<major.minor.patch>``), and ``X.Y`` is your Python version.
-
-Once the ``rocpd`` module is available, use the ``rocpd convert`` command to convert the output to other formats.
-
-Convert to CSV format:
+**CSV Format Conversion:**
 
 .. code-block:: bash
 
-   python3 -m rocpd convert -i <input-file>.db --output-format csv
+   /opt/rocm/bin/rocpd convert -i <input-file>.db --output-format csv
 
-The converted CSV will be saved as ``rocpd-output-data/out_hip_api_trace.csv`` in the current working directory.
+**Python Interpreter Compatibility:**
 
-Convert to OTF2 format:
-
-.. code-block:: bash
-
-   python3 -m rocpd convert -i <input-file>.db --output-format otf2
-
-Convert to PFTrace format:
+When encountering Python interpreter version conflicts, specify the appropriate Python executable explicitly:
 
 .. code-block:: bash
 
-   python3 -m rocpd convert -i <input-file>.db --output-format pftrace
+   python3.10 $(which rocpd) convert -f csv -i <input-file>.db
+
+The CSV conversion process generates output files in the ``rocpd-output-data/out_hip_api_trace.csv`` path relative to the current working directory.
+
+**OTF2 Format Conversion:**
+
+.. code-block:: bash
+
+   /opt/rocm/bin/rocpd convert -i <input-file>.db --output-format otf2
+
+**Perfetto Trace Format Conversion:**
+
+.. code-block:: bash
+
+   /opt/rocm/bin/rocpd convert -i <input-file>.db --output-format pftrace
 
 rocpd convert Command-Line Options
 ++++++++++++++++++++++++++++++++++
@@ -98,96 +101,102 @@ Options
 **Required Arguments:**
 
 - ``-i INPUT [INPUT ...]``, ``--input INPUT [INPUT ...]``  
-  Input path and filename to one or more database(s), separated by spaces.
+  Specifies input database file paths. Accepts multiple SQLite3 database files separated by whitespace for batch processing operations.
 
 - ``-f {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``, ``--output-format {csv,pftrace,otf2} [{csv,pftrace,otf2} ...]``  
-  Specify one or more output formats. Supported: ``csv``, ``pftrace``, ``otf2``.
+  Defines target output format(s). Supports concurrent conversion to multiple formats: ``csv`` (Comma-Separated Values), ``pftrace`` (Perfetto Protocol Buffers), ``otf2`` (Open Trace Format 2).
 
-**I/O Options:**
+**I/O Configuration:**
 
 - ``-o OUTPUT_FILE``, ``--output-file OUTPUT_FILE``  
-  Sets the base output file name (default: ``out``).
+  Configures the base filename for generated output files (default: ``out``).
 
 - ``-d OUTPUT_PATH``, ``--output-path OUTPUT_PATH``  
-  Sets the output directory (default: ``./rocpd-output-data``).
+  Specifies the target directory for output file generation (default: ``./rocpd-output-data``).
 
-**Kernel Naming Options:**
+**Kernel Identification Options:**
 
 - ``--kernel-rename``  
-  Use ROCTx marker names instead of kernel names.
+  Substitutes kernel function names with corresponding ROCTx marker annotations for enhanced semantic context.
 
-**Generic Options:**
+**Device Identification Configuration:**
 
 - ``--agent-index-value {absolute,relative,type-relative}``  
-  Device identification format in output:
+  Controls device identification methodology in converted output:
   
-  - ``absolute``: Uses node_id (e.g., Agent-0, Agent-2, Agent-4), ignoring cgroups.
-  - ``relative``: Uses logical_node_id (e.g., Agent-0, Agent-1, Agent-2), considering cgroups. *(Default)*
-  - ``type-relative``: Uses logical_node_type_id (e.g., CPU-0, GPU-0, GPU-1), numbering resets for each device type.
+  - ``absolute``: Utilizes hardware node identifiers (e.g., Agent-0, Agent-2, Agent-4), bypassing container group abstractions.
+  - ``relative``: Employs logical node identifiers (e.g., Agent-0, Agent-1, Agent-2), incorporating container group context. *(Default)*
+  - ``type-relative``: Applies device-type-specific logical identifiers (e.g., CPU-0, GPU-0, GPU-1), with independent numbering sequences per device class.
 
-**Perfetto Trace (pftrace) Options:**
+**Perfetto Trace Configuration:**
 
 - ``--perfetto-backend {inprocess,system}``  
-  Perfetto data collection backend. ``system`` mode requires running ``traced`` and ``perfetto`` daemons (default: ``inprocess``).
+  Configures Perfetto data collection architecture. The ``system`` backend requires active ``traced`` and ``perfetto`` daemon processes, while ``inprocess`` operates autonomously (default: ``inprocess``).
 
 - ``--perfetto-buffer-fill-policy {discard,ring_buffer}``  
-  Policy for handling new records when buffer is full (default: ``discard``).
+  Defines buffer overflow handling strategy: ``discard`` drops new records when capacity is exceeded, ``ring_buffer`` overwrites oldest records (default: ``discard``).
 
 - ``--perfetto-buffer-size KB``  
-  Buffer size for perfetto output in KB (default: 1 GB).
+  Sets the trace buffer capacity in kilobytes for Perfetto output generation (default: 1,048,576 KB / 1 GB).
 
 - ``--perfetto-shmem-size-hint KB``  
-  Perfetto shared memory size hint in KB (default: 64 KB).
+  Specifies shared memory allocation hint for Perfetto inter-process communication in kilobytes (default: 64 KB).
 
 - ``--group-by-queue``  
-  Display HIP streams that kernels and memory copy operations are submitted to, rather than HSA queues.
+  Organizes trace data by HIP stream abstractions rather than low-level HSA queue identifiers, providing higher-level application context for kernel and memory transfer operations.
 
-**Time Window Options:**
+**Temporal Filtering Configuration:**
 
 - ``--start START``  
-  Start time as percentage or nanoseconds from trace file (e.g., ``50%`` or ``781470909013049``).
+  Defines trace window start boundary using percentage notation (e.g., ``50%``) or absolute nanosecond timestamps (e.g., ``781470909013049``).
 
 - ``--start-marker START_MARKER``  
-  Named marker event to use as window start point.
+  Specifies named marker event identifier to establish trace window start boundary.
 
 - ``--end END``  
-  End time as percentage or nanoseconds from trace file (e.g., ``75%`` or ``3543724246381057``).
+  Defines trace window end boundary using percentage notation (e.g., ``75%``) or absolute nanosecond timestamps (e.g., ``3543724246381057``).
 
 - ``--end-marker END_MARKER``  
-  Named marker event to use as window end point.
+  Specifies named marker event identifier to establish trace window end boundary.
 
 - ``--inclusive INCLUSIVE``  
-  ``True``: include events if START or END in window; ``False``: only if BOTH in window (default: ``True``).
+  Controls event inclusion criteria: ``True`` includes events with either start or end timestamps within the specified window; ``False`` requires both timestamps within the window (default: ``True``).
 
-**Help:**
+**Command-Line Help:**
 
 - ``-h``, ``--help``  
-  Show help message and exit.
+  Displays comprehensive command syntax, parameter descriptions, and usage examples.
 
 Examples
 ++++++++
 
-Convert one database to Perfetto trace:
+**Single Database Conversion to Perfetto Format:**
 
 .. code-block:: bash
 
-   python3 -m rocpd convert -i db1.db --output-format pftrace
+   /opt/rocm/bin/rocpd convert -i db1.db --output-format pftrace
 
-Convert two databases to Perfetto trace, set output path and filename, and limit to last 70% of trace:
+**Multi-Database Conversion with Temporal Filtering:**
 
-.. code-block:: bash
-
-   python3 -m rocpd convert -i db1.db db2.db --output-format pftrace -d "./output/" -o "twoFileTraces" --start 30% --end 100%
-
-Convert six databases to CSV and Perfetto trace formats:
+Convert multiple databases to Perfetto format, specifying custom output directory and filename, with temporal window constraint to the final 70% of the trace duration:
 
 .. code-block:: bash
 
-   python3 -m rocpd convert -i db{0..5}.db --output-format csv pftrace -d "~/output_folder/" -o "sixFileTraces"
+   /opt/rocm/bin/rocpd convert -i db1.db db2.db --output-format pftrace -d "./output/" -o "twoFileTraces" --start 30% --end 100%
 
-Convert two databases to CSV, OTF2, and Perfetto trace formats:
+**Batch Conversion to Multiple Formats:**
+
+Process six database files simultaneously, generating both CSV and Perfetto trace outputs with custom output configuration:
 
 .. code-block:: bash
 
-   python3 -m rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
+   /opt/rocm/bin/rocpd convert -i db{0..5}.db --output-format csv pftrace -d "~/output_folder/" -o "sixFileTraces"
+
+**Comprehensive Format Conversion:**
+
+Convert multiple databases to all supported formats (CSV, OTF2, and Perfetto trace) in a single operation:
+
+.. code-block:: bash
+
+   /opt/rocm/bin/rocpd convert -i db{3,4}.db --output-format csv otf2 pftrace
 
