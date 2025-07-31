@@ -1722,9 +1722,6 @@ rocpd_post_process_overflow_data(
                 .first->c_str();
         auto main_name_id = data_processor.insert_string(_main_name);
 
-        const auto& _thread_info = thread_info::get(_tid, SequentTID);
-        ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
-        if(!_thread_info) return;
         size_t thread_id = _thread_info->index_data->system_value;
 
         auto thread_primary_key = data_processor.map_thread_id_to_primary_key(thread_id);
@@ -1755,9 +1752,11 @@ rocpd_post_process_overflow_data(
 }
 
 void
-rocpd_post_process_backtrace_metrics(int64_t                                 _tid,
-                                     const std::vector<timer_sampling_data>& _timer_data)
+rocpd_post_process_backtrace_metrics(
+    [[maybe_unused]] int64_t                                 _tid,
+    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
     for(const auto& itr : _timer_data)
@@ -1774,12 +1773,15 @@ rocpd_post_process_backtrace_metrics(int64_t                                 _ti
             itr.m_metrics.post_process_rocpd(_tid, 0.5 * (itr.m_beg + itr.m_end));
         backtrace_metrics::fini_rocpd(_tid, _valid_metrics);
     }
+#endif
 }
 
 void
-rocpd_post_process_timer_data(int64_t                                 _tid,
-                              const std::vector<timer_sampling_data>& _timer_data)
+rocpd_post_process_timer_data(
+    [[maybe_unused]] int64_t                                 _tid,
+    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     auto& data_processor = get_data_processor();
 
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
@@ -1814,7 +1816,7 @@ rocpd_post_process_timer_data(int64_t                                 _tid,
             {
                 auto _ncur = _ncount++;
                 // the begin/end + HW counters will be same for entire call-stack so only
-                // annotate the top and the bottom functons to keep the data consumption
+                // annotate the top and the bottom functions to keep the data consumption
                 // low
                 bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
 
@@ -1867,14 +1869,21 @@ rocpd_post_process_timer_data(int64_t                                 _tid,
             }
         }
     }
+#endif
 }
 
 void
 post_process_rocpd(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
                    const std::vector<overflow_sampling_data>& _overflow_data)
 {
+#if ROCPROFSYS_USE_ROCM > 0
     rocpd_post_process_overflow_data(_tid, _overflow_data);
     rocpd_post_process_timer_data(_tid, _timer_data);
+#else
+    (void) _tid;
+    (void) _timer_data;
+    (void) _overflow_data;
+#endif
 }
 
 struct sampling_initialization

@@ -372,8 +372,9 @@ get_backtrace(std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data
 
 template <typename CorrelationIdType>
 uint64_t
-get_parent_stack_id(const CorrelationIdType& correlation_id)
+get_parent_stack_id([[maybe_unused]] const CorrelationIdType& correlation_id)
 {
+#if(ROCPROFILER_VERSION >= 700)
     if constexpr(std::is_same_v<rocprofiler_correlation_id_t, CorrelationIdType>)
     {
         return correlation_id.ancestor;
@@ -382,6 +383,9 @@ get_parent_stack_id(const CorrelationIdType& correlation_id)
     {
         return 0;
     }
+#else
+    return 0;
+#endif
 }
 
 auto
@@ -487,6 +491,42 @@ cache_add_track(const char* track_name, uint64_t tid)
         { .track_name = track_name, .thread_id = tid, .extdata = "{}" });
 }
 
+size_t
+get_mem_copy_dst_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
+{
+#if(ROCPROFILER_VERSION >= 700)
+    return record.dst_address.value;
+#else
+    return 0;
+#endif
+}
+
+size_t
+get_mem_copy_src_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_copy_record_t& record)
+{
+#if(ROCPROFILER_VERSION >= 700)
+    return record.src_address.value;
+#else
+    return 0;
+#endif
+}
+
+#if(ROCPROFILER_VERSION >= 600)
+size_t
+get_mem_alloc_address(
+    [[maybe_unused]] const rocprofiler_buffer_tracing_memory_allocation_record_t& record)
+{
+#    if(ROCPROFILER_VERSION >= 700)
+    return record.address.value;
+#    else
+    return static_cast<size_t>(record.address.handle);
+#    endif
+}
+#endif
+
+// clang-format off
 void
 cache_region(const rocprofiler_callback_tracing_record_t* record,
              const rocprofiler_timestamp_t                start_timestamp,
@@ -495,8 +535,17 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
 
 {
     sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::region, *record, start_timestamp, end_timestamp,
-        call_stack.c_str(), args_str.c_str(), category.c_str());
+        sample_cache::entry_type::region,
+        record->thread_id,
+        static_cast<int32_t>(record->kind),
+        static_cast<int32_t>(record->operation),
+        record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id),
+        start_timestamp,
+        end_timestamp,
+        call_stack.c_str(),
+        args_str.c_str(),
+        category.c_str());
 }
 
 void
@@ -508,8 +557,26 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
     sample_cache::get_cache_metadata().add_queue(queue_handle);
     sample_cache::get_cache_metadata().add_stream(stream_handle);
 
-    sample_cache::get_cache_storage().store(sample_cache::entry_type::kernel_dispatch,
-                                            *record, stream_handle);
+    sample_cache::get_cache_storage().store(
+        sample_cache::entry_type::kernel_dispatch,
+        record->start_timestamp,
+        record->end_timestamp,
+        record->thread_id,
+        record->dispatch_info.agent_id.handle,
+        record->dispatch_info.kernel_id,
+        record->dispatch_info.dispatch_id,
+        record->dispatch_info.queue_id.handle,
+        record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id),
+        record->dispatch_info.private_segment_size,
+        record->dispatch_info.group_segment_size,
+        record->dispatch_info.workgroup_size.x,
+        record->dispatch_info.workgroup_size.y,
+        record->dispatch_info.workgroup_size.z,
+        record->dispatch_info.grid_size.x,
+        record->dispatch_info.grid_size.y,
+        record->dispatch_info.grid_size.z,
+        stream_handle);
 }
 
 void
@@ -517,22 +584,46 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
 {
     auto stream_handle = get_stream_id(record).handle;
 
-    sample_cache::get_cache_storage().store(sample_cache::entry_type::memory_copy,
-                                            *record, stream_handle);
+    sample_cache::get_cache_storage().store(
+        sample_cache::entry_type::memory_copy,
+        record->start_timestamp,
+        record->end_timestamp,
+        record->thread_id,
+        record->dst_agent_id.handle,
+        record->src_agent_id.handle,
+        static_cast<int32_t>(record->kind),
+        static_cast<int32_t>(record->operation),
+        record->bytes,
+        record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id),
+        get_mem_copy_dst_address(*record),
+        get_mem_copy_src_address(*record),
+        stream_handle);
 }
 
-#if(ROCPROFILER_VERSION >= 600)
+#if (ROCPROFILER_VERSION >= 600)
 void
 cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record)
 {
     auto stream_handle = get_stream_id(record).handle;
 
     sample_cache::get_cache_metadata().add_stream(stream_handle);
-    sample_cache::get_cache_storage().store(sample_cache::entry_type::memory_alloc,
-                                            *record, stream_handle);
+    sample_cache::get_cache_storage().store(
+        sample_cache::entry_type::memory_alloc,
+        record->start_timestamp,
+        record->end_timestamp,
+        record->thread_id,
+        record->agent_id.handle,
+        static_cast<int32_t>(record->kind),
+        static_cast<int32_t>(record->operation),
+        record->allocation_size,
+        record->correlation_id.internal,
+        get_parent_stack_id(record->correlation_id),
+        get_mem_alloc_address(*record),
+        stream_handle);
 }
 #endif
-
+// clang-format on
 template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,

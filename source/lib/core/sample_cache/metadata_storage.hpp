@@ -28,8 +28,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
+#if ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/callback_tracing.h>
+#    include <rocprofiler-sdk/cxx/name_info.hpp>
+#endif
 #include <set>
 #include <stdint.h>
 #include <string.h>
@@ -100,6 +102,7 @@ struct track
     }
 };
 
+#if ROCPROFSYS_USE_ROCM > 0
 struct code_object_less
 {
     bool operator()(const rocprofiler_callback_tracing_code_object_load_data_t& lhs,
@@ -119,6 +122,7 @@ struct kernel_symbol_less
         return lhs.kernel_object < rhs.kernel_object;
     }
 };
+#endif
 
 }  // namespace info
 
@@ -129,11 +133,6 @@ struct metadata
     void add_pmc_info(const info::pmc& pmc_info);
     void add_thread_info(const info::thread& thread_info);
     void add_track(const info::track& track_info);
-    void add_code_object(
-        const rocprofiler_callback_tracing_code_object_load_data_t& code_object);
-    void add_kernel_symbol(
-        const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
-            kernel_symbol);
     void add_queue(const uint64_t& queue_handle);
     void add_stream(const uint64_t& stream_handle);
     void add_string(const std::string_view& string_value);
@@ -142,24 +141,30 @@ struct metadata
     std::optional<info::pmc>    get_pmc_info(const std::string_view& unique_name) const;
     std::optional<info::thread> get_thread_info(const uint32_t& thread_id) const;
     std::optional<info::track>  get_track_info(const std::string_view& track_name) const;
+    std::vector<info::pmc>      get_pmc_info_list() const;
+    std::vector<info::thread>   get_thread_info_list() const;
+    std::vector<info::track>    get_track_info_list() const;
+    std::vector<uint64_t>       get_queue_list() const;
+    std::vector<uint64_t>       get_stream_list() const;
+    std::vector<std::string_view> get_string_list() const;
+
+#if ROCPROFSYS_USE_ROCM > 0
+    void add_code_object(
+        const rocprofiler_callback_tracing_code_object_load_data_t& code_object);
+    void add_kernel_symbol(
+        const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
+            kernel_symbol);
+    std::vector<rocprofiler_callback_tracing_code_object_load_data_t>
+    get_code_object_list() const;
+    std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+    get_kernel_symbol_list() const;
     std::optional<rocprofiler_callback_tracing_code_object_load_data_t> get_code_object(
         uint64_t code_object_id) const;
     std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
     get_kernel_symbol(uint64_t kernel_id) const;
-
-    std::vector<info::pmc>    get_pmc_info_list() const;
-    std::vector<info::thread> get_thread_info_list() const;
-    std::vector<info::track>  get_track_info_list() const;
-    std::vector<rocprofiler_callback_tracing_code_object_load_data_t>
-    get_code_object_list() const;
-    std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-                                  get_kernel_symbol_list() const;
-    std::vector<uint64_t>         get_queue_list() const;
-    std::vector<uint64_t>         get_stream_list() const;
-    std::vector<std::string_view> get_string_list() const;
-
     rocprofiler::sdk::buffer_name_info_t<const char*>   get_buffer_name_info() const;
     rocprofiler::sdk::callback_name_info_t<const char*> get_callback_tracing_info() const;
+#endif
 
 private:
     friend class cache_manager;
@@ -168,23 +173,25 @@ private:
     common::synchronized<std::set<info::pmc>>    m_pmc_infos;
     common::synchronized<std::set<info::thread>> m_threads;
     common::synchronized<std::set<info::track>>  m_tracks;
+
+    common::synchronized<std::set<uint64_t>>                   m_streams;
+    common::synchronized<std::set<uint64_t>>                   m_queues;
+    common::synchronized<std::unordered_set<std::string_view>> m_strings;
+#if ROCPROFSYS_USE_ROCM > 0
     common::synchronized<std::set<rocprofiler_callback_tracing_code_object_load_data_t,
                                   info::code_object_less>>
         m_code_objects;
     common::synchronized<
         std::set<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t,
                  info::kernel_symbol_less>>
-        m_kernel_symbols;
-
-    common::synchronized<std::set<uint64_t>>                   m_streams;
-    common::synchronized<std::set<uint64_t>>                   m_queues;
-    common::synchronized<std::unordered_set<std::string_view>> m_strings;
-    rocprofiler::sdk::buffer_name_info_t<const char*>          m_buffered_tracing_info{
+                                                      m_kernel_symbols;
+    rocprofiler::sdk::buffer_name_info_t<const char*> m_buffered_tracing_info{
         rocprofiler::sdk::get_buffer_tracing_names<const char*>()
     };
     rocprofiler::sdk::callback_name_info_t<const char*> m_callback_tracing_info{
         rocprofiler::sdk::get_callback_tracing_names<const char*>()
     };
+#endif
 };
 
 }  // namespace sample_cache

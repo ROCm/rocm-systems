@@ -29,7 +29,6 @@
 #include <cstring>
 #include <functional>
 #include <map>
-#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-systems/categories.h>
 #include <stdint.h>
 #include <string>

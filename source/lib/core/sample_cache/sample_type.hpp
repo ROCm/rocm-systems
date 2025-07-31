@@ -21,12 +21,14 @@
 // SOFTWARE.
 
 #pragma once
-#include <rocprofiler-sdk/buffer_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
 #include <stdint.h>
 #include <string>
 #include <unistd.h>
 #include <utility>
+
+#if ROCPROFSYS_USE_ROCM > 0
+#    include <rocprofiler-sdk/version.h>
+#endif
 
 namespace rocprofsys
 {
@@ -38,44 +40,127 @@ struct storage_parsed_type_base
 
 struct kernel_dispatch_sample : storage_parsed_type_base
 {
-    rocprofiler_buffer_tracing_kernel_dispatch_record_t record;
-    size_t                                              stream_handle;
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Identification fields
+    uint64_t thread_id;
+    uint64_t agent_id_handle;
+    uint64_t kernel_id;
+    uint64_t dispatch_id;
+    uint64_t queue_id_handle;
+
+    // Correlation fields
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+
+    // Dispatch configuration
+    uint32_t private_segment_size;
+    uint32_t group_segment_size;
+    uint32_t workgroup_size_x;
+    uint32_t workgroup_size_y;
+    uint32_t workgroup_size_z;
+    uint32_t grid_size_x;
+    uint32_t grid_size_y;
+    uint32_t grid_size_z;
+
+    // Stream handle
+    size_t stream_handle;
 };
 
 struct memory_copy_sample : storage_parsed_type_base
 {
-    rocprofiler_buffer_tracing_memory_copy_record_t record;
-    size_t                                          stream_handle;
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Identification fields
+    uint64_t thread_id;
+    uint64_t dst_agent_id_handle;
+    uint64_t src_agent_id_handle;
+
+    // Operation details
+    int32_t  kind;
+    int32_t  operation;
+    uint64_t bytes;
+
+    // Correlation fields
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+
+    // Address fields (version dependent)
+    uint64_t dst_address_value;
+    uint64_t src_address_value;
+
+    // Stream handle
+    size_t stream_handle;
 };
 
 #if(ROCPROFILER_VERSION >= 600)
 struct memory_allocate_sample : storage_parsed_type_base
 {
-    rocprofiler_buffer_tracing_memory_allocation_record_t record;
-    size_t                                                stream_handle;
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Identification fields
+    uint64_t thread_id;
+    uint64_t agent_id_handle;
+
+    // Operation details
+    int32_t  kind;
+    int32_t  operation;
+    uint64_t allocation_size;
+
+    // Correlation fields
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+
+    // Address fields (version dependent)
+    uint64_t address_value;
+
+    // Stream handle
+    size_t stream_handle;
 };
 #endif
 
 struct region_sample : storage_parsed_type_base
 {
     region_sample() = default;
-    region_sample(rocprofiler_callback_tracing_record_t _record,
-                  rocprofiler_timestamp_t               _start_timestamp,
-                  rocprofiler_timestamp_t _end_timestamp, std::string _call_stack,
-                  std::string _args_str, std::string _category)
-    : record(_record)
+    region_sample(uint64_t _thread_id, int32_t _kind, int32_t _operation,
+                  uint64_t _correlation_id_internal, uint64_t _correlation_id_ancestor,
+                  uint64_t _start_timestamp, uint64_t _end_timestamp,
+                  std::string _call_stack, std::string _args_str, std::string _category)
+    : thread_id(_thread_id)
+    , kind(_kind)
+    , operation(_operation)
+    , correlation_id_internal(_correlation_id_internal)
+    , correlation_id_ancestor(_correlation_id_ancestor)
     , start_timestamp(_start_timestamp)
     , end_timestamp(_end_timestamp)
     , call_stack(std::move(_call_stack))
     , args_str(std::move(_args_str))
     , category(std::move(_category))
     {}
-    rocprofiler_callback_tracing_record_t record;
-    rocprofiler_timestamp_t               start_timestamp;
-    rocprofiler_timestamp_t               end_timestamp;
-    std::string                           call_stack;
-    std::string                           args_str;
-    std::string                           category;
+
+    // Identification fields
+    uint64_t thread_id;
+    int32_t  kind;
+    int32_t  operation;
+
+    // Correlation fields
+    uint64_t correlation_id_internal;
+    uint64_t correlation_id_ancestor;
+
+    // Timing fields
+    uint64_t start_timestamp;
+    uint64_t end_timestamp;
+
+    // Additional fields
+    std::string call_stack;
+    std::string args_str;
+    std::string category;
 };
 
 struct in_time_sample : storage_parsed_type_base
@@ -104,7 +189,7 @@ enum class entry_type : uint32_t
     region                = 0x0002,
     kernel_dispatch       = 0x0003,
     memory_copy           = 0x0004,
-#if(ROCPROFILER_VERSION >= 600)
+#if(ROCPROFSYS_USE_ROCM && ROCPROFILER_VERSION >= 600)
     memory_alloc = 0x0005,
 #endif
     fragmented_space = 0xFFFF
