@@ -156,8 +156,11 @@ def write_kernel_csv(
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
             end AS End_Timestamp,
-            scratch_size AS Private_Segment_Size,
-            lds_size AS Group_Segment_Size,
+            lds_size AS LDS_Block_Size,
+            scratch_size AS Scratch_Size,
+            vgpr_count AS VGPR_Count,
+            accum_vgpr_count AS Accum_VGPR_Count,
+            sgpr_count AS SGPR_Count,
             workgroup_x AS Workgroup_Size_X,
             workgroup_y AS Workgroup_Size_Y,
             workgroup_z AS Workgroup_Size_Z,
@@ -323,7 +326,7 @@ def write_counters_csv(
 
     query = f"""
         SELECT
-            guid AS Pid,
+            guid AS Guid,
             stack_id AS Correlation_Id,
             dispatch_id AS Dispatch_Id,
             {agent_id} AS Agent_Id,
@@ -364,6 +367,7 @@ def write_scratch_memory_csv(
 
     query = f"""
         SELECT
+            guid AS Guid,
             'SCRATCH_MEMORY' AS Kind,
             'SCRATCH_MEMORY_' || operation AS Operation,
             {agent_id} AS Agent_Id,
