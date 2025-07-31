@@ -23,7 +23,6 @@
 #include "metadata_storage.hpp"
 #include <algorithm>
 #include <cstdint>
-#include <rocprofiler-sdk/callback_tracing.h>
 
 namespace rocprofsys
 {
@@ -80,32 +79,6 @@ metadata::add_thread_info(const info::thread& thread_info)
             return;
         }
         _data.emplace(thread_info);
-    });
-}
-void
-metadata::add_code_object(
-    const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
-{
-    m_code_objects.wlock([&code_object](auto& _data) {
-        if(_data.count(code_object) > 0)
-        {
-            return;
-        }
-        _data.emplace(code_object);
-    });
-}
-
-void
-metadata::add_kernel_symbol(
-    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
-        kernel_symbol)
-{
-    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
-        if(_data.count(kernel_symbol) > 0)
-        {
-            return;
-        }
-        _data.emplace(kernel_symbol);
     });
 }
 
@@ -181,28 +154,6 @@ metadata::get_thread_info(const uint32_t& thread_id) const
     });
 }
 
-std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
-metadata::get_code_object(uint64_t code_object_id) const
-{
-    return get_type_info<rocprofiler_callback_tracing_code_object_load_data_t>(
-        m_code_objects,
-        [&code_object_id](
-            const rocprofiler_callback_tracing_code_object_load_data_t& val) {
-            return val.code_object_id == code_object_id;
-        });
-}
-
-std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-metadata::get_kernel_symbol(uint64_t kernel_id) const
-{
-    return get_type_info<
-        rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>(
-        m_kernel_symbols,
-        [&kernel_id](
-            const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
-                val) { return val.kernel_id == kernel_id; });
-}
-
 std::optional<info::track>
 metadata::get_track_info(const std::string_view& track_name) const
 {
@@ -235,23 +186,6 @@ metadata::get_track_info_list() const
     return result;
 }
 
-std::vector<rocprofiler_callback_tracing_code_object_load_data_t>
-metadata::get_code_object_list() const
-{
-    std::vector<rocprofiler_callback_tracing_code_object_load_data_t> result;
-    m_code_objects.rlock(assign_set_to_vector(result));
-    return result;
-}
-
-std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-metadata::get_kernel_symbol_list() const
-{
-    std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
-        result;
-    m_kernel_symbols.rlock(assign_set_to_vector(result));
-    return result;
-}
-
 std::vector<uint64_t>
 metadata::get_queue_list() const
 {
@@ -276,6 +210,74 @@ metadata::get_string_list() const
     return result;
 }
 
+#if ROCPROFSYS_USE_ROCM
+
+void
+metadata::add_code_object(
+    const rocprofiler_callback_tracing_code_object_load_data_t& code_object)
+{
+    m_code_objects.wlock([&code_object](auto& _data) {
+        if(_data.count(code_object) > 0)
+        {
+            return;
+        }
+        _data.emplace(code_object);
+    });
+}
+
+void
+metadata::add_kernel_symbol(
+    const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
+        kernel_symbol)
+{
+    m_kernel_symbols.wlock([&kernel_symbol](auto& _data) {
+        if(_data.count(kernel_symbol) > 0)
+        {
+            return;
+        }
+        _data.emplace(kernel_symbol);
+    });
+}
+
+std::optional<rocprofiler_callback_tracing_code_object_load_data_t>
+metadata::get_code_object(uint64_t code_object_id) const
+{
+    return get_type_info<rocprofiler_callback_tracing_code_object_load_data_t>(
+        m_code_objects,
+        [&code_object_id](
+            const rocprofiler_callback_tracing_code_object_load_data_t& val) {
+            return val.code_object_id == code_object_id;
+        });
+}
+
+std::optional<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+metadata::get_kernel_symbol(uint64_t kernel_id) const
+{
+    return get_type_info<
+        rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>(
+        m_kernel_symbols,
+        [&kernel_id](
+            const rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t&
+                val) { return val.kernel_id == kernel_id; });
+}
+
+std::vector<rocprofiler_callback_tracing_code_object_load_data_t>
+metadata::get_code_object_list() const
+{
+    std::vector<rocprofiler_callback_tracing_code_object_load_data_t> result;
+    m_code_objects.rlock(assign_set_to_vector(result));
+    return result;
+}
+
+std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+metadata::get_kernel_symbol_list() const
+{
+    std::vector<rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t>
+        result;
+    m_kernel_symbols.rlock(assign_set_to_vector(result));
+    return result;
+}
+
 rocprofiler::sdk::buffer_name_info_t<const char*>
 metadata::get_buffer_name_info() const
 {
@@ -287,6 +289,8 @@ metadata::get_callback_tracing_info() const
 {
     return m_callback_tracing_info;
 }
+
+#endif
 
 }  // namespace sample_cache
 }  // namespace rocprofsys
