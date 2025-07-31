@@ -587,11 +587,10 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
     props.OverrideEngineId.ui32.Major = major & 0x3f;
     props.OverrideEngineId.ui32.Minor = minor & 0xff;
     props.OverrideEngineId.ui32.Stepping = step & 0xff;
-  } else {
-    props.EngineId.ui32.Major = device->Major();
-    props.EngineId.ui32.Minor = device->Minor();
-    props.EngineId.ui32.Stepping = device->Stepping();
   }
+  props.EngineId.ui32.Major = device->Major();
+  props.EngineId.ui32.Minor = device->Minor();
+  props.EngineId.ui32.Stepping = device->Stepping();
 
   snprintf((char *)props.AMDName, sizeof(props.AMDName) - 1, "GFX%06x",
            HSA_GET_GFX_VERSION_FULL(props.EngineId.ui32));
