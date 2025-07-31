@@ -1,0 +1,78 @@
+[submodule "projects/rocprofiler/perfetto"]
+	path = projects/rocprofiler/plugin/perfetto/perfetto
+	url = https://github.com/google/perfetto.git
+	branch = releases/v44.x
+[submodule "projects/rocprofiler-sdk/external/googletest"]
+	path = projects/rocprofiler-sdk/external/googletest
+	url = https://github.com/google/googletest.git
+[submodule "projects/rocprofiler-register/external/glog"]
+	path = projects/rocprofiler-register/external/glog
+	url = https://github.com/google/glog.git
+[submodule "projects/rocprofiler-sdk/external/glog"]
+	path = projects/rocprofiler-sdk/external/glog
+	url = https://github.com/google/glog.git
+[submodule "projects/rocprofiler-sdk/external/fmt"]
+	path = projects/rocprofiler-sdk/external/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "projects/rocprofiler-register/external/fmt"]
+	path = projects/rocprofiler-register/external/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "projects/rocprofiler-sdk/source/docs/doxygen-awesome-css"]
+	path = projects/rocprofiler-sdk/external/doxygen-awesome-css
+	url = https://github.com/jothepro/doxygen-awesome-css.git
+[submodule "projects/rocprofiler-sdk/external/ptl"]
+	path = projects/rocprofiler-sdk/external/ptl
+	url = https://github.com/jrmadsen/PTL
+[submodule "projects/rocprofiler-sdk/external/cereal"]
+	path = projects/rocprofiler-sdk/external/cereal
+	url = https://github.com/jrmadsen/cereal.git
+[submodule "projects/rocprofiler-sdk/external/filesystem"]
+	path = projects/rocprofiler-sdk/external/filesystem
+	url = https://github.com/gulrak/filesystem.git
+[submodule "projects/rocprofiler-sdk/external/perfetto"]
+	path = projects/rocprofiler-sdk/external/perfetto
+	url = https://github.com/google/perfetto
+[submodule "projects/rocprofiler-sdk/external/elfio"]
+	path = projects/rocprofiler-sdk/external/elfio
+	url = https://github.com/serge1/ELFIO.git
+[submodule "projects/rocprofiler-sdk/external/yaml-cpp"]
+	path = projects/rocprofiler-sdk/external/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "projects/rocprofiler-sdk/external/json"]
+	path = projects/rocprofiler-sdk/external/json
+	url = https://github.com/nlohmann/json.git
+[submodule "projects/rocprofiler-sdk/external/sqlite"]
+	path = projects/rocprofiler-sdk/external/sqlite
+	url = https://github.com/sqlite/sqlite
+[submodule "projects/rocprofiler-sdk/external/pybind11"]
+	path = projects/rocprofiler-sdk/external/pybind11
+	url = https://github.com/pybind/pybind11.git
+[submodule "projects/rocprofiler-sdk/external/gotcha"]
+	path = projects/rocprofiler-sdk/external/gotcha
+	url = https://jrmadsen@github.com/jrmadsen/GOTCHA
+[submodule "projects/rocprofiler-systems/external/timemory"]
+	path = projects/rocprofiler-systems/external/timemory
+	url = https://github.com/ROCm/timemory.git
+	branch = rocprofiler-systems
+[submodule "projects/rocprofiler-systems/external/perfetto"]
+	path = projects/rocprofiler-systems/external/perfetto
+	url = https://github.com/google/perfetto.git
+[submodule "projects/rocprofiler-systems/external/elfio"]
+	path = projects/rocprofiler-systems/external/elfio
+	url = https://github.com/jrmadsen/ELFIO.git
+[submodule "projects/rocprofiler-systems/external/dyninst"]
+	path = projects/rocprofiler-systems/external/dyninst
+	url = https://github.com/ROCm/dyninst.git
+	branch = dyninst_13
+[submodule "projects/rocprofiler-systems/external/PTL"]
+	path = projects/rocprofiler-systems/external/PTL
+	url = https://github.com/jrmadsen/PTL.git
+[submodule "projects/rocprofiler-systems/external/kokkos"]
+	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
+	url = https://github.com/kokkos/kokkos.git
+[submodule "external/papi"]
+	path = projects/rocprofiler-systems/external/papi
+	url = https://github.com/icl-utk-edu/papi.git
+[submodule "projects/rocprofiler-systems/external/pybind11"]
+	path = projects/rocprofiler-systems/external/pybind11
+	url = https://github.com/jrmadsen/pybind11.git
