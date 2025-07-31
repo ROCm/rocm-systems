@@ -63,7 +63,7 @@ jobs:
 
     runs-on: rocprofiler-ubuntu-22
 
-    # define this for containers
+    # define this for container
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 11

@@ -27,7 +27,7 @@ env:
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
-  ## A task should be assigned directly to fix the issue
+  ## A task should be assigned directly to fix the issues
   ## Scratch memory tests need to be fixed for ROCm 7.0 release
   navi3_EXCLUDE_TESTS_REGEX: ""
   vega20_EXCLUDE_TESTS_REGEX: ""
