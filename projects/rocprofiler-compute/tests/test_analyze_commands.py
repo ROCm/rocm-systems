@@ -42,7 +42,7 @@ indirs = [
     "tests/workloads/vcopy/MI350",
 ]
 
-time_units = {"s": 10 ** 9, "ms": 10 ** 6, "us": 10 ** 3, "ns": 1}
+time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 
 @pytest.mark.misc
@@ -1308,9 +1308,9 @@ def test_mathematical_correctness_all_units(sample_time_data, original_ns_values
     from utils.tty import convert_time_columns
 
     test_cases = [
-        ("s", 10 ** 9),  # 1 second = 10^9 nanoseconds
-        ("ms", 10 ** 6),  # 1 millisecond = 10^6 nanoseconds
-        ("us", 10 ** 3),  # 1 microsecond = 10^3 nanoseconds
+        ("s", 10**9),  # 1 second = 10^9 nanoseconds
+        ("ms", 10**6),  # 1 millisecond = 10^6 nanoseconds
+        ("us", 10**3),  # 1 microsecond = 10^3 nanoseconds
         ("ns", 1),  # 1 nanosecond = 1 nanosecond
     ]
 
