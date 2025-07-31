@@ -183,6 +183,9 @@ class RocProfCompute:
             if self.__args.specs:
                 print(generate_machine_specs(self.__args))
                 sys.exit(0)
+            elif self.__args.list_metrics:
+                self.list_metrics()
+                sys.exit(0)
             parser.print_help(sys.stderr)
             console_error(
                 "rocprof-compute requires you to pass a valid mode. Detected None."
@@ -219,17 +222,13 @@ class RocProfCompute:
 
     @demarcate
     def list_metrics(self):
-        if not self.__args.list_metrics:
-            arch = self.__mspec.gpu_arch
-        else:
-            arch = self.__args.list_metrics
+        arch = self.__args.list_metrics
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
             ac.panel_configs = file_io.load_panel_configs(
                 self.__args.config_dir.joinpath(arch)
             )
-            sys_info = self.__mspec.get_class_members().iloc[0]
-            parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+            parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=None)
             for key, value in ac.metric_list.items():
                 prefix = ""
                 if "." not in str(key):
