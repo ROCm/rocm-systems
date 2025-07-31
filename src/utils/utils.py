@@ -1041,8 +1041,9 @@ def pc_sampling_prof(
             "-o",
             "ps_file",  # todo: sync up with the name from source in 2100_.yaml
             "--",
-            appcmd,
         ]
+        options.extend(appcmd)
+
         success, output = capture_subprocess_output(
             [rocprof_cmd] + options, new_env=os.environ.copy(), profileMode=True
         )

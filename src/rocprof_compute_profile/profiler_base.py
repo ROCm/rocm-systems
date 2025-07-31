@@ -27,6 +27,7 @@ import glob
 import logging
 import os
 import re
+import shlex
 import shutil
 import time
 from abc import ABC, abstractmethod
@@ -473,7 +474,9 @@ class RocProfCompute_Base:
                 method=self.get_args().pc_sampling_method,
                 interval=self.get_args().pc_sampling_interval,
                 workload_dir=self.get_args().path,
-                appcmd=self.get_args().remaining,
+                appcmd=shlex.split(
+                    self.get_args().remaining
+                ),  # FIXME: the right solution is applying it when argparsing once!
                 rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
