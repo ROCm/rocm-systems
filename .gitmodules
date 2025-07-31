@@ -70,7 +70,7 @@
 [submodule "projects/rocprofiler-systems/external/kokkos"]
 	path = projects/rocprofiler-systems/examples/lulesh/external/kokkos
 	url = https://github.com/kokkos/kokkos.git
-[submodule "external/papi"]
+[submodule "projects/rocprofiler-systems/external/papi"]
 	path = projects/rocprofiler-systems/external/papi
 	url = https://github.com/icl-utk-edu/papi.git
 [submodule "projects/rocprofiler-systems/external/pybind11"]
