@@ -41,7 +41,7 @@ def write_sql_query_to_csv(
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 def write_agent_info_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -126,17 +126,26 @@ def write_agent_info_csv(
             model_name AS Model_Name
         FROM "rocpd_info_agent"
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_agent_info")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_agent_info")
 
 def write_kernel_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
-    query = """
+    if config.agent_index_value == libpyrocpd.agent_indexing.node : # absolute
+        agent_id = "'Agent ' || agent_abs_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node: # relative (default)
+        agent_id = "'Agent ' || agent_log_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type: #  type-relative
+        agent_id = "agent_type || ' ' || agent_type_index"
+    else:
+        agent_id = ""
+
+    query = f"""
         SELECT
             guid AS Guid,
             'KERNEL_DISPATCH' AS Kind,
-            'Agent ' || agent_log_index AS Agent_Id,
+            {agent_id} AS Agent_Id,
             queue_id AS Queue_Id,
             stream_id AS Stream_Id,
             tid AS Thread_Id,
@@ -158,20 +167,33 @@ def write_kernel_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_kernel_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_kernel_trace")
 
 def write_memory_copy_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
-    query = """
+    if config.agent_index_value == libpyrocpd.agent_indexing.node : # absolute
+        src_agent_id = "'Agent ' || src_agent_abs_index"
+        dst_agent_id = "'Agent ' || dst_agent_abs_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node: # relative (default)
+        src_agent_id = "'Agent ' || src_agent_log_index"
+        dst_agent_id = "'Agent ' || dst_agent_log_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type: #  type-relative
+        src_agent_id = "src_agent_type || ' ' || src_agent_type_index"
+        dst_agent_id = "dst_agent_type || ' ' || dst_agent_type_index"
+    else:
+        src_agent_id = ""
+        dst_agent_id = ""
+
+    query = f"""
         SELECT
             guid AS Guid,
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id AS Stream_Id,
-            'Agent ' || src_agent_log_index AS Source_Agent_Id,
-            'Agent ' || dst_agent_log_index AS Destination_Agent_Id,
+            {src_agent_id}  AS Source_Agent_Id,
+            {dst_agent_id}  AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
             end AS End_Timestamp
@@ -179,20 +201,29 @@ def write_memory_copy_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_memory_copy_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_memory_copy_trace")
 
 def write_memory_allocation_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
-    query = """
+    if config.agent_index_value == libpyrocpd.agent_indexing.node : # absolute
+        agent_id = "'Agent ' || agent_abs_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node: # relative (default)
+        agent_id = "'Agent ' || agent_log_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type: #  type-relative
+        agent_id = "agent_type || ' ' || agent_type_index"
+    else:
+        agent_id = ""
+
+    query = f"""
         SELECT
             guid AS Guid,
             'MEMORY_ALLOCATION' AS Kind,
             'MEMORY_ALLOCATION_' || type AS Operation,
             CASE
                 WHEN type != "FREE"
-                THEN 'Agent ' || agent_log_index
+                THEN {agent_id}
                 ELSE '"'
             END AS Agent_Id,
             size AS Allocation_Size,
@@ -204,10 +235,10 @@ def write_memory_allocation_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_memory_allocation_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_memory_allocation_trace")
 
 def write_hip_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -226,10 +257,10 @@ def write_hip_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_hip_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_hip_api_trace")
 
 def write_hsa_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -248,10 +279,10 @@ def write_hsa_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_hsa_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_hsa_api_trace")
 
 def write_marker_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -274,18 +305,27 @@ def write_marker_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_marker_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_marker_api_trace")
 
 def write_counters_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
-    query = """
+    if config.agent_index_value == libpyrocpd.agent_indexing.node : # absolute
+        agent_id = "'Agent ' || agent_abs_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node: # relative (default)
+        agent_id = "'Agent ' || agent_log_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type: #  type-relative
+        agent_id = "agent_type || ' ' || agent_type_index"
+    else:
+        agent_id = ""
+
+    query = f"""
         SELECT
             guid AS Pid,
             stack_id AS Correlation_Id,
             dispatch_id AS Dispatch_Id,
-            'Agent ' || agent_log_index AS Agent_Id,
+            {agent_id} AS Agent_Id,
             queue_id AS Queue_Id,
             pid AS Process_Id,
             tid AS Thread_Id,
@@ -306,17 +346,26 @@ def write_counters_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_counter_collection")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_counter_collection")
 
 def write_scratch_memory_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
-    query = """
+    if config.agent_index_value == libpyrocpd.agent_indexing.node : # absolute
+        agent_id = "'Agent ' || agent_abs_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node: # relative (default)
+        agent_id = "'Agent ' || agent_log_index"
+    elif config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type: #  type-relative
+        agent_id = "agent_type || ' ' || agent_type_index"
+    else:
+        agent_id = ""
+
+    query = f"""
         SELECT
             'SCRATCH_MEMORY' AS Kind,
             'SCRATCH_MEMORY_' || operation AS Operation,
-            'Agent ' || agent_log_index AS Agent_Id,
+            {agent_id} AS Agent_Id,
             queue_id AS Queue_Id,
             tid AS Thread_Id,
             alloc_flags AS Alloc_Flags,
@@ -326,10 +375,10 @@ def write_scratch_memory_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_scratch_memory_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_scratch_memory_trace")
 
 def write_rccl_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -348,10 +397,10 @@ def write_rccl_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_rccl_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_rccl_api_trace")
 
 def write_rocdecode_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -370,10 +419,10 @@ def write_rocdecode_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_rocdecode_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_rocdecode_api_trace")
 
 def write_rocjpeg_api_csv(
-    importData, output_path
+    importData, config
 ) -> None:
 
     query = """
@@ -392,22 +441,22 @@ def write_rocjpeg_api_csv(
         ORDER BY
             start ASC, end DESC
     """
-    write_sql_query_to_csv(importData, query, output_path, "out_rocjpeg_api_trace")
+    write_sql_query_to_csv(importData, query, config.output_path, "out_rocjpeg_api_trace")
 
 def write_csv(importData, config):
 
-    write_agent_info_csv(importData, config.output_path)
-    write_kernel_csv(importData, config.output_path)
-    write_memory_copy_csv(importData, config.output_path)
-    write_memory_allocation_csv(importData, config.output_path)
-    write_hip_api_csv(importData, config.output_path)
-    write_hsa_api_csv(importData, config.output_path)
-    write_marker_api_csv(importData, config.output_path)
-    write_counters_csv(importData, config.output_path)
-    write_scratch_memory_csv(importData, config.output_path)
-    write_rccl_api_csv(importData, config.output_path)
-    write_rocdecode_api_csv(importData, config.output_path)
-    write_rocjpeg_api_csv(importData, config.output_path)
+    write_agent_info_csv(importData, config)
+    write_kernel_csv(importData, config)
+    write_memory_copy_csv(importData, config)
+    write_memory_allocation_csv(importData, config)
+    write_hip_api_csv(importData, config)
+    write_hsa_api_csv(importData, config)
+    write_marker_api_csv(importData, config)
+    write_counters_csv(importData, config)
+    write_scratch_memory_csv(importData, config)
+    write_rccl_api_csv(importData, config)
+    write_rocdecode_api_csv(importData, config)
+    write_rocjpeg_api_csv(importData, config)
 
 def execute(input, config=None, window_args=None, **kwargs):
 
