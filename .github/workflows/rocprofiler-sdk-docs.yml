@@ -79,7 +79,6 @@ jobs:
         uses: actions/checkout@v4
         with:
             sparse-checkout: projects/rocprofiler-sdk
-            submodules: 'recursive'
             set-safe-directory: true
       - name: Create Docs Directory
         shell: bash
@@ -103,6 +102,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run:
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
+          git submodule update --init --recursive;
           cmake -B build
             -DROCPROFILER_DEP_ROCMCORE=ON
             -DROCPROFILER_BUILD_DOCS=ON
