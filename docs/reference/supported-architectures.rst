@@ -10,7 +10,7 @@ across multiple architectures.
 
 .. note::
 
-   The GFX versions (GFX9, GFX10, GFX11, GFX12) refer to the architecture families of the hardware for that version.
+   The GFX versions (GFX9XX, GFX10XX, GFX11XX, GFX12XX) refer to the architecture families of the hardware for that version. See `System requirements (Linux) <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html>`__ for more info.
 
 Here's a summary of the counter blocks supported for each architecture:
 

@@ -54,7 +54,7 @@ For more control over the build process, you can set the CMake options manually:
       make -j
 
 
-(Optional) Enable debug tracing
+Enable debug tracing (Optional) 
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 To enable debug tracing, set this environment variable before running CMake: 

@@ -1,11 +1,11 @@
 .. meta::
-  :description: Defined terms commonly used in AQLprofile
+  :description: Defined concepts commonly used in AQLprofile
   :keywords: AQLprofile, ROCm
 
-AQLprofile terms
-================
+AQLprofile glossary
+===================
 
-Learn the definitions of terms commonly used in AQLprofile.
+Learn the definitions of concepts commonly used in AQLprofile.
 
 Agents
 ------
