@@ -9270,7 +9270,7 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
-        assert options_list[-1] == ""
+        assert options_list[-1] == "--"
         mock_console_error.assert_not_called()
 
     mock_capture_subprocess.reset_mock()
