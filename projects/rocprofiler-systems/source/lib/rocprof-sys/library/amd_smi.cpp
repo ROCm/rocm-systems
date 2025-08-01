@@ -105,7 +105,7 @@ metadata_initialize_smi_tracks()
         { trait::name<category::amd_smi_temp>::value, thread_id, "{}" });
     sample_cache::get_cache_metadata().add_track(
         { trait::name<category::amd_smi_memory_usage>::value, thread_id, "{}" });
-};
+}
 
 void
 metadata_initialize_smi_pmc(size_t gpu_id)
@@ -148,7 +148,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
           trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
           COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0 });
-};
+}
 
 void
 rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& settings,
