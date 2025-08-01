@@ -44,9 +44,8 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        rocm: ['OFF']
         mpi: ['OFF']
-        ompt: ['OFF']
+        ompt: ['ON']
         papi: ['OFF']
         python: ['ON']
         strip: ['OFF']
@@ -106,6 +105,8 @@ jobs:
         USE_ROCM=OFF
         if [ "${{ matrix.rocm-version }}" != "0.0" ]; then
           CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=/opt/rocm"
+          '${{ matrix.compiler }}' --version
+          USE_ROCM=ON
         else
           CMAKE_PREFIX_PATH_ARG=""
         fi
@@ -118,10 +119,10 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
           -DROCPROFSYS_USE_MPI=${{ matrix.mpi }} \
-          -DROCPROFSYS_USE_ROCM=OFF \
+          -DROCPROFSYS_USE_ROCM=$USE_ROCM \
           -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }} \
           -DROCPROFSYS_USE_PAPI=${{ matrix.papi }} \
           -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
@@ -133,7 +134,7 @@ jobs:
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12" \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
           -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;lulesh" \
