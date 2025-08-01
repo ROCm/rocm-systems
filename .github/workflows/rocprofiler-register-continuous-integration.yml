@@ -53,9 +53,11 @@ jobs:
         PACKAGING_INSTALL_PREFIX: /opt/rocm
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-register
+        submodules: true
+        set-safe-directory: true
 
     - name: Install Packages
       timeout-minutes: 25
