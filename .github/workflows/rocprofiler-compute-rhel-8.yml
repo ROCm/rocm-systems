@@ -54,24 +54,24 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
       - name: Install Python prereqs
-        working_directory: projects/rocprofiler-compute
+        working-directory: projects/rocprofiler-compute
         run: |
           python3.9 -m pip install -r requirements.txt
           python3.9 -m pip install -r requirements-test.txt
       - name: Configure and install
-        working_directory: projects/rocprofiler-compute
+        working-directory: projects/rocprofiler-compute
         run: |
           mkdir build
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-compute -DPYTEST_NUMPROCS=4 ..
           make install
       - name: CTest- Analyze Commands
-        working_directory: projects/rocprofiler-compute
+        working-directory: projects/rocprofiler-compute
         run: |
           cd build
           ctest --verbose -R test_analyze_commands
       - name: CTest- Analyze Workloads
-        working_directory: projects/rocprofiler-compute
+        working-directory: projects/rocprofiler-compute
         run: |
           cd build
           ctest --verbose -R test_analyze_workloads
