@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/deprecated/counting_services.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 
