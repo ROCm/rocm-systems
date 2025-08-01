@@ -262,16 +262,16 @@ rocpd_post_processing::get_region_callback() const
         rocprofiler_sdk::function_args_t args;
         const std::string                delimiter = ";;";
 
-        auto split = [](const std::string& str, const std::string& delimiter) {
+        auto split = [](const std::string& str, const std::string& _delimiter) {
             std::vector<std::string> tokens;
             size_t                   start = 0;
-            size_t                   end   = str.find(delimiter);
+            size_t                   end   = str.find(_delimiter);
 
             while(end != std::string::npos)
             {
                 tokens.push_back(str.substr(start, end - start));
-                start = end + delimiter.length();
-                end   = str.find(delimiter, start);
+                start = end + _delimiter.length();
+                end   = str.find(_delimiter, start);
             }
 
             return tokens;
