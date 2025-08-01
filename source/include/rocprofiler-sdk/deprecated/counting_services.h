@@ -113,45 +113,4 @@ typedef rocprofiler_counter_record_dimension_info_t rocprofiler_record_dimension
 ROCPROFILER_SDK_DEPRECATED("Use rocprofiler_counter_info_v1_t for enhanced dimension support")
 typedef rocprofiler_counter_info_v0_t rocprofiler_counter_info_t;
 
-//==============================================================================
-// FUNCTION WRAPPER COMPATIBILITY NOTES
-//==============================================================================
-
-/*
- * The following functions have been renamed but cannot be easily aliased with
- * static inline functions due to experimental markings or complex signatures.
- * Users should update their code to use the new names:
- *
- * OLD NAME                                          → NEW NAME
- * ===============================================      =====================================
- * rocprofiler_configure_buffered_dispatch_counting_service  →
- * rocprofiler_configure_buffer_dispatch_counting_service
- * rocprofiler_configure_callback_dispatch_counting_service  → (same name, but parameter types
- * changed) rocprofiler_configure_device_counting_service            → (same name, but parameter
- * types changed) rocprofiler_sample_device_counting_service               → (same name, but
- * parameter types changed)
- *
- * Parameter type changes:
- * - rocprofiler_profile_config_id_t          → rocprofiler_counter_config_id_t
- * - rocprofiler_record_counter_t             → rocprofiler_counter_record_t
- * - rocprofiler_correlation_id_t             → rocprofiler_async_correlation_id_t
- * - All callback typedefs renamed with _cb_t suffix
- */
-
-//==============================================================================
-// USAGE EXAMPLE
-//==============================================================================
-
-/*
- * To use this backward compatibility header, include it after the main headers:
- *
- * #include <rocprofiler-sdk/rocprofiler.h>
- * #include <rocprofiler-sdk/deprecated/counting_services.h>
- *
- * // Now you can use old names:
- * rocprofiler_dispatch_counting_service_callback_t old_callback;
- * rocprofiler_record_counter_t* old_records;
- * rocprofiler_configure_buffered_dispatch_counting_service(...);
- */
-
 ROCPROFILER_EXTERN_C_FINI
