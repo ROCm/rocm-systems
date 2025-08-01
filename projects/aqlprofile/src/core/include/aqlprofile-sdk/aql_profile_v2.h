@@ -636,7 +636,7 @@ hsa_status_t aqlprofile_spm_stop(aqlprofile_handle_t handle);
  * @param[in] event_count  Number of events
  * @param[in] userdata     Returned to user
 */
-typedef void (*aqlprofile_spm_decode_callback_t)(
+typedef void (*aqlprofile_spm_decode_callback_v0_t)(
     uint64_t               timestamp,
     uint64_t*              event_values,
     size_t                 event_count,
@@ -655,11 +655,38 @@ typedef void (*aqlprofile_spm_decode_callback_t)(
  * @retval HSA_STATUS_ERROR   for generic error
 */
 hsa_status_t aqlprofile_spm_decode_accumulate_v0(
-    aqlprofile_spm_buffer_desc_t     desc,
-    aqlprofile_spm_decode_callback_t decode_cb,
-    void*                            data,
-    size_t                           size,
-    void*                            userdata
+    aqlprofile_spm_buffer_desc_t        desc,
+    aqlprofile_spm_decode_callback_v0_t decode_cb,
+    void*                               data,
+    size_t                              size,
+    void*                               userdata
+);
+
+typedef void (*aqlprofile_spm_decode_callback_v1_t)(
+    uint64_t timestamp,
+    uint64_t value,
+    uint64_t index,
+    int      shader_engine,
+    void*    userdata
+);
+
+/**
+ * @brief Decodes a raw buffer returned by aqlprofile_spm_data_callback_t.
+ * Returns results accumulated per event_id requested.
+ * @param[in] desc Descriptor returned in create_packets()
+ * @param[in] decode_cb  Callback where decoded SPM data will be returned to
+ * @param[in] data       Raw SPM data returned in aqlprofile_spm_data_callback_t
+ * @param[in] size       Raw data size
+ * @param[in] userdata   Passed back to user
+ * @retval HSA_STATUS_SUCCESS if decode successful
+ * @retval HSA_STATUS_ERROR   for generic error
+*/
+hsa_status_t aqlprofile_spm_decode_stream_v1(
+    aqlprofile_spm_buffer_desc_t        desc,
+    aqlprofile_spm_decode_callback_v1_t decode_cb,
+    void*                               data,
+    size_t                              size,
+    void*                               userdata
 );
 
 enum aqlprofile_spm_decode_query_t
