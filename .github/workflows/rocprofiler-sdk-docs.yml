@@ -38,7 +38,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-            sparse-checkout: projects/rocprofiler-sdk
+          sparse-checkout: projects/rocprofiler-sdk
+          submodules: true
+          set-safe-directory: true
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
@@ -78,8 +80,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-            sparse-checkout: projects/rocprofiler-sdk
-            set-safe-directory: true
+          sparse-checkout: projects/rocprofiler-sdk
+          submodules: true
+          set-safe-directory: true
       - name: Create Docs Directory
         shell: bash
         working-directory: projects/rocprofiler-sdk/
