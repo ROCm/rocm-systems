@@ -56,26 +56,23 @@ struct FlatProfiler
 
 // Raw pointers to prevent early destruction of static objects
 FlatProfiler* flat_profiler = nullptr;
-// Temporarily, we have to disable check of receiving more valid
-// than invalid samples on MI300X.
-bool* strict_checking_enabled = nullptr;
+// Temporarily, we have to disable strict checks on MI300X
+// because of receiving more valid than invalid samples on MI300X.
+// For other GPUs, we keep strict checking enabled by default.
+// Please consider the disable_strict_checks_if_needed for more information.
+bool strict_checking_enabled{true};
 
 void
 init()
 {
     flat_profiler = new FlatProfiler();
-    // By default, enable strict checking.
-    // Disable later when encountering MI300X device.
-    strict_checking_enabled = new bool(true);
 }
 
 void
 fini()
 {
     delete flat_profiler;
-    delete strict_checking_enabled;
-    flat_profiler           = nullptr;
-    strict_checking_enabled = nullptr;
+    flat_profiler = nullptr;
 }
 
 CodeobjAddressTranslate&
@@ -205,7 +202,7 @@ dump_flat_profile()
         samples_num == flat_profile.get_valid_decoded_samples_num(),
         "Number of collected valid samples different than the number of decoded samples.");
     utils::pcs_assert(samples_num > 0, "No valid samples collected/decoded.");
-    if(*strict_checking_enabled)
+    if(strict_checking_enabled)
     {
         // Temporarily disabling the check until understanding why it fails on MI300X,
         // and not on MI300A and MI355.
@@ -222,7 +219,7 @@ dump_flat_profile()
 void
 disable_strict_checks_if_needed(rocprofiler_agent_t agent)
 {
-    if (agent.product_name == nullptr)
+    if(agent.product_name == nullptr)
     {
         // We don't have the information about the product name,
         // so use the strict checks to try revealing potential issues.
@@ -232,7 +229,7 @@ disable_strict_checks_if_needed(rocprofiler_agent_t agent)
     std::string_view product_name(agent.product_name);
     if(product_name.find("MI300X") != std::string_view::npos)
     {
-        *strict_checking_enabled = false;
+        strict_checking_enabled = false;
     }
 }
 
