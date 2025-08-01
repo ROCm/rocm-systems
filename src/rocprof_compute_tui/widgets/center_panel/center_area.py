@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 """
 Panel Widget Modules
@@ -29,9 +31,9 @@ Contains the panel widgets used in the main layout.
 """
 
 from textual.containers import Vertical
-from textual.widgets import Label, TabPane
+from textual.widgets import TabPane
 
-from rocprof_compute_tui.widgets.center_panel.analyze_view import AnalyzeView
+from rocprof_compute_tui.views.kernel_view import KernelView
 from rocprof_compute_tui.widgets.tabbed_content import TabsTabbedContent
 
 
@@ -48,15 +50,12 @@ class CenterPanel(Vertical):
         super().__init__()
 
         self.default_tab = "center-analyze"
-        self.analyze_view = AnalyzeView()
+        self.kernel_view = KernelView()
 
     def compose(self):
-        with TabsTabbedContent(initial="tab-analyze"):
-            with TabPane("Basic View", id="tab-analyze"):
-                yield self.analyze_view
-            # TODO:
-            # with TabPane("placeholder (🚧)", id="tab-1"):
-            #     yield Label("🚧 Under Construction")
+        with TabsTabbedContent(initial="tab-kernel"):
+            with TabPane("Basic View", id="tab-kernel"):
+                yield self.kernel_view
 
     def on_mount(self) -> None:
         self.add_class("section")

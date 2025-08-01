@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 """
 ROCm Compute Profiler TUI - Main Application with Analysis Methods
@@ -39,15 +41,18 @@ from textual.binding import Binding
 from textual.widgets import Button, Footer, Header
 from textual_fspicker import SelectDirectory
 
-from rocprof_compute_tui.config import APP_TITLE, VERSION
+import config
+from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu
 from utils.specs import MachineSpecs, generate_machine_specs
+from utils.utils import get_version
 
 
 class RocprofTUIApp(App):
     """Main application for the performance analysis tool."""
 
+    VERSION = get_version(config.rocprof_compute_home)["version"]
     TITLE = f"{APP_TITLE} v{VERSION}"
     SUB_TITLE = "Workload Analysis Tool"
 
@@ -55,7 +60,8 @@ class RocprofTUIApp(App):
     BINDINGS = [
         Binding(key="q", action="quit", description="Quit"),
         Binding(key="r", action="refresh", description="Refresh"),
-        Binding(key="a", action="analyze", description="Analyze"),
+        # TODO
+        # Binding(key="a", action="analyze", description="Analyze"),
     ]
 
     def __init__(

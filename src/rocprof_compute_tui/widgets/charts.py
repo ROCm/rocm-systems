@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 from __future__ import annotations
 
@@ -68,7 +70,10 @@ def simple_bar(df, title=None):
         w *= 100
     plt.simple_bar(list(metric_dict.keys()), list(metric_dict.values()), width=w)
     # plt.show()
-    return "\n" + plt.build() + "\n"
+    plot_content = plt.build()
+    if not plot_content or plot_content.strip() == "":
+        return None
+    return "\n" + plot_content + "\n"
 
 
 def simple_multiple_bar(df, title=None):
@@ -100,10 +105,13 @@ def simple_multiple_bar(df, title=None):
         h *= 300
 
     plt.plot_size(height=h)
-    plt.multiple_bar(labels, data, color=["blue", "blue+", 68, 63])
+    plt.multiple_bar(labels, data)
 
     # plt.show()
-    return "\n" + plt.build() + "\n"
+    plot_content = plt.build()
+    if not plot_content or plot_content.strip() == "":
+        return None
+    return "\n" + plot_content + "\n"
 
 
 def simple_box(df, orientation="v", title=None):
@@ -173,7 +181,10 @@ def simple_box(df, orientation="v", title=None):
     plt.theme("pro")
 
     # plt.show()
-    return "\n" + plt.build() + "\n"
+    plot_content = plt.build()
+    if not plot_content or plot_content.strip() == "":
+        return None
+    return "\n" + plot_content + "\n"
 
 
 def px_simple_bar(df, title: str = None, id=None, style: dict = None, orientation="h"):
@@ -284,18 +295,8 @@ class RooflinePlot(Static):
         super().__init__("", classes="roofline", **kwargs)
         self.df = df
 
-        # Disable markup rendering
-        self._render_markup = False
-
         try:
-            plot_str = ""
-            try:
-                result = self.df["4. Roofline"]
-                if result:
-                    plot_str = str(result)
-            except:
-                plot_str = "No roofline data generated"
-
+            plot_str = str(self.df.get("4. Roofline", "No roofline data generated"))
             self.update(plot_str)
         except Exception as e:
             error_message = f"Roofline plot error: {str(e)}\n{traceback.format_exc()}"
@@ -319,41 +320,37 @@ class MemoryChart(Static):
     """
 
     def __init__(self, df: pd.DataFrame, **kwargs):
-        """Initialize the memory chart."""
         super().__init__("", classes="mem-chart", **kwargs)
         self.df = df
 
-        # Generate the chart content on initialization
         try:
-            # Prepare data
-            metric_dict = (
-                self.df[["Metric", "Value"]].set_index("Metric").to_dict()["Value"]
-            )
+            if self.df is None or self.df.empty:
+                self.update("No chart data generated")
+                return
 
-            # Capture stdout
+            if not {"Metric", "Value"}.issubset(self.df.columns):
+                self.update("Error: Missing required columns")
+                return
+
+            metric_dict = dict(zip(self.df["Metric"], self.df["Value"]))
+
             original_stdout = sys.stdout
-            string_buffer = StringIO()
-            sys.stdout = string_buffer
-
             try:
-                # Generate the chart
-                result = plot_mem_chart("", "per_kernel", metric_dict)
-                stdout_output = string_buffer.getvalue()
-
-                if stdout_output:
-                    plot_str = stdout_output
-                elif result:
-                    plot_str = str(result)
-                else:
-                    plot_str = "No chart data generated"
+                with StringIO() as string_buffer:
+                    sys.stdout = string_buffer
+                    result = plot_mem_chart("", "per_kernel", metric_dict)
+                    stdout_output = string_buffer.getvalue()
             finally:
                 sys.stdout = original_stdout
 
+            plot_str = next(
+                (x for x in [stdout_output, str(result) if result else None] if x),
+                "No chart data generated",
+            )
             self.update(plot_str)
 
         except Exception as e:
-            error_message = f"Memory chart error: {str(e)}\n{traceback.format_exc()}"
-            self.update(f"Error: {str(error_message)}")
+            self.update(f"Memory chart error: {str(e)}")
 
 
 class SimpleBar(Static):
@@ -372,7 +369,6 @@ class SimpleBar(Static):
     """
 
     def __init__(self, df: pd.DataFrame, **kwargs):
-        """Initialize the simple bar."""
         super().__init__("", classes="simple-bar", **kwargs)
         self.df = df
 
@@ -381,13 +377,8 @@ class SimpleBar(Static):
 
             if result:
                 plot_str = str(result)
-                # Escape markup characters
                 escaped_content = plot_str.replace("[", r"\[").replace("]", r"\]")
                 self.update(escaped_content)
-
-                # Alternative - wrap in [pre] tags for preformatted text
-                # self.update(f"[pre]{plot_str}[/pre]")
-
             else:
                 self.update("No simple bar data generated")
 
@@ -398,7 +389,6 @@ class SimpleBar(Static):
 
 
 class SimpleBox(Static):
-    """Simple Box visualization widget."""
 
     DEFAULT_CSS = """
     SimpleBox {
@@ -413,7 +403,6 @@ class SimpleBox(Static):
     """
 
     def __init__(self, df: pd.DataFrame, **kwargs):
-        """Initialize the simple box."""
         super().__init__("", classes="simple-box", **kwargs)
         self.df = df
 
@@ -422,7 +411,6 @@ class SimpleBox(Static):
 
             if result:
                 plot_str = str(result)
-                # Escape markup characters
                 escaped_content = plot_str.replace("[", r"\[").replace("]", r"\]")
                 self.update(escaped_content)
             else:
@@ -450,7 +438,6 @@ class SimpleMultiBar(Static):
     """
 
     def __init__(self, df: pd.DataFrame, **kwargs):
-        """Initialize the simple multiple bar."""
         super().__init__("", classes="simple-multi-bar", **kwargs)
         self.df = df
 
@@ -459,7 +446,6 @@ class SimpleMultiBar(Static):
 
             if result:
                 plot_str = str(result)
-                # Escape markup characters
                 escaped_content = plot_str.replace("[", r"\[").replace("]", r"\]")
                 self.update(escaped_content)
             else:
