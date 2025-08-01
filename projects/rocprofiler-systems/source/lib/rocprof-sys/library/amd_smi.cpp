@@ -98,21 +98,13 @@ metadata_initialize_smi_tracks()
     const auto thread_id = std::nullopt;
 
     sample_cache::get_cache_metadata().add_track(
-        { .track_name = trait::name<category::amd_smi_mm_busy>::value,
-          .thread_id  = thread_id,
-          .extdata    = "{}" });
+        { trait::name<category::amd_smi_mm_busy>::value, thread_id, "{}" });
     sample_cache::get_cache_metadata().add_track(
-        { .track_name = trait::name<category::amd_smi_power>::value,
-          .thread_id  = thread_id,
-          .extdata    = "{}" });
+        { trait::name<category::amd_smi_power>::value, thread_id, "{}" });
     sample_cache::get_cache_metadata().add_track(
-        { .track_name = trait::name<category::amd_smi_temp>::value,
-          .thread_id  = thread_id,
-          .extdata    = "{}" });
+        { trait::name<category::amd_smi_temp>::value, thread_id, "{}" });
     sample_cache::get_cache_metadata().add_track(
-        { .track_name = trait::name<category::amd_smi_memory_usage>::value,
-          .thread_id  = thread_id,
-          .extdata    = "{}" });
+        { trait::name<category::amd_smi_memory_usage>::value, thread_id, "{}" });
 };
 
 void

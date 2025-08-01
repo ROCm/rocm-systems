@@ -257,7 +257,7 @@ create_agent_profile(rocprofiler_agent_id_t          agent_id,
         ROCPROFSYS_ABORT_F(
             "Unable to find all counters for agent %i (gpu-%li, %s) in %s. Found: %s\n",
             tool_agent_v->agent->node_id, tool_agent_v->device_id,
-            tool_agent_v->agent->name, requested_counters.c_str(),
+            tool_agent_v->agent->name.c_str(), requested_counters.c_str(),
             found_counters.c_str());
     }
 
@@ -476,19 +476,14 @@ cache_category()
 void
 cache_add_thread_info(uint64_t tid)
 {
-    sample_cache::get_cache_metadata().add_thread_info({ .parent_process_id = getppid(),
-                                                         .process_id        = getpid(),
-                                                         .thread_id         = tid,
-                                                         .start             = 0,
-                                                         .end               = 0,
-                                                         .extdata           = "{}" });
+    sample_cache::get_cache_metadata().add_thread_info(
+        { getppid(), getpid(), tid, 0, 0, "{}" });
 }
 
 void
 cache_add_track(const char* track_name, uint64_t tid)
 {
-    sample_cache::get_cache_metadata().add_track(
-        { .track_name = track_name, .thread_id = tid, .extdata = "{}" });
+    sample_cache::get_cache_metadata().add_track({ track_name, tid, "{}" });
 }
 
 size_t
