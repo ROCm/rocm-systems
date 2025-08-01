@@ -83,16 +83,6 @@ ROCPROFILER_SDK_DEPRECATED("rocprofiler_device_counting_service_callback_t renam
 typedef rocprofiler_device_counting_service_cb_t rocprofiler_device_counting_service_callback_t;
 
 //==============================================================================
-// COUNTER RECORD TYPE BACKWARD COMPATIBILITY
-//==============================================================================
-
-/**
- * @brief (deprecated) Replaced by ::rocprofiler_counter_record_t
- */
-ROCPROFILER_SDK_DEPRECATED("rocprofiler_record_counter_t renamed to rocprofiler_counter_record_t")
-typedef rocprofiler_counter_record_t rocprofiler_record_counter_t;
-
-//==============================================================================
 // CORRELATION ID BACKWARD COMPATIBILITY
 //==============================================================================
 
