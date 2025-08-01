@@ -50,10 +50,10 @@ class MainView(Horizontal):
     """Main view layout for the application."""
 
     selected_path = reactive(None)
-    dfs = reactive({})
+    per_kernel_dfs = reactive({})
+    top_kernels = reactive([])
 
     def __init__(self):
-        """Initialize the main view."""
         super().__init__(id="main-container")
         self.start_path = (
             # NOTE: is cwd the best choice?
@@ -70,7 +70,6 @@ class MainView(Horizontal):
         pass
 
     def compose(self) -> ComposeResult:
-        """Compose the main view layout."""
         self.logger.info("Composing main view layout", update_ui=False)
         yield MenuBar()
 
@@ -80,7 +79,6 @@ class MainView(Horizontal):
                 # Center Panel - Analysis results display
                 center_panel = CenterPanel()
                 yield center_panel
-
                 self.center = center_panel
 
                 # Bottom Panel - Output, terminal, and metric description
@@ -91,7 +89,6 @@ class MainView(Horizontal):
                 self.metric_description = tabs.description_area
                 self.output = tabs.output_area
 
-                # Now set the output area for the logger
                 self.logger.set_output_area(self.output)
                 self.logger.info("Main view layout composed")
 
@@ -107,8 +104,9 @@ class MainView(Horizontal):
 
         try:
             row_data = table.get_row_at(row_idx)
-            content = f"Selected Row {row_idx}:\n"
-            content += "\n".join(f"{val}" for val in row_data)
+            content = f"Selected Metric ID: {row_data[0]}\n"
+            content += f"Selected Metric: {row_data[1]}\n"
+            # content += f"Metric Description:\n\t{row_data[-1]}"
 
             self.metric_description.text = content
             self.logger.info(f"Row {row_idx} data displayed in metric_description")
@@ -122,7 +120,8 @@ class MainView(Horizontal):
 
     @work(thread=True)
     def run_analysis(self) -> None:
-        self.dfs = {}
+        self.per_kernel_dfs = {}
+        self.top_kernels = []
 
         if not self.selected_path:
             error_msg = "No directory selected for analysis"
@@ -173,7 +172,6 @@ class MainView(Horizontal):
                 self.logger.info(
                     f"Step 3: sys_info_df shape = {sys_info_df.shape if hasattr(sys_info_df, 'shape') else 'No shape attribute'}"
                 )
-                self.logger.info(f"Step 3: sys_info_df = {sys_info_df}")
 
             except Exception as e:
                 self.logger.error(f"Step 3 failed - Error loading sys_info: {str(e)}")
@@ -196,7 +194,6 @@ class MainView(Horizontal):
                     raise TypeError(f"Unexpected type for sys_info: {type(sys_info_df)}")
 
                 self.logger.info(f"Step 4: sys_info converted = {sys_info}")
-                self.logger.info(f"Step 4: sys_info type = {type(sys_info)}")
 
             except Exception as e:
                 self.logger.error(f"Step 4 failed - Error converting sys_info: {str(e)}")
@@ -231,18 +228,19 @@ class MainView(Horizontal):
             # Step 8: Run analysis
             try:
                 self.logger.info("Step 8: Running analysis")
-                self.dfs = analyzer.run_analysis()
-                if not self.dfs:
-                    warning_msg = "Step 8: Analysis completed but no data was returned"
+                self.per_kernel_dfs = analyzer.run_kernel_analysis()
+                self.top_kernels = analyzer.run_top_kernel()
+
+                # TODO: add per kernel Roofline support when available
+
+                if not self.per_kernel_dfs or not self.top_kernels:
+                    warning_msg = "Step 8: Per Kernel Analysis completed but not all data was returned"
                     self._update_view(warning_msg, LogLevel.WARNING)
                     self.logger.warning(warning_msg)
                 else:
                     self.app.call_from_thread(self.refresh_results)
-                    self.logger.info("Step 8: Analysis completed successfully")
-                    if self.dfs.get("4. Roofline"):
-                        self.logger.info("Step 8: Roofline data available")
-                    else:
-                        self.logger.info("Step 8: Roofline data not available")
+                    self.logger.info("Step 8: Kernel Analysis completed successfully")
+                    # self.logger.info(f"{self.per_kernel_dfs}")
             except Exception as e:
                 self.logger.error(f"Step 8 failed - Error running analysis: {str(e)}")
                 raise
@@ -257,17 +255,15 @@ class MainView(Horizontal):
 
     def _update_view(self, message: str, log_level: LogLevel) -> None:
         try:
-            # Use call_from_thread to safely update UI from background thread
             self.app.call_from_thread(self._safe_update_view, message, log_level)
         except Exception as e:
-            # Capture errors that might occur when scheduling the UI update
             self.logger.error(f"View update scheduling error: {str(e)}")
 
     def _safe_update_view(self, message: str, log_level: LogLevel) -> None:
         try:
-            analyze_view = self.query_one("#analyze-view")
-            if analyze_view:
-                analyze_view.update_view(message, log_level)
+            kernel_view = self.query_one("#kernel-view")
+            if kernel_view:
+                kernel_view.update_view(message, log_level)
             else:
                 self.logger.warning("Analysis view not found when updating log")
         except Exception as e:
@@ -275,24 +271,29 @@ class MainView(Horizontal):
 
     def refresh_results(self) -> None:
         try:
-            self.logger.info("Refreshing analysis results")
-            analyze_view = self.query_one("#analyze-view")
-            if not analyze_view:
-                self.logger.error("Analysis view not found")
+            self.logger.info("Refreshing kernel results")
+            kernel_view = self.query_one("#kernel-view")
+            if not kernel_view:
+                self.logger.error("Kernel view not found")
                 return
 
-            if not hasattr(self, "dfs") or self.dfs is None:
-                self.logger.error("No analysis data available to display")
+            if (
+                not hasattr(self, "per_kernel_dfs")
+                or self.per_kernel_dfs is None
+                or not hasattr(self, "top_kernels")
+                or self.top_kernels is None
+            ):
+                self.logger.error("No kernel analysis data available to display")
                 return
 
-            analyze_view.update_results(self.dfs)
+            kernel_view.update_results(self.per_kernel_dfs, self.top_kernels)
             self.logger.success(f"Results displayed successfully.")
         except Exception as e:
             self.logger.error(f"Error refreshing results: {str(e)}")
 
     def refresh_view(self) -> None:
         self.logger.info("Refreshing view...")
-        if self.dfs:
+        if self.top_kernels:
             self.refresh_results()
         else:
             self.logger.warning("No data available for refresh")

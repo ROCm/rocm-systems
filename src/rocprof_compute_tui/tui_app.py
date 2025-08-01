@@ -39,15 +39,18 @@ from textual.binding import Binding
 from textual.widgets import Button, Footer, Header
 from textual_fspicker import SelectDirectory
 
-from rocprof_compute_tui.config import APP_TITLE, VERSION
+import config
+from rocprof_compute_tui.config import APP_TITLE
 from rocprof_compute_tui.views.main_view import MainView
 from rocprof_compute_tui.widgets.menu_bar.menu_bar import DropdownMenu
 from utils.specs import MachineSpecs, generate_machine_specs
+from utils.utils import get_version
 
 
 class RocprofTUIApp(App):
     """Main application for the performance analysis tool."""
 
+    VERSION = get_version(config.rocprof_compute_home)["version"]
     TITLE = f"{APP_TITLE} v{VERSION}"
     SUB_TITLE = "Workload Analysis Tool"
 
@@ -55,7 +58,8 @@ class RocprofTUIApp(App):
     BINDINGS = [
         Binding(key="q", action="quit", description="Quit"),
         Binding(key="r", action="refresh", description="Refresh"),
-        Binding(key="a", action="analyze", description="Analyze"),
+        # TODO
+        # Binding(key="a", action="analyze", description="Analyze"),
     ]
 
     def __init__(

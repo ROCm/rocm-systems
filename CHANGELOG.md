@@ -21,7 +21,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * This can be used to collect individual metrics from various sections of analysis config
 * CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
   * Remove metrics from analysis configuration files which are explicitly marked as empty or None
-* Change the basic (default) view of TUI from aggregated analysis to kernel analysis
+* Change the basic (default) view of TUI from aggregated analysis data to individual kernel analysis data
 
 ### Resolved issues
 
