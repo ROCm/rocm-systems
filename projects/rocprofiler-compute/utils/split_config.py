@@ -137,7 +137,7 @@ def update_documentation():
                     panel_config["metrics_description"].keys()
                 )
                 # Add metrics info
-                for metric_name in metric_names:
+                for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
                         "rst": panel_config["metrics_description"][metric_name]["rst"],
                         "unit": panel_config["metrics_description"][metric_name]["unit"],
