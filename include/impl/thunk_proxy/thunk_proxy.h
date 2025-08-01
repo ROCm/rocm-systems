@@ -105,16 +105,17 @@ bool QueryAdapterSupported(unsigned int device_id);
 uint32_t QueueEngine2EngineFlag(uint32_t queue_engine);
 void SetAllocationInfo(void *data, uint64_t size, AllocDomain domain,
                       uint64_t addr, uint32_t mem_flags, uint32_t engine_flag, const DeviceInfo &device_info);
-bool CreatePrivateAllocInfo(int num_handles, void **ppdrv_priv, void **ppalloc_priv,
-                            int *pdrv_priv_data_size, int *palloc_priv_data_size);
-void DestroyPrivateAllocInfo(void *drv_priv, void *alloc_priv);
+void GetAllocPrivDataSize(int *priv_drv_data_size, int *priv_alloc_data_size);
+void FillinAllocPrivDrvData(void *drv_priv, int priv_alloc_data_size);
 
-int CreateSubmitPrivData(void **priv_data, D3DKMT_HANDLE queue, uint64_t command_addr,
+int GetSubmitPrivDataSize();
+void FillinSubmitPrivData(void *priv_data, D3DKMT_HANDLE queue, uint64_t command_addr,
                         uint64_t command_size, bool is_hw_queue);
-int CreateHwQueuePrivData(void **priv_data, D3DKMT_HANDLE context,
-                        bool FwManagedGfxState, SchedLevel level = kNormal);
-int CreateContextPrivData(void **priv_data, bool FwManagedGfxState);
-int CreatePowerOptPrivData(void **priv_data, bool restore);
-void DestroyPrivData(void *priv_data);
+int GetHwQueuePrivDataSize();
+void FillinHwQueuePrivData(void *priv_data, bool FwManagedGfxState, SchedLevel level = kNormal);
+int GetContextPrivDataSize();
+void FillinContextPrivData(void *priv_data, bool FwManagedGfxState);
+int GetPowerOptPrivDataSize();
+void FillinPowerOptPrivData(void *priv_data, bool restore);
 }
 #endif

@@ -184,7 +184,11 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::CreatePowerOptPrivData(&priv_data, restore);
+  priv_size = thunk_proxy::GetPowerOptPrivDataSize();
+  priv_data = malloc(priv_size);
+  assert(priv_data);
+  memset(priv_data, 0, priv_size);
+  thunk_proxy::FillinPowerOptPrivData(priv_data, restore);
 
   D3DKMT_ESCAPE d3dkmt_escape;
   memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
@@ -199,7 +203,7 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
 
   NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
   pr_debug("status %d, restore %d\n", status, restore);
-  thunk_proxy::DestroyPrivData(priv_data);
+  free(priv_data);
 }
 
 void WDDMDevice::UpdatePageFence(uint64_t fence_value) {
@@ -264,8 +268,11 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (ordinal < 0)
     return false;
 
-  bool FwManagedGfxState = SupportStateShadowingByCpFw();
-  priv_size = thunk_proxy::CreateContextPrivData(&priv_data, FwManagedGfxState);
+  priv_size = thunk_proxy::GetContextPrivDataSize();
+  priv_data = malloc(priv_size);
+  assert(priv_data);
+  memset(priv_data, 0, priv_size);
+  thunk_proxy::FillinContextPrivData(priv_data, SupportStateShadowingByCpFw());
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -283,11 +290,11 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   NTSTATUS ret = D3DKMTCreateContextVirtual(&args);
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
-    thunk_proxy::DestroyPrivData(priv_data);
+    free(priv_data);
     return true;
   }
 
-  thunk_proxy::DestroyPrivData(priv_data);
+  free(priv_data);
 
   pr_err("fail %x\n", ret);
   return false;
@@ -568,7 +575,11 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, false);
+  priv_size = thunk_proxy::GetSubmitPrivDataSize();
+  priv_data = malloc(priv_size);
+  assert(priv_data);
+  memset(priv_data, 0, priv_size);
+  thunk_proxy::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, false);
 
   D3DKMT_SUBMITCOMMAND args = {0};
   args.Commands = command_addr;
@@ -581,11 +592,11 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   NTSTATUS ret = D3DKMTSubmitCommand(&args);
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
-    thunk_proxy::DestroyPrivData(priv_data);
+    free(priv_data);
     return false;
   }
 
-  thunk_proxy::DestroyPrivData(priv_data);
+  free(priv_data);
 
   if (!GpuSignal(queue->context, &queue->syncobj, &fence_value, 1))
     return false;
@@ -597,9 +608,12 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   void *priv_data;
   int priv_size;
 
+  priv_size = thunk_proxy::GetHwQueuePrivDataSize();
+  priv_data = malloc(priv_size);
+  assert(priv_data);
+  memset(priv_data, 0, priv_size);
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
-  priv_size = thunk_proxy::CreateHwQueuePrivData(&priv_data, queue->context,
-                                                  FwManagedGfxState, queue->prio);
+  thunk_proxy::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
@@ -610,11 +624,11 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   NTSTATUS ret = D3DKMTCreateHwQueue(&createHwQueue);
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
-    thunk_proxy::DestroyPrivData(priv_data);
+    free(priv_data);
     return false;
   }
 
-  thunk_proxy::DestroyPrivData(priv_data);
+  free(priv_data);
 
   queue->queue = createHwQueue.hHwQueue;
   queue->syncobj = createHwQueue.hHwQueueProgressFence;
@@ -642,7 +656,11 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = thunk_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, true);
+  priv_size = thunk_proxy::GetSubmitPrivDataSize();
+  priv_data = malloc(priv_size);
+  assert(priv_data);
+  memset(priv_data, 0, priv_size);
+  thunk_proxy::FillinSubmitPrivData(priv_data, queue->queue, command_addr, command_size, true);
 
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {0};
   args.hHwQueue = queue->queue;
@@ -655,11 +673,11 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   NTSTATUS ret = D3DKMTSubmitCommandToHwQueue(&args);
   if (ret != STATUS_SUCCESS) {
     pr_err("fail %x\n", ret);
-    thunk_proxy::DestroyPrivData(priv_data);
+    free(priv_data);
     return false;
   }
 
-  thunk_proxy::DestroyPrivData(priv_data);
+  free(priv_data);
 
   return true;
 }
