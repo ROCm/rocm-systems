@@ -75,15 +75,11 @@ CsvManager::CsvManager(rocprofiler::tool::output_config output_cfg)
     this->csv_configs = {
         {CsvType::KERNEL_DISPATCH,
          {"kernel_trace.csv",
-          "\"Guid\",\"Kind\",\"Agent_Id\",\"Queue_Id\","
-          "\"Stream_Id\",\"Thread_Id\",\"Dispatch_Id\","
-          "\"Kernel_Id\",\"Kernel_Name\",\"Correlation_Id\","
-          "\"Start_Timestamp\",\"End_"
-          "Timestamp\",\"Private_Segment_Size\",\"Group_"
-          "Segment_Size\",\"Workgroup_Size_X\","
-          "\"Workgroup_Size_Y\",\"Workgroup_Size_Z\",\"Grid_"
-          "Size_X\",\"Grid_Size_Y\",\"Grid_Size_"
-          "Z\""}},
+          "\"Guid\",\"Kind\",\"Agent_Id\",\"Queue_Id\",\"Stream_Id\",\"Thread_Id\",\"Dispatch_Id\","
+          "\"Kernel_Id\",\"Kernel_Name\",\"Correlation_Id\",\"Start_Timestamp\",\"End_Timestamp\","
+          "\"LDS_Block_Size\",\"Scratch_Size\",\"VGPR_Count\",\"Accum_VGPR_Count\",\"SGPR_Count\","
+          "\"Workgroup_Size_X\",\"Workgroup_Size_Y\",\"Workgroup_Size_Z\","
+          "\"Grid_Size_X\",\"Grid_Size_Y\",\"Grid_Size_Z\""}},
         {CsvType::MEMORY_COPY,
          {"memory_copy_trace.csv",
           "\"Guid\",\"Kind\",\"Direction\",\"Stream_Id\",\"Source_Agent_Id\","
@@ -260,8 +256,11 @@ write_kernel_csv(
                           kernel.stack_id,
                           kernel.start,
                           kernel.end,
-                          kernel.scratch_size,
                           kernel.lds_size,
+                          kernel.scratch_size,
+                          kernel.vgpr_count,
+                          kernel.accum_vgpr_count,
+                          kernel.sgpr_count,
                           kernel.workgroup_size.x,
                           kernel.workgroup_size.y,
                           kernel.workgroup_size.z,
