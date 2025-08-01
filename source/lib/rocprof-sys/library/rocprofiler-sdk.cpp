@@ -1687,21 +1687,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 #endif
         };
 
-    ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
-        _data->primary_ctx, external_corr_id_request_kinds.data(),
-        external_corr_id_request_kinds.size(),
-        set_kernel_rename_and_stream_correlation_id, nullptr));
-
-#if(ROCPROFILER_VERSION >= 700)
-    if((_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH) > 0) ||
-       (_buffered_domain.count(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY) > 0))
-    {
-        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-            _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_HIP_STREAM, nullptr, 0,
-            tool_hip_stream_callback, nullptr));
-    }
-#endif
-
     // Insert the default stream and queue info to ensure that the default entry is
     {
         sample_cache::get_cache_metadata().add_stream(0);
