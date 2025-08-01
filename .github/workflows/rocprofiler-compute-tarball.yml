@@ -71,18 +71,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tarball-testing
-      - name: Move tarball to target directory
-        run: mv rocprofiler-compute-*.tar.gz projects/rocprofiler-compute/
       - name: Expand
-        working-directory: projects/rocprofiler-compute
         run:  tar xfz rocprofiler-compute-*.tar.gz; rm rocprofiler-compute-*.tar.gz
       - name: Python dependency installs
-        working-directory: projects/rocprofiler-compute
         run: |
           cd rocprofiler-compute-*
           python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
       - name: Configure
-        working-directory: projects/rocprofiler-compute
         run:  |
           cd rocprofiler-compute-*
           mkdir build
@@ -90,13 +85,11 @@ jobs:
           cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/rocprofiler-compute \
             -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
       - name: Install
-        working-directory: projects/rocprofiler-compute
         run:  |
           cd rocprofiler-compute-*
           cd build
           make install
       - name: Verify expected paths
-        working-directory: projects/rocprofiler-compute
         run: |
           # find $INSTALL_DIR
           test -d $INSTALL_DIR/rocprofiler-compute
@@ -111,15 +104,12 @@ jobs:
           test -d $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
           test -s $INSTALL_DIR/rocprofiler-compute/share/doc/rocprofiler-compute/LICENSE
       - name: Query version (setting PYTHONPATH by hand)
-        working-directory: projects/rocprofiler-compute
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
           $INSTALL_DIR/rocprofiler-compute/bin/rocprof-compute --version
       - name: Install Lmod
-        working-directory: projects/rocprofiler-compute
         run: sudo apt-get install -y lmod
       - name: Access rocprofiler-compute using modulefile
-        working-directory: projects/rocprofiler-compute
         run: |
           . /etc/profile.d/lmod.sh
           module use $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
