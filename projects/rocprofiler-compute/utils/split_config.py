@@ -126,10 +126,21 @@ def update_documentation():
         for data_source in panel_config["data source"]:
             if "metric_table" in data_source:
                 metrics_info = {}
-                for key in panel_config["metrics_description"]:
-                    metrics_info[key] = {
-                        "rst": panel_config["metrics_description"][key]["rst"],
-                        "unit": panel_config["metrics_description"][key]["unit"],
+                # Metric names from data source
+                metric_names = {
+                    metric
+                    for _, gfx_data in data_source["metric_table"]["metric"].items()
+                    for metric in gfx_data
+                }
+                # Select metrics with descriptions available
+                metric_names = metric_names.intersection(
+                    panel_config["metrics_description"].keys()
+                )
+                # Add metrics info
+                for metric_name in metric_names:
+                    metrics_info[metric_name] = {
+                        "rst": panel_config["metrics_description"][metric_name]["rst"],
+                        "unit": panel_config["metrics_description"][metric_name]["unit"],
                     }
                 panel_metric_map[data_source["metric_table"]["id"]] = metrics_info
 
