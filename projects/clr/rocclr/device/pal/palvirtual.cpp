@@ -2767,6 +2767,22 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   amd_queue.scratch_backing_memory_location = static_cast<uint64_t>(dispatchParam.scratchAddr);
   amd_queue.scratch_backing_memory_byte_size = static_cast<uint64_t>(dispatchParam.scratchSize);
 
+  // FIXME: Conservatively, the read_dispatch_id cannot be smaller than the current aql_packet_id -
+  // hsa_queue.size for the debugger to work correctly. The read_dispatch_id really should be
+  // updated when the CmdBuf is marked as complete.
+  uint64_t new_read_dispatch_id = (aql_packet_id >= amd_queue.hsa_queue.size)
+      ? (aql_packet_id - amd_queue.hsa_queue.size + 1)
+      : 0;
+
+  // Do an atomic max of &amd_queue.read_dispatch_id and new_read_dispatch_id
+  uint64_t old_read_dispatch_id = amd_queue.read_dispatch_id;
+  std::atomic_ref read_dispatch_id(*const_cast<uint64_t *>(&amd_queue.read_dispatch_id));
+  while (!read_dispatch_id.compare_exchange_weak(old_read_dispatch_id,
+                                                 new_read_dispatch_id,
+                                                 std::memory_order::relaxed,
+                                                 std::memory_order::relaxed))
+    ;
+
   // Run AQL dispatch in HW
   eventBegin(MainEngine);
 
