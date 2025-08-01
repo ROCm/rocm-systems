@@ -83,20 +83,6 @@ ROCPROFILER_SDK_DEPRECATED("rocprofiler_device_counting_service_callback_t renam
 typedef rocprofiler_device_counting_service_cb_t rocprofiler_device_counting_service_callback_t;
 
 //==============================================================================
-// CORRELATION ID BACKWARD COMPATIBILITY
-//==============================================================================
-
-/**
- * @brief (deprecated) Replaced by ::rocprofiler_async_correlation_id_t
- *
- * Note: This provides basic compatibility but ::rocprofiler_async_correlation_id_t
- * may have additional fields not present in the original ::rocprofiler_correlation_id_t
- */
-ROCPROFILER_SDK_DEPRECATED(
-    "rocprofiler_correlation_id_t enhanced to rocprofiler_async_correlation_id_t")
-typedef rocprofiler_async_correlation_id_t rocprofiler_correlation_id_t;
-
-//==============================================================================
 // ADDITIONAL TYPE ALIASES FOR COMMON PATTERNS
 //==============================================================================
 
