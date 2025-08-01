@@ -818,10 +818,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 const auto* _agent    = tool_data->get_gpu_tool_agent(_agent_id);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
-                ROCPROFSYS_CI_THROW(
-                    _stream_id == 0,
-                    "Unexpected zero stream_id in kernel dispatch record: %s.",
-                    _name.c_str());
 
                 if(get_use_timemory())
                 {
@@ -847,8 +843,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
                             tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
+                            if (_stream_id != 0)
+                                tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                                _stream_id);
 
                             tracing::add_perfetto_annotation(ctx, "queue",
                                                              _queue_id.handle);
@@ -930,9 +927,6 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     tool_data->buffered_tracing_info.at(record->kind, record->operation);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
-                ROCPROFSYS_CI_THROW(
-                    _stream_id == 0,
-                    "Unexpected zero stream_id in memory copy record: %s.", _name.data());
 
                 if(get_use_timemory())
                 {
@@ -957,8 +951,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
                             tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                             _stream_id);
+                            if (_stream_id != 0)
+                                tracing::add_perfetto_annotation(ctx, "stream_id",
+                                                                _stream_id);
                             tracing::add_perfetto_annotation(ctx, "dst_agent",
                                                              _dst_agent->logical_node_id);
                             tracing::add_perfetto_annotation(ctx, "src_agent",
