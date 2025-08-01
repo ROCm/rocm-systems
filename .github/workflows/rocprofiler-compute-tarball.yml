@@ -71,6 +71,8 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: tarball-testing
+      - name: Move tarball to target directory
+        run: mv rocprofiler-compute-*.tar.gz projects/rocprofiler-compute/
       - name: Expand
         working-directory: projects/rocprofiler-compute
         run:  tar xfz rocprofiler-compute-*.tar.gz; rm rocprofiler-compute-*.tar.gz
