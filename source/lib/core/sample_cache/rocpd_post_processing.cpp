@@ -399,7 +399,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
     parser.register_type_callback(entry_type::pmc_event_with_sample,
                                   get_pmc_event_with_sample_callback());
 #endif
-};
+}
 
 void
 rocpd_post_processing::post_process_metadata()
@@ -545,7 +545,7 @@ rocpd_post_processing::post_process_metadata()
             pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived);
     }
 #endif
-};
+}
 
 inline void
 rocpd_post_processing::rocpd_insert_thread_id(info::thread&        t_info,
