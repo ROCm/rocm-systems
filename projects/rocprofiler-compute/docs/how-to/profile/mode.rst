@@ -24,6 +24,9 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
+* :ref:`Profiling output format <profiling-output-format>`: Collect raw data in ``rocpd`` database
+  output format and merge them into a single csv file containing counter collection data.
+
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -216,6 +219,18 @@ an Instinct MI210 vs an Instinct MI250.
    -rw-r--r-- 1 auser agroup   599 Mar  1 15:15 SQ_LEVEL_WAVES.csv
    -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
+
+.. _profiling-output-format:
+
+Profiling output format
+-----------------------
+
+* Provide ``--format-rocprof-output rocpd`` profile mode option to have the underlying ``rocprof`` collect raw performance counter data in ``rocpd`` database format.
+
+  * ROCm Compute Profiler takes care of merging multiple ``rocpd`` databases into a single csv file containing counter collection data in the workload folder.
+
+  * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder. This is useful for custom analysis of profiling data.
+
 
 .. _filtering:
 

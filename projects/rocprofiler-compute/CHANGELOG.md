@@ -21,6 +21,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added interactive metric descriptions in TUI analyze mode
   * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
 
+* Add `--db` option to analyze mode which creates analysis database file for further reporting
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release

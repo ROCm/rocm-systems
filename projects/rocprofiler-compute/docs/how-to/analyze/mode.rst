@@ -22,7 +22,8 @@ options.
 * :doc:`cli`
 * :doc:`grafana-gui`
 * :doc:`standalone-gui`
-* :doc:`text-based user interface (TUI)`
+* :doc:`tui`
+* :doc:`data-dump`
 
 .. note::
 
