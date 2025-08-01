@@ -43,7 +43,6 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
-#include "timemory/process/threading.hpp"
 
 #include <string_view>
 #include <timemory/backends/papi.hpp>
@@ -61,6 +60,7 @@
 #include <timemory/mpl/quirks.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/operations.hpp>
+#include <timemory/process/threading.hpp>
 #include <timemory/sampling/allocator.hpp>
 #include <timemory/sampling/overflow.hpp>
 #include <timemory/sampling/sampler.hpp>
