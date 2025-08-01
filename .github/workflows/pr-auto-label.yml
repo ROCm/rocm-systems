@@ -89,9 +89,6 @@ jobs:
           # this env clause gets repeated, but it is safer than echo'ing secrets in the workflow
           GH_TOKEN: ${{ github.event.pull_request.head.repo.fork && secrets.GITHUB_TOKEN || steps.generate-token.outputs.token }}
         run: |
-          if [ -n "${{ steps.compute_labels.outputs.label_remove }}" ]; then
-            gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ steps.compute_labels.outputs.label_remove }}"
-          fi
           if [ -n "${{ steps.compute_labels.outputs.label_add }}" ]; then
             gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ steps.compute_labels.outputs.label_add }}"
           fi
@@ -110,21 +107,17 @@ jobs:
 
           if [ "${{ github.event.pull_request.head.repo.fork }}" = true ]; then
             # For fork PRs: check if user has any collaborator permission on the repo
-            PERMISSION=$(gh api repos/${{ github.repository }}/collaborators/$PR_USER/permission --jq '.permission' --silent)
+            PERMISSION=$(gh api repos/${{ github.repository }}/collaborators/$PR_USER/permission --jq '.permission')
             if [ "$PERMISSION" = "admin" ] || [ "$PERMISSION" = "write" ] || [ "$PERMISSION" = "maintain" ]; then
               gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ env.ORG_LABEL }}"
-              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ env.EXTERNAL_LABEL }}"
             else
               gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ env.EXTERNAL_LABEL }}"
-              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ env.ORG_LABEL }}"
             fi
           else
             # For branch PRs (non-forks): check org membership via GitHub App token
             if gh api orgs/${{ env.ORG_TO_CHECK }}/members/$PR_USER --silent; then
               gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ env.ORG_LABEL }}"
-              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ env.EXTERNAL_LABEL }}"
             else
               gh pr edit "${{ github.event.pull_request.number }}" --add-label "${{ env.EXTERNAL_LABEL }}"
-              gh pr edit "${{ github.event.pull_request.number }}" --remove-label "${{ env.ORG_LABEL }}"
             fi
           fi
