@@ -222,6 +222,13 @@ dump_flat_profile()
 void
 disable_strict_checks_if_needed(rocprofiler_agent_t agent)
 {
+    if (agent.product_name == nullptr)
+    {
+        // We don't have the information about the product name,
+        // so use the strict checks to try revealing potential issues.
+        return;
+    }
+
     std::string_view product_name(agent.product_name);
     if(product_name.find("MI300X") != std::string_view::npos)
     {
