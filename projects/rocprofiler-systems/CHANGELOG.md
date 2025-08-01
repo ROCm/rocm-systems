@@ -2,6 +2,12 @@
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
 
+## ROCm System Profiler 1.2.0
+
+### Resolved issues
+
+- Fix incorrect power readings for pre-MI300 GPUs. 
+
 ## ROCm Systems Profiler 1.1.0 for ROCm 7.0
 
 ### Added
