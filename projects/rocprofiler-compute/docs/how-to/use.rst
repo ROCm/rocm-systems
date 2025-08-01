@@ -164,12 +164,20 @@ Analyze mode
    is great if you want immediate access to a hardware component you’re already
    familiar with.
 
+   Use the ``--db <db_name>`` option in analyze mode to have the post analysis data dumped into a SQLite database
+   named ``db_name.db``. This can be used to generate custom analysis reports. Note that using this option
+   will disable any analysis report generation such as CLI analysis report.
+
+   .. code-block:: shell
+
+      $ rocprof-compute analyze --db db_name -p workload_path_1 -p workload_path_2
+
+   See :doc:`analyze/mode` to learn about this mode in depth and to get started
+   with analysis using ROCm Compute Profiler.
+
    .. code-block:: shell
 
       $ rocprof-compute analyze --help
-
-See :doc:`analyze/mode` to learn about this mode in depth and to get started
-with analysis using ROCm Compute Profiler.
 
 .. _modes-database:
 

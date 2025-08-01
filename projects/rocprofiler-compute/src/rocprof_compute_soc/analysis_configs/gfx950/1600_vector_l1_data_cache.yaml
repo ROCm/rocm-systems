@@ -420,7 +420,7 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric:
         Req:
           avg: AVG((TCP_UTCL1_REQUEST_sum / $denom))
@@ -468,7 +468,7 @@ Panel Config:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric:
         Cache Full Stall:
           avg: AVG((TCP_UTCL1_STALL_INFLIGHT_MAX_sum / $denom))

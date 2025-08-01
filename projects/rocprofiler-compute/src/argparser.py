@@ -655,6 +655,17 @@ Examples:
         "interact with rocprofiler-compute metrics.",
     )
     analyze_group.add_argument(
+        "--db",
+        type=str,
+        required=False,
+        metavar="<db_file_name>",
+        help=(
+            "\t\tStore the analysis data in a sqlite3 database file\n"
+            "\t\twith the given name and .db suffix added to it.\n"
+            "\t\tThis option will disable generation of analysis report in CLI/GUI/TUI."
+        ),
+    )
+    analyze_group.add_argument(
         "-R",
         "--roofline-data-type",
         required=False,

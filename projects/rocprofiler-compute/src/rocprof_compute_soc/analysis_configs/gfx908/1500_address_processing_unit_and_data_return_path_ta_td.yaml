@@ -206,11 +206,6 @@ Panel Config:
           min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: pct
-        "Workgroup manager \u2192 Data-Return Stall":
-          avg: null
-          min: null
-          max: null
-          unit: pct
         Coalescable Instructions:
           avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
           min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))

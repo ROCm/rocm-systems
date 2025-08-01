@@ -258,6 +258,17 @@ class OmniAnalyze_Base:
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
 
+        # Ensure analysis db file only contains alphanumeric characters and the file does not exist
+        if self.__args.db:
+            if not self.__args.db.isalnum():
+                console_error(
+                    "Analysis database file name must contain only alphanumeric characters."
+                )
+            if Path(f"{self.__args.db}.db").exists():
+                console_error(
+                    f"Analysis database file {self.__args.db}.db already exists. Please choose a different name."
+                )
+
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------

@@ -18,6 +18,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
   * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
 
+* Add `--db` option to analyze mode which creates analysis database file for further reporting
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
