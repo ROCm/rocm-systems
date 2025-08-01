@@ -716,6 +716,11 @@ Vector L1 data-return path or Texture Data (TD):
       was stalled by the :ref:`workgroup manager <desc-spi>` due to  initialization
       of registers as a part of launching new workgroups.
     unit: Percent
+  Write Ack Instructions:
+    rst: The total number of write acknowledgements submitted by :ref:`data-return
+      unit <desc-td>` to SQ, summed over all compute units on the accelerator, per
+      normalization unit.
+    unit: Instructions per normalization unit
   Write Instructions:
     rst: The number of store instructions submitted to the  :ref:`data-return unit
       <desc-td>` by the  :ref:`address processor <desc-ta>` summed over all  :doc:`compute
@@ -755,6 +760,10 @@ L2 Speed-of-Light:
       :ref:`total L2 cycles <total-l2-cycles>`.
     unit: Percent
 L2 cache accesses:
+  Atomic Bandwidth:
+    rst: Total number of bytes looked up in the L2 cache for atomic requests, per
+      :ref:`normalization unit <normalization-units>`.
+    unit: Bytes per normalization unit
   Atomic Req:
     rst: The total number of atomic requests (with and without return) to the L2 from
       all clients.
@@ -808,6 +817,10 @@ L2 cache accesses:
     rst: The total number of requests to the L2 that go to Read-Write coherent memory  (RW)
       allocations. See the :ref:`memory-type` for more information.
     unit: Requests per normalization unit
+  Read Bandwidth:
+    rst: Total number of bytes looked up in the L2 cache for read requests, per :ref:`normalization
+      unit <normalization-units>`.
+    unit: Bytes per normalization unit
   Read Req:
     rst: 'The total number of read requests to the L2 from all clients.  '
     unit: Requests per normalization unit
@@ -827,6 +840,10 @@ L2 cache accesses:
     rst: The total number of requests to the L2 that go to Uncached (UC) memory  allocations.
       See the :ref:`memory-type` for more information.
     unit: Requests per normalization unit
+  Write Bandwidth:
+    rst: Total number of bytes looked up in the L2 cache for write requests, per :ref:`normalization
+      unit <normalization-units>`.
+    unit: Bytes per normalization unit
   Write Req:
     rst: The total number of write requests to the L2 from all clients.
     unit: Requests per normalization unit
@@ -957,6 +974,18 @@ L2 - Fabric interface detailed metrics:
       as  :ref:`fine-grained memory <memory-type>` allocations or  :ref:`uncached
       memory <memory-type>` allocations on the MI2XX.
     unit: Requests per normalization unit
+  Atomic Bandwidth - HBM:
+    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, per normalization
+      unit.
+    unit: Bytes per normalization unit
+  "Atomic Bandwidth - Infinity Fabric\u2122":
+    rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic,
+      per normalization unit.
+    unit: Bytes per normalization unit
+  Atomic Bandwidth - PCIe:
+    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, per
+      normalization unit.
+    unit: Bytes per normalization unit
   HBM Read:
     rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of  data
       from the accelerator's local HBM, per  :ref:`normalization unit <normalization-units>`.
@@ -983,6 +1012,18 @@ L2 - Fabric interface detailed metrics:
       <normalization-units>`. 64B requests for  uncached data are counted as two 32B
       uncached data requests. See  :ref:`l2-request-flow` for more detail.
     unit: Requests per normalization unit
+  Read Bandwidth - HBM:
+    rst: Total number of bytes due to L2 read requests due to HBM traffic, per normalization
+      unit.
+    unit: Bytes per normalization unit
+  "Read Bandwidth - Infinity Fabric\u2122":
+    rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic,
+      per normalization unit.
+    unit: Bytes per normalization unit
+  Read Bandwidth - PCIe:
+    rst: Total number of bytes due to L2 read requests due to PCIe traffic, per normalization
+      unit.
+    unit: Bytes per normalization unit
   Remote Read:
     rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of  data
       from any source other than the accelerator's local HBM, per  :ref:`normalization
@@ -994,6 +1035,18 @@ L2 - Fabric interface detailed metrics:
       HBM, per  :ref:`normalization unit <normalization-units>`. See  :ref:`l2-request-flow`
       for more detail.
     unit: Requests per normalization unit
+  Write Bandwidth - HBM:
+    rst: Total number of bytes due to L2 write requests due to HBM traffic, per normalization
+      unit.
+    unit: Bytes per normalization unit
+  "Write Bandwidth - Infinity Fabric\u2122":
+    rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic,
+      per normalization unit.
+    unit: Bytes per normalization unit
+  Write Bandwidth - PCIe:
+    rst: Total number of bytes due to L2 write requests due to PCIe traffic, per normalization
+      unit.
+    unit: Bytes per normalization unit
   Write and Atomic (32B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically  update
       32B of data to any memory location, per  :ref:`normalization unit <normalization-units>`.
