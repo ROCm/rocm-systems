@@ -4,10 +4,10 @@ name: RocProfiler-Compute Formatting
 on:
   push:
     path:
-      - 'projects/rocprofiler-compute'
+      - 'projects/rocprofiler-compute/**'
   pull_request:
     path:
-      - 'projects/rocprofiler-compute'
+      - 'projects/rocprofiler-compute/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
