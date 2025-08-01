@@ -141,7 +141,7 @@ cache_storage::reserve_memory_space(size_t len)
     auto* _result = m_buffer->data() + _size;
     memset(_result, 0, len);
     return _result;
-};
+}
 
 bool
 cache_storage::is_running() const

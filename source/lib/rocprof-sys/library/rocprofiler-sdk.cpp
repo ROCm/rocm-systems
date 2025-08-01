@@ -23,8 +23,6 @@
 #include "core/rocprofiler-sdk.hpp"
 #include "api.hpp"
 #include "common/synchronized.hpp"
-#include "core/benchmark/benchmark.hpp"
-#include "core/benchmark/category.hpp"
 #include "core/common.hpp"
 #include "core/config.hpp"
 #include "core/containers/stable_vector.hpp"

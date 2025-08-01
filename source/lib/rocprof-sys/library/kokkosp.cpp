@@ -169,9 +169,8 @@ metadata_initialize_kokkos_category()
 void
 metadata_initialize_kokkos_track()
 {
-    size_t thread_id = gettid();
     rocprofsys::sample_cache::get_cache_metadata().add_track(
-        { rocprofsys::trait::name<category::kokkos>::value, thread_id, "{}" });
+        { rocprofsys::trait::name<category::kokkos>::value, std::nullopt, "{}" });
 }
 
 void

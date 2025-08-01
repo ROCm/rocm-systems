@@ -95,8 +95,7 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        sample_cache::get_cache_metadata().add_track(
-            { label, static_cast<size_t>(gettid()), "{}" });
+        sample_cache::get_cache_metadata().add_track({ label, std::nullopt, "{}" });
     };
 
     static std::once_flag _once{};
