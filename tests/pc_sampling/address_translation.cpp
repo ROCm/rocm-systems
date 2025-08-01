@@ -54,20 +54,28 @@ struct FlatProfiler
 };
 }  // namespace
 
-// Raw pointer to prevent early destruction of static objects
+// Raw pointers to prevent early destruction of static objects
 FlatProfiler* flat_profiler = nullptr;
+// Temporarily, we have to disable check of receiving more valid
+// than invalid samples on MI300X.
+bool* strict_checking_enabled = nullptr;
 
 void
 init()
 {
     flat_profiler = new FlatProfiler();
+    // By default, enable strict checking.
+    // Disable later when encountering MI300X device.
+    strict_checking_enabled = new bool(true);
 }
 
 void
 fini()
 {
     delete flat_profiler;
-    flat_profiler = nullptr;
+    delete strict_checking_enabled;
+    flat_profiler           = nullptr;
+    strict_checking_enabled = nullptr;
 }
 
 CodeobjAddressTranslate&
@@ -197,10 +205,28 @@ dump_flat_profile()
         samples_num == flat_profile.get_valid_decoded_samples_num(),
         "Number of collected valid samples different than the number of decoded samples.");
     utils::pcs_assert(samples_num > 0, "No valid samples collected/decoded.");
-    // Temporarily disabling the check until understanding why it fails on MI300X,
-    // and not on MI300A and MI355.
-    // utils::pcs_assert(flat_profile.more_valid_decoded_samples_expected(),
-    //                   "More invalid samples observed.");
+    if(*strict_checking_enabled)
+    {
+        // Temporarily disabling the check until understanding why it fails on MI300X,
+        // and not on MI300A and MI355.
+        utils::pcs_assert(flat_profile.more_valid_decoded_samples_expected(),
+                          "More invalid samples observed.");
+    }
+}
+
+/**
+ * @brief Disabling strict checks on MI300X.
+ *
+ * Temporarily introduced due to high number of error samples observed on MI300X.
+ */
+void
+disable_strict_checks_if_needed(rocprofiler_agent_t agent)
+{
+    std::string_view product_name(agent.product_name);
+    if(product_name.find("MI300X") != std::string_view::npos)
+    {
+        *strict_checking_enabled = false;
+    }
 }
 
 }  // namespace address_translation
