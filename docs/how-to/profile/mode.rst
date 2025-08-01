@@ -487,24 +487,28 @@ To see a list of available sets, use the ``--list-sets`` option.
                   |_|                                           |_|
 
    Available Sets:
-   ======================================================================
-   Title: Compute Throughput Utilization
+   ===================================================================================================================
+   Set Option                          Set Title                           Metric Name                    Metric ID
+   -------------------------------------------------------------------------------------------------------------------
+   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               11.2.3
+                                                                           VALU Utilization               11.2.4
+                                                                           VMEM Utilization               11.2.6
+                                                                           Branch Utilization             11.2.7
 
-   Set: compute_thruput_util
-   Description: Placeholder
-
-   Metric(s)                      ID
-   ------------------------------ ---------------
-   SALU Utilization               11.2.3
-   VALU Utilization               11.2.4
-   VMEM Utilization               11.2.6
-   Branch Utilization             11.2.7
-   MFMA Utilization               11.2.9
    ...
 
+   launch_stats                        Launch Stats                        Grid Size                      7.1.0
+                                                                           Workgroup Size                 7.1.1
+                                                                           Total Wavefronts               7.1.2
+                                                                           VGPRs                          7.1.5
+                                                                           AGPRs                          7.1.6
+                                                                           SGPRs                          7.1.7
+                                                                           LDS Allocation                 7.1.8
+                                                                           Scratch Allocation             7.1.9
+
    Usage Examples:
-   rocprof-compute profile --set compute_thruput_util    # Profile this set
-   rocprof-compute profile --list-sets                   # Show this help
+   rocprof-compute profile --set compute_thruput_util  # Profile this set
+   rocprof-compute profile --list-sets        # Show this help
 
 
 .. _standalone-roofline:
