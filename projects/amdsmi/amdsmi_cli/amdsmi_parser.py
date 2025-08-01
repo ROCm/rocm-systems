@@ -217,7 +217,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _is_command_supported(self, user_input, acceptable_values, command_name):
         if acceptable_values == "N/A":
-            raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(command_name, self.helpers.get_output_format())
+            outputformat = self.helpers.get_output_format()
+            raise amdsmi_cli_exceptions.AmdSmiPermissionDeniedException(command_name, outputformat)
         elif str(user_input).upper() not in acceptable_values:
             print(f"Valid inputs are {acceptable_values}")
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(sys.argv[1], str(user_input).upper(), self.helpers.get_output_format())

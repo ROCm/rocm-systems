@@ -264,6 +264,21 @@ class AmdSmiInvalidSubcommandException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
+class AmdSmiPermissionDeniedException(AmdSmiException):
+    def __init__(self, command, outputformat: str):
+        super().__init__()
+        self.value = -11
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = f"AMD-SMI Command '{self.command}' requires elevation (sudo privileges required)"
+
+        self.json_message["error"] = common_message
+        self.json_message["code"] = self.value
+        self.csv_message = f"error,code\n{common_message}, {self.value}"
+        self.stdout_message = f"{common_message} Error code: {self.value}"
+
+
 class AmdSmiUnknownErrorException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
@@ -279,7 +294,7 @@ class AmdSmiUnknownErrorException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
-class AmdSmiAMDSMIErrorException(AmdSmiException):
+class AmdSmiLibraryErrorException(AmdSmiException):
     def __init__(self, outputformat: str, error_code):
         super().__init__()
         self.value = -1000 - abs(error_code)
