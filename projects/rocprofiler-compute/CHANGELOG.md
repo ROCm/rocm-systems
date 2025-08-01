@@ -25,6 +25,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * CLI analysis mode baseline comparison will now only compare common metrics across workloads and will not show Metric ID
   * Remove metrics from analysis configuration files which are explicitly marked as empty or None
 
+* Change the basic view of TUI from aggregated analysis data to individual kernel analysis data
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi
@@ -42,6 +44,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Usage of rocm-smi
 * Hardware IP block based filtering has been removed in favor of analysis report block based filtering
+* Remove aggregated analysis view from TUI mode
 
 
 ## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0

@@ -137,14 +137,28 @@ def to_max(*args):
 def to_avg(a):
     if str(type(a)) == "<class 'NoneType'>":
         return np.nan
-    elif np.isnan(a).all():
-        return np.nan
-    elif a.empty:
-        return np.nan
     elif isinstance(a, pd.core.series.Series):
-        return a.mean()
+        if a.empty:
+            return np.nan
+        elif np.isnan(a).all():
+            return np.nan
+        else:
+            return a.mean()
+    elif isinstance(a, (np.ndarray, list)):
+        arr = np.array(a)
+        if arr.size == 0:
+            return np.nan
+        elif np.isnan(arr).all():
+            return np.nan
+        else:
+            return np.nanmean(arr)
+    elif isinstance(a, (int, float, np.number)):
+        if np.isnan(a):
+            return np.nan
+        else:
+            return float(a)
     else:
-        raise Exception("to_avg: unsupported type.")
+        raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
 def to_median(a):
@@ -313,6 +327,7 @@ def build_eval_string(equation, coll_level, config):
     s = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", s)
     # use .get() to catch any potential KeyErrors
     s = re.sub(r"raw_pmc_df\['(.*?)']", r'raw_pmc_df.get("\1")', s)
+    # print("--- intermediate string: ", s)
     # apply coll_level
     if config.get("format_rocprof_output") == "rocpd":
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
@@ -1448,7 +1463,7 @@ def load_kernel_top(workload, dir, args):
 def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False):
     """
     - Load data for all "raw_csv_table"
-    - Load dat for "pc_sampling_table"
+    - Load data for "pc_sampling_table"
     - Calculate mertric value for all "metric_table"
     """
     if not skipKernelTop:
