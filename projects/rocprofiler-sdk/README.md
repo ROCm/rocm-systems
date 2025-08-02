@@ -135,3 +135,4 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
 
 Force a commit
 another commit
+commit
