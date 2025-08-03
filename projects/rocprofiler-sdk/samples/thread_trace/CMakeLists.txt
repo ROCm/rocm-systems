@@ -21,6 +21,16 @@ project(rocprofiler-sdk-samples-thread-trace LANGUAGES CXX HIP)
 
 find_package(rocprofiler-sdk REQUIRED)
 find_package(rocprofiler-sdk-roctx REQUIRED)
+find_package(
+    amd_comgr
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -44,11 +54,8 @@ target_sources(thread-trace-sample PRIVATE main.cpp agent.cpp)
 target_link_libraries(
     thread-trace-sample
     PUBLIC rocprofiler-sdk::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk
-            rocprofiler-sdk::samples-common-library
-            rocprofiler-sdk::rocprofiler-sdk-dw
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
-            rocprofiler-sdk::rocprofiler-sdk-amd-comgr)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx amd_comgr)
 
 add_test(NAME thread-trace-sample COMMAND $<TARGET_FILE:thread-trace-sample>)
 
