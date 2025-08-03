@@ -29,7 +29,7 @@ def set_github_output(d: Mapping[str, str]):
 def retrieve_projects(args):
     # TODO(geomin12): #590 Enable TheRock CI for forked PRs
     if args.get("is_forked_pr"):
-        logging.info("Warning: not enabling any projects due to is_forked_pr. Builds/tests for forked PRs are disabled pending: https://github.com/ROCm/rocm-systems/issues/590")
+        logging.info("Warning: not enabling any projects due to is_forked_pr. Builds/tests for forked PRs are disabled pending: https://github.com/ROCm/rocm-libraries/issues/590")
         return []
 
     if args.get("is_pull_request"):
@@ -52,7 +52,7 @@ def retrieve_projects(args):
             projects.add(subtree_to_project_map.get(subtree))
 
 
-    # retrieve the subtrees to checkout, cmake options to build, and projects to test
+    # retrieve the subtrees to checkout, cmake options to build, and projects to test 
     project_to_run = []
     for project in projects:
         if project in project_map:

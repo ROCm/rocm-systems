@@ -1,4 +1,4 @@
-# Contributing to the ROCm Systems
+# Contributing to the ROCm Libraries
 
 Thank you for contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the monorepo.
 
@@ -19,7 +19,7 @@ To limit your local checkout to only the project(s) you work on and improve perf
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
 git sparse-checkout init --cone
-git sparse-checkout set projects/rocprofiler-register projects/rocprofiler-sdk
+git sparse-checkout set projects/rocblas shared/tensile
 git checkout develop # or the branch you are starting from
 ```
 
@@ -33,7 +33,7 @@ The checkout command of the two projects lasted less than 90 seconds.
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:
 
 ```bash
-git sparse-checkout set projects/amdsmi projects/rocmsmilib
+git sparse-checkout set projects/hipsparse projects/rocsparse
 ```
 
 This keeps your working directory clean and fast, as you won't need to clone the entire monorepo.
@@ -44,8 +44,8 @@ This keeps your working directory clean and fast, as you won't need to clone the
 
 - `.github/`: CI workflows, scripts, and configuration files for synchronizing repositories during the migration period.
 - `docs/`: Documentation, including this guide and other helpful resources.
-- `projects/<name>/`: Each folder corresponds to a ROCm systems project that was previously maintained in its own GitHub repository and released as distinct packages.
-- `shared/<name>/`: Shared components that existed in their own repository, used as dependencies by multiple projects, but do not produce distinct packages in previous ROCm releases.
+- `projects/<name>/`: Each folder corresponds to a ROCm library that was previously maintained in its own GitHub repository and released as distinct packages.
+- `shared/<name>/`: Shared components that existed in their own repository, used as dependencies by multiple libraries, but do not produce distinct packages in previous ROCm releases.
 
 Further changes to the structure may be made to improve development efficiency and minimize redundancy.
 
@@ -58,10 +58,10 @@ Further changes to the structure may be made to improve development efficiency a
 You can continue working inside your project's folder as you did before the monorepo migration.
 This process is intended to remain as familiar as possible, though some adjustments may be made to improve efficiency based on feedback.
 
-#### Example: rocr-runtime Developer
+#### Example: hipblaslt Developer
 
 ```bash
-cd projects/rocr-runtime
+cd projects/hipblaslt
 # Edit, build, test as usual
 ```
 
@@ -103,7 +103,7 @@ During this period, a high priority will be placed on keeping the `develop` bran
 
 ### 1. Branch Naming and Forks
 
-When creating a branch for your work, use the following convention to make branch names informative and consistent: `users/<github-husername>/<branch-name>`.
+When creating a branch for your work, use the following convention to make branch names informative and consistent: `users/<github-username>/<branch-name>`.
 
 Try to keep branch names descriptive yet concise to reflect the purpose of the branch. For example, referencing the GitHub Issue number if the pull request is related.
 

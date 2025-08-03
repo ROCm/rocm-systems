@@ -32,9 +32,10 @@ Example Usage:
 """
 
 import argparse
-import sys
-import os
+import json
 import logging
+import os
+import sys
 from typing import List, Optional, Set
 from github_cli_client import GitHubCLIClient
 from repo_config_model import RepoEntry
@@ -115,18 +116,19 @@ def main(argv=None) -> None:
     changed_files = client.get_changed_files(args.repo, int(args.pr))
 
     if not changed_files:
-        logger.warning("REST API failed or returned no changed files. Falling back to Git CLI...")
+        logger.warning("REST API failed or returned no changed files. Falling back to SHA-based Git diff...")
         try:
-            # Ensure fetch is safe
-            os.system("git fetch origin +refs/pull/*/merge:refs/remotes/origin/pr/*")
-            # Get merge commit ref for this PR
-            base_ref = f"origin/{os.getenv('GITHUB_BASE_REF', 'main')}"
-            head_ref = "HEAD"  # Assumes checkout to PR merge ref
-            result = os.popen(f"git diff --name-only {base_ref}...{head_ref}").read()
+            pr_data = os.popen(f"gh api repos/{args.repo}/pulls/{args.pr}").read()
+            pr = json.loads(pr_data)
+            base_sha = pr["base"]["sha"]
+            head_sha = pr["head"]["sha"]
+            logger.debug(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
+            os.system(f"git fetch origin {base_sha} {head_sha}")
+            result = os.popen(f"git diff --name-only {base_sha} {head_sha}").read()
             changed_files = result.strip().splitlines()
-            logger.info(f"Fallback changed files: {changed_files}")
+            logger.info(f"Fallback changed files (SHA-based): {changed_files}")
         except Exception as e:
-            logger.error(f"Git CLI fallback failed: {e}")
+            logger.error(f"SHA-based Git CLI fallback failed: {e}")
             sys.exit(1)
 
     valid_prefixes = get_valid_prefixes(config, args.require_auto_pull, args.require_auto_push)

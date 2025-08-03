@@ -112,7 +112,7 @@ git push origin develop
 
 3. **Protection Rules:**
    - Use branch protection to make the new default branch with the deprecation notice read-only.
-   - Create a ruleset for the `develop` branch to also be restrictive, but allow the assistant-librarian bot exceptions to push patches to the original repository.
+   - Create a ruleset for the `develop` branch to also be restrictive, but allow the systems-assistant bot exceptions to push patches to the original repository.
 
 ### Step 6: Source of Truth Declaration
 

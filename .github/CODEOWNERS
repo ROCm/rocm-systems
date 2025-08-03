@@ -3,7 +3,7 @@
 
 # CI ownership
 /.azuredevops/                                                        @ROCm/external-ci
-/.github/                                                             @ROCm/rocm-libraries-reviewers
+/.github/                                                             @ROCm/rocm-systems-reviewers
 
 # Global documentation ownership
 /**/*.md                                                              @ROCm/rocm-documentation
