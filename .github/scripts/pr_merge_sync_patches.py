@@ -128,9 +128,9 @@ def _extract_commit_message_from_patch(patch_path: Path) -> str:
     return "".join(commit_msg_lines).strip()
 
 def _format_commit_message(monorepo_url: str, pr_number: int, merge_sha: str, original_msg: str) -> str:
-    """Prepend a sync annotation to the original commit message."""
-    annotation = f"[rocm-systems] {monorepo_url}#{pr_number} (commit {merge_sha[:7]})\n\n"
-    return annotation + original_msg
+    """Append a sync annotation to the original commit message."""
+    annotation = f"\n[rocm-systems] {monorepo_url}#{pr_number} (commit {merge_sha[:7]})\n"
+    return original_msg + annotation
 
 def _commit_changes(repo_path: Path, message: str, author_name: str, author_email: str) -> None:
     """Commit staged changes with the specified author and message."""
