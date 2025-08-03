@@ -389,7 +389,7 @@ void ModuleLaunchKernel::AllocateMemory() {
   args2.clockRate = clkRate;
   size1 = sizeof(args1);
   size2 = sizeof(args2);
-  size3 = sizeof(args3);
+  size3 = 0;
   HIP_CHECK(hipEventCreate(&start_event1));
   HIP_CHECK(hipEventCreate(&end_event1));
   HIP_CHECK(hipEventCreate(&start_event2));
