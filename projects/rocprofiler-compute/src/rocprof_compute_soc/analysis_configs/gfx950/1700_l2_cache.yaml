@@ -87,6 +87,12 @@ Panel Config:
       by the cache line size. This value does not consider partial requests, so for
       example, if only a single value is requested in a cache line, the data movement
       will still be counted as a full cache line.
+    Read Bandwidth: Total number of bytes looked up in the L2 cache for read requests,
+      per normalization unit.
+    Write Bandwidth: Total number of bytes looked up in the L2 cache for write requests,
+      per normalization unit.
+    Atomic Bandwidth: Total number of bytes looked up in the L2 cache for atomic requests,
+      per normalization unit.
     Req: The total number of incoming requests to the L2 from all clients for all
       request types, per normalization unit.
     Read Req: The total number of read requests to the L2 from all clients.
@@ -143,6 +149,12 @@ Panel Config:
     Remote Read: The total number of L2 requests to Infinity Fabric to read 32B or
       64B of data from any source other than the accelerator's local HBM, per normalization
       unit.
+    Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe
+      traffic, per normalization unit.
+    "Read Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 read
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Read Bandwidth - HBM: Total number of bytes due to L2 read requests due to HBM
+      traffic, per normalization unit.
     Write and Atomic (32B): The total number of L2 requests to Infinity Fabric to
       write or atomically update 32B of data to any memory location, per normalization
       unit.
@@ -158,6 +170,18 @@ Panel Config:
     Remote Write and Atomic: The total number of L2 requests to Infinity Fabric to
       write or atomically update 32B or 64B of data in any memory location other than
       the accelerator's local HBM, per normalization unit.
+    Write Bandwidth - PCIe: Total number of bytes due to L2 write requests due to
+      PCIe traffic, per normalization unit.
+    "Write Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 write
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Write Bandwidth - HBM: Total number of bytes due to L2 write requests due to HBM
+      traffic, per normalization unit.
+    Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to
+      PCIe traffic, per normalization unit.
+    "Atomic Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 atomic
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to
+      HBM traffic, per normalization unit.
     Atomic: The total number of L2 requests to Infinity Fabric to atomically update
       32B or 64B of data in any memory location, per normalization unit. See Request
       flow for more detail. Note that on current CDNA accelerators, such as the MI2XX,
@@ -628,6 +652,21 @@ Panel Config:
           min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           unit: (Req  + $normUnit)
+        Read Bandwidth - PCIe:
+          avg: AVG(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
+          min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
+          max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
+          unit: (Bytes + $normUnit)
+        "Read Bandwidth - Infinity Fabric\u2122":
+          avg: AVG(TCC_EA0_RDREQ_GMI_32B_sum * 32/ $denom)
+          min: MIN(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ $denom)
+          unit: (Bytes + $normUnit)
+        Read Bandwidth - HBM:
+          avg: AVG(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
+          min: MIN(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
+          unit: (Bytes + $normUnit)
         Write and Atomic (32B):
           avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
           min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
@@ -654,19 +693,19 @@ Panel Config:
           max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
           unit: (Req  + $normUnit)
         Write Bandwidth - PCIe:
-          avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
           unit: (Bytes + $normUnit)
         "Write Bandwidth - Infinity Fabric\u2122":
-          avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ $denom)
           unit: (Bytes + $normUnit)
         Write Bandwidth - HBM:
-          avg: AVG(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
           unit: (Bytes + $normUnit)
         Atomic:
           avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
@@ -679,17 +718,17 @@ Panel Config:
           max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
           unit: (Req  + $normUnit)
         Atomic Bandwidth - PCIe:
-          avg: AVG(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
           unit: (Bytes + $normUnit)
         "Atomic Bandwidth - Infinity Fabric\u2122":
-          avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
           unit: (Bytes + $normUnit)
         Atomic Bandwidth - HBM:
-          avg: AVG(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum / $denom)
-          min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum / $denom)
-          max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum / $denom)
+          avg: AVG(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
+          min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
+          max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
           unit: (Bytes + $normUnit)
