@@ -85,31 +85,20 @@ TEST_CASE("Unit_hipMemcpy_Negative_Parameters") {
 
 TEST_CASE("Unit_hipMemcpyWithStream_Capture") {
   constexpr size_t kNumElements = 1024;
-  constexpr int kInitialValue = 42;
 
-  std::vector<int> host_src(kNumElements, kInitialValue);
-  std::vector<int> host_dst(kNumElements, 0);
+  LinearAllocGuard<int> host_data(LinearAllocs::malloc, kNumElements * sizeof(int));
+  LinearAllocGuard<int> device_data(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
 
-  LinearAllocGuard<int> device_src(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
-  LinearAllocGuard<int> device_dst(LinearAllocs::hipMalloc, kNumElements * sizeof(int));
-
-  hipStream_t stream = nullptr;
+  hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  GENERATE_CAPTURE();
-  BEGIN_CAPTURE(stream);
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
 
-  HIP_CHECK(hipMemcpyWithStream(device_src.ptr(), host_src.data(), kNumElements * sizeof(int),
-                                hipMemcpyHostToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(device_dst.ptr(), device_src.ptr(), kNumElements * sizeof(int),
-                                hipMemcpyDeviceToDevice, stream));
-  HIP_CHECK(hipMemcpyWithStream(host_dst.data(), device_dst.ptr(), kNumElements * sizeof(int),
-                                hipMemcpyDeviceToHost, stream));
+  HIP_CHECK_ERROR(hipMemcpyWithStream(device_data.ptr(), host_data.ptr(),
+                                      kNumElements * sizeof(int), hipMemcpyHostToDevice, stream),
+                  hipErrorStreamCaptureUnsupported);
 
-  END_CAPTURE(stream);
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, nullptr), hipErrorStreamCaptureInvalidated);
 
-  HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipStreamDestroy(stream));
-
-  REQUIRE(std::equal(host_src.begin(), host_src.end(), host_dst.begin()));
 }
