@@ -1,7 +1,7 @@
 # Azure CI Dispatcher
 # ------------------
 # This workflow allows Azure CI to be centralized in a single PR check.
-# It detects which subtrees (from a monorepo structure) were changed in a
+# It detects which subtrees (from a super-repo structure) were changed in a
 # pull request, and automatically requests Azure CI runs for the corresponding
 # subtrees.
 #

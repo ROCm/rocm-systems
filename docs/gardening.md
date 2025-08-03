@@ -21,7 +21,7 @@ For anyone who wants to reach a gardener please email:
 
 Your primary job is to keep the mono-repo shippable. In order to facilitate this we've made
 status badges for all relevant CI available here:
-https://github.com/ROCm/rocm-systems?tab=readme-ov-file#monorepo-status-and-ci-health.
+https://github.com/ROCm/rocm-systems?tab=readme-ov-file#super-repo-status-and-ci-health.
 Effectively your job is to ensure all status badges are green. All of these status
 badges are clickable which will allow you to deep-dive on any failures quickly. If any
 CI is missing, please file an issue leveraging the "gardener" tag, ping on the teams chat,
@@ -52,7 +52,7 @@ In scope:
 - Gardeners are responsible for ensuring develop (post-submit) checks remain green.
 - If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
 - No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
-- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue, 
+- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue,
   verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
 - If the issue is related to a code change, the gardener should isolate the error message, and notify the
   appropriate component owners with a link to the log (reference the [CODEOWNERS](../.github/CODEOWNERS) file).

@@ -4,14 +4,14 @@
 Sync Patches to Subrepositories
 -------------------------------
 
-This script is part of the monorepo synchronization system. It runs after a monorepo pull request
+This script is part of the super-repo synchronization system. It runs after a super-repo pull request
 is merged and applies relevant changes to the corresponding sub-repositories using Git patches.
 
-- Uses the merge commit of the monorepo PR to extract subtree changes.
+- Uses the merge commit of the super-repo PR to extract subtree changes.
 - Generates patch files per changed subtree.
 - Applies each patch to its respective sub-repository, adjusting for subtree prefix.
 - Uses the repos-config.json file to map subtrees to sub-repos.
-- Assumes this script is run from the root of the monorepo.
+- Assumes this script is run from the root of the super-repo.
 
 Arguments:
     --repo      : Full repository name (e.g., org/repo)
@@ -127,9 +127,9 @@ def _extract_commit_message_from_patch(patch_path: Path) -> str:
             commit_msg_lines.append(line)
     return "".join(commit_msg_lines).strip()
 
-def _format_commit_message(monorepo_url: str, pr_number: int, merge_sha: str, original_msg: str) -> str:
+def _format_commit_message(super_repo_url: str, pr_number: int, merge_sha: str, original_msg: str) -> str:
     """Append a sync annotation to the original commit message."""
-    annotation = f"\n[rocm-systems] {monorepo_url}#{pr_number} (commit {merge_sha[:7]})\n"
+    annotation = f"\n[rocm-systems] {super_repo_url}#{pr_number} (commit {merge_sha[:7]})\n"
     return original_msg + annotation
 
 def _commit_changes(repo_path: Path, message: str, author_name: str, author_email: str) -> None:
@@ -175,7 +175,7 @@ def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[s
     name, email = client.get_user(username)
     return name or username, email
 
-def apply_patch_to_subrepo(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
+def apply_patch_to_subrepo(entry: RepoEntry, super_repo_url: str, super_repo_pr: int,
                             patch_path: Path, author_name: str, author_email: str,
                             merge_sha: str, dry_run: bool = False) -> None:
     """Clone the subrepo, apply the patch, and attribute to the original author with commit message annotations."""
@@ -189,7 +189,7 @@ def apply_patch_to_subrepo(entry: RepoEntry, monorepo_url: str, monorepo_pr: int
         _apply_patch(subrepo_path, patch_path)
         _stage_changes(subrepo_path)
         original_commit_msg = _extract_commit_message_from_patch(patch_path)
-        commit_msg = _format_commit_message(monorepo_url, monorepo_pr, merge_sha, original_commit_msg)
+        commit_msg = _format_commit_message(super_repo_url, super_repo_pr, merge_sha, original_commit_msg)
         _commit_changes(subrepo_path, commit_msg, author_name, author_email)
         _set_authenticated_remote(subrepo_path, entry.url)
         _push_changes(subrepo_path, entry.branch)

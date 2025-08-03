@@ -32,7 +32,7 @@ class RepoEntry(BaseModel):
         name     : Name of the project matching packaging file names. Lower-cased and no underscores. (e.g., "rocblas")
         url      : Individual GitHub org plus repo names in matching case and punctuation. (e.g., "ROCm/rocBLAS")
         branch   : The base branch of the sub-repo to target (e.g., "develop").
-        category : Directory category in the monorepo (e.g., "projects" or "shared").
+        category : Directory category in the super-repo (e.g., "projects" or "shared").
     """
     name: str
     url: str
