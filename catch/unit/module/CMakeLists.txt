@@ -36,6 +36,7 @@ set(TEST_SRC
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
     hipModuleLoadFatBinary.cc
+    hipModuleGetLoadingMode.cc
 )
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/get_function_module.code
