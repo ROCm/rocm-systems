@@ -142,6 +142,11 @@ def write_kernel_csv(
     else:
         agent_id = ""
 
+    if config.kernel_rename :
+        kernel_name = "region"
+    else:
+        kernel_name = "name"
+
     query = f"""
         SELECT
             guid AS Guid,
@@ -152,7 +157,7 @@ def write_kernel_csv(
             tid AS Thread_Id,
             dispatch_id AS Dispatch_Id,
             kernel_Id AS Kernel_Id,
-            name AS Kernel_Name,
+            {kernel_name} AS Kernel_Name,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
             end AS End_Timestamp,
