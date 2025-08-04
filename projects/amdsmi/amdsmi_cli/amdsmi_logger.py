@@ -1083,7 +1083,10 @@ class AMDSMILogger():
             for process in output['processes']:
                 gpu_id = str(process['gpu']).rjust(4)
                 pid = str(process['pid']).rjust(9)
-                process_name = str(process['name']).split('/')[-1].ljust(19)
+                if str(process['name']) == "N/A":
+                    process_name = "N/A".ljust(19)
+                else:
+                    process_name = str(process['name']).split('/')[-1].ljust(19)
                 gtt_mem = str(process['gtt']).rjust(8)
                 vram_mem = str(process['vram']).rjust(8)
                 mem_usage = str(process['mem_usage']).rjust(9)
