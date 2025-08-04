@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
 import json
 import os
 import pytest
@@ -43,7 +44,13 @@ def pytest_addoption(parser):
         "--otf2-input",
         action="store",
         default="memory-allocation-tracing/out_results.otf2",
-        help="Input JSON",
+        help="Input OTF2",
+    )
+    parser.addoption(
+        "--csv-input",
+        action="store",
+        default="memory-allocation-tracing/out_memory_allocation_trace.csv",
+        help="Input CSV",
     )
 
 
@@ -60,3 +67,16 @@ def otf2_data(request):
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]
+
+
+@pytest.fixture
+def csv_data(request):
+    filename = request.config.getoption("--csv-input")
+    data = []
+    if not os.path.isfile(filename):
+        raise FileExistsError(f"{filename} does not exist")
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+    return data
