@@ -325,7 +325,7 @@ class Gfx9CmdBuilder : public CmdBuilder {
   }
 
   void BuildNopPacket(CmdBuffer* cmdbuf, uint32_t num_dwords) {
-    uint32_t header = MakePacket3Header(PACKET3_NOP, num_dwords);
+    uint32_t header = MakePacket3Header(PACKET3_NOP, num_dwords * sizeof(uint32_t));
     APPEND_COMMAND_WRAPPER(cmdbuf, header);
     if (num_dwords > 1) {
       std::vector<uint32_t> data_block((num_dwords - 1), 0);

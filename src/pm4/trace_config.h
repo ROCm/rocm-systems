@@ -42,18 +42,20 @@ struct TraceConfig {
   uint32_t perfMASK = ~0u;
   uint32_t perfCTRL = 0;
   std::vector<std::pair<size_t, size_t>> perfcounters{};
+  // GC configurations used by both TT and SPM
+  uint32_t se_number = 0;
+  uint32_t sa_number = 0;
+  uint32_t xcc_number = 0;
   // SPM mode
   bool spm_sq_32bit_mode = true;
-  bool spm_kfd_mode = true;
-  bool mi100 = false;
+  bool spm_has_core1 = false;
+  uint32_t spm_sample_delay_max = 0;
 
   void* control_buffer_ptr = nullptr;
   uint32_t control_buffer_size = 0;
   void* data_buffer_ptr = nullptr;
-  uint32_t data_buffer_size = 0;
+  uint64_t data_buffer_size = 0;
 
-  // SE number for tracing
-  uint32_t spm_se_number_total = 0;
   // concurrent kernels mode
   uint32_t concurrent = 0;
   // SE mask for tracing; note -> replicated for all XCCs

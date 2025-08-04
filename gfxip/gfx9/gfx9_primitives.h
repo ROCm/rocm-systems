@@ -133,6 +133,8 @@ class gfx9_cntx_prim {
       REG_32B_ADDR(GC, 0, mmRLC_SPM_SE_MUXSEL_ADDR);
   static constexpr Register RLC_SPM_SE_MUXSEL_DATA__ADDR =
       REG_32B_ADDR(GC, 0, mmRLC_SPM_SE_MUXSEL_DATA);
+  static constexpr Register RLC_SPM_PERFMON_SAMPLE_DELAY_MAX__ADDR =
+      REG_32B_ADDR(GC, 0, mmRLC_SPM_PERFMON_SAMPLE_DELAY_MAX);
   static const uint32_t RLC_SPM_COUNTERS_PER_LINE = 16;
   static const uint32_t RLC_SPM_TIMESTAMP_SIZE16 = 4;
 
@@ -189,7 +191,7 @@ class gfx9_cntx_prim {
   static uint32_t get_spm_global_delay(const counter_des_t& counter_des,
                                        const uint32_t& instance_index) {
     const auto* block_info = counter_des.block_info;
-    return block_info->delay_info[instance_index].val - 1;
+    return block_info->delay_info.val[instance_index];
   }
 
   // SPM delay functions for se instance
@@ -197,7 +199,7 @@ class gfx9_cntx_prim {
                                    const uint32_t& instance_index) {
     const auto* block_info = counter_des.block_info;
     int delay_index = se_index * block_info->instance_count + instance_index;
-    return block_info->delay_info[delay_index].val - 1;
+    return block_info->delay_info.val[delay_index];
   }
 
   // GRBM broadcasting mode
@@ -681,7 +683,7 @@ class gfx9_cntx_prim {
 
   // Indicates the size of buffer to use per Shader Engine instance.
   // The size is specified in terms of 4KB blocks
-  static uint32_t sqtt_buffer_size_value(uint32_t size_val, uint32_t base_hi) {
+  static uint32_t sqtt_buffer_size_value(uint64_t size_val, uint32_t base_hi) {
     uint32_t sq_thread_trace_size =
         SET_REG_FIELD_BITS(SQ_THREAD_TRACE_SIZE, SIZE, (size_val >> TT_BUFF_ALIGN_SHIFT));
     return sq_thread_trace_size;
