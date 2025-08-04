@@ -57,7 +57,7 @@ bool
 is_jpeg_busy_supported(uint32_t dev_id);
 
 bool
-is_gpu_category_mi300(uint32_t dev_id);
+is_current_power_supported(uint32_t dev_id);
 
 struct processors
 {
@@ -67,7 +67,7 @@ struct processors
     static std::vector<bool>                    jpeg_activity_supported;
     static std::vector<bool>                    vcn_busy_supported;
     static std::vector<bool>                    jpeg_busy_supported;
-    static std::vector<bool>                    gpu_category_mi300;
+    static std::vector<bool>                    current_power_supported;
 
 private:
     friend void                    rocprofsys::gpu::get_processor_handles();
@@ -77,7 +77,7 @@ private:
     friend bool rocprofsys::gpu::is_jpeg_activity_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_vcn_busy_supported(uint32_t dev_id);
     friend bool rocprofsys::gpu::is_jpeg_busy_supported(uint32_t dev_id);
-    friend bool rocprofsys::gpu::is_gpu_category_mi300(uint32_t dev_id);
+    friend bool rocprofsys::gpu::is_current_power_supported(uint32_t dev_id);
 };
 #endif
 

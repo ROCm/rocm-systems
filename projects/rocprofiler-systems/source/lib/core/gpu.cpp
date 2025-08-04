@@ -250,7 +250,7 @@ std::vector<bool>                    processors::vcn_activity_supported  = {};
 std::vector<bool>                    processors::jpeg_activity_supported = {};
 std::vector<bool>                    processors::vcn_busy_supported      = {};
 std::vector<bool>                    processors::jpeg_busy_supported     = {};
-std::vector<bool>                    processors::gpu_category_mi300      = {};
+std::vector<bool>                    processors::current_power_supported = {};
 
 void
 get_processor_handles()
@@ -300,7 +300,7 @@ get_processor_handles()
             amdsmi_asic_info_t   asic_info;
             bool                 vcn_supported = false, jpeg_supported = false;
             bool                 v_busy_supported = false, j_busy_supported = false;
-            bool                 gpu_cat_mi300 = false;
+            bool                 current_power_supported = false;
             // AMD SMI will not report VCN_activity and JPEG_activity, if VCN_busy or
             // JPEG_busy fields are available.
             if(amdsmi_get_gpu_metrics_info(processor, &gpu_metrics) ==
@@ -329,14 +329,14 @@ get_processor_handles()
 
                 if(gfx_version >= mi300_gfx_ver && gfx_version < navi10_gfx_ver)
                 {
-                    gpu_cat_mi300 = true;
+                    current_power_supported = true;
                 }
             }
             processors::vcn_activity_supported.push_back(vcn_supported);
             processors::jpeg_activity_supported.push_back(jpeg_supported);
             processors::vcn_busy_supported.push_back(v_busy_supported);
             processors::jpeg_busy_supported.push_back(j_busy_supported);
-            processors::gpu_category_mi300.push_back(gpu_cat_mi300);
+            processors::current_power_supported.push_back(current_power_supported);
         }
     }
     processors::total_processor_count = processors::processors_list.size();
@@ -383,10 +383,10 @@ get_handle_from_id(uint32_t dev_id)
 }
 
 bool
-is_gpu_category_mi300(uint32_t dev_id)
+is_current_power_supported(uint32_t dev_id)
 {
-    if(dev_id >= processors::gpu_category_mi300.size()) return false;
-    return processors::gpu_category_mi300[dev_id];
+    if(dev_id >= processors::current_power_supported.size()) return false;
+    return processors::current_power_supported[dev_id];
 }
 
 #endif
