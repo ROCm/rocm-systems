@@ -253,3 +253,31 @@ set_tests_properties(
     rocprofv3-test-att-plus-pc-sampling
     PROPERTIES TIMEOUT 90 LABELS "integration-tests;thread-trace;pc-sampling" DISABLED
                ${ATT_PLUS_PCS_DISABLE})
+
+# Trace two GPUs
+add_test(NAME rocprofv3-test-att-gpu-index-two-gpus
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input -o
+                 out --att-gpu-index 0,1 -- $<TARGET_FILE:vector-ops>)
+
+set_tests_properties(
+    rocprofv3-test-att-gpu-index-two-gpus
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DISABLED ${IS_DISABLED})
+
+# No machine has gpu index = 9999
+add_test(NAME rocprofv3-test-att-gpu-index-will-fail
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> ${COMMON_PARAMS}/cmd_input -o
+                 out --att-gpu-index 0,9999 -- $<TARGET_FILE:vector-ops>)
+
+# The FAIL regex for this test is the ROCP_ERROR specific to invalid device index
+set_tests_properties(
+    rocprofv3-test-att-gpu-index-will-fail
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DISABLED
+               ${IS_DISABLED}
+               WILL_FAIL
+               True
+               FAIL_REGULAR_EXPRESSION
+               "Invalid GPU Device Index")
