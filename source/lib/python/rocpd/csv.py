@@ -36,6 +36,12 @@ def write_sql_query_to_csv(
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
 
+    query_one = "{} LIMIT 1".format(query)
+
+    # just return if view is empty
+    if not connection.execute(query_one).fetchone():
+        return
+
     # call query module to export to csv
     file_prefix = output_file + "_" if output_file else ""
     export_path = os.path.join(output_path, f"{file_prefix}{filename}_trace.csv")
