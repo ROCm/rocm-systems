@@ -63,7 +63,7 @@ namespace
 const auto env_regexes =
     new std::array<RE2, 3>{RE2{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
                            RE2{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                           RE2{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+                           RE2{"(.*)%(q)\\{([A-Z0-9_]+)\\}(.*)"}};
 // env regex examples:
 //  - %env{USER}%       Consistent with other output key formats (start+end with %)
 //  - $ENV{USER}        Similar to CMake
@@ -120,7 +120,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
             std::string _match_fpath = _fpath;
             re2::StringPiece input(_match_fpath);
             std::string beg, envtype, var, end;
-            while(RE2::FullMatch(input, _re, &beg, &envtype, &var, &end))
+            if(RE2::FullMatch(input, _re, &beg, &envtype, &var, &end))
             {
                 std::string _val = common::get_env<std::string>(var, "");
                 _val = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
@@ -142,7 +142,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
         std::string _match_fpath = _fpath;
         re2::StringPiece input(_match_fpath);
         std::string beg, percent_or_brace, argn, percent_or_brace2, dash_or_slash, end;
-        while(RE2::FullMatch(input, _re, &beg, &percent_or_brace, &argn, &percent_or_brace2, &dash_or_slash, &end))
+        if(RE2::FullMatch(input, _re, &beg, &percent_or_brace, &argn, &percent_or_brace2, &dash_or_slash, &end))
         {
             _fpath = beg + end;
             _match_fpath = _fpath;
