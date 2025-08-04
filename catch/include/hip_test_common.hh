@@ -323,6 +323,26 @@ inline bool isPcieAtomicsSupported() {
   return pcieAtomics != 0;
 }
 
+inline bool isP2PSupported(int& d1, int& d2) {
+  int num_devices = HipTest::getDeviceCount();
+  int supported  = 1;
+  for (auto i = 0u; i < num_devices; ++i) {
+    int canAccess = 0;
+    for (auto j = 0u; j < num_devices; ++j) {  
+      if (i != j) {
+        HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
+        if (!canAccess) {
+          supported = 0;
+          d1 = i;
+          d2 = j;
+          break;
+        }
+      }
+    }
+  }
+  return supported;
+}
+
 inline bool areWarpMatchFunctionsSupported() {
   int matchFunctionsSupported = 1;
 #if HT_NVIDIA
@@ -516,6 +536,14 @@ class BlockingContext {
     return;                                                                                        \
   }
 
+#define CHECK_P2P_SUPPORT                                                                          \
+  int d1, d2;                                                                                      \
+  if (!HipTest::isP2PSupported(d1,d2)) {                                                           \
+    std::string msg = "P2P access check failed between dev1:" + std::to_string(d1) + ",dev2:" +    \
+                                                                std::to_string(d2);                \
+    HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
+    return;                                                                                        \
+  }                                                                                                \
 // This must be called in the beginning of warp test app's main() to indicate warp match functions
 // are supported.
 #define CHECK_WARP_MATCH_FUNCTIONS_SUPPORT                                                         \

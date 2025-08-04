@@ -580,6 +580,8 @@ void MultipleDeviceMultipleKernelAndHostTest(const unsigned int num_devices,
     }
   }
 
+  CHECK_P2P_SUPPORT
+
   if (kernel_count > 1) {
     for (auto i = 0u; i < num_devices; ++i) {
       int canAccess  = 0;
