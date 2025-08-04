@@ -286,7 +286,7 @@ struct kernel_dispatch
     uint64_t                stack_id            = 0;
     uint64_t                parent_stack_id     = 0;
     uint64_t                corr_id             = 0;
-    uint64_t                vgpr_count          = 0;
+    uint64_t                arch_vgpr_count     = 0;
     uint64_t                accum_vgpr_count    = 0;
     uint64_t                sgpr_count          = 0;
 };
@@ -444,7 +444,7 @@ struct counter
     uint32_t                workgroup_size   = 0;
     uint32_t                lds_block_size   = 0;
     uint32_t                scratch_size     = 0;
-    uint32_t                vgpr_count       = 0;
+    uint32_t                arch_vgpr_count  = 0;
     uint32_t                accum_vgpr_count = 0;
     uint32_t                sgpr_count       = 0;
     std::string             counter_name     = {};
@@ -712,7 +712,7 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     load_dim3("grid", data.grid_size);
     LOAD_DATA_FIELD(lds_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
+    LOAD_DATA_FIELD(arch_vgpr_count);
     LOAD_DATA_FIELD(accum_vgpr_count);
     LOAD_DATA_FIELD(sgpr_count);
     LOAD_DATA_FIELD(static_lds_size);
@@ -889,7 +889,7 @@ load(ArchiveT& ar, rocpd::types::counter& data)
     LOAD_DATA_FIELD(workgroup_size);
     LOAD_DATA_FIELD(lds_block_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
+    LOAD_DATA_FIELD(arch_vgpr_count);
     LOAD_DATA_FIELD(accum_vgpr_count);
     LOAD_DATA_FIELD(sgpr_count);
     LOAD_DATA_FIELD(counter_name);
