@@ -151,6 +151,7 @@ struct config : output_config
     std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
     std::string att_library_path        = get_env("ROCPROF_ATT_LIBRARY_PATH", "");
+    std::string att_gpu_index           = get_env("ROCPROF_ATT_PARAM_GPU_INDEX", "");
 
     std::unordered_set<size_t>         kernel_filter_range    = {};
     std::vector<std::set<std::string>> counters               = {};
