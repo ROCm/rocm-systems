@@ -54,6 +54,7 @@ option(DISABLE_DIRECT_DISPATCH "Disable Direct Dispatch" OFF)
 option(BUILD_SHARED_LIBS "Build the shared library" ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake")
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/../../cmake")
 
 if(BUILD_SHARED_LIBS)
   add_library(amdhip64 SHARED)
@@ -158,31 +159,10 @@ target_compile_definitions(amdhip64 PRIVATE __HIP_PLATFORM_AMD__)
 target_link_libraries(amdhip64 PRIVATE ${OPENGL_LIBRARIES})
 target_link_libraries(amdhip64 PRIVATE ${CMAKE_DL_LIBS})
 
-find_package(PkgConfig REQUIRED)
-if (PkgConfig_FOUND)
-   pkg_check_modules(simde IMPORTED_TARGET simde)
-endif()
+find_package(SIMDe REQUIRED)
 
-if (PkgConfig_FOUND AND simde_FOUND)
-  message(STATUS "Found SIMDe via pkg-config")
-  # Link against SIMDe pseudo-target, even though it is header-only, to ensure
-  # <> inclusion.
-  target_link_libraries(amdhip64 PRIVATE PkgConfig::simde)
-else()
-  message(WARNING "SIMDe not found via pkg-config. Falling back to find_path...")
-
-  find_path(SIMDE_INCLUDE_DIR
-      NAMES simde/simde-common.h
-      PATHS
-          /usr/include
-          /usr/local/include
-      NO_DEFAULT_PATH
-  )
-
-  if (SIMDE_INCLUDE_DIR)
-    message(STATUS "Found SIMDe headers at: ${SIMDE_INCLUDE_DIR}")
-    target_include_directories(amdhip64 PRIVATE ${SIMDE_INCLUDE_DIR})
-  endif()
+if(SIMDE_FOUND)
+    target_link_libraries(amdhip64 PRIVATE ${SIMDE_TARGET})
 endif()
 
 # Add link to comgr, hsa-runtime and other required libraries in target files

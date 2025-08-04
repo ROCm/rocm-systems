@@ -19,7 +19,7 @@
  THE SOFTWARE. */
 
 #include "hip_graph_internal.hpp"
-
+#include <cmath>
 #include <simde/x86/sse2.h>
 
 

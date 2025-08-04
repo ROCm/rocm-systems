@@ -30,7 +30,7 @@
 #include <time.h>
 #include <unistd.h>
 #endif  // !_WIN32
-
+#include <cmath>
 #include <simde/x86/sse2.h>
 
 namespace amd {
