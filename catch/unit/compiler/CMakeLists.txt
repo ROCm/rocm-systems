@@ -19,7 +19,7 @@ if(HIP_PLATFORM MATCHES "amd")
                       TEST_TARGET_NAME build_tests)
 
   set(OFFLOAD_ARCH_GENERIC_STR "--offload-arch=gfx9-generic --offload-arch=gfx9-4-generic:sramecc+:xnack- --offload-arch=gfx9-4-generic:sramecc-:xnack- --offload-arch=gfx9-4-generic:xnack+ --offload-arch=gfx10-1-generic --offload-arch=gfx10-3-generic --offload-arch=gfx11-generic --offload-arch=gfx12-generic")
-  
+
   set(DISABLE_GENERIC_TARGET_ONLY)
 
   # Build hipSquareGenericTargetOnly to cover generic targets only
@@ -40,7 +40,7 @@ if(HIP_PLATFORM MATCHES "amd")
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_EXE})
     set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/${GENERIC_TARGET_ONLY_COMPRESSED_EXE})
   else()
-    set(DISABLE_GENERIC_TARGET_ONLY "-DNO_GENERIC_TARGET_ONLY_TEST") 
+    set(DISABLE_GENERIC_TARGET_ONLY "-DNO_GENERIC_TARGET_ONLY_TEST")
   endif()
 
   # Build hipSquareGenericTarget to cover generic targets and the specific target
@@ -72,4 +72,16 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnly)
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
   endif()
+
+  add_custom_target(hipSpirvTest ALL
+                  COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                  ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
+                  ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
+                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH} --offload-arch=amdgcnspirv
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
+  add_dependencies(CompilerTest hipSpirvTest)
+
 endif()
