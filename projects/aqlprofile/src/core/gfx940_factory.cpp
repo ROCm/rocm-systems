@@ -52,6 +52,7 @@ class Mi300Factory : public Mi100Factory {
           break;
         case TcpCounterBlockId:
           block_info->event_id_max = 84;
+          assert(agent_info->se_num * block_info->instance_count == cu_block_delay_table_size);
           break;
         case TccCounterBlockId:
           block_info->instance_count = 16;
@@ -139,6 +140,7 @@ static const uint32_t SqBlockDelayValue[] = {0x25, 0x2d, 0x2f, 0x2b};
 void Mi300Factory::InitSpmBlockDelayTable(gpu_id_t gpu_id) {
   const uint32_t** p;
   if (gpu_id == MI300_GPU_ID) {
+    cu_block_delay_table_size = sizeof(gfx940::TaBlockDelayValue) / sizeof(gfx940::TaBlockDelayValue[0]);
     // Global Blocks
     p = spm_block_delay_global;
     *p++ = gfx940::CpgBlockDelayValue;  // CPG = 0
@@ -163,6 +165,7 @@ void Mi300Factory::InitSpmBlockDelayTable(gpu_id_t gpu_id) {
     *p++ = gfx940::SqBlockDelayValue;   // SQG = 9
     *p++ = NULL;                        // VGT = 10
   } else if (gpu_id == MI350_GPU_ID) {
+    cu_block_delay_table_size = sizeof(gfx950::TaBlockDelayValue) / sizeof(gfx950::TaBlockDelayValue[0]);
     // Global Blocks
     p = spm_block_delay_global;
     *p++ = gfx950::CpgBlockDelayValue;  // CPG = 0

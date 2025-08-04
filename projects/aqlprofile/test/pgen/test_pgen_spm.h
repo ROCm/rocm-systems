@@ -32,6 +32,7 @@
 
 #include "pgen/test_pgen.h"
 #include "util/test_assert.h"
+#include "spm_common.hpp"
 
 // C++11's solution for std::format()
 template <typename... Args>
@@ -45,20 +46,6 @@ std::string string_format(const std::string& format, Args... args) {
   std::snprintf(buf.get(), size, format.c_str(), args...);
   return std::string(buf.get(), buf.get() + size - 1);  // We don't want the '\0' inside
 }
-
-// TODO: This is copied from ./src/pm4/spm_builder.h
-// Will find its permanent home later.
-typedef struct SpmBufferDesc_ {
-  uint32_t version{1};
-  uint32_t global_num_line{0};
-  uint32_t se_num_line{0};
-  uint32_t num_se{0};
-  uint32_t num_sa{0};
-  uint32_t num_xcc{0};
-  size_t num_events{0};
-
-  uint16_t* get_counter_map() { return (uint16_t*)(this + 1); }
-} SpmBufferDesc;
 
 hsa_status_t TestPGenSpmCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                                  hsa_ven_amd_aqlprofile_info_data_t* info_data,
@@ -209,9 +196,10 @@ class TestPGenSpm : public TestPGen {
     uint16_t* buffer = (uint16_t*)malloc(seg_size);
     uint64_t* counter = (uint64_t*)malloc(profile_.event_count * sizeof(uint64_t));
     uint64_t* counter_total = (uint64_t*)calloc(profile_.event_count, sizeof(uint64_t));
-    if (!buffer || !counter) {
+    if (!buffer || !counter || !counter_total) {
       if (buffer) free(buffer);
       if (counter) free(counter);
+      if (counter_total) free(counter_total);
       return;
     }
     std::clog << string_format("Segment Size = %d bytes\n", seg_size);
@@ -285,6 +273,7 @@ class TestPGenSpm : public TestPGen {
 
     free(buffer);
     free(counter);
+    free(counter_total);
   }
 
   bool Cleanup() {

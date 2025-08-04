@@ -150,9 +150,10 @@ static void producer(spm_state_t* s) {
     // Forced exit: This happens when we want to stop SPM but not the app. This should be
     // improved by getting the hint from caller instead of a hardcoded number. Will consider this
     // in the new SPM api design
+    #define MAX_EXTRA_CALLS_AFTER_FORCED_EXIT 5
     if (exiting && s->size_copied) {
       count_down++;
-      if (count_down > 5) {
+      if (count_down > MAX_EXTRA_CALLS_AFTER_FORCED_EXIT) {
         printf("Forced exit after %d extra hsa_amd_spm_set_dest_buffer() calls\n", count_down);
         break;
       }

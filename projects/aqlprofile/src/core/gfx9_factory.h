@@ -51,6 +51,7 @@ class Gfx9Factory : public Pm4Factory {
   const uint32_t* spm_block_delay_global[SPM_GLOBAL_BLOCK_NUMBER];
   const uint32_t* spm_block_delay_se[SPM_SE_BLOCK_NUMBER];
   void InitSpmBlockDelay(GpuBlockInfo* block_info);
+  size_t cu_block_delay_table_size;
 };
 
 // Mi100 factory class

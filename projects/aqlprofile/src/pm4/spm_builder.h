@@ -122,7 +122,7 @@ class GpuSpmBuilder : public SpmBuilder, protected Primitives {
 
     // Hardcode PERFMON_RING_MODE to 3 (Stall and send interrupt) to match KFD
     builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::RLC_SPM_PERFMON_CNTL__ADDR,
-                                       Primitives::rlc_spm_perfmon_cntl_value(sampling_rate)|0x00003000L);
+                                       Primitives::rlc_spm_perfmon_cntl_value(sampling_rate));
 
     // Iterate through the list of blocks to create PM4 packets to read counter values
     // Below pair.first is the block id of a counter event and pair.second is the index into
