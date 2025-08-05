@@ -95,7 +95,7 @@ class RocProfCompute_Base:
             return
 
         # Set default output directory if not specified
-        if type(self.__args.path) == str:
+        if isinstance(self.__args.path, str):
             if out is None:
                 out = self.__args.path + "/pmc_perf.csv"
             files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
@@ -120,7 +120,7 @@ class RocProfCompute_Base:
                         os.path.basename(f)
                     )
                 ]
-        elif type(self.__args.path) == list:
+        elif isinstance(self.__args.path, list):
             files = self.__args.path
         else:
             console_error(
@@ -129,7 +129,7 @@ class RocProfCompute_Base:
 
         df = None
         for i, file in enumerate(files):
-            _df = pd.read_csv(file) if type(self.__args.path) == str else file
+            _df = pd.read_csv(file) if isinstance(self.__args.path, str) else file
             if self.__args.join_type == "kernel":
                 key = _df.groupby("Kernel_Name").cumcount()
                 _df["key"] = _df.Kernel_Name + " - " + key.astype(str)
@@ -237,7 +237,8 @@ class RocProfCompute_Base:
                 )
             ]
         ]
-        #   B) any timestamps that are _not_ the duration, which is the one we care about
+        #   B) any timestamps that are _not_ the duration,
+        #      which is the one we care about
         df = df[
             [
                 k
@@ -277,8 +278,9 @@ class RocProfCompute_Base:
         df["End_Timestamp"] = endNs
         # finally, join the drop key
         df = df.drop(columns=["key"])
-        # save to file and delete old file(s), skip if we're being called outside of rocprof-compute
-        if type(self.__args.path) == str:
+        # save to file and delete old file(s)
+        # skip if we're being called outside of rocprof-compute
+        if isinstance(self.__args.path, str):
             df.to_csv(out, index=False)
             if not self.__args.verbose:
                 for file in files:
@@ -324,7 +326,12 @@ class RocProfCompute_Base:
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
             console_error(
-                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
+                (
+                    "Profiling command required. Pass application executable after -- "
+                    "at the end of options.\n"
+                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                    "./vcopy -n 1048576 -b 256"
+                )
             )
 
         gen_sysinfo(
@@ -378,15 +385,18 @@ class RocProfCompute_Base:
                 time_left_seconds = (total_runs - run_number) * avg_profiling_time
                 time_left = format_time(time_left_seconds)
                 console_log(
-                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: {time_left}]..."
+                    f"[Run {run_number}/{total_runs}]"
+                    f"[Approximate profiling time left: {time_left}]..."
                 )
             else:
                 console_log(
-                    f"[Run {run_number}/{total_runs}][Approximate profiling time left: pending first measurement...]"
+                    f"[Run {run_number}/{total_runs}]"
+                    "[Approximate profiling time left: "
+                    "pending first measurement...]"
                 )
 
             # Kernel filtering (in-place replacement)
-            if not self.__args.kernel == None:
+            if not self.__args.kernel is not None:
                 success, output = capture_subprocess_output([
                     "sed",
                     "-i",
@@ -404,7 +414,7 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             # Dispatch filtering (inplace replacement)
-            if not self.__args.dispatch == None:
+            if not self.__args.dispatch is not None:
                 success, output = capture_subprocess_output([
                     "sed",
                     "-i",
