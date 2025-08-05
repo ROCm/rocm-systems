@@ -84,7 +84,7 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         zypper install -y perl-File-BaseDir
-        zypper install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        zypper install --gpg-auto-import-keys -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
         zypper install -y rocm-dev rocdecode-devel python3-devel
 
     - name: Build rocprofiler-systems
