@@ -254,6 +254,12 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+add_test(
+    NAME test_profile_live_attach_detach
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m live_attach_detach --junitxml=tests/test_profile_misc.xml
+            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
 set_tests_properties(
     test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
     test_profile_sort test_profile_misc PROPERTIES LABELS "profile" RESOURCE_GROUPS

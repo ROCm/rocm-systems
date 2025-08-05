@@ -72,4 +72,5 @@ markers = [
 	"L1_cache",
 	"num_xcds_spec_class",
 	"num_xcds_cli_output",
+  "live_attach_detach"
 ]
