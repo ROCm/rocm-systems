@@ -1,0 +1,50 @@
+---
+Checks: "-*,\
+misc-*,\
+-misc-incorrect-roundings,\
+-misc-macro-parentheses,\
+-misc-misplaced-widening-cast,\
+-misc-static-assert,\
+-misc-no-recursion,\
+-misc-non-private-member-variables-in-classes,\
+modernize-*,\
+-modernize-deprecated-headers,\
+-modernize-raw-string-literal,\
+-modernize-return-braced-init-list,\
+-modernize-use-transparent-functors,\
+-modernize-use-trailing-return-type,\
+-modernize-avoid-c-arrays,\
+-modernize-redundant-void-arg,\
+-modernize-use-using,\
+-modernize-use-auto,\
+-modernize-concat-nested-namespaces,\
+-modernize-use-nodiscard,\
+performance-*,\
+readability-*,\
+-readability-function-size,\
+-readability-identifier-naming,\
+-readability-identifier-length,\
+-readability-implicit-bool-cast,\
+-readability-inconsistent-declaration-parameter-name,\
+-readability-named-parameter,\
+-readability-magic-numbers,\
+-readability-redundant-declaration,\
+-readability-redundant-member-init,\
+-readability-simplify-boolean-expr,\
+-readability-uppercase-literal-suffix,\
+-readability-braces-around-statements,\
+-readability-avoid-const-params-in-decls,\
+-readability-else-after-return,\
+-readability-isolate-declaration,\
+-readability-redundant-string-cstr,\
+-readability-static-accessed-through-instance,\
+-readability-const-return-type,\
+-readability-redundant-access-specifiers,\
+-readability-function-cognitive-complexity,\
+"
+CheckOptions:
+  - key:             readability-braces-around-statements.ShortStatementLines
+    value:           '2'
+  - key:             readability-implicit-bool-conversion.AllowPointerConditions
+    value:           '1'
+...
