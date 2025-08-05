@@ -1,0 +1,79 @@
+declare -A FILTER
+
+# FILTER is meant to be used with a negative gtest filter
+
+# Designate the tests to be excluded from all test runs first,
+# followed by tests that should be excluded by device.
+
+# Permanent exclusions
+# These tests are included for debugging, but are not executed in normal
+# execution on any ASIC:
+PERMANENT_BLACKLIST_ALL_ASICS=
+
+# This is the temporary blacklist for all ASICs. This is to be used when a test
+# is failing consistently
+TEMPORARY_BLACKLIST_ALL_ASICS=
+
+
+if [ -z "$PERMANENT_BLACKLIST_ALL_ASICS" -a -z "$TEMPORARY_BLACKLIST_ALL_ASICS" ]; then
+  BLACKLIST_ALL_ASICS=
+else
+  BLACKLIST_ALL_ASICS=\
+"$PERMANENT_BLACKLIST_ALL_ASICS:"\
+"$TEMPORARY_BLACKLIST_ALL_ASICS:"
+fi
+
+# Device specific blacklists
+FILTER[vega10]=\
+$BLACKLIST_ALL_ASICS
+
+# SWDEV-207510
+FILTER[vega20]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadOnly.TestProcInfoRead"
+
+# SWDEV-207510
+FILTER[arcturus]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadOnly.TestProcInfoRead"
+
+# SWDEV-306889
+FILTER[aldebaran]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.FanRead:"\
+"rsmitstReadOnly.TestVoltCurvRead:"\
+"rsmitstReadOnly.TestFrequenciesRead:"\
+"rsmitstReadWrite.FanReadWrite:"\
+"rsmitstReadWrite.TestFrequenciesReadWrite:"\
+"rsmitstReadWrite.TestPciReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite"
+
+# SWDEV-319795
+FILTER[sienna_cichlid]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadWrite.TestPerfLevelReadWrite"
+
+# SWDEV-391407
+# aqua_vanjaram and later systems show 'ip discovery' in
+# /sys/class/kfd/kfd/topology/nodes/*/name
+#
+# For those systems gfx_target_version must be used. It can be found in
+# /sys/class/kfd/kfd/topology/nodes/*/properties
+FILTER[90400]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestVoltCurvRead"
+FILTER[90401]=${FILTER[90400]}
+FILTER[90402]=${FILTER[90400]}
+
+# SWDEV-321166
+FILTER[virtualization]=\
+$BLACKLIST_ALL_ASICS\
+"rsmitstReadOnly.TestOverdriveRead:"\
+"rsmitstReadOnly.TestGPUBusyRead:"\
+"rsmitstReadWrite.FanReadWrite:"\
+"rsmitstReadWrite.TestOverdriveReadWrite:"\
+"rsmitstReadWrite.TestPowerReadWrite:"\
+"rsmitstReadWrite.TestPowerCapReadWrite"

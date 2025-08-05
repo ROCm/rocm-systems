@@ -1,0 +1,241 @@
+/*
+Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+// clang-format off
+
+// Description Fields:
+//   Arg #   Type              Meaning
+//  -------------------------------------------------
+//   1       rdc_field_t       enum of field
+//   2       string            description of enum
+//   3       string            rdci display label
+//   4       bool              do or do not display in rdci
+//           rdc_field_t                 Description                                    rdci label          To Display
+//           ===========                 ===========                                    =========           ==========
+#ifndef FLD_DESC_ENT
+#define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY)
+#endif
+
+FLD_DESC_ENT(RDC_FI_INVALID,             "Unknown/Invalid field",                       "INVALID",          false)
+FLD_DESC_ENT(RDC_FI_GPU_COUNT,           "GPU count in the system",                     "GPU_COUNT",        true)
+FLD_DESC_ENT(RDC_FI_DEV_NAME,            "Name of the device",                          "DEV_NAME",         true)
+FLD_DESC_ENT(RDC_FI_OAM_ID,              "OAM ID of the device",                        "OAM_ID",           true)
+
+FLD_DESC_ENT(RDC_FI_DEV_ID,              "ID of the device",                            "DEV_ID",           true)
+FLD_DESC_ENT(RDC_FI_REV_ID,              "Revision ID of the device",                   "REV_ID",           true)
+FLD_DESC_ENT(RDC_FI_TARGET_GRAPHICS_VERSION, "GFX version of the device",               "GFX",              true)
+FLD_DESC_ENT(RDC_FI_NUM_OF_COMPUTE_UNITS, "Number of Compute Units",                    "COMPUTE_UNITS",    true)
+FLD_DESC_ENT(RDC_FI_UUID,                "Unique ID of the device AKA asic_serial",     "UUID",             true)
+FLD_DESC_ENT(RDC_FI_GPU_PARTITION_COUNT, "GPU partition count",                         "PARTITION_COUNT",  true)
+
+FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies",               "GPU_CLOCK",        true)
+FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies",            "MEM_CLOCK",        true)
+FLD_DESC_ENT(RDC_FI_MEMORY_TEMP,         "Memory temperature in millidegrees Celsius",  "MEMORY_TEMP",      true)
+FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsius",     "GPU_TEMP",         true)
+FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",                   "POWER_USAGE",      true)
+FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
+FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
+FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in Mbps",                      "PCIE_BANDWIDTH",   true)
+
+FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage",                         "GPU_UTIL",         true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes",   "GPU_MEMORY_USAGE", true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL,    "Total memory of the GPU instance",            "GPU_MEMORY_TOTAL", true)
+FLD_DESC_ENT(RDC_FI_GPU_MM_ENC_UTIL,     "Mutilmedia encoder busy percentage",          "GPU_MM_ENC_UTIL",  true)
+FLD_DESC_ENT(RDC_FI_GPU_MM_DEC_UTIL,     "Mutilmedia decoder busy percentage",          "GPU_MM_DEC_UTIL",  true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_ACTIVITY, "Memory busy percentage",                      "GPU_MEM_UTIL",     true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_MAX_BANDWIDTH,       "Memory max bandwidth",             "GPU_MEM_MAX_BANDWIDTH",   true)
+FLD_DESC_ENT(RDC_FI_GPU_MEMORY_CUR_BANDWIDTH,       "Memory current bandwidth",         "GPU_MEM_CUR_BANDWIDTH",   true)
+FLD_DESC_ENT(RDC_FI_GPU_BUSY_PERCENT,    "GPU busy percentage",                         "GPU_BUSY_PERCENT", true)
+FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
+
+// ECC totals
+FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL,   "Accumulated Single Error Correction",         "ECC_CORRECT",      true)
+FLD_DESC_ENT(RDC_FI_ECC_UNCORRECT_TOTAL, "Accumulated Double Error Detection",          "ECC_UNCORRECT",    true)
+
+// ECC blocks
+FLD_DESC_ENT(RDC_FI_ECC_SDMA_CE,         "SDMA Correctable Error",                      "ECC_SDMA_CE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_SDMA_UE,         "SDMA Uncorrectable Error",                    "ECC_SDMA_UE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_GFX_CE,          "GFX Correctable Error",                       "ECC_GFX_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_GFX_UE,          "GFX Uncorrectable Error",                     "ECC_GFX_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MMHUB_CE,        "MMHUB Correctable Error",                     "ECC_MMHUB_CE",     true)
+FLD_DESC_ENT(RDC_FI_ECC_MMHUB_UE,        "MMHUB Uncorrectable Error",                   "ECC_MMHUB_UE",     true)
+FLD_DESC_ENT(RDC_FI_ECC_ATHUB_CE,        "ATHUB Correctable Error",                     "ECC_ATHUB_CE",     true)
+FLD_DESC_ENT(RDC_FI_ECC_ATHUB_UE,        "ATHUB Uncorrectable Error",                   "ECC_ATHUB_UE",     true)
+FLD_DESC_ENT(RDC_FI_ECC_PCIE_BIF_CE,     "PCIE_BIF Correctable Error",                  "ECC_PCIE_BIF_CE",  true)
+FLD_DESC_ENT(RDC_FI_ECC_PCIE_BIF_UE,     "PCIE_BIF Uncorrectable Error",                "ECC_PCIE_BIF_UE",  true)
+FLD_DESC_ENT(RDC_FI_ECC_HDP_CE,          "HDP Correctable Error",                       "ECC_HDP_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_HDP_UE,          "HDP Uncorrectable Error",                     "ECC_HDP_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_XGMI_WAFL_CE,    "XGMI_WAFL Correctable Error",                 "ECC_XGMI_WAFL_CE", true)
+FLD_DESC_ENT(RDC_FI_ECC_XGMI_WAFL_UE,    "XGMI_WAFL Uncorrectable Error",               "ECC_XGMI_WAFL_UE", true)
+FLD_DESC_ENT(RDC_FI_ECC_DF_CE,           "DF Correctable Error",                        "ECC_DF_CE",        true)
+FLD_DESC_ENT(RDC_FI_ECC_DF_UE,           "DF Uncorrectable Error",                      "ECC_DF_UE",        true)
+FLD_DESC_ENT(RDC_FI_ECC_SMN_CE,          "SMN Correctable Error",                       "ECC_SMN_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_SMN_UE,          "SMN Uncorrectable Error",                     "ECC_SMN_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_SEM_CE,          "SEM Correctable Error",                       "ECC_SEM_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_SEM_UE,          "SEM Uncorrectable Error",                     "ECC_SEM_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MP0_CE,          "MP0 Correctable Error",                       "ECC_MP0_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MP0_UE,          "MP0 Uncorrectable Error",                     "ECC_MP0_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MP1_CE,          "MP1 Correctable Error",                       "ECC_MP1_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MP1_UE,          "MP1 Uncorrectable Error",                     "ECC_MP1_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_FUSE_CE,         "FUSE Correctable Error",                      "ECC_FUSE_CE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_FUSE_UE,         "FUSE Uncorrectable Error",                    "ECC_FUSE_UE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_UMC_CE,          "UMC Correctable Error",                       "ECC_UMC_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_UMC_UE,          "UMC Uncorrectable Error",                     "ECC_UMC_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MCA_CE,          "MCA Correctable Error",                       "ECC_MCA_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_MCA_UE,          "MCA Uncorrectable Error",                     "ECC_MCA_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_VCN_CE,          "VCN Correctable Error",                       "ECC_VCN_CE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_VCN_UE,          "VCN Uncorrectable Error",                     "ECC_VCN_UE",       true)
+FLD_DESC_ENT(RDC_FI_ECC_JPEG_CE,         "JPEG Correctable Error",                      "ECC_JPEG_CE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_JPEG_UE,         "JPEG Uncorrectable Error",                    "ECC_JPEG_UE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_IH_CE,           "IH Correctable Error",                        "ECC_IH_CE",        true)
+FLD_DESC_ENT(RDC_FI_ECC_IH_UE,           "IH Uncorrectable Error",                      "ECC_IH_UE",        true)
+FLD_DESC_ENT(RDC_FI_ECC_MPIO_CE,         "MPIO Correctable Error",                      "ECC_MPIO_CE",      true)
+FLD_DESC_ENT(RDC_FI_ECC_MPIO_UE,         "MPIO Uncorrectable Error",                    "ECC_MPIO_UE",      true)
+
+// XGMI
+FLD_DESC_ENT(RDC_FI_XGMI_0_READ_KB,      "XGMI0 accumulated data read size (KB)",       "XGMI_0_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_1_READ_KB,      "XGMI1 accumulated data read size (KB)",       "XGMI_1_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_2_READ_KB,      "XGMI2 accumulated data read size (KB)",       "XGMI_2_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_3_READ_KB,      "XGMI3 accumulated data read size (KB)",       "XGMI_3_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_4_READ_KB,      "XGMI4 accumulated data read size (KB)",       "XGMI_4_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_5_READ_KB,      "XGMI5 accumulated data read size (KB)",       "XGMI_5_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_6_READ_KB,      "XGMI6 accumulated data read size (KB)",       "XGMI_6_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_7_READ_KB,      "XGMI7 accumulated data read size (KB)",       "XGMI_7_READ",      true)
+
+FLD_DESC_ENT(RDC_FI_XGMI_0_WRITE_KB,     "XGMI0 accumulated data write size (KB)",      "XGMI_0_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_1_WRITE_KB,     "XGMI1 accumulated data write size (KB)",      "XGMI_1_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_2_WRITE_KB,     "XGMI2 accumulated data write size (KB)",      "XGMI_2_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_3_WRITE_KB,     "XGMI3 accumulated data write size (KB)",      "XGMI_3_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_4_WRITE_KB,     "XGMI4 accumulated data write size (KB)",      "XGMI_4_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_5_WRITE_KB,     "XGMI5 accumulated data write size (KB)",      "XGMI_5_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_6_WRITE_KB,     "XGMI6 accumulated data write size (KB)",      "XGMI_6_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)",      "XGMI_7_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_READ_KB,    "XGMI accumlated data read size across all lanes (KB)", "XGMI_TOTAL_READ", true)
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_WRITE_KB,    "XGMI accumlated data write size across all lanes (KB)", "XGMI_TOTAL_WRITE", true)
+
+
+// ROCProfiler fields
+// This doesn't map to rocprofiler counters directly
+// See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
+// See metrics.xml in rocprofiler
+FLD_DESC_ENT(RDC_FI_PROF_OCCUPANCY_PERCENT,     "Percent of GPU occupancy",              "OCCUPANCY_PERCENT", true)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,         "Number of Active Cycles",               "ACTIVE_CYCLES",     true)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,          "Number of Active Waves",                "ACTIVE_WAVES",      true)
+FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,        "Number of Elapsed Cycles over all SMs", "ELAPSED_CYCLES",    true)
+FLD_DESC_ENT(RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "Percent of Active Pipe Tensors",        "TENSOR_PERCENT",    true)
+FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL_PERCENT,      "Percent of GPU Utilization",            "GPU_UTIL_PERCENT",  true)
+// metrics with EVAL are divided by time passed
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,         "Fetched from video memory kb / ms",     "MEM_R_BW",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms",       "MEM_W_BW",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,         "Number of fp32 OPS / ms",               "FLOPS_32",          true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,         "Number of fp64 OPS / ms",               "FLOPS_64",          true)
+FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",           "VALU_UTILIZATION",  true)
+FLD_DESC_ENT(RDC_FI_PROF_SM_ACTIVE,             "Ratio of Cycles with active warp on SM","VALUBusy",          true)
+FLD_DESC_ENT(RDC_FI_PROF_OCC_PER_ACTIVE_CU,     "Mean occ per active compute unit",      "OCC_CU",            true)
+FLD_DESC_ENT(RDC_FI_PROF_OCC_ELAPSED,           "Mean occ per active cu over elapsed",   "OCC_CU_ELAPSED",    true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16_PERCENT, "Number of fp16 OPS percent of max",     "FLOPS_16_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32_PERCENT, "Number of fp32 OPS percent of max",     "FLOPS_32_PERCENT",  true)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64_PERCENT, "Number of fp64 OPS percent of max",     "FLOPS_64_PERCENT",  true)
+// CPC
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_BUSY,                  "", "CPC_CPC_STAT_BUSY",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_IDLE,                  "", "CPC_CPC_STAT_IDLE",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_STAT_STALL,                 "", "CPC_CPC_STAT_STALL",                 false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_TCIU_BUSY,                  "", "CPC_CPC_TCIU_BUSY",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_TCIU_IDLE,                  "", "CPC_CPC_TCIU_IDLE",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_UTCL2IU_BUSY,               "", "CPC_CPC_UTCL2IU_BUSY",               false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_UTCL2IU_IDLE,               "", "CPC_CPC_UTCL2IU_IDLE",               false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CPC_UTCL2IU_STALL,              "", "CPC_CPC_UTCL2IU_STALL",              false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ME1_BUSY_FOR_PACKET_DECODE,     "", "CPC_ME1_BUSY_FOR_PACKET_DECODE",     false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ME1_DC0_SPI_BUSY,               "", "CPC_ME1_DC0_SPI_BUSY",               false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_UTCL1_STALL_ON_TRANSLATION,     "", "CPC_UTCL1_STALL_ON_TRANSLATION",     false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ALWAYS_COUNT,                   "", "CPC_ALWAYS_COUNT",                   false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ADC_VALID_CHUNK_NOT_AVAIL,      "", "CPC_ADC_VALID_CHUNK_NOT_AVAIL",      false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ADC_DISPATCH_ALLOC_DONE,        "", "CPC_ADC_DISPATCH_ALLOC_DONE",        false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_ADC_VALID_CHUNK_END,            "", "CPC_ADC_VALID_CHUNK_END",            false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_SYNC_FIFO_FULL_LEVEL,           "", "CPC_SYNC_FIFO_FULL_LEVEL",           false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_SYNC_FIFO_FULL,                 "", "CPC_SYNC_FIFO_FULL",                 false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_GD_BUSY,                        "", "CPC_GD_BUSY",                        false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_TG_SEND,                        "", "CPC_TG_SEND",                        false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_WALK_NEXT_CHUNK,                "", "CPC_WALK_NEXT_CHUNK",                false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_STALLED_BY_SE0_SPI,             "", "CPC_STALLED_BY_SE0_SPI",             false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_STALLED_BY_SE1_SPI,             "", "CPC_STALLED_BY_SE1_SPI",             false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_STALLED_BY_SE2_SPI,             "", "CPC_STALLED_BY_SE2_SPI",             false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_STALLED_BY_SE3_SPI,             "", "CPC_STALLED_BY_SE3_SPI",             false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_LTE_ALL,                        "", "CPC_LTE_ALL",                        false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_SYNC_WRREQ_FIFO_BUSY,           "", "CPC_SYNC_WRREQ_FIFO_BUSY",           false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CANE_BUSY,                      "", "CPC_CANE_BUSY",                      false)
+FLD_DESC_ENT(RDC_FI_PROF_CPC_CANE_STALL,                     "", "CPC_CANE_STALL",                     false)
+// CPF
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CMP_UTCL1_STALL_ON_TRANSLATION, "", "CPF_CMP_UTCL1_STALL_ON_TRANSLATION", false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_STAT_BUSY,                  "", "CPF_CPF_STAT_BUSY",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_STAT_IDLE,                  "", "CPF_CPF_STAT_IDLE",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_STAT_STALL,                 "", "CPF_CPF_STAT_STALL",                 false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_BUSY,                  "", "CPF_CPF_TCIU_BUSY",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_IDLE,                  "", "CPF_CPF_TCIU_IDLE",                  false)
+FLD_DESC_ENT(RDC_FI_PROF_CPF_CPF_TCIU_STALL,                 "", "CPF_CPF_TCIU_STALL",                 false)
+// Misc
+FLD_DESC_ENT(RDC_FI_PROF_SIMD_UTILIZATION, "Fraction of time the SIMDs are being utilized", "SIMD_UTILIZATION", false)
+FLD_DESC_ENT(RDC_FI_PROF_UUID,             "UUID from rocprofiler",                         "PROF_UUID",        true)
+FLD_DESC_ENT(RDC_FI_PROF_KFD_ID,           "GPU_ID from rocprofiler, same as KFD_ID",       "PROF_KFD_ID",      true)
+
+// Events
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_REQ_TX,     "Outgoing requests to neighbor 0",             "XGMI_REQ_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_RESP_TX,    "Outgoing responses to neighbor 0",            "XGMI_RES_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_BEATS_TX,   "Data sent to neighbor 0 (32 byte pkts)",      "XGMI_BTS_0",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_NOP_TX,     "NOPs sent to neighbor 1",                     "XGMI_NOP_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_REQ_TX,     "Outgoing requests to neighbor 1",             "XGMI_REQ_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_RESP_TX,    "Outgoing responses to neighbor 1",            "XGMI_RES_1",       false)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_BEATS_TX,   "Data sent to neighbor 1 (32 byte pkts)",      "XGMI_BTS_1",       false)
+
+FLD_DESC_ENT(RDC_EVNT_XGMI_0_THRPUT,     "Tx throughput to XGMI neighbor 0 in b/s",     "XGMI_0_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_1_THRPUT,     "Tx throughput to XGMI neighbor 1 in b/s",     "XGMI_1_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_2_THRPUT,     "Tx throughput to XGMI neighbor 2 in b/s",     "XGMI_2_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_3_THRPUT,     "Tx throughput to XGMI neighbor 3 in b/s",     "XGMI_3_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_4_THRPUT,     "Tx throughput to XGMI neighbor 4 in b/s",     "XGMI_4_T",         true)
+FLD_DESC_ENT(RDC_EVNT_XGMI_5_THRPUT,     "Tx throughput to XGMI neighbor 5 in b/s",     "XGMI_5_T",         true)
+
+// Asynchronous event notifications
+FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                               "VM_PAGE_FAULT",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",          "THERMAL_THROT",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_START, "GPU migrate has started",                   "MIGRATE_START",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_MIGRATE_END, "GPU migrate has ended",                       "MIGRATE_END",      false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_START, "GPU page fault started",                 "PAGE_FAULT_START", false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PAGE_FAULT_END, "GPU page fault ended",                     "PAGE_FAULT_END",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_EVICTION, "GPU queue eviction occured",               "QUEUE_EVICITION",  false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_QUEUE_RESTORE, "GPU queue restore occured",                 "QUEUE_RESTORE",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_UNMAP_FROM_GPU, "GPU unmap occured",                        "UNMAP_FROM_GPU",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_START, "GPU process started",                       "PROCESS_START",    false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_PROCESS_END, "GPU process ended",                           "PROCESS_END",      false)
+
+// RDC health related fields
+FLD_DESC_ENT(RDC_HEALTH_XGMI_ERROR,               "XGMI one or more errors detected",           "XGMI_ERROR",               true)
+FLD_DESC_ENT(RDC_HEALTH_PCIE_REPLAY_COUNT,        "Total PCIE replay count",                    "PCIE_REPLAY_COUNT",        true)
+FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_NUM,         "Retired page number",                        "RETIRED_PAGE_NUM",         true)
+FLD_DESC_ENT(RDC_HEALTH_PENDING_PAGE_NUM,         "Pending page number",                        "PENDING_PAGE_NUM",         true)
+FLD_DESC_ENT(RDC_HEALTH_RETIRED_PAGE_LIMIT,       "Retired page limit",                         "RETIRED_PAGE_LIMIT",       true)
+FLD_DESC_ENT(RDC_HEALTH_EEPROM_CONFIG_VALID,      "Verify checksum of EEPROM",                  "EEPROM_CONFIG_VALID",      true)
+FLD_DESC_ENT(RDC_HEALTH_POWER_THROTTLE_TIME,      "Power throttle status counter",              "POWER_THROTTLE_TIME",      true)
+FLD_DESC_ENT(RDC_HEALTH_THERMAL_THROTTLE_TIME,    "Total time(ms) in thermal throttle status",  "THERMAL_THROTTLE_TIME",    true)

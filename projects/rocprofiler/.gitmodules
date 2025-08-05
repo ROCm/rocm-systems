@@ -1,0 +1,6 @@
+
+
+[submodule "perfetto"]
+	path = plugin/perfetto/perfetto
+	url = https://github.com/google/perfetto.git
+	branch = releases/v44.x

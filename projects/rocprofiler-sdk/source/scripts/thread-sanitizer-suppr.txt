@@ -1,0 +1,39 @@
+#
+# ThreadSanitizer suppressions file for rocprofiler project.
+#
+
+# leaked thread
+thread:libhsa-runtime64.so
+
+# data race in operator delete(void*)
+race:libamdhip64.so
+
+# data race arising from hsa runtime
+race:libhsa-runtime64.so
+
+# data race(s) arising from OpenMP
+race:__kmp_resume_template
+race:__kmp_suspend_initialize_thread
+
+# unlock of an unlocked mutex (or by a wrong thread)
+mutex:libhsa-runtime64.so
+
+# unlock of an unlocked mutex (or by a wrong thread)
+mutex:librocm_smi64.so
+
+# google logging
+race:google::LogMessageTime::CalcGmtOffset
+race:tzset_internal
+
+# bug in libtsan.so.0 which thinks there is a
+# double mutex lock (there isn't one)
+mutex:external/ptl/source/PTL/TaskGroup.hh
+
+# lock order inversion that cannot happen
+mutex:source/lib/common/synchronized.hpp
+
+# signal-unsafe function called from signal handler
+signal:rocprofv3_error_signal_handler
+
+# data race within perfetto internals
+race:perfetto::internal::

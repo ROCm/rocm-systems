@@ -1,0 +1,5 @@
+* @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
+
+docs/* @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation

@@ -1,0 +1,5 @@
+pmc:  SPI_RA_SGPR_SIMD_FULL_CSN SPI_RA_LDS_CU_FULL_CSN
+
+gpu:
+range:
+kernel:
