@@ -50,7 +50,7 @@ except ImportError:
 # Minor version - Increment when adding a new feature, set to 0 when major is incremented
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
 # Hash  version - Shortened commit hash. Print here and not with lib for consistency with amd-smi
-SMI_MAJ = 3
+SMI_MAJ = 4
 SMI_MIN = 0
 SMI_PAT = 0
 # SMI_HASH is provided by rsmiBindings
