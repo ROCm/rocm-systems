@@ -58,7 +58,7 @@ find_program(GIT NAMES git)
 
 # Debian package specific variables
 # Set a default value for the package version
-get_version_from_tag("1.1.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
+get_version_from_tag("1.2.0.0" ${SO_VERSION_GIT_TAG_PREFIX} GIT)
 
 # VERSION_* variables should be set by get_version_from_tag
 set(SO_VERSION_STRING "${VERSION_MAJOR}.${VERSION_MINOR}")
