@@ -1,0 +1,43 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+
+- caption: Installation
+  entries:
+  - file: install/install
+    title: ROCm SMI installation
+ 
+- caption: How to 
+  entries:
+  - file: how-to/use-cpp
+  - file: how-to/use-python
+    
+- caption: API Reference
+  entries:
+    - file: doxygen/html/files
+      title: Files
+    - file: doxygen/html/globals
+      title: Globals
+    - file: doxygen/html/annotated
+      title: Data structures
+    - file: doxygen/html/modules
+      title: Modules
+    - file: reference/python_api
+      title: Python API
+  
+    
+- caption: Tutorials
+  entries:
+  - file: tutorials/cpp_tutorials
+    title: C++ 
+  - file: tutorials/python_tutorials
+    title: Python 
+    
+- caption: About
+  entries:
+  - file: license
+    title: License

@@ -1,0 +1,97 @@
+# caution: most of this file was written using Claude 3.7 Sonnet
+name: CMake Format Check
+
+on:
+  push:
+    branches: [ amd-staging ]
+    paths:
+      - '**/*.cmake'
+      - '**/CMakeLists.txt'
+  pull_request:
+    branches: [ amd-staging ]
+    paths:
+      - '**/*.cmake'
+      - '**/CMakeLists.txt'
+  workflow_dispatch:  # Allows manual triggering
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check-gersemi:
+    name: Check CMake files formatting
+    runs-on: lstt
+    container: catthehacker/ubuntu:act-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for better diff context
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+        cache: 'pip'
+
+    - name: Install gersemi
+      run: |
+        python -m pip install --upgrade pip
+        pip install gersemi==0.19.3
+
+    - name: Check CMake formatting
+      id: check-format
+      run: |
+        echo "::group::Finding CMake files"
+        FILES=$(find . -type f \( -name "CMakeLists.txt" -o -name "*.cmake" \) \
+                -not -name "*.in" \
+                -not -path "*/\.*" \
+                -not -path "*/build/*")
+        echo "Found $(echo "$FILES" | wc -l) CMake files to check"
+        echo "::endgroup::"
+
+        # Create an array to store failed files
+        declare -a failed_files
+
+        # Check if files are formatted correctly
+        for file in $FILES; do
+          echo "Checking $file..."
+          if ! gersemi --check "$file"; then
+            failed_files+=("$file")
+            echo "::error file=$file::File needs formatting"
+          fi
+        done
+
+        # Generate report and exit with error if any files failed
+        if [ ${#failed_files[@]} -ne 0 ]; then
+          echo "Failed files: ${failed_files[*]}"
+          echo "FAILED_FILES=${failed_files[*]}" >> $GITHUB_ENV
+          exit 1
+        else
+          echo "All CMake files are formatted correctly!"
+        fi
+
+    - name: Generate diff for failed files
+      if: failure() && env.FAILED_FILES != ''
+      run: |
+        echo "## CMake Format Check Failed" >> $GITHUB_STEP_SUMMARY
+        echo "The following files need formatting:" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+
+        for file in ${FAILED_FILES}; do
+          echo "### $file" >> $GITHUB_STEP_SUMMARY
+        done
+
+        cat << 'EOF' >> $GITHUB_STEP_SUMMARY
+        ### How to fix
+        Run this command locally to fix formatting issues:
+        ```bash
+        # Install gersemi
+        pip install gersemi==0.19.3
+
+        # Format files
+        gersemi -i <file>
+        ```
+        EOF

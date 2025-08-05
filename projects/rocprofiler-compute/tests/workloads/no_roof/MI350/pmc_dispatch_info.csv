@@ -1,0 +1,4 @@
+Dispatch_ID,Kernel_Name,GPU_ID
+0,"vecCopy(double*, double*, double*, int, int)",0
+1,"vecCopy(double*, double*, double*, int, int)",0
+2,"vecCopy(double*, double*, double*, int, int)",0

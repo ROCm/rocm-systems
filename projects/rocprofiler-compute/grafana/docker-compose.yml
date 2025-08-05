@@ -1,0 +1,43 @@
+# -----------------------------------------------------------------------
+# NOTE:
+# Dependencies are not included as part of ROCm Compute Profiler.
+# It's the user's responsibility to accept any licensing implications
+# before building the project
+# -----------------------------------------------------------------------
+
+version: "3.3"
+
+services:
+  web:
+    image: rocprofiler-compute-grafana-v1.0
+    container_name: rocprofiler-compute-grafana-v1.0
+    restart: always
+    build: .
+    environment:
+      - GF_PATHS_CONFIG="grafana/etc/grafana.ini"
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=amd-rocprofiler-compute-data-plugin
+      - GF_DEFAULT_APP_MODE=development
+    ports:
+      - "14000:4000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+    stdin_open: true
+    tty: true
+  db_mongo:
+    container_name: mongo
+    image: mongo
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: temp
+      MONGO_INITDB_ROOT_PASSWORD: temp123
+    volumes:
+      - grafana-mongo-db:/data/db
+    ports:
+      - "27018:27017"
+    command: mongod --bind_ip 0.0.0.0
+
+volumes:
+  grafana-mongo-db:
+      external: true
+  grafana-storage:
+      external: true

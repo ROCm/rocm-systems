@@ -1,0 +1,5 @@
+pmc:  TCP_TCC_NC_READ_REQ_sum TCP_TCC_NC_WRITE_REQ_sum TCP_TCC_NC_ATOMIC_REQ_sum TCP_TCC_UC_READ_REQ_sum
+
+gpu:
+range:
+kernel:

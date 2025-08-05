@@ -1,0 +1,39 @@
+name: Python Linting
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ amd-staging, amd-mainline ]
+    paths:
+      - '**.py'
+  pull_request:
+    paths:
+      - '**.py'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linting:
+    runs-on: rocprof-azure-gpuless-emu-runner-set
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.10', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+    - name: Lint with flake8
+      run: |
+        # stop the build if there are Python syntax errors or undefined names
+        flake8 source --count --show-source --statistics --select=E9,F63,F7,F82
+        # flake8 options are defined in .flake8
+        flake8 source --count --show-source --statistics
