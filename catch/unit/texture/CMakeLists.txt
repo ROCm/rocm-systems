@@ -64,6 +64,12 @@ set(TEST_SRC
     hipTexRefGetFlags.cc
     hipTexRefSetAddressMode.cc
     hipTexRefGetAddressMode.cc
+    hipTexRefSetGetFilterMode.cc
+    hipTexRefSetGetMipmapFilterMode.cc
+    hipTexRefSetGetMipmapLevelBias.cc
+    hipTexRefSetGetMipmapLevelClamp.cc
+    hipTexRefSetGetMipmappedArray.cc
+
 )
 
 # tests not for gfx90a+
