@@ -111,12 +111,12 @@ jobs:
         set -v
         cd $BUILD_DIR
         DISTRO=${{ matrix.system.os }}
-        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE=deb; else PACKAGE=rpm; fo
+        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE=deb; else PACKAGE=rpm; fi
         if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE_MANAGER=dpkg; fi
         if [ "${DISTRO}" -eq "rhel"]; then PACKAGE_MANAGER=dnf; fi
         if [ "${DISTRO}" -eq "opensuse"]; then PACKAGE_MANAGER=zypper; fi
         cpack -G ${PACKAGE}
-        ${PACKAGE_MANAGER} ${{ matrix.system.os == 'ubuntu' && ' -i' || ' install --skip-broken'}} *.${PACKAGE}
+        ${PACKAGE_MANAGER} ${{ matrix.system.os == 'ubuntu' && '-i' || 'install --skip-broken'}} *.${PACKAGE}
 
     - name: Verify Installation
       timeout-minutes: 15
