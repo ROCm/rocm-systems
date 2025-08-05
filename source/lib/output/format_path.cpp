@@ -120,7 +120,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
             std::string _match_fpath = _fpath;
             re2::StringPiece input(_match_fpath);
             std::string beg, envtype, var, end;
-            if(RE2::FullMatch(input, _re, &beg, &envtype, &var, &end))
+            while(RE2::FullMatch(input, _re, &beg, &envtype, &var, &end))
             {
                 std::string _val = common::get_env<std::string>(var, "");
                 _val = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
