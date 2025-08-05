@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   synchronize-subtrees:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-24.04
     steps:
       - name: Generate a token
