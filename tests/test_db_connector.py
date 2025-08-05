@@ -28,6 +28,7 @@ from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
+from db_connector import DatabaseConnector
 
 logging.TRACE = logging.DEBUG - 5
 logging.addLevelName(logging.TRACE, "TRACE")
@@ -38,8 +39,6 @@ def trace_logger(message, *args, **kwargs):
 
 
 setattr(logging, "trace", trace_logger)
-
-from db_connector import DatabaseConnector
 
 """
 Tests for the DatabaseConnector class that tests almost methods with initialization,

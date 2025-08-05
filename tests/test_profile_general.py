@@ -419,7 +419,13 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
             metric_info = re.findall(
                 r"(^"
                 + metric
-                + r")(?: *)([()0-9A-Za-z- ]+ )(?: *)([0-9.-]*)(?: *)([0-9.-]*)(?: *)\(([-0-9.]*)%\)(?: *)([-0-9.e]*)",
+                + (
+                    r")(?: *)([()0-9A-Za-z- ]+ )"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)\(([-0-9.]*)%\)"
+                    r"(?: *)([-0-9.e]*)"
+                ),
                 captured_output,
                 flags=re.MULTILINE,
             )
@@ -833,7 +839,7 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -859,7 +865,7 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -910,7 +916,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         return
 
     try:
-        import plotext as plt
+        import plotext as plt  # noqa: F401
 
         cli_available = True
     except ImportError:
@@ -920,7 +926,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         options = ["--device", "0", "--roof-only"]
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(
+        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
             config, workload_dir, options, check_success=False, roof=True
         )
 
@@ -942,7 +948,7 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if os.path.exists(pmc_perf_path):
         os.remove(pmc_perf_path)
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -1068,7 +1074,7 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     options = ["--device", "0", "--roof-only", "--mem-level", "INVALID_LEVEL"]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 

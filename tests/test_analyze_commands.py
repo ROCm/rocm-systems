@@ -999,37 +999,6 @@ def test_parser_error_handling():
     except SystemExit:
         pass
 
-
-@pytest.mark.misc
-def test_parser_error_handling():
-    """Test parser error handling paths"""
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-
-    from utils.parser import build_eval_string, calc_builtin_var, update_denom_string
-
-    try:
-        build_eval_string("AVG(SQ_WAVES)", None, config={})
-        assert False, "Should have raised exception for None coll_level"
-    except Exception as e:
-        assert "coll_level can not be None" in str(e)
-
-    assert build_eval_string("", "pmc_perf", config={}) == ""
-    assert update_denom_string("", "per_wave") == ""
-
-    class MockSysInfo:
-        total_l2_chan = 32
-
-    sys_info = MockSysInfo()
-    try:
-        calc_builtin_var("$unsupported_var", sys_info)
-        assert False, "Should have raised exception for unsupported var"
-    except SystemExit:
-        pass
-
-
 @pytest.mark.misc
 def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
     """Test handling of missing files"""
@@ -1236,7 +1205,7 @@ def test_missing_files_scenarios(binary_handler_analyze_rocprof_compute):
                     if os.path.exists(csv_path):
                         os.remove(csv_path)
 
-                code = binary_handler_analyze_rocprof_compute([
+                code = binary_handler_analyze_rocprof_compute([  # noqa: F841
                     "analyze",
                     "--path",
                     workload_dir,
