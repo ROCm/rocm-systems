@@ -50,6 +50,10 @@ public:
     template <typename... T>
     void store(entry_type type, T&&... values)
     {
+        constexpr bool is_supported_type = (supported_types::is_supported<T> && ...);
+        static_assert(is_supported_type, "Supported types are const char*, char*, "
+                                         "unsigned long, unsigned int, and int.");
+
         auto   arg_size        = get_size(values...);
         auto   total_size      = arg_size + sizeof(type) + sizeof(size_t);
         auto*  reserved_memory = reserve_memory_space(total_size);
@@ -87,21 +91,42 @@ private:
     void     fragment_memory();
     uint8_t* reserve_memory_space(size_t len);
 
-    template <typename... T>
-    constexpr size_t get_size(T&... val)
+    template <typename... Types>
+    struct typelist
     {
-        auto get_size_impl = [&](auto& _val) {
-            using Type = std::decay_t<decltype(_val)>;
-            if constexpr(std::is_same_v<Type, const char*>)
-            {
-                return strlen(_val) + 1;
-            }
-            else
-            {
-                return sizeof(Type);
-            }
-        };
+        template <typename T>
+        constexpr static bool is_supported =
+            (std::is_same_v<std::decay_t<T>, Types> || ...);
+    };
 
+    using supported_types = typelist<const char*, char*, uint64_t, int32_t, uint32_t>;
+
+    template <typename T>
+    static constexpr bool is_string_literal_v =
+        std::is_same_v<std::decay_t<T>, const char*> ||
+        std::is_same_v<std::decay_t<T>, char*>;
+
+    template <typename T>
+    constexpr size_t get_size_impl(T&& val)
+    {
+        if constexpr(is_string_literal_v<T>)
+        {
+            size_t size = 0;
+            while(val[size] != '\0')
+            {
+                size++;
+            }
+            return ++size;
+        }
+        else
+        {
+            return sizeof(T);
+        }
+    }
+
+    template <typename... T>
+    constexpr size_t get_size(T&&... val)
+    {
         auto total_size = 0;
         ((total_size += get_size_impl(val)), ...);
         return total_size;
