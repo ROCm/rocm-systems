@@ -231,3 +231,190 @@ def test_rocpd_data(
         assert len(_rpd_data) == len(
             _js_data
         ), f"query: {_rpd_query}\n{rpd_category} ({len(_rpd_data)}):\n\t{_rpd_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"
+
+
+def _perform_time_sanity_checks(data):
+    """Helper function to perform time sanity checks on data."""
+    columns = data[0].keys()
+    start_columns = [c for c in columns if "start" in c.lower()]
+    end_columns = [c for c in columns if "end" in c.lower()]
+
+    if not start_columns or not end_columns:
+        return None, None
+
+    for record in data:
+        start_time = record[start_columns[0]]
+        end_time = record[end_columns[0]]
+        assert int(start_time) >= 0, f"Time error: Start time ({start_time}) < 0)."
+        assert int(end_time) >= 0, f"Time error: End time ({end_time}) < 0)."
+        assert int(end_time) >= int(
+            start_time
+        ), f"Time error: End time ({end_time}) < Start time ({start_time})."
+
+    return start_columns[0], end_columns[0]
+
+
+def _perform_csv_json_match(csv_row, json_row, mapping, json_data):
+
+    def get_nested(d, path):
+        """Helper to get nested dict values using dot notation."""
+        keys = path.split(".")
+        for k in keys:
+            if isinstance(d, dict):
+                d = d.get(k)
+            else:
+                return None
+        return d
+
+    for csv_key, json_info in mapping.items():
+        if json_info is None:
+            continue
+
+        csv_value = csv_row[csv_key]
+
+        if csv_key == "Operation":
+            json_value = json_data["rocprofiler-sdk-tool"]["strings"]["buffer_records"][
+                json_row["kind"]
+            ]["operations"][json_row["operation"]]
+
+            assert str(csv_value) in str(
+                json_value
+            ), f"Mismatch for {csv_key}: CSV={csv_value} JSON={json_value}"
+            continue
+
+        if csv_key == "Function":
+            json_value = json_data["rocprofiler-sdk-tool"]["strings"]["buffer_records"][
+                json_row["kind"]
+            ]["operations"][json_row["operation"]]
+        else:
+            json_path, subkey = json_info
+            json_value = get_nested(json_row, json_path)
+            if subkey:
+                json_value = (
+                    json_value.get(subkey) if isinstance(json_value, dict) else None
+                )
+
+        assert str(csv_value) == str(
+            json_value
+        ), f"Mismatch for {csv_key}: CSV={csv_value} JSON={json_value}"
+
+
+def test_csv_data(
+    csv_data,
+    json_data,
+    categories=(
+        "agent",
+        "hip",
+        "hsa",
+        "marker",
+        "kernel",
+        "memory_copy",
+        "memory_allocation",
+        "rocdecode_api",
+        "rocjpeg_api",
+        "counter_collection",
+    ),
+):
+
+    mapping = {
+        "hip": "hip_api",
+        "hsa": "hsa_api",
+        "marker": "marker_api",
+        "kernel": "kernel_dispatch",
+        "memory_copy": "memory_copy",
+        "memory_allocation": "memory_allocation",
+        "rocdecode_api": "rocdecode_api",
+        "rocjpeg_api": "rocjpeg_api",
+        "counter_collection": "counter_collection",
+    }
+
+    keys_mapping = {
+        "kernel": {
+            "Thread_Id": ("thread_id", None),
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+            "Queue_Id": ("dispatch_info.queue_id.handle", None),
+            "Kernel_Id": ("dispatch_info.kernel_id", None),
+            "Dispatch_Id": ("dispatch_info.dispatch_id", None),
+            "Stream_Id": ("stream_id.handle", None),
+            "Workgroup_Size_X": ("dispatch_info.workgroup_size.x", None),
+            "Workgroup_Size_Y": ("dispatch_info.workgroup_size.y", None),
+            "Workgroup_Size_Z": ("dispatch_info.workgroup_size.z", None),
+            "Grid_Size_X": ("dispatch_info.grid_size.x", None),
+            "Grid_Size_Y": ("dispatch_info.grid_size.y", None),
+            "Grid_Size_Z": ("dispatch_info.grid_size.z", None),
+        },
+        "hip": {
+            "Function": (),  # Special case
+            "Thread_Id": ("thread_id", None),
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+        },
+        "hsa": {
+            "Function": (),  # Special case
+            "Thread_Id": ("thread_id", None),
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+        },
+        "memory_copy": {
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+        },
+        "memory_allocation": {
+            "Operation": (),  # Special case
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+        },
+        "marker": {
+            "Thread_Id": ("thread_id", None),
+            "Correlation_Id": ("correlation_id", "internal"),
+            "Start_Timestamp": ("start_timestamp", None),
+            "End_Timestamp": ("end_timestamp", None),
+        },
+    }
+
+    for data in csv_data:
+        filename, _csv_data = data
+
+        file_category = [category for category in categories if category in filename]
+        assert len(file_category) > 0, f"{filename} is not a valid csv filename"
+
+        category = file_category[0]
+
+        if category == "counter_collection":
+            _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
+        elif category == "agent":
+            _js_data = json_data["rocprofiler-sdk-tool"]["agents"]
+        else:
+            json_records_key = mapping[category]
+            _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][
+                json_records_key
+            ]
+
+        assert len(_js_data) == len(
+            _csv_data
+        ), f"Size mismatch for {category}: JSON size= {len(_js_data)} rows, CSV size= {len(_csv_data)} rows."
+
+        if not _csv_data:
+            continue  # Exit if there is no data to validate
+
+        csv_start_col, csv_end_col = _perform_time_sanity_checks(_csv_data)
+        json_start_col, json_end_col = _perform_time_sanity_checks(_js_data)
+
+        if None in (csv_start_col, json_start_col, csv_end_col, json_end_col):
+            continue
+
+        _csv_data_sorted = sorted(
+            _csv_data, key=lambda x: (int(x[csv_start_col]), int(x[csv_end_col]))
+        )
+        _js_data_sorted = sorted(
+            _js_data, key=lambda x: (int(x[json_start_col]), int(x[json_end_col]))
+        )
+
+        for a, b in zip(_csv_data_sorted, _js_data_sorted):
+            _perform_csv_json_match(a, b, keys_mapping[category], json_data)

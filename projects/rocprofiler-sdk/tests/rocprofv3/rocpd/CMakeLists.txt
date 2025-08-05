@@ -290,7 +290,13 @@ add_test(
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.json --otf2-input
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.otf2 --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_results.pftrace --csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_agent_info_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_hip_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_marker_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_memory_allocation_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data/out_counter_collection_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-rocpd-validation
