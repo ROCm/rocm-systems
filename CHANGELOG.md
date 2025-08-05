@@ -210,6 +210,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed perfetto counter collection by introducing per dispatch accumulation.
 - Fixed queue preemption error and HSA_STATUS_ERROR_INVALID_PACKET_FORMAT error for stochastic PC-sampling for MI300X, leading to more stable runs.
 - Fixed the system hang issue for host-trap PC-sampling on MI300X. 
+- Added input sanitization for command field when inserting process information for rocpd
 
 ### Removed
 
