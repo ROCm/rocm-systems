@@ -1,0 +1,4 @@
+# License
+
+```{include} ../License.txt
+```
