@@ -1,4 +1,4 @@
-name: Packaging Installation Tests (RPM, DEB)
+name: Packaging Installation Tests (rpm, deb)
 run-name: packaging_installation
 
 on:
@@ -18,16 +18,15 @@ jobs:
     strategy:
       matrix:
         system: [
-          #{os: 'ubuntu', os-release: '22.04', package: 'deb', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04', rocm-version: '6.4'},
-          #{os: 'ubuntu', os-release: '24.04', package: 'deb', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '8.10', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.4', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.5', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
-          {os: 'sles', os-release: '15.5', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.5', rocm-version: '6.4'},
-          {os: 'sles', os-release: '15.6', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.6', rocm-version: '6.4'}
+          #{os: 'ubuntu', os-release: '22.04', package: 'deb', rocm-version: '6.4'},
+          #{os: 'ubuntu', os-release: '24.04', package: 'deb', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '8.10', package: 'rpm', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.4', package: 'rpm', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.5', package: 'rpm', rocm-version: '6.4'},
+          {os: 'opensuse', os-release: '15.6', package: 'rpm', rocm-version: '6.4'}
         ]
     container:
-      image: ${{ matrix.system.image }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-${{ matrix.system.os }}-${{ matrix.system.os-release }}
     steps:
     - uses: actions/checkout@v4
 
@@ -73,8 +72,8 @@ jobs:
         dnf install -y rocm-dev rocdecode-devel python3-devel
         if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
-    - name: Setup ROCm (sles)
-      if: ${{ matrix.system.os == 'sles'}}
+    - name: Setup ROCm (opensuse)
+      if: ${{ matrix.system.os == 'opensuse'}}
       timeout-minutes: 15
       shell: bash
       run: |
@@ -84,7 +83,16 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         zypper install -y perl-File-BaseDir
-        zypper --gpg-auto-import-keys install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        tee --append /etc/zypp/repos.d/rocm.repo <<EOF
+        [ROCm-${ROCM_VERSION}]
+        name=ROCm${ROCM_VERSION}
+        baseurl=https://repo.radeon.com/rocm/zyp/${ROCM_VERSION}/main
+        enabled=1
+        gpgcheck=1
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+        EOF
+        zypper refresh
+        zypper install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
         zypper install -y rocm-dev rocdecode-devel python3-devel
 
     - name: Build rocprofiler-systems
@@ -103,12 +111,12 @@ jobs:
         set -v
         cd $BUILD_DIR
         DISTRO=${{ matrix.system.os }}
-        PACAKGE=${{ matrix.system.package }}
+        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE=deb; else PACKAGE=rpm; fo
         if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE_MANAGER=dpkg; fi
-        if [ "${DISTRO}" -eq "RHEL"]; then PACKAGE_MANAGER=dnf; fi
-        if [ "${DISTRO}" -eq "SLES"]; then PACKAGE_MANAGER=zypper; fi
-        cpack -G ${{ matrix.system.package == 'deb' && 'DEB' || 'RPM' }}
-        ${PACKAGE_MANAGER} ${{ matrix.system.package == 'deb' && ' -i' || ' install --skip-broken'}} *.${PACKAGE}
+        if [ "${DISTRO}" -eq "rhel"]; then PACKAGE_MANAGER=dnf; fi
+        if [ "${DISTRO}" -eq "opensuse"]; then PACKAGE_MANAGER=zypper; fi
+        cpack -G ${PACKAGE}
+        ${PACKAGE_MANAGER} ${{ matrix.system.os == 'ubuntu' && ' -i' || ' install --skip-broken'}} *.${PACKAGE}
 
     - name: Verify Installation
       timeout-minutes: 15
