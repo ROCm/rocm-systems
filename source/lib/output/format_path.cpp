@@ -142,7 +142,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
         std::string _match_fpath = _fpath;
         re2::StringPiece input(_match_fpath);
         std::string beg, percent_or_brace, argn, percent_or_brace2, dash_or_slash, end;
-        if(RE2::FullMatch(input, _re, &beg, &percent_or_brace, &argn, &percent_or_brace2, &dash_or_slash, &end))
+        while(RE2::FullMatch(input, _re, &beg, &percent_or_brace, &argn, &percent_or_brace2, &dash_or_slash, &end))
         {
             _fpath = beg + end;
             _match_fpath = _fpath;
