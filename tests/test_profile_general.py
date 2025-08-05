@@ -66,7 +66,7 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-config["app_hip_dynamic_shared"] = ["./test/hip_dynamic_shared"]
+config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -1652,7 +1652,8 @@ def test_comprehensive_error_paths():
         assert "coll_level can not be None" in str(e)
         
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
+def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):  
+    assert using_v3() 
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
     process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], shell=True)
@@ -1669,8 +1670,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     )
 
     # kill the process of the workload at thsi point if it's still running
-    if process_workload.poll() is None:
-        process_workload.terminate()
+    process_workload.terminate()
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(

@@ -82,10 +82,10 @@ def binary_handler_profile_rocprof_compute(request):
                     + ["--" , config[app_name]]
             else:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--pid" , attach_detach_para["pid"]]
+                    + ["--pid" , str(attach_detach_para["pid"])]
                 if attach_detach_para["attach-duration-msec"]:
                     command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-duration-msec" , attach_detach_para["attach-duration-msec"]]
+                    + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]
                 
             process = subprocess.run(
                 command_rocprof_compute,
@@ -95,6 +95,7 @@ def binary_handler_profile_rocprof_compute(request):
             if check_success:
                 assert process.returncode == 0
             return process.returncode
+            return 0
         else:
             baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
             if not roof:
@@ -110,10 +111,11 @@ def binary_handler_profile_rocprof_compute(request):
                     + ["--" , config[app_name]]
             else:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--pid" , attach_detach_para["pid"]]
+                    + ["--pid" , str(attach_detach_para["pid"])]
                 if attach_detach_para["attach-duration-msec"]:
                     command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-duration-msec" , attach_detach_para["attach-duration-msec"]]
+                    + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]
+                    
                     
             with pytest.raises(SystemExit) as e:
                 with patch(
