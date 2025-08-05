@@ -78,9 +78,7 @@ jobs:
         command: |
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y autoconf bison build-essential clang environment-modules \
-            gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 \
-            openmpi-bin python3-pip texinfo
+          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin
 
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
