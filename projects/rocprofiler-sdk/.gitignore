@@ -42,3 +42,5 @@
 
 # VSCode Workspaces
 *.code-workspace
+rocprofiler-sdk-build/CMakeCache.txt
+/rocprofiler-sdk-build
