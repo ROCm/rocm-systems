@@ -18,13 +18,13 @@ jobs:
     strategy:
       matrix:
         system: [
-          #{os: 'ubuntu', os-release: '22.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04', rocm-version: '6.4'},
-          #{os: 'ubuntu', os-release: '24.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '8.10', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '9.4', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '9.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
-          {os: 'SLES', os-release: '15.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.5', rocm-version: '6.4'},
-          {os: 'SLES', os-release: '15.6', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.6', rocm-version: '6.4'}
+          #{os: 'ubuntu', os-release: '22.04', package: 'deb', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04', rocm-version: '6.4'},
+          #{os: 'ubuntu', os-release: '24.04', package: 'deb', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '8.10', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.4', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.5', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
+          {os: 'sles', os-release: '15.5', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.5', rocm-version: '6.4'},
+          {os: 'sles', os-release: '15.6', package: 'rpm', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.6', rocm-version: '6.4'}
         ]
     container:
       image: ${{ matrix.system.image }}
@@ -40,8 +40,8 @@ jobs:
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         env
 
-    - name: Setup ROCm (deb)
-      if: ${{ matrix.system.package == 'DEB'}}
+    - name: Setup ROCm (ubuntu)
+      if: ${{ matrix.system.os == 'ubuntu'}}
       timeout-minutes: 15
       shell: bash
       run: |
@@ -51,13 +51,13 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
-        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/ubuntu/${{ contains(matrix.system.os-release, '22') && 'jammy' || 'noble' }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os }}/${{ contains(matrix.system.os-release, '22') && 'jammy' || 'noble' }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
         apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
 
-    - name: Setup ROCm (rpm)
-      if: ${{ matrix.system.package == 'RPM'}}
+    - name: Setup ROCm (rhel)
+      if: ${{ matrix.system.os == 'rhel'}}
       timeout-minutes: 15
       shell: bash
       run: |
@@ -69,9 +69,23 @@ jobs:
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
-        dnf install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/rhel/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+        dnf install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
         dnf install -y rocm-dev rocdecode-devel python3-devel
         if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+
+    - name: Setup ROCm (sles)
+      if: ${{ matrix.system.os == 'sles'}}
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        ROCM_VERSION=${{ matrix.system.rocm-version }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        zypper -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
+        zypper install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        zypper install -y rocm-dev rocdecode-devel python3-devel
 
     - name: Build rocprofiler-systems
       timeout-minutes: 35
@@ -88,8 +102,13 @@ jobs:
       run: |
         set -v
         cd $BUILD_DIR
-        cpack -G ${{ matrix.system.package }}
-        ${{ matrix.system.package == 'DEB' && 'dpkg -i' || 'dnf install --skip-broken'}} *.${{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
+        DISTRO=${{ matrix.system.os }}
+        PACAKGE=${{ matrix.system.package }}
+        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE_MANAGER=dpkg; fi
+        if [ "${DISTRO}" -eq "RHEL"]; then PACKAGE_MANAGER=dnf; fi
+        if [ "${DISTRO}" -eq "SLES"]; then PACKAGE_MANAGER=zypper; fi
+        cpack -G ${{ matrix.system.package == 'deb' && 'DEB' || 'RPM' }}
+        ${PACKAGE_MANAGER} ${{ matrix.system.package == 'deb' && ' -i' || ' install --skip-broken'}} *.${PACKAGE}
 
     - name: Verify Installation
       timeout-minutes: 15
