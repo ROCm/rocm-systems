@@ -41,7 +41,7 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 namespace info
 {
@@ -127,7 +127,7 @@ struct kernel_symbol_less
 }  // namespace info
 
 class cache_manager;
-struct metadata
+struct metadata_registry
 {
     void set_process(const info::process& process);
     void add_pmc_info(const info::pmc& pmc_info);
@@ -168,7 +168,7 @@ struct metadata
 
 private:
     friend class cache_manager;
-    metadata() = default;
+    metadata_registry() = default;
     common::synchronized<info::process>          m_process;
     common::synchronized<std::set<info::pmc>>    m_pmc_infos;
     common::synchronized<std::set<info::thread>> m_threads;
@@ -194,5 +194,5 @@ private:
 #endif
 };
 
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

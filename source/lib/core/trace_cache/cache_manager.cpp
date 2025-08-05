@@ -20,24 +20,60 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-#include "sample_type.hpp"
-#include <array>
-#include <string>
-#include <unistd.h>
+#include "cache_manager.hpp"
+#include "core/config.hpp"
+#include "core/trace_cache/storage_parser.hpp"
+#include "debug.hpp"
+#include "trace_cache/rocpd_post_processing.hpp"
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
-constexpr size_t MByte           = 1024 * 1024;
-constexpr size_t GByte           = 1024 * 1024 * 1024;
-constexpr size_t buffer_size     = 100 * MByte;
-constexpr size_t flush_threshold = 80 * MByte;
-const auto       filename = "/tmp/buffered_storage_" + std::to_string(getpid()) + ".bin";
 
-constexpr size_t minimal_fragmented_memory_size = sizeof(entry_type) + sizeof(size_t);
-using buffer_array_t                            = std::array<uint8_t, buffer_size>;
+cache_manager&
+cache_manager::get_instance()
+{
+    static cache_manager instance;
+    return instance;
+}
 
-}  // namespace sample_cache
+cache_manager::cache_manager()
+: m_postprocessing{ m_metadata }
+{
+    m_postprocessing.register_parser_callback(m_parser);
+}
+
+void
+cache_manager::post_process()
+{
+    if(m_storage.is_running())
+    {
+        ROCPROFSYS_WARNING(2, "Postprocessing called without previously shutting down "
+                              "cache storage. Calling shutdown explicitly..\n");
+        shutdown();
+    }
+
+    if(get_use_rocpd())
+    {
+        ROCPROFSYS_PRINT(
+            "Generating rocpd with collected data. This may take a while..\n");
+    }
+    post_process_metadata();
+    m_parser.consume_storage();
+}
+
+void
+cache_manager::post_process_metadata()
+{
+    m_postprocessing.post_process_metadata();
+}
+
+void
+cache_manager::shutdown()
+{
+    m_storage.shutdown();
+}
+
+}  // namespace trace_cache
 }  // namespace rocprofsys

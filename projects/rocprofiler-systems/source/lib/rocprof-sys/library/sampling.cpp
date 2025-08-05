@@ -30,8 +30,8 @@
 #include "core/perf.hpp"
 #include "core/rocpd/data_processor.hpp"
 #include "core/rocpd/json.hpp"
-#include "core/sample_cache/cache_manager.hpp"
 #include "core/state.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -243,10 +243,11 @@ rocpd_initialize_sampling_category()
     static bool _is_initialized = false;
     if(_is_initialized) return;
 
-    sample_cache::get_cache_metadata().add_string(trait::name<category::sampling>::value);
-    sample_cache::get_cache_metadata().add_string(
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::sampling>::value);
+    trace_cache::get_metadata_registry().add_string(
         trait::name<category::overflow_sampling>::value);
-    sample_cache::get_cache_metadata().add_string(
+    trace_cache::get_metadata_registry().add_string(
         trait::name<category::timer_sampling>::value);
 
     _is_initialized = true;
@@ -259,7 +260,7 @@ rocpd_initialize_thread_info(size_t tid)
     ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", tid);
     if(!_thread_info) return;
 
-    sample_cache::get_cache_metadata().add_thread_info(
+    trace_cache::get_metadata_registry().add_thread_info(
         { getppid(), getpid(),
           static_cast<size_t>(_thread_info->index_data->system_value),
           static_cast<uint32_t>(_thread_info->get_start()),
@@ -277,7 +278,7 @@ rocpd_init_track(int64_t tid)
 
     const auto& _track_name = get_track_name(*_thread_info);
 
-    sample_cache::get_cache_metadata().add_track({ _track_name, thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track({ _track_name, thread_id, "{}" });
 }
 
 template <typename Category>

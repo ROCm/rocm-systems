@@ -43,8 +43,8 @@
 #include "core/node_info.hpp"
 #include "core/perfetto_fwd.hpp"
 #include "core/rocpd/data_processor.hpp"
-#include "core/sample_cache/cache_manager.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "core/utility.hpp"
 #include "library/causal/data.hpp"
 #include "library/causal/experiment.hpp"
@@ -338,7 +338,7 @@ rocprofsys_preinit_cache()
         _cmd_line.emplace_back("rocprofiler-systems");
     }
 
-    sample_cache::get_cache_metadata().set_process(
+    trace_cache::get_metadata_registry().set_process(
         { getpid(), getppid(), _cmd_line.at(0) });
 }
 
@@ -757,8 +757,9 @@ rocprofsys_finalize_hidden(void)
             rocprofiler_sdk::shutdown();
         }
 #endif
-        rocprofsys::sample_cache::cache_manager::get_instance().shutdown();
-        rocprofsys::sample_cache::cache_manager::get_instance().post_process();
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process();
 
 #if ROCPROFSYS_USE_ROCM > 0
         if(get_use_rocpd())
@@ -867,8 +868,9 @@ rocprofsys_finalize_hidden(void)
 #endif
 
     {
-        rocprofsys::sample_cache::cache_manager::get_instance().shutdown();
-        rocprofsys::sample_cache::cache_manager::get_instance().post_process();
+        auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.shutdown();
+        _manager.post_process();
     }
 
     ROCPROFSYS_DEBUG_F("Stopping and destroying instrumentation bundles...\n");
