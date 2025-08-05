@@ -229,12 +229,15 @@ get_data_processor()
     return rocpd::data_processor::get_instance();
 }
 
+template <typename Category>
 std::string
 get_track_name(const thread_info& _thread_info)
 {
-    size_t thread_id     = _thread_info.index_data->system_value;
-    size_t sequent_value = _thread_info.index_data->sequent_value;
-    return JOIN(" ", "Thread", sequent_value, "Overflow", "(S)", thread_id);
+    size_t         thread_id     = _thread_info.index_data->system_value;
+    size_t         sequent_value = _thread_info.index_data->sequent_value;
+    constexpr auto sample_type =
+        std::is_same_v<Category, category::timer_sampling> ? "Timer" : "Overflow";
+    return JOIN(" ", "Thread", sequent_value, sample_type, "(S)", thread_id);
 }
 
 void
@@ -276,9 +279,15 @@ rocpd_init_track(int64_t tid)
 
     size_t thread_id = _thread_info->index_data->system_value;
 
-    const auto& _track_name = get_track_name(*_thread_info);
+    const auto& _timer_track_name =
+        get_track_name<category::timer_sampling>(*_thread_info);
+    const auto& _overflow_track_name =
+        get_track_name<category::overflow_sampling>(*_thread_info);
 
-    trace_cache::get_metadata_registry().add_track({ _track_name, thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { _timer_track_name, thread_id, "{}" });
+    trace_cache::get_metadata_registry().add_track(
+        { _overflow_track_name, thread_id, "{}" });
 }
 
 template <typename Category>
@@ -1726,7 +1735,8 @@ rocpd_post_process_overflow_data(
         size_t thread_id = _thread_info->index_data->system_value;
 
         auto thread_primary_key = data_processor.map_thread_id_to_primary_key(thread_id);
-        const auto _track_name  = get_track_name(*_thread_info);
+        const auto _track_name =
+            get_track_name<category::overflow_sampling>(*_thread_info);
 
         rocpd_insert_region<category::overflow_sampling>(
             thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
@@ -1796,7 +1806,7 @@ rocpd_post_process_timer_data(
         auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
         auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
 
-        const auto _track_name = get_track_name(*_thread_info);
+        const auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
 
         auto thread_primary_key = data_processor.map_thread_id_to_primary_key(
             _thread_info->index_data->system_value);
