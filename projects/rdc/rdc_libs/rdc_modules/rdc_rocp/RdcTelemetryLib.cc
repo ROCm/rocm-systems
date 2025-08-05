@@ -20,11 +20,13 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <dlfcn.h>
 #include <math.h>
 #include <sys/time.h>
 
 #include <algorithm>
 #include <cstring>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <stdexcept>
@@ -64,6 +66,22 @@ rdc_status_t rdc_module_init(uint64_t /*flags*/) {
     // before the tests are. Utilize an env var instead.
     return RDC_ST_DISABLED_MODULE;
   }
+
+  Dl_info dl_info = {};
+  RDC_LOG(RDC_DEBUG, "Checking if rocprofiler is available");
+  if (dladdr(reinterpret_cast<const void*>(rdc_module_init), &dl_info) != 0) {
+    const std::filesystem::path rdc_path(dl_info.dli_fname);
+    const auto profiler_metrics_path =
+        rdc_path.parent_path().parent_path().parent_path() / "share/rocprofiler-sdk";
+    const auto rocprofiler_exists = std::filesystem::exists(profiler_metrics_path);
+    if (!rocprofiler_exists) {
+      RDC_LOG(RDC_ERROR, "rocprofiler metrics are not available at " << profiler_metrics_path);
+      return RDC_ST_FAIL_LOAD_MODULE;
+    }
+    RDC_LOG(RDC_DEBUG, "rocprofiler metrics are available at " << profiler_metrics_path);
+    setenv("ROCPROFILER_METRICS_PATH", profiler_metrics_path.c_str(), 0);
+  }
+
   rocp_p = std::make_unique<amd::rdc::RdcRocpBase>();
   return RDC_ST_OK;
 }
@@ -98,7 +116,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
 
-  struct timeval tv {};
+  struct timeval tv{};
   gettimeofday(&tv, nullptr);
   const uint64_t curTime = static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 

@@ -1,7 +1,7 @@
 # Azure CI Dispatcher
 # ------------------
 # This workflow allows Azure CI to be centralized in a single PR check.
-# It detects which subtrees (from a monorepo structure) were changed in a
+# It detects which subtrees (from a super-repo structure) were changed in a
 # pull request, and automatically requests Azure CI runs for the corresponding
 # subtrees.
 #
@@ -296,7 +296,7 @@ jobs:
             -f "output[title]=Azure CI Summary" \
             -f "output[summary]=$summary")
           echo "Created empty summary check with ID: $(echo "$gh_output" | jq -r '.id')"
-          echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+          echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/$pr_number/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
           exit 0
         fi
 
@@ -342,4 +342,4 @@ jobs:
           -f "output[text]=$text")
 
         echo "Created summary check with ID: $(echo "$gh_output" | jq -r '.id')"
-        echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/561/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"
+        echo "Summary check URL: https://github.com/ROCm/rocm-systems/pull/$pr_number/checks?check_run_id=$(echo "$gh_output" | jq -r '.id')"

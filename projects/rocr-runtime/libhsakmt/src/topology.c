@@ -1794,9 +1794,11 @@ static int32_t gpu_get_direct_link_cpu(uint32_t gpu_node, node_props_t *node_pro
 		return -1;
 
 	for (i = 0; i < node_props[gpu_node].node.NumIOLinks; i++)
-		if (props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS &&
-			props[i].Weight <= 20) /* >20 is GPU->CPU->GPU */
-			return props[i].NodeTo;
+		if ((props[i].IoLinkType == HSA_IOLINKTYPE_PCIEXPRESS || props[i].IoLinkType == HSA_IOLINK_TYPE_XGMI) &&
+			props[i].Weight <= 20) /* >20 is GPU->CPU->GPU */{
+			if (!node_props[props[i].NodeTo].node.KFDGpuID)
+				return props[i].NodeTo;
+		}
 
 	return -1;
 }

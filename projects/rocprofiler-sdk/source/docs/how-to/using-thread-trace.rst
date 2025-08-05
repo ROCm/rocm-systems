@@ -102,6 +102,9 @@ The following table lists the parameters relevant to thread tracing:
 |                          |         |         |           | Shorthand for att-perfcounter-ctrl and the att-perfcounters  |
 |                          |         |         |           | related to compute unit activity such as VALU, SALU, etc.    |
 +--------------------------+---------+---------+-----------+--------------------------------------------------------------+
+| att-gpu-index            | Integer |         |           | Comma-separated list of integers. If enabled, only the GPU   |
+|                          | (List)  |         |           | indexes in the list will be profiled by thread trace.        |
++--------------------------+---------+---------+-----------+--------------------------------------------------------------+
 
 For AMD Instinct accelerators, enable perfmon streaming using:
 

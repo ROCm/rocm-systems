@@ -71,7 +71,7 @@ public:
     bool valid() const;
 
 protected:
-    rocprofiler_thread_trace_decoder_handle_t decoder{};
+    rocprofiler_thread_trace_decoder_id_t decoder{};
 };
 
 class ATTFileMgr
@@ -79,9 +79,9 @@ class ATTFileMgr
     using AddressTable = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 public:
-    ATTFileMgr(Fspath                                    _dir,
-               std::vector<std::string>                  _counters,
-               rocprofiler_thread_trace_decoder_handle_t _decoder);
+    ATTFileMgr(Fspath                                _dir,
+               std::vector<std::string>              _counters,
+               rocprofiler_thread_trace_decoder_id_t _decoder);
     ~ATTFileMgr();
 
     void addDecoder(const char* filepath, uint64_t id, uint64_t load_addr, uint64_t memsize);
@@ -95,7 +95,7 @@ public:
     std::shared_ptr<AddressTable>              table{nullptr};
     std::map<size_t, std::vector<occupancy_t>> occupancy{};
     std::vector<uint64_t>                      codeobjs_to_delete{};
-    rocprofiler_thread_trace_decoder_handle_t  decoder{};
+    rocprofiler_thread_trace_decoder_id_t      decoder{};
 
     std::array<std::shared_ptr<class WstatesFile>, ROCPROFILER_THREAD_TRACE_DECODER_WSTATE_LAST>
         wstates;

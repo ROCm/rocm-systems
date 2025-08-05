@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,21 +10,24 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import copy
 import os
 import sys
+import textwrap
 from abc import ABC, abstractmethod
 from collections import OrderedDict
 from pathlib import Path
@@ -96,15 +99,28 @@ class OmniAnalyze_Base:
                     sys_info.iloc[0],
                 )
 
+            metric_descriptions = {
+                k: v
+                for dfs in self._arch_configs[args.list_metrics].dfs.values()
+                for k, v in dfs.to_dict().get("Description", {}).items()
+            }
             for key, value in self._arch_configs[args.list_metrics].metric_list.items():
                 prefix = ""
+                description = ""
                 if "." not in str(key):
                     prefix = ""
                 elif str(key).count(".") == 1:
                     prefix = "\t"
                 else:
                     prefix = "\t\t"
-                print(prefix + key, "->", value)
+                    description = metric_descriptions.get(key, "")
+                print(prefix + key, "->", value + "\n")
+                if description:
+                    print(
+                        prefix
+                        + f"\n{prefix}".join(textwrap.wrap(description, width=40))
+                        + "\n"
+                    )
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -114,11 +130,13 @@ class OmniAnalyze_Base:
         if not normalization_filter:
             for k, v in self._arch_configs.items():
                 parser.build_metric_value_string(
-                    v.dfs, v.dfs_type, self.__args.normal_unit
+                    v.dfs, v.dfs_type, self.__args.normal_unit, self._profiling_config
                 )
         else:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
+                parser.build_metric_value_string(
+                    v.dfs, v.dfs_type, normalization_filter, self._profiling_config
+                )
 
         args = self.__args
         # Error checking for multiple runs and multiple kernel filters

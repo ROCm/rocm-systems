@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,22 +10,26 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
+##############################################################################
+
+
+import csv
 import glob
 import logging
 import os
 import re
+import shlex
 import shutil
 import time
 from abc import ABC, abstractmethod
@@ -56,14 +60,6 @@ class RocProfCompute_Base:
         self.__profiler = profiler_mode
         self.__supported_archs = supported_archs
         self._soc = soc  # OmniSoC obj
-        self.__filter_hardware_blocks = [
-            name for name, type in args.filter_blocks.items() if type == "hardware_block"
-        ]
-        self.__filter_metric_ids = [
-            name for name, type in args.filter_blocks.items() if type == "metric_id"
-        ]
-        # Fixme: remove the hack code "21" after we could enable pc sampling as default
-        self.__pc_sampling = True if "21" in self.__filter_metric_ids else False
 
     def get_args(self):
         return self.__args
@@ -76,6 +72,30 @@ class RocProfCompute_Base:
     @demarcate
     def join_prof(self, out=None):
         """Manually join separated rocprof runs"""
+        if self.get_args().format_rocprof_output == "rocpd":
+            # Vertically concat (by rows) results_*.csv into pmc_perf.csv
+            result_files = glob.glob(self.get_args().path + "/results_*.csv")
+            if out is None:
+                out = self.__args.path + "/pmc_perf.csv"
+            with open(out, "w", newline="") as outfile:
+                writer = None
+                for file in result_files:
+                    with open(file, "r", newline="") as infile:
+                        reader = csv.reader(infile)
+                        header = next(reader)
+                        # Write header only once
+                        if writer is None:
+                            writer = csv.writer(outfile)
+                            writer.writerow(header)
+                        for row in reader:
+                            writer.writerow(row)
+            console_debug(f"Created file: {out}")
+            # Delete results_*.csv files
+            for file in result_files:
+                os.remove(file)
+                console_debug(f"Deleted file: {file}")
+            return
+
         # Set default output directory if not specified
         if type(self.__args.path) == str:
             if out is None:
@@ -309,14 +329,8 @@ class RocProfCompute_Base:
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            ip_blocks=[
-                name
-                for name, type in self.__args.filter_blocks.items()
-                if type == "hardware_block"
-            ],
             app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
-            roof_only=self.__args.roof_only,
             mspec=self._soc._mspec,
             soc=self._soc,
         )
@@ -336,14 +350,10 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
-        if self.__filter_hardware_blocks == None:
-            console_log("Hardware Blocks: All")
-        else:
-            console_log("Hardware Blocks: " + str(self.__filter_hardware_blocks))
-        if self.__filter_metric_ids == None:
+        if self.get_args().filter_blocks is None:
             console_log("Report Sections: All")
         else:
-            console_log("Report Sections: " + str(self.__filter_metric_ids))
+            console_log("Report Sections: " + str(self.get_args().filter_blocks))
 
         msg = "Collecting Performance Counters"
         (
@@ -430,6 +440,7 @@ class RocProfCompute_Base:
                     mspec=self._soc._mspec,
                     loglevel=self.get_args().loglevel,
                     format_rocprof_output=self.get_args().format_rocprof_output,
+                    retain_rocpd_output=self.get_args().retain_rocpd_output,
                 )
                 end_run_prof = time.time()
                 actual_profiling_duration = end_run_prof - start_run_prof
@@ -443,7 +454,8 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
-        if self.__pc_sampling == True and self.__profiler in (
+        # PC sampling data is only collected when block "21" is specified
+        if "21" in self.get_args().filter_blocks and self.__profiler in (
             "rocprofv3",
             "rocprofiler-sdk",
         ):
@@ -453,15 +465,17 @@ class RocProfCompute_Base:
                 method=self.get_args().pc_sampling_method,
                 interval=self.get_args().pc_sampling_interval,
                 workload_dir=self.get_args().path,
-                appcmd=self.get_args().remaining,
+                appcmd=shlex.split(
+                    self.get_args().remaining
+                ),  # FIXME: the right solution is applying it when argparsing once!
                 rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
             pc_sampling_duration = end_run_prof - start_run_prof
             console_debug(
                 "The time of pc sampling profiling is {} m {} sec".format(
-                    int((end_run_prof - start_run_prof) / 60),
-                    str((end_run_prof - start_run_prof) % 60),
+                    int((pc_sampling_duration) / 60),
+                    str((pc_sampling_duration) % 60),
                 )
             )
 

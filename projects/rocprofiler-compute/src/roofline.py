@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import os
 import textwrap
@@ -35,6 +37,7 @@ import plotext as plt
 import plotly.graph_objects as go
 from dash import dcc, html
 
+from utils import file_io, rocpd_data
 from utils.logger import (
     console_debug,
     console_error,
@@ -673,6 +676,9 @@ class Roofline:
             console_error("roofline", "{} does not exist".format(pmc_perf_csv))
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
+        profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
+        if profiling_config.get("format_rocprof_output") == "rocpd":
+            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
         color_scheme = {
             "HBM": "blue+",
@@ -861,6 +867,9 @@ class Roofline:
             console_error("roofline", "{} does not exist".format(app_path))
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(app_path)
+        profiling_config = file_io.load_profiling_config(self.__args.path)
+        if profiling_config.get("format_rocprof_output") == "rocpd":
+            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
         self.empirical_roofline(ret_df=t_df)
 
     @abstractmethod

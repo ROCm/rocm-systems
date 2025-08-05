@@ -54,10 +54,9 @@
 
 namespace rocr {
 namespace AMD {
-CpuAgent::CpuAgent(HSAuint32 node, const HsaNodeProperties &node_props)
-    : core::Agent(
-          core::Runtime::runtime_singleton_->AgentDriver(core::DriverType::KFD),
-          node, kAmdCpuDevice),
+CpuAgent::CpuAgent(HSAuint32 node, const HsaNodeProperties& node_props,
+                   core::DriverType driver_type)
+    : core::Agent(core::Runtime::runtime_singleton_->AgentDriver(driver_type), node, kAmdCpuDevice),
       properties_(node_props) {
   InitRegionList();
 

@@ -188,7 +188,7 @@ To decode the raw thread trace data, create and initialize a Trace Decoder:
 
 .. code-block:: cpp
 
-    rocprofiler_thread_trace_decoder_handle_t decoder{};
+    rocprofiler_thread_trace_decoder_id_t decoder{};
     
     // Create the Trace Decoder with the path to the decoder library
     ROCPROFILER_CALL(

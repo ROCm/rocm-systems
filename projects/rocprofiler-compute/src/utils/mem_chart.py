@@ -106,8 +106,8 @@ def format_text(
     )
     key_str = (
         "{key:{key_format}}".format(key=key, key_format=key_format)
-        if key is not None
-        else None
+        if key and isinstance(key, (int, float))
+        else str(key) if key else None
     )
 
     unit_string = post_description_with_space if not "N/A" in value_str else ""
@@ -1013,8 +1013,8 @@ class MemChart:
         block_instr_buff.y_max = self.y_max - 5.0
         block_instr_buff.y_min = block_instr_buff.y_max - 24.0
 
-        block_instr_buff.wave_occupancy = metric_dict["Wavefront Occupancy"]
-        block_instr_buff.wave_life = metric_dict["Wave Life"]
+        block_instr_buff.wave_occupancy = metric_dict.get("Wavefront Occupancy", "n/a")
+        block_instr_buff.wave_life = metric_dict.get("Wave Life", "n/a")
 
         block_instr_buff.draw(canvas)
 
@@ -1037,14 +1037,14 @@ class MemChart:
         block_instr_disp.y_max = block_instr_buff.y_max
         block_instr_disp.y_min = block_instr_buff.y_min
 
-        block_instr_disp.instrs["SALU"] = metric_dict["SALU"]
-        block_instr_disp.instrs["SMEM"] = metric_dict["SMEM"]
-        block_instr_disp.instrs["VALU"] = metric_dict["VALU"]
-        block_instr_disp.instrs["MFMA"] = metric_dict["MFMA"]
-        block_instr_disp.instrs["VMEM"] = metric_dict["VMEM"]
-        block_instr_disp.instrs["LDS"] = metric_dict["LDS"]
-        block_instr_disp.instrs["GWS"] = metric_dict["GWS"]
-        block_instr_disp.instrs["BRANCH"] = metric_dict["BR"]
+        block_instr_disp.instrs["SALU"] = metric_dict.get("SALU", "n/a")
+        block_instr_disp.instrs["SMEM"] = metric_dict.get("SMEM", "n/a")
+        block_instr_disp.instrs["VALU"] = metric_dict.get("VALU", "n/a")
+        block_instr_disp.instrs["MFMA"] = metric_dict.get("MFMA", "n/a")
+        block_instr_disp.instrs["VMEM"] = metric_dict.get("VMEM", "n/a")
+        block_instr_disp.instrs["LDS"] = metric_dict.get("LDS", "n/a")
+        block_instr_disp.instrs["GWS"] = metric_dict.get("GWS", "n/a")
+        block_instr_disp.instrs["BRANCH"] = metric_dict.get("BR", "n/a")
 
         block_instr_disp.draw(canvas)
 
@@ -1056,14 +1056,14 @@ class MemChart:
         block_exec.y_min = block_instr_disp.y_min - 6
         block_exec.y_max = block_instr_disp.y_max
 
-        block_exec.active_cus = metric_dict["Active CUs"]
-        block_exec.num_cus = metric_dict["Num CUs"]
-        block_exec.vgprs = metric_dict["VGPR"]
-        block_exec.sgprs = metric_dict["SGPR"]
-        block_exec.lds_alloc = metric_dict["LDS Allocation"]
-        block_exec.scratch_alloc = metric_dict["Scratch Allocation"]
-        block_exec.wavefronts = metric_dict["Wavefronts"]
-        block_exec.workgroups = metric_dict["Workgroups"]
+        block_exec.active_cus = metric_dict.get("Active CUs", "n/a")
+        block_exec.num_cus = metric_dict.get("Num CUs", "n/a")
+        block_exec.vgprs = metric_dict.get("VGPR", "n/a")
+        block_exec.sgprs = metric_dict.get("SGPR", "n/a")
+        block_exec.lds_alloc = metric_dict.get("LDS Allocation", "n/a")
+        block_exec.scratch_alloc = metric_dict.get("Scratch Allocation", "n/a")
+        block_exec.wavefronts = metric_dict.get("Wavefronts", "n/a")
+        block_exec.workgroups = metric_dict.get("Workgroups", "n/a")
 
         block_exec.draw(canvas)
 
@@ -1075,11 +1075,11 @@ class MemChart:
         wires_E_GLV.y_min = block_instr_disp.y_min
         wires_E_GLV.y_max = block_instr_disp.y_max
 
-        wires_E_GLV.lds_req = metric_dict["LDS Req"]
-        wires_E_GLV.vl1_rd = metric_dict["VL1 Rd"]
-        wires_E_GLV.vl1_wr = metric_dict["VL1 Wr"]
-        wires_E_GLV.vl1_atomic = metric_dict["VL1 Atomic"]
-        wires_E_GLV.sl1_rd = metric_dict["VL1D Rd"]
+        wires_E_GLV.lds_req = metric_dict.get("LDS Req", "n/a")
+        wires_E_GLV.vl1_rd = metric_dict.get("VL1 Rd", "n/a")
+        wires_E_GLV.vl1_wr = metric_dict.get("VL1 Wr", "n/a")
+        wires_E_GLV.vl1_atomic = metric_dict.get("VL1 Atomic", "n/a")
+        wires_E_GLV.sl1_rd = metric_dict.get("VL1D Rd", "n/a")
 
         wires_E_GLV.draw(canvas)
 
@@ -1093,7 +1093,7 @@ class MemChart:
             y_max=block_instr_buff.y_min,
         )
 
-        wire_InstrBuff_IL1Cache.il1_fetch = metric_dict["IL1 Fetch"]
+        wire_InstrBuff_IL1Cache.il1_fetch = metric_dict.get("IL1 Fetch", "n/a")
 
         wire_InstrBuff_IL1Cache.draw(canvas)
 
@@ -1118,8 +1118,8 @@ class MemChart:
         block_lds.y_max = wires_E_GLV.y_max
         block_lds.y_min = block_lds.y_max - 5
 
-        block_lds.util = metric_dict["LDS Util"]
-        block_lds.latency = metric_dict["LDS Latency"]
+        block_lds.util = metric_dict.get("LDS Util", "n/a")
+        block_lds.latency = metric_dict.get("LDS Latency", "n/a")
 
         block_lds.draw(canvas)
 
@@ -1131,10 +1131,10 @@ class MemChart:
         block_vector_L1.y_max = block_lds.y_min - 3
         block_vector_L1.y_min = block_vector_L1.y_max - 9
 
-        block_vector_L1.hit = metric_dict["VL1 Hit"]
-        block_vector_L1.latency = metric_dict["VL1 Lat"]
-        block_vector_L1.coales = metric_dict["VL1 Coalesce"]
-        block_vector_L1.stall = metric_dict["VL1 Stall"]
+        block_vector_L1.hit = metric_dict.get("VL1 Hit", "n/a")
+        block_vector_L1.latency = metric_dict.get("VL1 Lat", "n/a")
+        block_vector_L1.coales = metric_dict.get("VL1 Coalesce", "n/a")
+        block_vector_L1.stall = metric_dict.get("VL1 Stall", "n/a")
 
         block_vector_L1.draw(canvas)
 
@@ -1146,8 +1146,8 @@ class MemChart:
         block_const_L1.y_max = block_vector_L1.y_min - 3
         block_const_L1.y_min = block_const_L1.y_max - 5
 
-        block_const_L1.hit = metric_dict["VL1D Hit"]
-        block_const_L1.latency = metric_dict["VL1D Lat"]
+        block_const_L1.hit = metric_dict.get("sL1D Hit", "n/a")
+        block_const_L1.latency = metric_dict.get("sL1D Lat", "n/a")
 
         block_const_L1.draw(canvas)
 
@@ -1159,8 +1159,8 @@ class MemChart:
         block_instr_L1.y_max = block_const_L1.y_min - 3
         block_instr_L1.y_min = block_instr_L1.y_max - 5
 
-        block_instr_L1.hit = metric_dict["IL1 Hit"]
-        block_instr_L1.latency = metric_dict["IL1 Lat"]
+        block_instr_L1.hit = metric_dict.get("IL1 Hit", "n/a")
+        block_instr_L1.latency = metric_dict.get("IL1 Lat", "n/a")
 
         block_instr_L1.draw(canvas)
 
@@ -1171,13 +1171,13 @@ class MemChart:
         wires_L1_L2.x_max = wires_L1_L2.x_min + 14
         wires_L1_L2.y_min = block_instr_L1.y_min
         wires_L1_L2.y_max = block_vector_L1.y_max
-        wires_L1_L2.vl1_l2_rd = metric_dict["VL1_L2 Rd"]
-        wires_L1_L2.vl1_l2_wr = metric_dict["VL1_L2 Wr"]
-        wires_L1_L2.vl1_l2_atomic = metric_dict["VL1_L2 Atomic"]
-        wires_L1_L2.sl1_l2_rd = metric_dict["VL1D_L2 Rd"]
-        wires_L1_L2.sl1_l2_wr = metric_dict["VL1D_L2 Wr"]
-        wires_L1_L2.sl1_l2_atomic = metric_dict["VL1D_L2 Atomic"]
-        wires_L1_L2.il1_l2_req = metric_dict["IL1_L2 Rd"]
+        wires_L1_L2.vl1_l2_rd = metric_dict.get("VL1_L2 Rd", "n/a")
+        wires_L1_L2.vl1_l2_wr = metric_dict.get("VL1_L2 Wr", "n/a")
+        wires_L1_L2.vl1_l2_atomic = metric_dict.get("VL1_L2 Atomic", "n/a")
+        wires_L1_L2.sl1_l2_rd = metric_dict.get("VL1D_L2 Rd", "n/a")
+        wires_L1_L2.sl1_l2_wr = metric_dict.get("VL1D_L2 Wr", "n/a")
+        wires_L1_L2.sl1_l2_atomic = metric_dict.get("VL1D_L2 Atomic", "n/a")
+        wires_L1_L2.il1_l2_req = metric_dict.get("IL1_L2 Rd", "n/a")
 
         wires_L1_L2.draw(canvas)
 
@@ -1190,12 +1190,12 @@ class MemChart:
         block_L2.y_min = block_instr_L1.y_min
         block_L2.y_max = block_lds.y_max
 
-        block_L2.hit = metric_dict["L2 Hit"]
-        block_L2.rd = metric_dict["L2 Rd"]
-        block_L2.wr = metric_dict["L2 Wr"]
-        block_L2.atomic = metric_dict["L2 Atomic"]
-        block_L2.rd_lat = metric_dict["L2 Rd Lat"]
-        block_L2.wr_lat = metric_dict["L2 Wr Lat"]
+        block_L2.hit = metric_dict.get("L2 Hit", "n/a")
+        block_L2.rd = metric_dict.get("L2 Rd", "n/a")
+        block_L2.wr = metric_dict.get("L2 Wr", "n/a")
+        block_L2.atomic = metric_dict.get("L2 Atomic", "n/a")
+        block_L2.rd_lat = metric_dict.get("L2 Rd Lat", "n/a")
+        block_L2.wr_lat = metric_dict.get("L2 Wr Lat", "n/a")
 
         block_L2.draw(canvas)
 
@@ -1209,9 +1209,9 @@ class MemChart:
             y_max=block_L2.y_max - 10,
         )
 
-        wires_L2_Fabric.rd = metric_dict["Fabric_L2 Rd"]
-        wires_L2_Fabric.wr = metric_dict["Fabric_L2 Wr"]
-        wires_L2_Fabric.atomic = metric_dict["Fabric_L2 Atomic"]
+        wires_L2_Fabric.rd = metric_dict.get("Fabric_L2 Rd", "n/a")
+        wires_L2_Fabric.wr = metric_dict.get("Fabric_L2 Wr", "n/a")
+        wires_L2_Fabric.atomic = metric_dict.get("Fabric_L2 Atomic", "n/a")
 
         wires_L2_Fabric.draw(canvas)
 
@@ -1236,9 +1236,9 @@ class MemChart:
             y_min=block_xgmi_pcie.y_min - 5 - 11,
         )
 
-        block_fabric.lat["Rd"] = metric_dict["Fabric Rd Lat"]
-        block_fabric.lat["Wr"] = metric_dict["Fabric Wr Lat"]
-        block_fabric.lat["Atomic"] = metric_dict["Fabric Atomic Lat"]
+        block_fabric.lat["Rd"] = metric_dict.get("Fabric Rd Lat", "n/a")
+        block_fabric.lat["Wr"] = metric_dict.get("Fabric Wr Lat", "n/a")
+        block_fabric.lat["Atomic"] = metric_dict.get("Fabric Atomic Lat", "n/a")
 
         block_fabric.draw(canvas)
 
@@ -1264,8 +1264,8 @@ class MemChart:
             y_max=block_fabric.y_max - 4,
         )
 
-        wires_Fabric_HBM.rd = metric_dict["HBM Rd"]
-        wires_Fabric_HBM.wr = metric_dict["HBM Wr"]
+        wires_Fabric_HBM.rd = metric_dict.get("HBM Rd", "n/a")
+        wires_Fabric_HBM.wr = metric_dict.get("HBM Wr", "n/a")
 
         wires_Fabric_HBM.draw(canvas)
 
@@ -1331,9 +1331,9 @@ if __name__ == "__main__":
     metric_dict["VL1 Coalesce"] = 27
     metric_dict["VL1 Stall"] = 28
 
-    metric_dict["VL1D Rd"] = 29
-    metric_dict["VL1D Hit"] = 30
-    metric_dict["VL1D Lat"] = 31
+    metric_dict["sL1D Rd"] = 29
+    metric_dict["sL1D Hit"] = 30
+    metric_dict["sL1D Lat"] = 31
 
     metric_dict["IL1 Fetch"] = 32
     metric_dict["IL1 Hit"] = 33
@@ -1344,9 +1344,9 @@ if __name__ == "__main__":
     metric_dict["VL1_L2 Wr"] = 37
     metric_dict["VL1_L2 Atomic"] = 38
 
-    metric_dict["VL1D_L2 Rd"] = 39
-    metric_dict["VL1D_L2 Wr"] = 40
-    metric_dict["VL1D_L2 Atomic"] = 41
+    metric_dict["sL1D_L2 Rd"] = 39
+    metric_dict["sL1D_L2 Wr"] = 40
+    metric_dict["sL1D_L2 Atomic"] = 41
     metric_dict["IL1_L2 Rd"] = 42
 
     metric_dict["L2 Hit"] = 43

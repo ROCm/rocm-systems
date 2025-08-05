@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import os
 import shlex
@@ -43,11 +45,6 @@ class rocprof_v3_profiler(RocProfCompute_Base):
     def get_profiler_options(self, fname, soc):
         app_cmd = shlex.split(self.get_args().remaining)
         trace_option = "--kernel-trace"
-        rocprof_out_format = "json"
-
-        if self.get_args().format_rocprof_output == "csv":
-            rocprof_out_format = "csv"
-
         if self.get_args().kokkos_trace:
             trace_option = "--kokkos-trace"
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -63,7 +60,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             self.get_args().path + "/" + "out",
             trace_option,
             "--output-format",
-            rocprof_out_format,
+            self.get_args().format_rocprof_output,
         ]
         # Kernel filtering
         if self.get_args().kernel:

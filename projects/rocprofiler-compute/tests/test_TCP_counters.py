@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import csv
 import inspect
@@ -144,7 +146,7 @@ def test_L1_cache_counters(
 
     # set up two apps: sequential and random access
     app_names = ["vseq", "vrand"]
-    options = ["-b", "TCP"]
+    options = ["-b", "16"]
 
     result = {}
     metrics = ["Read Req", "Write Req", "Cache Hit Rate"]
@@ -174,7 +176,7 @@ def test_L1_cache_counters(
         # 3. save results in local
 
         # FIXME: customize file name to avoid hardcode
-        csv_path = workload_dir + "/16.3_L1D_Cache_Accesses.csv"
+        csv_path = workload_dir + "/16.3_vL1D_cache_access_metrics.csv"
         data = load_metrics(csv_path)
 
         for metric in metrics:

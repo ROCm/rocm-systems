@@ -93,8 +93,8 @@ namespace AMD {
 const uint64_t CP_DMA_DATA_TRANSFER_CNT_MAX = (1 << 26);
 
 GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xnack_mode,
-                   uint32_t index)
-    : GpuAgentInt(node),
+                   uint32_t index, core::DriverType driver_type)
+    : GpuAgentInt(node, driver_type),
       properties_(node_props),
       current_coherency_type_(HSA_AMD_COHERENCY_TYPE_COHERENT),
       scratch_used_large_(0),
@@ -106,7 +106,6 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       memory_max_frequency_(0),
       enum_index_(index),
       ape1_base_(0),
-      ape1_size_(0),
       pending_copy_req_ref_(0),
       pending_copy_stat_check_ref_(0),
       sdma_blit_used_mask_(0),
@@ -712,10 +711,6 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
   const size_t copy_size_overrides[2] = {0x3fffff, 0x3fffffff};
 
   switch (isa_->GetMajorVersion()) {
-    case 7:
-    case 8:
-      sdma = new BlitSdmaV2V3();
-      break;
     case 9:
       sdma = new BlitSdmaV4();
       copy_size_override = (isa_->GetMinorVersion() == 0 && isa_->GetStepping() == 10) ?
@@ -2558,14 +2553,14 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
     return HSA_STATUS_ERROR;
 
   // First query to get size of list needed
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), NULL, 0, &size));
-  if (ret != HSAKMT_STATUS_SUCCESS || size == 0) return HSA_STATUS_ERROR;
+  hsa_status_t ret = driver().PcSamplingQueryCapabilities(node_id(), NULL, 0, &size);
+  if (ret != HSA_STATUS_SUCCESS || size == 0) return ret;
 
   std::vector<HsaPcSamplingInfo> sampleInfoList(size);
-  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
-                                          &size));
+  ret = driver().PcSamplingQueryCapabilities(node_id(), sampleInfoList.data(),
+                                             sampleInfoList.size(), &size);
 
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSA_STATUS_SUCCESS) return ret;
 
   for (uint32_t i = 0; i < size; i++) {
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
@@ -2591,10 +2586,9 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
 
   // Pass the sampling information to the kernel driver to create PC
   // sampling session.
-  HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
-  if (retkmt != HSAKMT_STATUS_SUCCESS) {
-    return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
-            : HSA_STATUS_ERROR;
+  ret = driver().PcSamplingCreate(node_id(), &sampleInfo, &thunkId);
+  if (ret != HSA_STATUS_SUCCESS) {
+    return ret;
   }
 
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
@@ -2800,7 +2794,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
+  hsa_status_t ret = driver().PcSamplingDestroy(node_id(), session.ThunkId());
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -2832,7 +2826,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   // Update the trap handler to clear any associated device data
   UpdateTrapHandlerWithPCS(nullptr, nullptr);
 
-  return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return ret;
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -2899,8 +2893,9 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Start the sampling session in the kernel driver
-  if (HSAKMT_CALL(hsaKmtPcSamplingStart(node_id(), session.ThunkId())) == HSAKMT_STATUS_SUCCESS)
+  if (driver().PcSamplingStart(node_id(), session.ThunkId()) == HSA_STATUS_SUCCESS) {
     return HSA_STATUS_SUCCESS;
+  }
 
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
   // Clean up if starting the session failed
@@ -2920,8 +2915,8 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   session.stop();
 
   // Stop PC sampling in the kernel driver
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
-  if (retKmt != HSAKMT_STATUS_SUCCESS)
+  hsa_status_t ret = driver().PcSamplingStop(node_id(), session.ThunkId());
+  if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to stop PC Sampling session.");
 
   // Determine the sampling method and corresponding data
@@ -3093,6 +3088,7 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
 
   const uint32_t atomic_ex_cmd_sz = 9;
   const uint32_t wait_reg_mem_cmd_sz = 7;
+  const uint32_t acquire_mem_cmd_sz = 8;
   const uint32_t dma_data_cmd_sz = 7;
   const uint32_t copy_data_cmd_sz = 6;
   const uint32_t write_data_cmd_sz = 5;
@@ -3224,6 +3220,20 @@ hsa_status_t GpuAgent::PcSamplingFlushDeviceBuffers(
   cmd_data[i++] = 0xFFFFFFFF;
   cmd_data[i++] = PM4_WAIT_REG_MEM_DW6(PM4_WAIT_REG_MEM_POLL_INTERVAL(4) |
                                        PM4_WAIT_REG_MEM_OPTIMIZE_ACE_OFFLOAD_MODE);
+
+  // For GFX1200 and GFX1201 only - add an ACQUIRE_MEM packet to flush L2 cache before DMA.
+  // This ensures that any data written by the trap handler is visible to the DMA engine.
+  if ((isa_->GetMajorVersion() == 12) && (isa_->GetMinorVersion() == 0)) {
+    cmd_data[i++] =
+        PM4_HDR(PM4_HDR_IT_OPCODE_ACQUIRE_MEM, acquire_mem_cmd_sz, isa_->GetMajorVersion());
+    cmd_data[i++] = 0;                                // DW1: COHER_CNTL
+    cmd_data[i++] = 0;                                // DW2: COHER_SIZE
+    cmd_data[i++] = 0;                                // DW3: COHER_SIZE_HI
+    cmd_data[i++] = 0;                                // DW4: COHER_BASE_LO
+    cmd_data[i++] = 0;                                // DW5: COHER_BASE_HI
+    cmd_data[i++] = 4;                                // DW6: POLL_INTERVAL
+    cmd_data[i++] = PM4_ACQUIRE_MEM_GCR_CNTL_GL2_WB;  // DW7: GCR_CNTL (GL2_WB=1, RANGE=ALL)
+  }
 
   uint8_t* buffer_temp = buffer[which_buffer];
 

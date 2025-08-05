@@ -222,6 +222,18 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     const uint64_t se_number_xcc = se_number_total / GetXCCNumber();
     uint64_t base_addr = reinterpret_cast<uint64_t>(config->data_buffer_ptr);
     const uint64_t base_step = GetBaseStep(config->data_buffer_size, config->se_mask);
+
+    // Old v1 API calls this with buffer == 0 first
+    if (config->data_buffer_size > 0)
+    {
+      // Max 16GB for gfx{9, 10, 12} and 512MB for gfx11. Min of 32 page per SE.
+      if (base_step >= (1ul<<34) || (Primitives::GFXIP_LEVEL == 11 && base_step >= (1ul<<29)))
+        throw std::runtime_error("SQTT Buffer size too high");
+      else if (base_step < (1ul<<17))
+        throw std::runtime_error("SQTT Buffer size too low");
+    }
+
+
     config->capacity_per_se = base_step;
     config->capacity_per_disabled_se = 1 << Primitives::TT_BUFF_ALIGN_SHIFT;
 
@@ -331,7 +343,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
         const unsigned baddr_lo = Low32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
         const unsigned baddr_hi = High32(base_addr >> Primitives::TT_BUFF_ALIGN_SHIFT);
-        const uint32_t sqtt_size = bMaskedIn ? base_step : config->capacity_per_disabled_se;
+        const uint64_t sqtt_size = bMaskedIn ? base_step : config->capacity_per_disabled_se;
         const uint32_t ctrl_val = Primitives::sqtt_ctrl_value(true);
 
         Select_GRBM_SE_SH0(cmd_buffer, index);
@@ -432,7 +444,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       // Initialize cache flush request object
       builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->control_buffer_ptr),
                                     config->control_buffer_size);
-      builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->data_buffer_size),
+      builder.BuildCacheFlushPacket(cmd_buffer, size_t(config->data_buffer_ptr),
                                     config->data_buffer_size);
       // Program zero size of thread trace buffer
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_SIZE_ADDR,

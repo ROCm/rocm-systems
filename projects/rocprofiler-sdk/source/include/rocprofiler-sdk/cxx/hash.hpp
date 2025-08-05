@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -70,6 +71,7 @@ ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(hsa_signal_t)
 ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(hsa_executable_t)
 ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(hsa_region_t)
 ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(hsa_amd_memory_pool_t)
+ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER(rocprofiler_thread_trace_decoder_id_t)
 
 #undef ROCPROFILER_CXX_SPECIALIZE_HANDLE_HASHER
 }  // namespace std

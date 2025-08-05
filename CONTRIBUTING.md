@@ -1,17 +1,17 @@
-# Contributing to the ROCm Systems
+# Contributing to the ROCm Libraries
 
-Thank you for contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the monorepo.
+Thank you for contributing! This guide outlines the development workflow, contribution standards, and best practices when working in the super-repo.
 
 ## Getting Started
 
-### Option A: Clone the Monorepo
+### Option A: Clone the super-repo
 
 ```bash
 git clone https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
 ```
 
-### Option B: Clone the Monorepo with Sparse-Checkout
+### Option B: Clone the super-repo with Sparse-Checkout
 
 To limit your local checkout to only the project(s) you work on and improve performance with a large codebase, you can configure sparse-checkout prior to cloning:
 
@@ -19,7 +19,7 @@ To limit your local checkout to only the project(s) you work on and improve perf
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
 git sparse-checkout init --cone
-git sparse-checkout set projects/rocprofiler-register projects/rocprofiler-sdk
+git sparse-checkout set projects/rocblas shared/tensile
 git checkout develop # or the branch you are starting from
 ```
 
@@ -33,10 +33,10 @@ The checkout command of the two projects lasted less than 90 seconds.
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:
 
 ```bash
-git sparse-checkout set projects/amdsmi projects/rocmsmilib
+git sparse-checkout set projects/hipsparse projects/rocsparse
 ```
 
-This keeps your working directory clean and fast, as you won't need to clone the entire monorepo.
+This keeps your working directory clean and fast, as you won't need to clone the entire super-repo.
 
 ---
 
@@ -44,8 +44,8 @@ This keeps your working directory clean and fast, as you won't need to clone the
 
 - `.github/`: CI workflows, scripts, and configuration files for synchronizing repositories during the migration period.
 - `docs/`: Documentation, including this guide and other helpful resources.
-- `projects/<name>/`: Each folder corresponds to a ROCm systems project that was previously maintained in its own GitHub repository and released as distinct packages.
-- `shared/<name>/`: Shared components that existed in their own repository, used as dependencies by multiple projects, but do not produce distinct packages in previous ROCm releases.
+- `projects/<name>/`: Each folder corresponds to a ROCm library that was previously maintained in its own GitHub repository and released as distinct packages.
+- `shared/<name>/`: Shared components that existed in their own repository, used as dependencies by multiple libraries, but do not produce distinct packages in previous ROCm releases.
 
 Further changes to the structure may be made to improve development efficiency and minimize redundancy.
 
@@ -55,13 +55,13 @@ Further changes to the structure may be made to improve development efficiency a
 
 ### From a Developer's Perspective
 
-You can continue working inside your project's folder as you did before the monorepo migration.
+You can continue working inside your project's folder as you did before the super-repo migration.
 This process is intended to remain as familiar as possible, though some adjustments may be made to improve efficiency based on feedback.
 
-#### Example: rocr-runtime Developer
+#### Example: hipblaslt Developer
 
 ```bash
-cd projects/rocr-runtime
+cd projects/hipblaslt
 # Edit, build, test as usual
 ```
 
@@ -69,7 +69,7 @@ cd projects/rocr-runtime
 
 ## Keeping Your Branch in Sync
 
-To stay up to date with the latest changes in the monorepo:
+To stay up to date with the latest changes in the super-repo:
 
 ```bash
 git fetch origin
@@ -82,7 +82,7 @@ Avoid using git merge to keep history clean and maintain a linear progression.
 
 ## New Product Introduction (NPI) and New Technology Introduction (NTI) Development
 
-A mirror of this monorepo will be on GitHub Enterprise Managed User (EMU) and available only on the AMD intranet.
+A mirror of this super-repo will be on GitHub Enterprise Managed User (EMU) and available only on the AMD intranet.
 Please reach out within the AMD intranet if you need the link and permissions.
 
 A primary development branch will be created for a new product or new technology.
@@ -103,7 +103,7 @@ During this period, a high priority will be placed on keeping the `develop` bran
 
 ### 1. Branch Naming and Forks
 
-When creating a branch for your work, use the following convention to make branch names informative and consistent: `users/<github-husername>/<branch-name>`.
+When creating a branch for your work, use the following convention to make branch names informative and consistent: `users/<github-username>/<branch-name>`.
 
 Try to keep branch names descriptive yet concise to reflect the purpose of the branch. For example, referencing the GitHub Issue number if the pull request is related.
 
@@ -119,11 +119,11 @@ git push origin branch-name-like-above
 
 ### 3. Auto-Labeling and Review Routing
 
-The monorepo uses automation to assign labels and reviewers based on the changed files. Reviewers are designated via the top-level CODEOWNERS file.
+The super-repo uses automation to assign labels and reviewers based on the changed files. Reviewers are designated via the top-level CODEOWNERS file.
 
 ### 4. Tests and CI
 
-Existing testing and CI infrastructure will be updated to directly point to the monorepo.
+Existing testing and CI infrastructure will be updated to directly point to the super-repo.
 Specific checks will become mandatory for pull requests before merging. Initially, these will be limited to compilation, but will expand to correctness tests and eventually performance tests.
 Hardware and operating system coverage will also expand for these checks over time.
 Please refer to [this documentation](/docs/continuous-integration.md) for further details on the current signals that will be provided through CI for pull requests and commits.
@@ -142,9 +142,9 @@ See [docs/gardening.md](docs/gardening.md) for more information.
 
 ## Developer Communications
 
-As this monorepo continues to evolve, weekly office hour sessions with a wide audience of ROCm engineers and managers will occur.
+As this super-repo continues to evolve, weekly office hour sessions with a wide audience of ROCm engineers and managers will occur.
 Focused meetings with smaller project teams will be also be scheduled regularly.
-These discussions can go over any topic of the monorepo important to the different teams.
+These discussions can go over any topic of the super-repo important to the different teams.
 If you want to be looped into these syncs, please reach out to project leadership.
 
 ---

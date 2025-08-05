@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import copy
 import os
@@ -36,7 +38,7 @@ from config import HIDDEN_COLUMNS, PROJECT_NAME
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser
 from utils.gui import build_bar_chart, build_table_chart
-from utils.logger import console_debug, console_error, demarcate
+from utils.logger import console_debug, console_error, console_warning, demarcate
 
 
 class webui_analysis(OmniAnalyze_Base):
@@ -53,7 +55,9 @@ class webui_analysis(OmniAnalyze_Base):
         # define different types of bar charts
         self.__barchart_elements = {
             "instr_mix": [1001, 1002],
-            "multi_bar": [1604, 1704],
+            # 1604: L1D - L2 Transactions
+            # 1705: L2 - Fabric Interface Stalls
+            "multi_bar": [1604, 1705],
             "sol": [1101, 1201, 1301, 1401, 1601, 1701],
             # "l2_cache_per_chan": [1802, 1803]
         }
@@ -118,6 +122,7 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 self.get_args().verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
@@ -166,6 +171,7 @@ class webui_analysis(OmniAnalyze_Base):
                 dir=self.dest_dir,
                 is_gui=True,
                 args=self.get_args(),
+                config=self._profiling_config,
             )
 
             # ~~~~~~~~~~~~~~~~~~~~~~~
@@ -298,6 +304,7 @@ class webui_analysis(OmniAnalyze_Base):
                 self.get_args().spatial_multiplexing,
                 self.get_args().kernel_verbose,
                 args.verbose,
+                self._profiling_config,
             )
 
             if self.get_args().spatial_multiplexing:
@@ -371,7 +378,11 @@ def determine_chart_type(
 
     # Determine chart type:
     # a) Barchart
-    if table_config["id"] in [x for i in barchart_elements.values() for x in i]:
+    if original_df.empty:
+        console_warning(
+            f"The dataframe with id={table_config['id']} is empty! Not displaying it."
+        )
+    elif table_config["id"] in [x for i in barchart_elements.values() for x in i]:
         d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
         # Smaller formatting if barchart yeilds several graphs
         if (

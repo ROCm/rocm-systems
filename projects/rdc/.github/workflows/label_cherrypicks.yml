@@ -7,7 +7,7 @@ on:
 
 jobs:
   add-label:
-    runs-on: ubuntu-latest
+    runs-on: lstt
     container:
       image: node:16-alpine
     permissions:
@@ -18,18 +18,13 @@ jobs:
         with:
           script: |
             const pr = context.payload.pull_request;
-            const headBranch = pr.head.ref;
             const baseBranch = pr.base.ref;
 
-            // Check if head branch contains cherry-pick pattern or base branch starts with release/
-            const isCherryPick = /cherry.*pick/i.test(headBranch);
             const isReleaseTarget = baseBranch.startsWith('release/');
 
-            if (isCherryPick || isReleaseTarget) {
-              // Label to apply
+            if (isReleaseTarget) {
               const labelToAdd = 'cherry-pick';
 
-              // Try to add the label
               try {
                 await github.rest.issues.addLabels({
                   owner: context.repo.owner,
@@ -37,11 +32,11 @@ jobs:
                   issue_number: pr.number,
                   labels: [labelToAdd]
                 });
-                console.log(`Added label "${labelToAdd}" to PR #${pr.number}`);
+                console.log("Added label ${labelToAdd} to PR #${pr.number}");
               } catch (error) {
-                console.error(`Error adding label: ${error.message}`);
+                console.error("Error adding label: ${error.message}");
               }
             } else {
-              console.log('PR does not match criteria for automatic labeling');
+              console.log("PR does not match criteria for automatic labeling");
             }
 

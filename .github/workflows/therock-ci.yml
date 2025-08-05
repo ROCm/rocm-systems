@@ -120,3 +120,24 @@ jobs:
       cmake_options: ${{ matrix.projects.cmake_options }}
       project_to_test: ${{ matrix.projects.project_to_test }}
       subtree_checkout: ${{ matrix.projects.subtree_checkout }}
+
+  therock_ci_summary:
+    name: TheRock CI Summary
+    if: always()
+    needs:
+      - setup
+      - therock-ci-linux
+      - therock-ci-windows
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Output failed jobs
+        run: |
+          echo '${{ toJson(needs) }}'
+          FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
+            | jq --raw-output \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+          )"
+          if [[ "${FAILED_JOBS}" != "" ]]; then
+            echo "The following jobs failed: ${FAILED_JOBS}"
+            exit 1
+          fi

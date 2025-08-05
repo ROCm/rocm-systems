@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import logging
 
@@ -8484,39 +8486,39 @@ def test_merge_counters_spatial_multiplex_timestamp_median_calculation():
 
 
 # =============================================================================
-# Tests for convert_metric_id_to_panel_idx function
+# Tests for convert_metric_id_to_panel_info function
 # ============================================================================
 
 
-def test_convert_metric_id_to_panel_idx_zero_values():
-    """Test convert_metric_id_to_panel_idx with zero values in different positions.
+def test_convert_metric_id_to_panel_info_zero_values():
+    """Test convert_metric_id_to_panel_info with zero values in different positions.
 
     Args:
         None
     Returns:
         None: Asserts that zero values are handled correctly in metric IDs.
     """
-    assert utils.convert_metric_id_to_panel_idx("0") == 0
-    assert utils.convert_metric_id_to_panel_idx("0.0") == 0
-    assert utils.convert_metric_id_to_panel_idx("5.0") == 500
-    assert utils.convert_metric_id_to_panel_idx("0.5") == 5
+    assert utils.convert_metric_id_to_panel_info("0") == ("0000", None, None)
+    assert utils.convert_metric_id_to_panel_info("0.0") == ("0000", 0, None)
+    assert utils.convert_metric_id_to_panel_info("5.0") == ("0500", 500, None)
+    assert utils.convert_metric_id_to_panel_info("0.5") == ("0000", 5, None)
 
 
-def test_convert_metric_id_to_panel_idx_leading_zeros():
-    """Test convert_metric_id_to_panel_idx with leading zeros in metric IDs.
+def test_convert_metric_id_to_panel_info_leading_zeros():
+    """Test convert_metric_id_to_panel_info with leading zeros in metric IDs.
 
     Args:
         None
     Returns:
         None: Asserts that leading zeros are handled correctly.
     """
-    assert utils.convert_metric_id_to_panel_idx("04") == 400
-    assert utils.convert_metric_id_to_panel_idx("4.02") == 402
-    assert utils.convert_metric_id_to_panel_idx("01.05") == 105
+    assert utils.convert_metric_id_to_panel_info("04") == ("0400", None, None)
+    assert utils.convert_metric_id_to_panel_info("4.02") == ("0400", 402, None)
+    assert utils.convert_metric_id_to_panel_info("01.05") == ("0100", 105, None)
 
 
-def test_convert_metric_id_to_panel_idx_invalid_empty_string():
-    """Test convert_metric_id_to_panel_idx with empty string raises exception.
+def test_convert_metric_id_to_panel_info_invalid_empty_string():
+    """Test convert_metric_id_to_panel_info with empty string raises exception.
 
     Args:
         None
@@ -8524,11 +8526,11 @@ def test_convert_metric_id_to_panel_idx_invalid_empty_string():
         None: Asserts that empty string raises ValueError.
     """
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("")
+        utils.convert_metric_id_to_panel_info("")
 
 
-def test_convert_metric_id_to_panel_idx_invalid_too_many_parts():
-    """Test convert_metric_id_to_panel_idx with more than two parts raises exception.
+def test_convert_metric_id_to_panel_info_invalid_too_many_parts():
+    """Test convert_metric_id_to_panel_info with more than two parts raises exception.
 
     Args:
         None
@@ -8536,17 +8538,17 @@ def test_convert_metric_id_to_panel_idx_invalid_too_many_parts():
         None: Asserts that metric IDs with more than two parts raise Exception.
     """
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("4.02.1")
+        utils.convert_metric_id_to_panel_info("4.02.1.5")
 
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("1.2.3.4")
+        utils.convert_metric_id_to_panel_info("1.2.3.4")
 
     with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("4.02.1.5")
+        utils.convert_metric_id_to_panel_info("4.02.1.5")
 
 
-def test_convert_metric_id_to_panel_idx_invalid_non_numeric():
-    """Test convert_metric_id_to_panel_idx with non-numeric values raises exception.
+def test_convert_metric_id_to_panel_info_invalid_non_numeric():
+    """Test convert_metric_id_to_panel_info with non-numeric values raises exception.
 
     Args:
         None
@@ -8554,68 +8556,63 @@ def test_convert_metric_id_to_panel_idx_invalid_non_numeric():
         None: Asserts that non-numeric metric IDs raise ValueError.
     """
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("abc")
+        utils.convert_metric_id_to_panel_info("abc")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("4.abc")
+        utils.convert_metric_id_to_panel_info("4.abc")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("abc.02")
+        utils.convert_metric_id_to_panel_info("abc.02")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("4.02abc")
+        utils.convert_metric_id_to_panel_info("4.02abc")
 
 
-def test_convert_metric_id_to_panel_idx_invalid_floating_point():
-    """Test convert_metric_id_to_panel_idx with floating point numbers in unexpected format.
+def test_convert_metric_id_to_panel_info_three_floating_point():
+    """Test convert_metric_id_to_panel_info with floating point numbers in unexpected format.
 
     Args:
         None
     Returns:
         None: Asserts behavior with floating point representations.
     """
-    with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("4.0.2")
-
-    with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("4.2.0")
+    assert utils.convert_metric_id_to_panel_info("4.0.2") == ("0400", 400, 2)
+    assert utils.convert_metric_id_to_panel_info("4.2.0") == ("0400", 402, 0)
+    assert utils.convert_metric_id_to_panel_info("4.0.3") == ("0400", 400, 3)
 
 
-def test_convert_metric_id_to_panel_idx_edge_case_whitespace():
-    """Test convert_metric_id_to_panel_idx with whitespace in metric IDs.
+def test_convert_metric_id_to_panel_info_edge_case_whitespace():
+    """Test convert_metric_id_to_panel_info with whitespace in metric IDs.
 
     Args:
         None
     Returns:
         None: Asserts that whitespace is handled (int() strips whitespace).
     """
-    assert utils.convert_metric_id_to_panel_idx(" 4") == 400
-    assert utils.convert_metric_id_to_panel_idx("4 ") == 400
-    assert utils.convert_metric_id_to_panel_idx(" 4.02 ") == 402
-
-    assert utils.convert_metric_id_to_panel_idx("4. 02") == 402
-    assert utils.convert_metric_id_to_panel_idx(" 4 . 02 ") == 402
+    assert utils.convert_metric_id_to_panel_info(" 4") == ("0400", None, None)
+    assert utils.convert_metric_id_to_panel_info("4 ") == ("0400", None, None)
+    assert utils.convert_metric_id_to_panel_info("4 . 02") == ("0400", 402, None)
 
 
-def test_convert_metric_id_to_panel_idx_edge_case_dot_only():
-    """Test convert_metric_id_to_panel_idx with only dot character raises exception.
+def test_convert_metric_id_to_panel_info_edge_case_dot_only():
+    """Test convert_metric_id_to_panel_info with only dot character raises exception.
 
     Args:
         None
     Returns:
         None: Asserts that metric ID with only dot raises Exception.
     """
-    with pytest.raises(Exception, match="Invalid metric id"):
-        utils.convert_metric_id_to_panel_idx("..")
+    with pytest.raises(ValueError):
+        utils.convert_metric_id_to_panel_info("..")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx(".")
+        utils.convert_metric_id_to_panel_info(".")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx("4.")
+        utils.convert_metric_id_to_panel_info("4.")
 
     with pytest.raises(ValueError):
-        utils.convert_metric_id_to_panel_idx(".02")
+        utils.convert_metric_id_to_panel_info(".02")
 
 
 # =============================================================================
@@ -8707,7 +8704,7 @@ def test_add_counter_overwrite_existing():
 
     updated_description = "Updated version"
     updated_expression = "updated_expr"
-    updated_architectures = ["gfx906", "gfx908"]
+    updated_architectures = ["gfx908"]
     updated_properties = ["P_UPDATED", "P_NEW"]
 
 
@@ -9275,7 +9272,7 @@ def test_pc_sampling_prof_empty_appcmd(
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
-        assert options_list[-1] == ""
+        assert options_list[-1] == "--"
         mock_console_error.assert_not_called()
 
     mock_capture_subprocess.reset_mock()

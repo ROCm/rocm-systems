@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,23 +10,22 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
 
-import collections
-import glob
+##############################################################################
+
+
 import os
 import re
-import sys
 from collections import OrderedDict
 from pathlib import Path
 
@@ -34,7 +33,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import schema
+from utils import rocpd_data, schema
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_debug, console_error, console_log, demarcate
 
@@ -55,8 +54,6 @@ top_stats_build_in_config = {
     },
 }
 
-time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
-
 
 def load_sys_info(f):
     """
@@ -75,6 +72,12 @@ def load_panel_configs(dir):
             if f.endswith(".yaml"):
                 with open(str(Path(root).joinpath(f))) as file:
                     config = yaml.safe_load(file)
+                    # metric key can be None due to some metric tables not having any metrics
+                    # metric key should be empty dict instead of None
+                    for data_source in config["Panel Config"]["data source"]:
+                        metric_table = data_source.get("metric_table")
+                        if metric_table and metric_table["metric"] is None:
+                            metric_table["metric"] = {}
                     d[config["Panel Config"]["id"]] = config["Panel Config"]
 
     # TODO: sort metrics as the header order in case they are not defined in the same order
@@ -94,9 +97,7 @@ def load_profiling_config(config_dir):
             prof_config = yaml.safe_load(file)
             return prof_config
     except FileNotFoundError:
-        console_log(
-            f"Could not find profiling_config.yaml in {config_dir} for filtering analysis report"
-        )
+        console_log(f"Could not find profiling_config.yaml in {config_dir}")
     return dict()
 
 
@@ -167,11 +168,11 @@ def create_df_kernel_top_stats(
     ]
 
     key = "Sum" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
     key = "Mean" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
     key = "Median" + time_unit_str
-    grouped[key] = grouped[key].div(time_units[time_unit])
+    grouped[key] = grouped[key].div(config.TIME_UNITS[time_unit])
 
     grouped = grouped.reset_index()  # Remove special group indexing
 
@@ -194,7 +195,7 @@ def create_df_kernel_top_stats(
 
 @demarcate
 def create_df_pmc(
-    raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose
+    raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose, config
 ):
     """
     Load all raw pmc counters and join into one df.
@@ -213,6 +214,8 @@ def create_df_pmc(
                     f == schema.pmc_perf_file_prefix + ".csv"
                 ):
                     tmp_df = pd.read_csv(str(Path(root).joinpath(f)))
+                    if config.get("format_rocprof_output") == "rocpd":
+                        tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
                     # Demangle original KernelNames
                     kernel_name_shortener(tmp_df, kernel_verbose)
 

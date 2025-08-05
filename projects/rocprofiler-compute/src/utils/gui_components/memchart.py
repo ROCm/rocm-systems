@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,22 +10,23 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 from dash import html
 from dash_svg import G, Path, Rect, Svg, Text
 
-from config import HIDDEN_COLUMNS
 from utils.logger import console_error
 
 
@@ -312,7 +313,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D Rd"]),
+                children=memchart_values["sL1D Rd"],
             ),
             Text(
                 x="838",
@@ -320,7 +321,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_hit",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1D Hit"],
+                children=memchart_values["sL1D Hit"],
             ),
             Text(
                 x="838",
@@ -328,7 +329,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_lat",
                 fill="rgb(0, 0, 0)",
                 fontSize="12px",
-                children=memchart_values["VL1D Lat"],
+                children=memchart_values["sL1D Lat"],
             ),
             Text(
                 x="1000",
@@ -336,7 +337,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_rd",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D_L2 Rd"]),
+                children=memchart_values["sL1D_L2 Rd"],
             ),
             Text(
                 x="1000",
@@ -344,7 +345,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_wr",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=format_value_for_display(memchart_values["VL1D_L2 Wr"]),
+                children=memchart_values["sL1D_L2 Wr"],
             ),
             Text(
                 x="1008",
@@ -352,7 +353,7 @@ def insert_chart_data(mem_data, base_data):
                 id="sl1_l2_atom",
                 fill="#FFFFFF",
                 fontSize="12px",
-                children=memchart_values["VL1D_L2 Atomic"],
+                children=memchart_values["sL1D_L2 Atomic"],
             ),
             # ----------------------------------------
             # Instr L1  Cache Block

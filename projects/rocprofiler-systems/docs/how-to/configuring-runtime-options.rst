@@ -217,6 +217,14 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+ROCPROFSYS_ROCM_GROUP_BY_QUEUE
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, Perfetto trace will show the HIP streams to which kernel
+and memory copy operations submitted. With the
+``ROCPROFSYS_ROCM_GROUP_BY_QUEUE=ON`` setting, the trace will display HSA queues
+to which these kernel and memory operations were submitted.
+
 Exploring GPU Metrics
 ---------------------
 

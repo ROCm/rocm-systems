@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import os
 from dataclasses import dataclass
@@ -228,7 +230,7 @@ class MIGPUSpecs:
         gpu_arch_lower = gpu_arch_.lower()
 
         # Handle gfx942 with chip_id mapping
-        if gpu_arch_lower not in ("gfx906", "gfx908", "gfx90a"):
+        if gpu_arch_lower not in ("gfx908", "gfx90a"):
             if chip_id_ and int(chip_id_) in cls._chip_id_dict:
                 gpu_model = cls._chip_id_dict.get(int(chip_id_))
             else:
@@ -283,7 +285,7 @@ class MIGPUSpecs:
         4. Default settings (last resort)
         """
         # Constants for legacy GPUs that don't support compute partitions
-        LEGACY_ARCHS = {"gfx906", "gfx908", "gfx90a"}
+        LEGACY_ARCHS = {"gfx908", "gfx90a"}
         LEGACY_MODELS = {"mi50", "mi60", "mi100", "mi210", "mi250", "mi250x"}
 
         # Normalize inputs to lowercase for consistent comparison

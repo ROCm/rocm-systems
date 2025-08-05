@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,24 +10,28 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import copy
-import sys
 from pathlib import Path
 
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
-from rocprof_compute_tui.utils.tui_utils import process_panels_to_dataframes
+from rocprof_compute_tui.utils.tui_utils import (
+    get_top_kernels_and_dispatch_ids,
+    process_panels_to_dataframes,
+)
 from utils import file_io, parser, schema
 from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, demarcate
@@ -38,29 +42,28 @@ class tui_analysis(OmniAnalyze_Base):
         super().__init__(args, supported_archs)
         self.path = str(path)
         self.arch = None
+        self.raw_dfs = {}
+        self.kernel_dfs = {}
 
     # -----------------------
     # Required child methods
     # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to analysis."""
-        # Read profiling config
         self._profiling_config = file_io.load_profiling_config(self.path)
 
-        # initalize runs
         self._runs = self.initalize_runs()
 
         if self.get_args().random_port:
             console_error("--gui flag is required to enable --random-port")
 
-        # create 'mega dataframe'
         self._runs[self.path].raw_pmc = file_io.create_df_pmc(
             self.path,
             self.get_args().nodes,
             self.get_args().spatial_multiplexing,
             self.get_args().kernel_verbose,
             self.get_args().verbose,
+            self._profiling_config,
         )
 
         if self.get_args().spatial_multiplexing:
@@ -79,21 +82,33 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_verbose=self.get_args().kernel_verbose,
         )
 
-        # demangle and overwrite original 'Kernel_Name'
         kernel_name_shortener(
             self._runs[self.path].raw_pmc, self.get_args().kernel_verbose
         )
 
-        # create the loaded table
-        parser.load_table_data(
-            workload=self._runs[self.path],
-            dir=self.path,
-            is_gui=False,
-            args=self.get_args(),
+        # 1. load top kernel
+        parser.load_kernel_top(
+            workload=self._runs[self.path], dir=self.path, args=self.get_args()
         )
 
+        # 2. load table data for each kernel
+        self.raw_dfs.clear()
+        for idx in self._runs[self.path].raw_pmc.index:
+            kernel_df = self._runs[self.path].raw_pmc.loc[[idx]]
+            kernel_name = kernel_df.pmc_perf["Kernel_Name"].loc[idx]
+            this_dfs = copy.deepcopy(self._runs[self.path].dfs)
+            parser.eval_metric(
+                this_dfs,
+                self._runs[self.path].dfs_type,
+                self._runs[self.path].sys_info.iloc[0],
+                kernel_df,
+                self.get_args().debug,
+                self._profiling_config,
+            )
+
+            self.raw_dfs[kernel_name] = this_dfs
+
     def initalize_runs(self, normalization_filter=None):
-        # load required configs
         sysinfo_path = Path(self.path)
         sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
         self.arch = sys_info.iloc[0]["gpu_arch"]
@@ -109,10 +124,6 @@ class tui_analysis(OmniAnalyze_Base):
         self.load_options(normalization_filter)
 
         w = schema.Workload()
-        # FIXME:
-        #    For regular single node case, load sysinfo.csv directly
-        #    For multi-node, either the default "all", or specified some,
-        #    pick up the one in the 1st sub_dir. We could fix it properly later.
         w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
         mspec = self.get_socs()[self.arch]._mspec
         if args.specs_correction:
@@ -125,43 +136,14 @@ class tui_analysis(OmniAnalyze_Base):
         return self._runs
 
     @demarcate
-    def run_analysis(self):
-        """Run TUI analysis."""
-        super().run_analysis()
-
-        roof_plot = None
-        # 1. check if not baseline && compatible soc:
-        if self.arch in [
-            # >= MI200
-            "gfx90a",
-            "gfx940",
-            "gfx941",
-            "gfx942",
-            "gfx950",
-        ]:
-            # add roofline plot to cli output
-            self.get_socs()[self.arch].analysis_setup(
-                roofline_parameters={
-                    "workload_dir": self.path,
-                    "device_id": 0,
-                    "sort_type": "kernels",
-                    "mem_level": "ALL",
-                    "include_kernel_names": False,
-                    "is_standalone": False,
-                    "roofline_data_type": "FP32",
-                }
+    def run_kernel_analysis(self):
+        self.kernel_dfs.clear()
+        for kernel_name, df in self.raw_dfs.items():
+            self.kernel_dfs[kernel_name] = process_panels_to_dataframes(
+                self.get_args(), df, self._arch_configs[self.arch], roof_plot=None
             )
-            roof_obj = self.get_socs()[self.arch].roofline_obj
+        return self.kernel_dfs
 
-            if roof_obj:
-                # NOTE: using default data type
-                roof_plot = roof_obj.cli_generate_plot(roof_obj.get_dtype()[0])
-
-        results = process_panels_to_dataframes(
-            self.get_args(),
-            self._runs,
-            self._arch_configs[self.arch],
-            self._profiling_config,
-            roof_plot=roof_plot,
-        )
-        return results
+    @demarcate
+    def run_top_kernel(self):
+        return get_top_kernels_and_dispatch_ids(self._runs)

@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import argparse
 import importlib
@@ -169,6 +171,14 @@ class RocProfCompute:
         )
         self.__args = parser.parse_args()
 
+        if (
+            "format_rocprof_output" in self.__args
+            and self.__args.format_rocprof_output != "rocpd"
+        ):
+            console_warning(
+                f"The option --format-rocprof-output currently set to {self.__args.format_rocprof_output} will default to rocpd in a future release."
+            )
+
         if self.__args.mode == None:
             if self.__args.specs:
                 print(generate_machine_specs(self.__args))
@@ -245,14 +255,6 @@ class RocProfCompute:
 
         if self.__args.name.find("/") != -1:
             console_error("'/' not permitted in profile name")
-
-        # Deprecation warning for hardware blocks
-        if [
-            name
-            for name, type in self.__args.filter_blocks.items()
-            if type == "hardware_block"
-        ]:
-            console_warning("Hardware block based filtering will be deprecated soon")
 
         # FIXME:
         #     Changing default path should be done at the end of arg parsing stage,

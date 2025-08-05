@@ -769,7 +769,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     att_options.add_argument(
         "--att-buffer-size",
-        help="Thread trace buffer size. Default 96MB",
+        help="Thread trace buffer size. Default 256MB",
         default=None,
         type=str,
     )
@@ -777,6 +777,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     att_options.add_argument(
         "--att-shader-engine-mask",
         help="Bitmask of shader engines to enable. Default 0x1",
+        default=None,
+        type=str,
+    )
+
+    att_options.add_argument(
+        "--att-gpu-index",
+        help="Comma-separated list of GPU index(es) to enable thread trace. Default: All",
         default=None,
         type=str,
     )
@@ -1551,6 +1558,12 @@ def run(app_args, args, **kwargs):
             update_env(
                 "ROCPROF_ATT_PARAM_SERIALIZE_ALL",
                 args.att_serialize_all,
+                overwrite=True,
+            )
+        if args.att_gpu_index:
+            update_env(
+                "ROCPROF_ATT_PARAM_GPU_INDEX",
+                args.att_gpu_index,
                 overwrite=True,
             )
         if check_att_capability(args):
