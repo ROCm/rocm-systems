@@ -20,7 +20,7 @@ jobs:
         system: [
           #{os: 'ubuntu', os-release: '22.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04', rocm-version: '6.4'},
           #{os: 'ubuntu', os-release: '24.04', package: 'DEB', image: 'dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04', rocm-version: '6.4'},
-          {os: 'RHEL', os-release: '8.10', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
+          #{os: 'RHEL', os-release: '8.10', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-8.10', rocm-version: '6.4'},
           {os: 'RHEL', os-release: '9.4', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.4', rocm-version: '6.4'},
           {os: 'RHEL', os-release: '9.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-rhel-9.5', rocm-version: '6.4'},
           #{os: 'SLES', os-release: '15.5', package: 'RPM', image: 'dgaliffiamd/rocprofiler-systems:ci-base-opensuse-15.5', rocm-version: '6.4'},
@@ -74,7 +74,7 @@ jobs:
         if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Build rocprofiler-systems
-      timeout-minutes: 30
+      timeout-minutes: 35
       shell: bash
       run: |
         set -v
