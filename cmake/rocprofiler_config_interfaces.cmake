@@ -226,28 +226,6 @@ target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_l
 
 # ----------------------------------------------------------------------------------------#
 #
-# HSAKMT
-#
-# ----------------------------------------------------------------------------------------#
-
-find_package(
-    hsakmt
-    REQUIRED
-    CONFIG
-    HINTS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATHS
-    ${rocm_version_DIR}
-    ${ROCM_PATH}
-    PATH_SUFFIXES
-    lib/cmake/hsakmt)
-
-target_link_libraries(rocprofiler-sdk-hsakmt INTERFACE hsakmt::hsakmt)
-rocprofiler_config_nolink_target(rocprofiler-sdk-hsakmt-nolink hsakmt::hsakmt)
-
-# ----------------------------------------------------------------------------------------#
-#
 # drm
 #
 # ----------------------------------------------------------------------------------------#
