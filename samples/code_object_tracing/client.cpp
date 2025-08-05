@@ -36,6 +36,7 @@
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/secure_filename.hpp"
 
 #include <cxxabi.h>
 #include <atomic>
@@ -156,8 +157,8 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
 void
 print_call_stack(const call_stack_t& _call_stack)
 {
-    auto ofname = std::string{"code_object_trace.log"};
-    if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
+    // Use secure filename validation from common utilities
+    auto ofname = common::secure::get_safe_output_filename("code_object_trace.log");
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};

@@ -23,6 +23,7 @@
 #pragma once
 
 #include "filesystem.hpp"
+#include "secure_filename.hpp"
 
 #include <cstdint>
 #include <fstream>
@@ -49,7 +50,9 @@ print_call_stack(std::string         ofname,
                  const call_stack_t& _call_stack,
                  const char*         env_variable = "ROCPROFILER_SAMPLE_OUTPUT_FILE")
 {
-    if(auto* eofname = getenv(env_variable)) ofname = eofname;
+    // Use secure filename validation
+    std::cout << "Gopesh$$$$$$$$$$$$$$$$$$" << std::endl;
+    ofname = common::secure::get_safe_filename(env_variable, ofname);
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};

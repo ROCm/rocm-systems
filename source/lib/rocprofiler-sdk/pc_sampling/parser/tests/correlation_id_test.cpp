@@ -404,8 +404,10 @@ pcs_parser_multi_buffer()
     EXPECT_EQ(check_samples(sample.first, sample.second),
               true);  // MultiBuffer: parsed ID does not match correct ID
 
-    delete[] all_allocations[0].first;
-    delete[] all_allocations[1].first;
+    for(auto& allocation : all_allocations)
+    {
+        delete[] allocation.first;
+    }
 }
 
 TEST(pcs_parser, multi_buffer)

@@ -25,6 +25,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "common/secure_filename.hpp"
+
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -243,8 +245,7 @@ rocprofiler_configure(uint32_t                 version,
 
     auto* tool_data = new tool_data_t{};
 
-    std::string filename = "counter_collection.log";
-    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
+    std::string filename = common::secure::get_safe_output_filename("counter_collection.log");
     if(filename == "stdout")
         tool_data->output_stream = &std::cout;
     else if(filename == "stderr")
