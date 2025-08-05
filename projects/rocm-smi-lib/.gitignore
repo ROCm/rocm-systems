@@ -1,0 +1,35 @@
+# NOTE! Please use 'git ls-files -i --exclude-standard'
+# command after changing this file, to see if there are
+# any tracked files which get ignored after the change.
+
+# VisualStudioCode
+.venv/
+.vscode/
+_build
+
+# below files are generated via CMake
+include/rocm_smi/rocm_smi64Config.h
+oam/include/oam/oamConfig.h
+python_smi_tools/rsmiBindingsInit.py
+
+# Build directory
+build/
+
+# CMake cache
+.cache/
+
+# Simulated SYSFS - for early development or debug
+device/
+
+# Misc
+__pycache__
+README
+README.html
+
+# do NOT ignore these files
+!.clang-format
+!.clang-tidy
+!.clangd
+
+# avoid duplicating contributing.md due to conf.py
+docs/CHANGELOG.md

@@ -1,0 +1,5 @@
+pmc:  CPC_CPC_STAT_STALL CPC_UTCL1_STALL_ON_TRANSLATION
+
+gpu:
+range:
+kernel:
