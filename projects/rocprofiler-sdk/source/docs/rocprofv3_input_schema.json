@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Schema for the rocprofv3 JSON input",
+  "properties": {
+      "jobs": {
+        "type": "array",
+        "description": "rocprofv3 input data per application run",
+        "items": {
+            "type" : "object",
+             "description": "data for rocprofv3",
+              "properties": {
+
+                    "pmc": {
+                      "type" : "array",
+                      "description": "list of counters to collect"
+                     },
+                    
+                    "pmc_groups": {
+                         "type" : "array",
+                         "description": "An array containing lists of PMC counters to collect in a multiplexing fashion (e.x. [[counter1, counter2], [counter3, counter4]])"
+                     },
+                    "pmc_group_interval": {
+                         "type" : "integer",
+                          "description": "Number of kernel launches between selecting the next group of counters to collect"
+                     },
+                     
+                     "kernel_include_regex":{
+                        "type": "string",
+                        "description": "Include the kernels matching this filter"
+                     },
+
+                     "kernel_exclude_regex": {
+                      "type": "string",
+                      "description": "Exclude the kernels matching this filter"
+                     },
+
+                     "kernel_iteration_range": {
+                        "type": "string",
+                        "description": "Iteration range for each kernel that match the filter [start-stop]"
+                     },
+
+                     "hip_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Traces (runtime + compiler)"
+                     },
+
+                     "hip_runtime_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Runtime API Traces"
+                     },
+
+                     "hip_compiler_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Compiler generated code Traces"
+                     },
+
+                     "marker_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Marker (ROCTx) Traces"
+                     },
+
+                     "kernel_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Kernel Dispatch Traces"
+                     },
+
+                     "memory_copy_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Memory Copy Traces"
+                     },
+
+                     "memory_allocation_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Memory Allocation Traces"
+                     },
+		     "rocdecode_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting rocDecode Traces"
+                     },
+		     "rocjpeg_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting rocJPEG Traces"
+                     },
+                     "scratch_memory_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Scratch Memory operations Traces"
+                     },
+
+                     "stats": {
+                          "type": "boolean",
+                          "description": "For Collecting statistics of enabled tracing types"
+                     },
+
+                     "hsa_trace": {
+                          "type": "boolean",
+                          "description":"For Collecting HSA Traces (core + amd + image + finalizer)"
+                     },
+
+                     "hsa_core_trace": {
+                            "type": "boolean",
+                            "description": "For Collecting HSA API Traces (core API)"
+                     },
+
+                     "hsa_amd_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (AMD-extension API)"
+                     },
+
+                     "hsa_finalize_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (Finalizer-extension API)"
+                     },
+
+                     "hsa_image_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (Image-extenson API)"
+                     },
+
+		     "runtime_trace" : {
+			     "type": "boolean",
+			     "description": "For collecting HIP (runtime), memory copy, memory allocation, marker, scratch memory, rocDecode, and Kernel dispatch traces."
+		     },
+
+                     "sys_trace" : {
+                              "type": "boolean",
+                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Memory allocation, Scratch memory, rocDecode, rocJPEG, and Kernel dispatch traces"
+                     },
+
+                     "mangled_kernels": {
+                      "type": "boolean",
+                      "description": "Do not demangle the kernel names"
+                     },
+
+                     "truncate_kernels": {
+                      "type": "boolean",
+                      "description": "Truncate the demangled kernel names"
+                     },
+
+                     "output_file":{
+                      "type": "string",
+                      "description": "For the output file name"
+                     },
+
+                     "output_directory":{
+                      "type": "string",
+                      "description": "For adding output path where the output files will be saved"
+                     },
+
+                     "output_format":{
+                      "type": "array",
+                      "description": "For adding output format (supported formats: csv, json, pftrace)"
+                     },
+
+                     "list_metrics" : {
+                      "type" : "boolean",
+                      "description": "List the metrics"
+                     },
+
+                     "log_level":{
+                      "type": "string",
+                      "description": "fatal, error, warning, info, trace"
+                     },
+
+                     "preload":{
+                      "type": "array",
+                      "description": "Libraries to prepend to LD_PRELOAD (usually for sanitizers)"
+                     },
+                     "minimum-output-data":{
+                      "type": "integer",
+                      "description": "Minimum output data, the output files are generated only if output data size is greater than minimum output data size. It can be used for controlling the generation of output files so that user don't recieve empty files. The input is in KB units"
+                     },
+                     "disable-signal-handlers":{
+                         "type": "boolean",
+                         "description": "Disables the signal handlers in the rocprofv3 tool. When --disable-signal-handlers is set to true, and application has its signal handler on SIGSEGV or similar installed, then its signal handler will be used not the rocprofv3 signal handler. Note: glog still installs signal handlers which provide backtraces"
+                     },
+                     "pc_sampling_unit": {
+                      "type": "string",
+                      "description": "pc sampling unit"
+                     },
+                     "pc_sampling_method": {
+                         "type": "string",
+                         "description": "pc sampling method"
+                    },
+                    "pc_sampling_interval": {
+                         "type": "integer",
+                         "description": "pc sampling interval"
+                    },
+                    "pc-sampling-beta-enabled": {
+                         "type": "boolean",
+                         "description": "enable pc sampling support; beta version"
+                    }
+                 }
+              }
+           }
+        }
+}

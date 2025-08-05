@@ -1,0 +1,123 @@
+name: Documentation
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ amd-staging, amd-mainline ]
+    paths:
+      - '*.md'
+      - 'VERSION'
+      - 'source/docs/**'
+      - 'source/scripts/update-docs.sh'
+      - 'source/include/rocprofiler-sdk/**'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - '*.md'
+      - 'VERSION'
+      - 'source/docs/**'
+      - 'source/scripts/update-docs.sh'
+      - 'source/include/rocprofiler-sdk/**'
+      - '.github/workflows/docs.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  build-docs:
+    runs-on: rocprof-azure-docker-emu-runner-set
+    container: continuumio/miniconda3
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+            submodules: true
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Create Docs Directory
+        run:
+          mkdir -p docs/_doxygen/rocprofiler-sdk
+          mkdir -p docs/_doxygen/roctx
+      - name: Install documentation dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y doxygen graphviz build-essential cmake
+      - name: Build Docs
+        shell: bash -el {0}
+        working-directory: source/docs
+        run: |
+          conda init
+          conda env create -n rocprofiler-docs -f environment.yml
+          conda activate rocprofiler-docs
+          python3 -m pip install sphinx
+          python3 -m pip install doxysphinx rocm-docs-core
+          ../scripts/update-docs.sh
+      - name: Upload artifact
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs
+
+  deploy-docs:
+    if: github.ref == 'refs/heads/amd-mainline'
+    runs-on: ubuntu-latest
+    needs: build-docs
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  build-docs-from-source:
+    runs-on: rocprof-azure-gpuless-emu-runner-set
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+            submodules: true
+      - name: Create Docs Directory
+        run:
+          mkdir -p source/docs/_doxygen/rocprofiler-sdk
+          mkdir -p source/docs/_doxygen/roctx
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          apt-get update
+          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev
+          python3 -m pip install -r requirements.txt
+
+      - name: Configure, Build, Install, and Package
+        timeout-minutes: 60
+        shell: bash
+        run:
+          export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
+          cmake -B build
+            -DROCPROFILER_DEP_ROCMCORE=ON
+            -DROCPROFILER_BUILD_DOCS=ON
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
+            -DCPACK_GENERATOR='DEB;RPM;TGZ'
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
+            -DPython3_EXECUTABLE=$(which python3)
+            . &&
+          cmake --build build --target docs --parallel 4 &&
+          cmake --build build --target all --parallel 12 &&
+          cmake --build build --target install --parallel 12 &&
+          cmake --build build --target package --parallel 12
