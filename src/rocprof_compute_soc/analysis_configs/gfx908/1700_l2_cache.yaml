@@ -87,6 +87,12 @@ Panel Config:
       by the cache line size. This value does not consider partial requests, so for
       example, if only a single value is requested in a cache line, the data movement
       will still be counted as a full cache line.
+    Read Bandwidth: Total number of bytes looked up in the L2 cache for read requests,
+      per normalization unit.
+    Write Bandwidth: Total number of bytes looked up in the L2 cache for write requests,
+      per normalization unit.
+    Atomic Bandwidth: Total number of bytes looked up in the L2 cache for atomic requests,
+      per normalization unit.
     Req: The total number of incoming requests to the L2 from all clients for all
       request types, per normalization unit.
     Read Req: The total number of read requests to the L2 from all clients.
@@ -143,6 +149,12 @@ Panel Config:
     Remote Read: The total number of L2 requests to Infinity Fabric to read 32B or
       64B of data from any source other than the accelerator's local HBM, per normalization
       unit.
+    Read Bandwidth - PCIe: Total number of bytes due to L2 read requests due to PCIe
+      traffic, per normalization unit.
+    "Read Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 read
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Read Bandwidth - HBM: Total number of bytes due to L2 read requests due to HBM
+      traffic, per normalization unit.
     Write and Atomic (32B): The total number of L2 requests to Infinity Fabric to
       write or atomically update 32B of data to any memory location, per normalization
       unit.
@@ -158,6 +170,18 @@ Panel Config:
     Remote Write and Atomic: The total number of L2 requests to Infinity Fabric to
       write or atomically update 32B or 64B of data in any memory location other than
       the accelerator's local HBM, per normalization unit.
+    Write Bandwidth - PCIe: Total number of bytes due to L2 write requests due to
+      PCIe traffic, per normalization unit.
+    "Write Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 write
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Write Bandwidth - HBM: Total number of bytes due to L2 write requests due to HBM
+      traffic, per normalization unit.
+    Atomic Bandwidth - PCIe: Total number of bytes due to L2 atomic requests due to
+      PCIe traffic, per normalization unit.
+    "Atomic Bandwidth - Infinity Fabric\u2122": Total number of bytes due to L2 atomic
+      requests due to Infinity Fabric traffic, per normalization unit.
+    Atomic Bandwidth - HBM: Total number of bytes due to L2 atomic requests due to
+      HBM traffic, per normalization unit.
     Atomic: The total number of L2 requests to Infinity Fabric to atomically update
       32B or 64B of data in any memory location, per normalization unit. See Request
       flow for more detail. Note that on current CDNA accelerators, such as the MI2XX,
