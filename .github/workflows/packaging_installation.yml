@@ -18,12 +18,12 @@ jobs:
     strategy:
       matrix:
         system: [
-          #{os: 'ubuntu', os-release: '22.04', rocm-version: '6.4'},
-          #{os: 'ubuntu', os-release: '24.04', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '8.10', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.4', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.5', rocm-version: '6.4'},
-          {os: 'opensuse', os-release: '15.6', rocm-version: '6.4'}
+          {os: 'ubuntu', os-release: '22.04', rocm-version: '6.4'},
+          {os: 'ubuntu', os-release: '24.04', rocm-version: '6.4'},
+          {os: 'rhel', os-release: '8.10', rocm-version: '6.4'},
+          {os: 'rhel', os-release: '9.4', rocm-version: '6.4'},
+          {os: 'rhel', os-release: '9.5', rocm-version: '6.4'},
+          #{os: 'opensuse', os-release: '15.6', rocm-version: '6.4'}
         ]
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-${{ matrix.system.os }}-${{ matrix.system.os-release }}
