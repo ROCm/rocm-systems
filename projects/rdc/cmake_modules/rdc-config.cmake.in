@@ -1,0 +1,19 @@
+# - Config file for the rdc package
+# It defines the following variables
+#  RDC_INCLUDE_DIRS - include directories for rdc
+#  RDC_LIBRARIES    - libraries to link against
+
+@PACKAGE_INIT@
+
+# Compute paths
+get_filename_component(RDC_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+set(ROCM_RDC_INCLUDE_DIR "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_INCLUDEDIR}")
+set(ROCM_RDC_LIB_DIR "${PACKAGE_PREFIX_DIR}/${CMAKE_INSTALL_LIBDIR}")
+
+# Our library dependencies (contains definitions for IMPORTED targets)
+if(NOT TARGET rdc_libs AND NOT rdc_BINARY_DIR)
+    include("${RDC_CMAKE_DIR}/rdcTargets.cmake")
+endif()
+
+# These are IMPORTED targets created by rdcTargets.cmake
+set(ROCM_RDC_LIBRARIES "@CONF_LIBS@")
