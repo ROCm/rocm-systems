@@ -18,12 +18,12 @@ jobs:
     strategy:
       matrix:
         system: [
-          #{os: 'ubuntu', os-release: '22.04', package: 'deb', rocm-version: '6.4'},
-          #{os: 'ubuntu', os-release: '24.04', package: 'deb', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '8.10', package: 'rpm', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.4', package: 'rpm', rocm-version: '6.4'},
-          #{os: 'rhel', os-release: '9.5', package: 'rpm', rocm-version: '6.4'},
-          {os: 'opensuse', os-release: '15.6', package: 'rpm', rocm-version: '6.4'}
+          #{os: 'ubuntu', os-release: '22.04', rocm-version: '6.4'},
+          #{os: 'ubuntu', os-release: '24.04', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '8.10', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.4', rocm-version: '6.4'},
+          #{os: 'rhel', os-release: '9.5', rocm-version: '6.4'},
+          {os: 'opensuse', os-release: '15.6', rocm-version: '6.4'}
         ]
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-${{ matrix.system.os }}-${{ matrix.system.os-release }}
@@ -91,9 +91,9 @@ jobs:
         gpgcheck=1
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
-        zypper refresh
-        zypper install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
-        zypper install -y rocm-dev rocdecode-devel python3-devel
+        zypper --non-interactive refresh
+        zypper --non-interactive install https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        zypper --non-interactive install rocm-dev rocdecode-devel python3-devel
 
     - name: Build rocprofiler-systems
       timeout-minutes: 35
