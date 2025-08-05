@@ -1,0 +1,260 @@
+= CTF plugin for ROCProfiler
+13 December 2022
+Philippe Proulx
+
+This plugin writes the received ROCProfiler tracer and profiler records to
+a https://diamon.org/ctf/[CTF] trace.
+
+== Build requirements
+
+* Python ≥ 3.10
+* barectf ≥ 3.1.1 (`pip3 install barectf`)
+* PyYAML (`apt-get install python3-yaml`)
+* CppHeaderParser (`pip3 install CppHeaderParser`)
+
+== Usage
+
+Once installed, you may load this plugin with `rocprofv2` using
+the `--plugin ctf` command-line arguments.
+
+This plugin honours the `OUTPUT_PATH` environment variable which
+`rocprofv2` sets with the `-d` option. If you pass `-d my-dir` to
+`rocprofv2`, then the plugin will write the CTF trace to the
+`my-dir/trace` directory.
+
+IMPORTANT: This plugin performs important cleanup tasks at finalization
+time, so the resulting CTF trace could be corrupted if the plugin is
+never finalized.
+
+Once the plugin is finalized, open the resulting trace directory with
+either https://babeltrace.org/[Babeltrace{nbsp}2] or
+https://www.eclipse.org/tracecompass/[Trace Compass] to view or analyze
+it.
+
+=== Event record types
+
+This plugin writes to different CTF data streams having different types.
+On the file system, the prefix of a data stream file name indicates the
+data stream type, that is:
+
+`roctx_`::
+    rocTX messages.
++
+Each CTF event record is named `roctx` and corresponds to a rocTX
+tracer record.
++
+The fields are:
++
+--
+[horizontal]
+`thread_id`::
+    Thread ID.
+
+`id`::
+    rocTX ID.
+
+`msg`::
+    rocTX message.
+--
+
+`hsa_api_`::
+    HSA API beginning and end function calls.
++
+All CTF event records have the following common fields:
++
+--
+[horizontal]
+`thread_id`::
+    Thread ID.
+
+`queue_id`::
+    Queue ID.
+
+`agent_id`::
+    Agent ID.
+
+`correlation_id`::
+    Correlation ID.
+--
++
+For each ROCProfiler HSA API tracer record for the HSA function named
+`__name__`, this plugin writes two event records:
++
+`__name___begin`:::
+    Beginning of the function call.
++
+The event record contains fields which correspond to most of the
+parameters of the HSA function.
+
+`__name___end`:::
+    End of the function call.
+
+`hip_api_`::
+    HIP API beginning and end function calls.
++
+All CTF event records have the following common fields:
++
+--
+[horizontal]
+`thread_id`::
+    Thread ID.
+
+`queue_id`::
+    Queue ID.
+
+`agent_id`::
+    Agent ID.
+
+`correlation_id`::
+    Correlation ID.
+
+`kernel_name`::
+    Kernel name (empty string if not available).
+--
++
+For each ROCProfiler HIP API tracer record for the HIP function named
+`__name__`, this plugin writes two event records:
++
+`__name__Begin`:::
+    Beginning of the function call.
++
+The event record contains fields which correspond to most of the
+parameters of the HIP function.
+
+`__name__End`:::
+    End of the function call.
+
+`api_ops_`::
+    HSA/HIP API beginning and end operations.
++
+All CTF event records have the following common fields:
++
+--
+[horizontal]
+`thread_id`::
+    Thread ID.
+
+`queue_id`::
+    Queue ID.
+
+`agent_id`::
+    Agent ID.
+
+`correlation_id`::
+    Correlation ID.
+--
++
+The possible CTF event records are:
++
+`hsa_op_begin`:::
+    HSA API operation beginning.
+
+`hsa_op_end`:::
+    HSA API operation end.
+
+`hip_op_begin`:::
+    HIP API operation beginning.
++
+Such an event record also has the field `kernel_name` which is the
+kernel name (empty string if not available).
+
+`hip_op_end`:::
+    HIP API operation end.
+
+`profiler_`::
+    Profiler records.
++
+All CTF event records have the following common fields:
++
+--
+[horizontal]
+`dispatch`::
+    Dispatch ID.
+
+`gpu_id`::
+    GPU ID.
+
+`queue_id`::
+    Queue ID.
+
+`queue_index`::
+    Queue index.
+
+`process_id`::
+    Process ID.
+
+`thread_id`::
+    Thread ID.
+
+`kernel_id`::
+    Kernel ID.
+
+`kernel_name`::
+    Kernel name (empty string if not available).
+
+`counter_names`::
+    Array of counter names, each one having a corresponding integral
+    value in the `counter_values` field.
+
+`counter_values`::
+    Array of integers, each one being the value of a counter of which
+    the name is a corresponding string in the `counter_names` field.
+--
++
+The possible CTF event records are:
++
+`profiler_record`:::
+    Profiler record.
+
+`profiler_record_with_kernel_properties`:::
+    Profiler record with kernel properties.
++
+Such an event record also has the following fields:
++
+--
+`grid_size`::
+    Grid size.
+
+`workgroup_size`::
+    Workgroup size.
+
+`lds_size`::
+    Local memory size.
+
+`scratch_size`::
+    Scratch size.
+
+`arch_vgpr_count`::
+    Architecture vector general purpose register count.
+
+`accum_vgpr_count`::
+    Accum. vector general purpose register count
+
+`sgpr_count`::
+    Scalar general purpose register count.
+
+`wave_size`::
+    Wavefront size.
+
+`signal_handle`::
+    Signal handle.
+--
+
+`hsa_handles_`::
+    HSA handle type mappings.
++
+Each CTF event record is named `hsa_handle_type` and maps an HSA handle
+to a processor unit type (CPU or GPU).
++
+The clock value of those event records is irrelevant (always{nbsp}0).
++
+The fields are:
++
+--
+[horizontal]
+`handle`::
+    HSA handle.
+
+`type`::
+    Processor unit type (`CPU` or `GPU` enumeration label).
+--
