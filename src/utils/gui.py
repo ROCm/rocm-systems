@@ -97,7 +97,9 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
                                 if (i < len(bounds) - 1)
                                 else ""
                             )
-                        ).format(column=column, min_bound=min_bound, max_bound=max_bound),
+                        ).format(
+                            column=column, min_bound=min_bound, max_bound=max_bound
+                        ),
                         "column_id": column,
                     },
                     "backgroundColor": backgroundColor,
@@ -203,7 +205,9 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [float(x) if x != "" else float(0) for x in display_df["Avg"]]
+        display_df["Avg"] = [
+            float(x) if x != "" else float(0) for x in display_df["Avg"]
+        ]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(
@@ -265,7 +269,9 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                 ).update_xaxes(range=[0, 110])
             )
     else:
-        console_error("Table id %s. Cannot determine barchart type." % table_config["id"])
+        console_error(
+            "Table id %s. Cannot determine barchart type." % table_config["id"]
+        )
 
     # update layout for each of the charts
     for fig in d_figs:

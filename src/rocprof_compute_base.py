@@ -27,7 +27,6 @@
 import argparse
 import importlib
 import os
-import shutil
 import socket
 import sys
 import time
@@ -188,7 +187,6 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
         elif self.__args.mode == "profile":
-
             # FIXME:
             #     Might want to get host name from detected spec
             if self.__args.subpath == "node_name":
@@ -263,7 +261,9 @@ class RocProfCompute:
         # Update default path
         if self.__args.path == str(Path(os.getcwd()).joinpath("workloads")):
             self.__args.path = str(
-                Path(self.__args.path).joinpath(self.__args.name, self.__mspec.gpu_model)
+                Path(self.__args.path).joinpath(
+                    self.__args.name, self.__mspec.gpu_model
+                )
             )
 
         # instantiate desired profiler

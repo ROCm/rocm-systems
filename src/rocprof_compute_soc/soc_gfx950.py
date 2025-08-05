@@ -29,7 +29,7 @@ from pathlib import Path
 import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from roofline import Roofline
-from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.logger import console_log, console_warning, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 from utils.utils import mibench
 

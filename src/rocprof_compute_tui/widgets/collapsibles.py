@@ -141,7 +141,9 @@ def build_subsection(
         widgets = []
         if "header_label" in subsection_config:
             header_class = subsection_config.get("header_class", "")
-            widgets.append(Label(subsection_config["header_label"], classes=header_class))
+            widgets.append(
+                Label(subsection_config["header_label"], classes=header_class)
+            )
 
         widgets.append(widget)
 
@@ -289,7 +291,9 @@ def build_section_from_config(
                 if subsection:
                     children.append(subsection)
             except Exception as e:
-                error_msg = f"{subsection_config.get('title', 'Unknown')} error: {str(e)}"
+                error_msg = (
+                    f"{subsection_config.get('title', 'Unknown')} error: {str(e)}"
+                )
                 children.append(Label(error_msg, classes="warning"))
     else:
         children = [Label("No configuration provided for this section")]

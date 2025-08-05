@@ -50,7 +50,9 @@ top_stats_build_in_config = {
     1: {
         "id": 1,
         "title": "Dispatch List",
-        "data source": [{"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}],
+        "data source": [
+            {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
+        ],
     },
 }
 
@@ -250,7 +252,9 @@ def create_df_pmc(
     else:
         # regular single node case
         if nodes is None:
-            return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose, verbose)
+            return create_single_df_pmc(
+                raw_data_root_dir, None, kernel_verbose, verbose
+            )
 
         # "empty list" means all nodes
         elif not nodes:

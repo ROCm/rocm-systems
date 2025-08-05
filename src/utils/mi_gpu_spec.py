@@ -152,9 +152,13 @@ class MIGPUSpecs:
                         .get("num_xcds", {})
                     )
                     if "chip_ids" in models and "physical" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["physical"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["physical"]] = (
+                            curr_gpu_model
+                        )
                     if "chip_ids" in models and "virtual" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                            curr_gpu_model
+                        )
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -171,7 +175,9 @@ class MIGPUSpecs:
                 compute_partition = cls._num_xcds_dict.get(single_model)
 
                 if compute_partition is not None:
-                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = compute_partition
+                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = (
+                        compute_partition
+                    )
                     console_debug(
                         "[populate_single_arch_partition_dict] Single model arch found: "
                         "%s -> %s (partition: %s)"

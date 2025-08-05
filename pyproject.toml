@@ -10,7 +10,7 @@ developer = [
 
 [tool.ruff]
 target-version="py38"
-line-length = 90
+line-length = 88
 
 # Ruff's default excludes cover: .bzr, .direnv, .eggs, .git, .git-rewrite, .hg, .ipynb_checkpoints,
 # .mypy_cache, .nox, .pants.d, .pyenv, .pytest_cache, .pytype, .ruff_cache, .svn,
@@ -30,10 +30,6 @@ select = ["E", "W", "F", "I"]
 ignore = ["E713"]
 fixable = ["ALL"]
 unfixable = []
-
-[tool.ruff.lint.pycodestyle]
-ignore-overlong-task-comments = true
-max-line-length = 90
 
 [tool.ruff.format]
 preview = true

@@ -35,7 +35,6 @@ import pandas as pd
 import plotext as plt
 import plotly.express as px
 from textual.widgets import Static
-from textual_plotext import PlotextPlot
 
 from utils.mem_chart import plot_mem_chart
 
@@ -58,7 +57,9 @@ def simple_bar(df, title=None):
             .to_dict()["Avg"]
         )
     else:
-        raise NameError(f"simple_bar: No Metric or Avg in df columns: {str(df.columns)}")
+        raise NameError(
+            f"simple_bar: No Metric or Avg in df columns: {str(df.columns)}"
+        )
 
     plt.clear_figure()
 
@@ -389,7 +390,6 @@ class SimpleBar(Static):
 
 
 class SimpleBox(Static):
-
     DEFAULT_CSS = """
     SimpleBox {
         padding: 0;

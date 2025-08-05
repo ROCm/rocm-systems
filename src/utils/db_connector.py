@@ -26,7 +26,7 @@
 
 import getpass
 import os
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd

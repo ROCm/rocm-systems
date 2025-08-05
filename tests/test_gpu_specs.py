@@ -27,19 +27,17 @@
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from importlib.machinery import SourceFileLoader
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
-import pandas as pd
 import pytest
-import yaml
 
 from src.utils.specs import generate_machine_specs
 
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 
 # NOTE: Only testing gfx942 for now.
@@ -132,7 +130,6 @@ def get_num_xcds():
 
 
 def get_gpu_arch():
-
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
         subprocess.run(

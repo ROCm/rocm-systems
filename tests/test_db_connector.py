@@ -110,7 +110,10 @@ class TestDatabaseConnector:
         mock_path.return_value.is_file.return_value = True
 
         mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100 "], "workload_name": [" test_workload"]}
+            {
+                "gpu_model": ["MI100 "],
+                "workload_name": [" test_workload"],
+            }
         )
         mock_read_csv.return_value = mock_sysinfo
 
@@ -399,7 +402,10 @@ class TestDatabaseConnectorIntegration:
         mock_path.return_value.is_file.return_value = True
 
         mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100"], "workload_name": ["device_filter"]}
+            {
+                "gpu_model": ["MI100"],
+                "workload_name": ["device_filter"],
+            }
         )
         mock_read_csv.return_value = mock_sysinfo
 

@@ -31,7 +31,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Dict, Generator, List, Mapping
+from typing import Dict, List
 
 import pandas as pd
 

@@ -157,7 +157,9 @@ class MainView(Horizontal):
                 analyzer.sanitize()
                 self.logger.info("Step 2: Analyzer sanitized successfully")
             except Exception as e:
-                self.logger.error(f"Step 2 failed - Error sanitizing analyzer: {str(e)}")
+                self.logger.error(
+                    f"Step 2 failed - Error sanitizing analyzer: {str(e)}"
+                )
                 raise
 
             # Step 3: Load sys_info
@@ -193,12 +195,16 @@ class MainView(Horizontal):
                     # If it's already a dict
                     sys_info = sys_info_df
                 else:
-                    raise TypeError(f"Unexpected type for sys_info: {type(sys_info_df)}")
+                    raise TypeError(
+                        f"Unexpected type for sys_info: {type(sys_info_df)}"
+                    )
 
                 self.logger.info(f"Step 4: sys_info converted = {sys_info}")
 
             except Exception as e:
-                self.logger.error(f"Step 4 failed - Error converting sys_info: {str(e)}")
+                self.logger.error(
+                    f"Step 4 failed - Error converting sys_info: {str(e)}"
+                )
                 raise
 
             # Step 5: Load SoC specs
@@ -289,7 +295,7 @@ class MainView(Horizontal):
                 return
 
             kernel_view.update_results(self.per_kernel_dfs, self.top_kernels)
-            self.logger.success(f"Results displayed successfully.")
+            self.logger.success("Results displayed successfully.")
         except Exception as e:
             self.logger.error(f"Error refreshing results: {str(e)}")
 

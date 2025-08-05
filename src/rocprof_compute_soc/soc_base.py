@@ -24,7 +24,6 @@
 ##############################################################################
 
 
-import ctypes
 import glob
 import json
 import math
@@ -32,11 +31,9 @@ import os
 import re
 import shutil
 import sys
-import threading
 from abc import abstractmethod
 from pathlib import Path
 
-import pandas as pd
 import yaml
 
 import config
@@ -170,12 +167,16 @@ class OmniSoC_Base:
         )
 
         # Parse json from amd-smi static --clock
-        amd_smi_mclk = run(["amd-smi", "static", "--clock", "--json"], exit_on_error=True)
+        amd_smi_mclk = run(
+            ["amd-smi", "static", "--clock", "--json"], exit_on_error=True
+        )
         amd_smi_mclk = json.loads(amd_smi_mclk)
 
         if isinstance(amd_smi_mclk, dict):
             # The output of `amd-smi static --clock --json` is a dict with amd-smi>=26.0.0.
-            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"]["frequency_levels"]
+            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"][
+                "frequency_levels"
+            ]
         else:
             # For backward compatibility: the output of `amd-smi static --clock --json` used to be a list for amd-smi<26.0.0.
             amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
@@ -203,7 +204,9 @@ class OmniSoC_Base:
 
         self._mspec.num_xcd = str(
             mi_gpu_specs.get_num_xcds(
-                self._mspec.gpu_arch, self._mspec.gpu_model, self._mspec.compute_partition
+                self._mspec.gpu_arch,
+                self._mspec.gpu_model,
+                self._mspec.compute_partition,
             )
         )
 
@@ -229,7 +232,10 @@ class OmniSoC_Base:
                 "name": "VBIOS Name",
                 "pattern": r"NAME:\s*.*(mi|MI\d*[a-zA-Z]*)",
             },
-            {"name": "Product Name", "pattern": r"PRODUCT_NAME:\s*.*(mi|MI\d*[a-zA-Z]*)"},
+            {
+                "name": "Product Name",
+                "pattern": r"PRODUCT_NAME:\s*.*(mi|MI\d*[a-zA-Z]*)",
+            },
         ]
 
         gpu_model = None
@@ -344,7 +350,9 @@ class OmniSoC_Base:
                 counters = counters.union(
                     {
                         f"{counter_name}[{i}]"
-                        for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
+                        for i in range(
+                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
+                        )
                     }
                 )
 
@@ -379,7 +387,10 @@ class OmniSoC_Base:
 
         if not using_v3():
             # Counters not supported in rocprof v1 / v2
-            counters = counters - {"SQ_INSTS_VALU_MFMA_F8", "SQ_INSTS_VALU_MFMA_MOPS_F8"}
+            counters = counters - {
+                "SQ_INSTS_VALU_MFMA_F8",
+                "SQ_INSTS_VALU_MFMA_MOPS_F8",
+            }
 
         # Following counters are not supported
         # TCP_TCP_LATENCY_sum (except for gfx950)
@@ -633,7 +644,9 @@ class OmniSoC_Base:
                 and not is_tcc_channel_counter(counter)
             ):
                 counters.remove(counter)
-                output_files.append(CounterFile(counter + ".txt", self.__perfmon_config))
+                output_files.append(
+                    CounterFile(counter + ".txt", self.__perfmon_config)
+                )
                 output_files[-1].add(counter)
                 if using_v3():
                     # v3 does not support SQ_ACCUM_PREV_HIRES. Instead we defined our own
@@ -661,7 +674,9 @@ class OmniSoC_Base:
                     added = True
                     # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
-                        tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[i]
+                        tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[
+                            i
+                        ]
                     break
 
             # All files are full, create a new file
@@ -678,7 +693,6 @@ class OmniSoC_Base:
 
         # TODO: rewrite the above logic for spatial_multiplexing later
         if self.get_args().spatial_multiplexing:
-
             # TODO: more error checking
             if len(self.get_args().spatial_multiplexing) != 3:
                 console_error(
@@ -721,7 +735,12 @@ class OmniSoC_Base:
             for f_idx in range(groups_per_bucket):
                 file_name = str(
                     Path(workload_perfmon_dir).joinpath(
-                        "pmc_perf_" + "node_" + str(node_idx) + "_" + str(f_idx) + ".txt"
+                        "pmc_perf_"
+                        + "node_"
+                        + str(node_idx)
+                        + "_"
+                        + str(f_idx)
+                        + ".txt"
                     )
                 )
 
@@ -745,7 +764,9 @@ class OmniSoC_Base:
         else:
             # Output to files
             for f in output_files:
-                file_name_txt = str(Path(workload_perfmon_dir).joinpath(f.file_name_txt))
+                file_name_txt = str(
+                    Path(workload_perfmon_dir).joinpath(f.file_name_txt)
+                )
                 file_name_yaml = str(
                     Path(workload_perfmon_dir).joinpath(f.file_name_yaml)
                 )

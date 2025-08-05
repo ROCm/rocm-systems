@@ -24,9 +24,6 @@
 ##############################################################################
 
 
-from pathlib import Path
-
-import config
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs

@@ -580,21 +580,31 @@ def get_memchart(mem_data, base_data):
                                             Rect(x="319", y="329.5", rx="3", ry="3"),
                                             Rect(x="319", y="382", rx="3", ry="3"),
                                             Rect(x="1367.69", y="271", rx="3", ry="3"),
-                                            Rect(x="1367.69", y="296.5", rx="3", ry="3"),
-                                            Rect(x="1367.69", y="322.5", rx="3", ry="3"),
+                                            Rect(
+                                                x="1367.69", y="296.5", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="1367.69", y="322.5", rx="3", ry="3"
+                                            ),
                                             Rect(x="1078", y="199", rx="3", ry="3"),
                                             Rect(x="1078", y="224.5", rx="3", ry="3"),
                                             Rect(x="1078", y="250.5", rx="3", ry="3"),
                                             Rect(x="771.44", y="103", rx="3", ry="3"),
-                                            Rect(x="770.44", y="358.75", rx="3", ry="3"),
-                                            Rect(x="770.44", y="390.25", rx="3", ry="3"),
+                                            Rect(
+                                                x="770.44", y="358.75", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="770.44", y="390.25", rx="3", ry="3"
+                                            ),
                                             Rect(x="769.44", y="477", rx="3", ry="3"),
                                             Rect(x="769.44", y="508.5", rx="3", ry="3"),
                                             Rect(x="1078", y="278", rx="3", ry="3"),
                                             Rect(x="1078", y="342.5", rx="3", ry="3"),
                                             Rect(x="1078", y="368.5", rx="3", ry="3"),
                                             Rect(x="772.44", y="179", rx="3", ry="3"),
-                                            Rect(x="772.44", y="210.18", rx="3", ry="3"),
+                                            Rect(
+                                                x="772.44", y="210.18", rx="3", ry="3"
+                                            ),
                                             Rect(x="771.44", y="71.28", rx="3", ry="3"),
                                             Rect(x="772.44", y="242", rx="3", ry="3"),
                                             Rect(x="770.44", y="274.5", rx="3", ry="3"),
@@ -617,21 +627,31 @@ def get_memchart(mem_data, base_data):
                                         className="val-3",
                                         children=[
                                             Rect(x="1410.69", y="271", rx="3", ry="3"),
-                                            Rect(x="1410.69", y="296.5", rx="3", ry="3"),
-                                            Rect(x="1410.69", y="322.5", rx="3", ry="3"),
+                                            Rect(
+                                                x="1410.69", y="296.5", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="1410.69", y="322.5", rx="3", ry="3"
+                                            ),
                                             Rect(x="1121", y="199", rx="3", ry="3"),
                                             Rect(x="1121", y="224.5", rx="3", ry="3"),
                                             Rect(x="1121", y="250.5", rx="3", ry="3"),
                                             Rect(x="814.44", y="103", rx="3", ry="3"),
-                                            Rect(x="813.44", y="358.75", rx="3", ry="3"),
-                                            Rect(x="813.44", y="390.25", rx="3", ry="3"),
+                                            Rect(
+                                                x="813.44", y="358.75", rx="3", ry="3"
+                                            ),
+                                            Rect(
+                                                x="813.44", y="390.25", rx="3", ry="3"
+                                            ),
                                             Rect(x="812.44", y="477", rx="3", ry="3"),
                                             Rect(x="812.44", y="508.5", rx="3", ry="3"),
                                             Rect(x="1121", y="278", rx="3", ry="3"),
                                             Rect(x="1121", y="342.5", rx="3", ry="3"),
                                             Rect(x="1121", y="368.5", rx="3", ry="3"),
                                             Rect(x="815.44", y="179", rx="3", ry="3"),
-                                            Rect(x="815.44", y="210.18", rx="3", ry="3"),
+                                            Rect(
+                                                x="815.44", y="210.18", rx="3", ry="3"
+                                            ),
                                             Rect(x="814.44", y="71.28", rx="3", ry="3"),
                                             Rect(x="815.44", y="242", rx="3", ry="3"),
                                             Rect(x="813.44", y="274.5", rx="3", ry="3"),
@@ -1986,11 +2006,11 @@ def format_value_for_display(value, max_length=6):
     if isinstance(value, (int, float)):
         value = abs(value)
         if value >= 1000000000:
-            value = f"{value/1000000000:.1f}B"
+            value = f"{value / 1000000000:.1f}B"
         elif value >= 1000000:
-            value = f"{value/1000000:.1f}M"
+            value = f"{value / 1000000:.1f}M"
         elif value >= 1000:
-            value = f"{value/1000:.1f}K"
+            value = f"{value / 1000:.1f}K"
         elif value == int(value):
             value = str(int(value))
         else:

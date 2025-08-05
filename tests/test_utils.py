@@ -29,7 +29,6 @@ import logging
 logging.trace = lambda *args, **kwargs: None
 
 import builtins
-import glob
 import inspect
 import io
 import json
@@ -38,7 +37,6 @@ import logging
 import os
 import pathlib
 import re
-import selectors
 import shutil
 import subprocess
 import tempfile
@@ -133,8 +131,10 @@ def clean_output_dir(cleanup, output_dir):
         if Path(output_dir).exists():
             try:
                 shutil.rmtree(output_dir)
-            except OSError as e:
-                print("WARNING: shutil.rmdir(output_dir): directory may not be empty...")
+            except OSError:
+                print(
+                    "WARNING: shutil.rmdir(output_dir): directory may not be empty..."
+                )
     return
 
 
@@ -1062,7 +1062,9 @@ def test_v3_json_get_counters_missing_key():
     """
     data = {
         "rocprofiler-sdk-tool": [
-            {"counters": [{"id": {"handle": 1}, "name": "counter1"}]}  # Missing agent_id
+            {
+                "counters": [{"id": {"handle": 1}, "name": "counter1"}]
+            }  # Missing agent_id
         ]
     }
 
@@ -1264,10 +1266,19 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
-                    {"id": {"handle": 101}, "agent_id": {"handle": 1}, "name": "COUNTER1"}
+                    {
+                        "id": {"handle": 101},
+                        "agent_id": {"handle": 1},
+                        "name": "COUNTER1",
+                    }
                 ],
                 "kernel_symbols": {
                     "kernel1": {
@@ -1370,7 +1381,12 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [],
                 "kernel_symbols": {},
@@ -1420,7 +1436,12 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
                     {
@@ -1495,7 +1516,9 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
     monkeypatch.setattr(
-        utils, "v3_json_get_counters", lambda data: {(1, 101): {"name": "COUNTER_ACCUM"}}
+        utils,
+        "v3_json_get_counters",
+        lambda data: {(1, 101): {"name": "COUNTER_ACCUM"}},
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -1523,7 +1546,12 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
                     {
@@ -1692,8 +1720,18 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 1, "wave_front_size": 32},
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    },
+                    {
+                        "id": {"handle": 2},
+                        "type": 2,
+                        "node_id": 1,
+                        "wave_front_size": 32,
+                    },
                 ],
                 "counters": [
                     {
@@ -1851,8 +1889,18 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 1, "wave_front_size": 32},
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    },
+                    {
+                        "id": {"handle": 2},
+                        "type": 2,
+                        "node_id": 1,
+                        "wave_front_size": 32,
+                    },
                 ],
                 "counters": [
                     {
@@ -2088,7 +2136,6 @@ def test_check_file_pattern_match_found():
     Test check_file_pattern when the pattern is found in the file.
     Should return True.
     """
-    import tempfile
 
     with tempfile.NamedTemporaryFile(mode="w", delete=False) as f:
         f.write("This is a test file\nwith multiple lines\nand some pattern text\n")
@@ -2120,8 +2167,18 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 1, "wave_front_size": 32},
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    },
+                    {
+                        "id": {"handle": 2},
+                        "type": 2,
+                        "node_id": 1,
+                        "wave_front_size": 32,
+                    },
                 ],
                 "counters": [
                     {
@@ -2287,7 +2344,12 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
             {
                 "metadata": {"pid": 12345},
                 "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 0, "wave_front_size": 64}
+                    {
+                        "id": {"handle": 1},
+                        "type": 2,
+                        "node_id": 0,
+                        "wave_front_size": 64,
+                    }
                 ],
                 "counters": [
                     {
@@ -2682,7 +2744,9 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files)
+    monkeypatch.setattr(
+        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
+    )
 
     mock_df = pd.DataFrame({"Dispatch_ID": [0], "GPU_ID": [0], "Kernel_Name": ["test"]})
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
@@ -2921,13 +2985,19 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     )
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
-    monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files)
+    monkeypatch.setattr(
+        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
+    )
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
     mock_df = pd.DataFrame(
-        {"Dispatch_ID": [0], "Start_Timestamp": [100], "End_Timestamp": [200]}
+        {
+            "Dispatch_ID": [0],
+            "Start_Timestamp": [100],
+            "End_Timestamp": [200],
+        }
     )
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
@@ -3002,7 +3072,9 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
 
     mspec = MockSpec()
 
-    csv_content = "KernelName,Index,grd,gpu-id,BeginNs,EndNs\ntest_kernel,0,64,0,100,200"
+    csv_content = (
+        "KernelName,Index,grd,gpu-id,BeginNs,EndNs\ntest_kernel,0,64,0,100,200"
+    )
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
@@ -3087,7 +3159,11 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
         nonlocal flatten_called
         flatten_called = True
         return pd.DataFrame(
-            {"Dispatch_ID": [0], "TCC_HIT[0]": [100], "TCC_HIT[16]": [200]}
+            {
+                "Dispatch_ID": [0],
+                "TCC_HIT[0]": [100],
+                "TCC_HIT[16]": [200],
+            }
         )
 
     # Mock functions
@@ -3101,7 +3177,9 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
         "utils.utils.flatten_tcc_info_across_xcds", mock_flatten_tcc_info_across_xcds
     )
     monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 2)
-    monkeypatch.setattr("glob.glob", lambda pattern: [workload_dir + "/results_test.csv"])
+    monkeypatch.setattr(
+        "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
+    )
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
@@ -3153,7 +3231,9 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         capture_subprocess_called_with_env = new_env
         return (True, "Success")
 
-    monkeypatch.setattr("utils.utils.capture_subprocess_output", mock_capture_subprocess)
+    monkeypatch.setattr(
+        "utils.utils.capture_subprocess_output", mock_capture_subprocess
+    )
 
     def mock_console_error_no_exit(msg, exit=True):
         print(f"Mocked console_error: {msg}, exit={exit}")
@@ -3181,7 +3261,11 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
                 return mock_out_path_obj
             if p_arg.endswith("counters.txt"):
                 return mock_fname_path_obj
-        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
+        if (
+            p_arg == mock_fname_path_obj
+            and args == ()
+            and hasattr(p_arg, "with_suffix")
+        ):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
@@ -3280,7 +3364,11 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
             return mock_out_path_obj
         if isinstance(p_arg, str) and p_arg.endswith("counters.txt"):
             return mock_fname_path_obj
-        if p_arg == mock_fname_path_obj and args == () and hasattr(p_arg, "with_suffix"):
+        if (
+            p_arg == mock_fname_path_obj
+            and args == ()
+            and hasattr(p_arg, "with_suffix")
+        ):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
@@ -3885,7 +3973,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
         output_file = out_dir / f"results_{fbase}_marker_api_trace.csv"
         assert output_file.exists()
 
-    except ValueError as e:
+    except ValueError:
         # pandas.concat() raises ValueError when passed empty list
         pytest.skip(
             "process_kokkos_trace_output doesn't handle empty file list gracefully"
@@ -4079,7 +4167,7 @@ def test_process_kokkos_trace_output_large_files(tmp_path, monkeypatch):
     ]
     for i in range(1000):
         marker_name = kokkos_markers[i % len(kokkos_markers)]
-        content += f"{i},{marker_name},{i%100},{i%10}\n"
+        content += f"{i},{marker_name},{i % 100},{i % 10}\n"
 
     csv1.write_text(content)
 
@@ -4184,7 +4272,13 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
     df = pd.read_csv(output_file)
     assert len(df) == 4
     # Should have union of all columns with NaN for missing values
-    expected_columns = ["marker_id", "marker_name", "start_time", "duration", "thread_id"]
+    expected_columns = [
+        "marker_id",
+        "marker_name",
+        "start_time",
+        "duration",
+        "thread_id",
+    ]
     assert all(col in df.columns for col in expected_columns)
 
 
@@ -4378,7 +4472,9 @@ def test_process_hip_trace_output_no_files_found(tmp_path, monkeypatch):
         assert output_file.exists()
 
     except (ValueError, pd.errors.EmptyDataError):
-        pytest.skip("process_hip_trace_output doesn't handle empty file list gracefully")
+        pytest.skip(
+            "process_hip_trace_output doesn't handle empty file list gracefully"
+        )
 
 
 def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
@@ -4641,7 +4737,7 @@ def test_process_hip_trace_output_large_files(tmp_path, monkeypatch):
     ]
     for i in range(1000):
         api_name = hip_apis[i % len(hip_apis)]
-        content += f"{i},{api_name},{i%100},{i%10}\n"
+        content += f"{i},{api_name},{i % 100},{i % 10}\n"
 
     csv1.write_text(content)
 
@@ -5736,7 +5832,12 @@ def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
     Returns:
         None: Asserts function handles various TCC column name patterns but may fail with pandas Series ambiguity.
     """
-    columns = ["Kernel_Name", "TCC_HIT_SPECIAL[0]", "NOT_TCC_BUT_HAS_TCC", "TCC_MISS[0]"]
+    columns = [
+        "Kernel_Name",
+        "TCC_HIT_SPECIAL[0]",
+        "NOT_TCC_BUT_HAS_TCC",
+        "TCC_MISS[0]",
+    ]
     data = [
         ["kernel1", 100, 50, 10],
         ["kernel1", 200, 60, 20],
@@ -6418,7 +6519,9 @@ def test_get_submodules_docstring_verification():
     import utils.utils as utils_mod
 
     assert utils_mod.get_submodules.__doc__ is not None
-    assert "List all submodules for a target package" in utils_mod.get_submodules.__doc__
+    assert (
+        "List all submodules for a target package" in utils_mod.get_submodules.__doc__
+    )
 
     mock_package = MagicMock()
     mock_package.__path__ = ["/fake/path"]
@@ -7094,7 +7197,10 @@ def test_set_locale_encoding_c_utf8_fails_fallback_to_current_utf8():
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
             with patch("utils.utils.console_error", side_effect=mock_console_error):
-                mock_setlocale.side_effect = [locale.Error("C.UTF-8 not available"), None]
+                mock_setlocale.side_effect = [
+                    locale.Error("C.UTF-8 not available"),
+                    None,
+                ]
                 mock_getdefaultlocale.return_value = ("en_US", "UTF-8")
 
                 utils_mod.set_locale_encoding()
@@ -7339,7 +7445,10 @@ def test_set_locale_encoding_locale_with_utf8_substring():
     with patch("locale.setlocale") as mock_setlocale:
         with patch("locale.getdefaultlocale") as mock_getdefaultlocale:
             with patch("utils.utils.console_error", side_effect=mock_console_error):
-                mock_setlocale.side_effect = [locale.Error("C.UTF-8 not available"), None]
+                mock_setlocale.side_effect = [
+                    locale.Error("C.UTF-8 not available"),
+                    None,
+                ]
                 mock_getdefaultlocale.return_value = (
                     "en_US",
                     "ISO-8859-1.UTF-8.EXTENDED",
@@ -7591,7 +7700,6 @@ def test_set_locale_encoding_multiple_calls():
     Returns:
         None: Asserts function behaves consistently across multiple calls.
     """
-    import locale
     from unittest.mock import patch
 
     import utils.utils as utils_mod
@@ -8266,7 +8374,6 @@ def test_merge_counters_spatial_multiplex_basic_functionality():
     Returns:
         None: Asserts function correctly merges counter values for spatial multiplexing.
     """
-    import numpy as np
     import pandas as pd
 
     import utils.utils as utils_mod
@@ -8961,7 +9068,11 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.
     """
     agent_info_content = create_csv_string(
-        {"Node_Id": [0, 1], "Agent_Type": ["CPU", "GPU"], "Wave_Front_Size": [0, 64]}
+        {
+            "Node_Id": [0, 1],
+            "Agent_Type": ["CPU", "GPU"],
+            "Wave_Front_Size": [0, 64],
+        }
     )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
@@ -9057,7 +9168,11 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     """
     # --- Setup ---
     agent_info_content = create_csv_string(
-        {"Node_Id": [0], "Agent_Type": ["GPU"], "Wave_Front_Size": [64]}
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
     )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
@@ -9106,7 +9221,11 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
     agent_info_content = create_csv_string(
-        {"Node_Id": [0], "Agent_Type": ["GPU"], "Wave_Front_Size": [64]}
+        {
+            "Node_Id": [0],
+            "Agent_Type": ["GPU"],
+            "Wave_Front_Size": [64],
+        }
     )
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
@@ -9236,7 +9355,10 @@ def test_pc_sampling_prof_subprocess_fails(
         tool_dir.mkdir(parents=True, exist_ok=True)
         (tool_dir / "librocprofiler-sdk-tool.so").touch()
 
-        mock_capture_subprocess.return_value = (False, "Error output from SDK subprocess")
+        mock_capture_subprocess.return_value = (
+            False,
+            "Error output from SDK subprocess",
+        )
 
         utils.pc_sampling_prof(
             method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk

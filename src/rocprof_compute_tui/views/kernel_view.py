@@ -177,7 +177,7 @@ class KernelView(Container):
         bottom_container.remove_children()
 
         bottom_container.mount(
-            Label(f"Toggle kernel selection to view detailed analysis.")
+            Label("Toggle kernel selection to view detailed analysis.")
         )
 
         if self.current_selection and self.current_selection in self.dfs:

@@ -98,7 +98,9 @@ def convert_time_columns(df, time_unit):
                     numeric_values = pd.to_numeric(
                         df_copy.loc[mask, col], errors="coerce"
                     )
-                    df_copy.loc[mask, col] = numeric_values / config.TIME_UNITS[time_unit]
+                    df_copy.loc[mask, col] = (
+                        numeric_values / config.TIME_UNITS[time_unit]
+                    )
                 except:
                     pass
 
@@ -191,7 +193,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         if not common_metrics:
                             common_metrics = set(data.dfs[table_config["id"]]["Metric"])
                         else:
-                            common_metrics &= set(data.dfs[table_config["id"]]["Metric"])
+                            common_metrics &= set(
+                                data.dfs[table_config["id"]]["Metric"]
+                            )
                     # Apply common metrics across all runs
                     # Reindex all runs based on first run
                     initial_index = None
@@ -255,10 +259,13 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                 cur_df = data.dfs[table_config["id"]]
 
                                 if args.time_unit and has_time_data(base_df):
-                                    cur_df = convert_time_columns(cur_df, args.time_unit)
+                                    cur_df = convert_time_columns(
+                                        cur_df, args.time_unit
+                                    )
 
                                 if (type == "raw_csv_table") or (
-                                    type == "metric_table" and (not header in hidden_cols)
+                                    type == "metric_table"
+                                    and (not header in hidden_cols)
                                 ):
                                     if run != base_run:
                                         # calc percentage over the baseline
@@ -337,7 +344,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                             )
                                             for x in base_df[header]
                                         ]
-                                        df = pd.concat([df, cur_df_copy[header]], axis=1)
+                                        df = pd.concat(
+                                            [df, cur_df_copy[header]], axis=1
+                                        )
 
                 if not df.empty:
                     # subtitle for each table in a panel if existing
@@ -401,7 +410,6 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         and table_config["columnwise"] == True
                     )
                     if not is_empty_columns_exist:
-
                         # enable mem_chart only with single run
                         if (
                             "cli_style" in table_config

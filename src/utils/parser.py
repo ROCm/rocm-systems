@@ -333,7 +333,7 @@ def build_eval_string(equation, coll_level, config):
     # apply coll_level
     if config.get("format_rocprof_output") == "rocpd":
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        s = re.sub(f"SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
+        s = re.sub("SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
         s = re.sub(
             r"raw_pmc_df", "raw_pmc_df.get('" + schema.pmc_perf_file_prefix + "')", s
         )
@@ -428,7 +428,9 @@ def gen_counter_list(formula):
         )
         for node in ast.walk(tree):
             if isinstance(node, ast.Name):
-                val = str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                val = (
+                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                )
                 if val.isupper() and val not in function_filter:
                     counters.append(val)
                     visited = True
@@ -851,7 +853,9 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                     print("~" * 40 + "\nExpression:")
                                     print(expr, "=", row[expr])
                                     print("Inputs:")
-                                    matched_vars = re.findall(r"ammolite__\w+", row[expr])
+                                    matched_vars = re.findall(
+                                        r"ammolite__\w+", row[expr]
+                                    )
                                     if matched_vars:
                                         for v in matched_vars:
                                             print(
@@ -1050,7 +1054,6 @@ def find_key_recursively(data, search_key):
 
 
 def search_key_in_json(file_path, search_key):
-
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
@@ -1121,9 +1124,13 @@ def search_pc_sampling_record(records):
 
             if len(snapshot):
                 if issued:
-                    grouped_data[code_object_id][code_object_offset]["count_issued"] += 1
+                    grouped_data[code_object_id][code_object_offset][
+                        "count_issued"
+                    ] += 1
                 else:
-                    grouped_data[code_object_id][code_object_offset]["count_stalled"] += 1
+                    grouped_data[code_object_id][code_object_offset][
+                        "count_stalled"
+                    ] += 1
                     grouped_data[code_object_id][code_object_offset]["stall_reason"][
                         snapshot.get("stall_reason")[rocp_inst_not_issued_prefix_len:]
                     ] += 1
@@ -1258,7 +1265,16 @@ def load_pc_sampling_data_per_kernel(
         (df["code_object_id"] == kernel_info["code_object_id"])
         & (df["offset"] > kernel_info["entry_byte_offset"])
         & (df["offset"] < kernel_info["potential_end_offset"])
-    ][["inst_index", "offset", "count", "count_issued", "count_stalled", "stall_reason"]]
+    ][
+        [
+            "inst_index",
+            "offset",
+            "count",
+            "count_issued",
+            "count_stalled",
+            "stall_reason",
+        ]
+    ]
 
     df["offset"] = df["offset"].apply(lambda x: hex(x))
 
@@ -1334,7 +1350,9 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
     #  - The default file name is subject to changes from rocprofv3
     #  - Prioritize stochastic
     #  - Alternatively, we could check pc_sampling_method in json
-    csv_file_path = Path.joinpath(Path(dir), file_prefix + "_pc_sampling_stochastic.csv")
+    csv_file_path = Path.joinpath(
+        Path(dir), file_prefix + "_pc_sampling_stochastic.csv"
+    )
     if csv_file_path.exists():
         pc_sampling_method = "stochastic"
     else:
@@ -1352,7 +1370,6 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
 
     # No kernel filter, return grouped and sorted csv directly
     if not workload.filter_kernel_ids:
-
         df = pd.read_csv(csv_file_path)
         # Group by 'Instruction_Comment' and count occurrences
         grouped_counts = (

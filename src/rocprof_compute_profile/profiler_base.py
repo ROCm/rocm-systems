@@ -26,13 +26,12 @@
 
 import csv
 import glob
-import logging
 import os
 import re
 import shlex
 import shutil
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd
@@ -146,7 +145,8 @@ class RocProfCompute_Base:
                 )
             else:
                 console_error(
-                    "%s is an unrecognized option for --join-type" % self.__args.join_type
+                    "%s is an unrecognized option for --join-type"
+                    % self.__args.join_type
                 )
 
             if df is None:
@@ -175,7 +175,9 @@ class RocProfCompute_Base:
         }
         # Check for vgpr counter in ROCm < 5.3
         if "vgpr" in df.columns:
-            duplicate_cols["vgpr"] = [col for col in df.columns if col.startswith("vgpr")]
+            duplicate_cols["vgpr"] = [
+                col for col in df.columns if col.startswith("vgpr")
+            ]
         # Check for vgpr counter in ROCm >= 5.3
         else:
             duplicate_cols["Arch_VGPR"] = [
@@ -459,7 +461,9 @@ class RocProfCompute_Base:
             "rocprofv3",
             "rocprofiler-sdk",
         ):
-            console_log(f"[Run {total_runs+1}/{total_runs+1}][PC sampling profile run]")
+            console_log(
+                f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
+            )
             start_run_prof = time.time()
             pc_sampling_prof(
                 method=self.get_args().pc_sampling_method,

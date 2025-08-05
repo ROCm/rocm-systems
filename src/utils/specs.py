@@ -25,13 +25,11 @@
 
 """Get host/gpu specs."""
 
-
 import importlib
 import os
 import re
 import socket
 import subprocess
-import sys
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
@@ -103,7 +101,7 @@ def kw_only(cls):
 
 
 def generate_machine_specs(args, sysinfo: dict = None):
-    if not sysinfo is None:
+    if sysinfo is not None:
         try:
             sysinfo_ver = str(sysinfo["version"])
         except KeyError:
@@ -173,8 +171,8 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Apply default compute partition is above fails
     if compute_partition is None:
-        console_warning(f"Can not detect compute/accelerator partition from amd-smi.")
-        console_warning(f"Applying default compute partition: SPX")
+        console_warning("Can not detect compute/accelerator partition from amd-smi.")
+        console_warning("Applying default compute partition: SPX")
         compute_partition = "SPX"
 
     memory_partition = search(memory_partition_pattern, amd_smi_output)
@@ -218,7 +216,9 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Load above SoC specs via module import
     try:
-        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + specs.gpu_arch)
+        soc_module = importlib.import_module(
+            "rocprof_compute_soc.soc_" + specs.gpu_arch
+        )
     except ModuleNotFoundError as e:
         console_error(
             "Arch %s marked as supported, but couldn't find class implementation %s."
@@ -605,7 +605,9 @@ class MachineSpecs:
                         if name == "version":
                             topstr += f"Output version: {value}\n"
                         else:
-                            console_error(f"Unknown out of table printing field: {name}")
+                            console_error(
+                                f"Unknown out of table printing field: {name}"
+                            )
                         continue
                     if "name" in field.metadata:
                         name = field.metadata["name"]

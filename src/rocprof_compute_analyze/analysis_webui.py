@@ -25,7 +25,6 @@
 
 
 import copy
-import os
 import random
 from pathlib import Path
 
@@ -228,7 +227,10 @@ class webui_analysis(OmniAnalyze_Base):
                         for t_type, table_config in data_source.items():
                             original_df = base_data[base_run].dfs[table_config["id"]]
                             # The sys info table need to add index back
-                            if t_type == "raw_csv_table" and "Info" in original_df.keys():
+                            if (
+                                t_type == "raw_csv_table"
+                                and "Info" in original_df.keys()
+                            ):
                                 original_df.reset_index(inplace=True)
 
                             content = determine_chart_type(
@@ -308,8 +310,10 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
             if self.get_args().spatial_multiplexing:
-                self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
-                    self._runs[self.dest_dir].raw_pmc
+                self._runs[self.dest_dir].raw_pmc = (
+                    self.spatial_multiplex_merge_counters(
+                        self._runs[self.dest_dir].raw_pmc
+                    )
                 )
 
             file_io.create_df_kernel_top_stats(

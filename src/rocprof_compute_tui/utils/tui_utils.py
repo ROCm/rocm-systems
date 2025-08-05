@@ -3,7 +3,6 @@ from collections import defaultdict
 from datetime import datetime
 from enum import Enum
 
-import numpy as np
 import pandas as pd
 
 import config
@@ -61,7 +60,9 @@ class Logger:
             if hasattr(self.output_area, "text"):
                 current_text = self.output_area.text
                 self.output_area.text = (
-                    f"{current_text}\n{formatted_msg}" if current_text else formatted_msg
+                    f"{current_text}\n{formatted_msg}"
+                    if current_text
+                    else formatted_msg
                 )
                 # HACK: moving curson to end of outpu (Is there a better way to achieve this?)
                 self.output_area.cursor_location = (999999, 0)
@@ -192,7 +193,9 @@ def apply_rounding_logic(df, decimal_precision):
                     if df_copy[column].dtype == "object":
                         df_copy[column] = df_copy[column].combine(
                             rounded_series,
-                            lambda orig, rounded: rounded if pd.notna(rounded) else orig,
+                            lambda orig, rounded: (
+                                rounded if pd.notna(rounded) else orig
+                            ),
                         )
                     else:
                         df_copy[column] = rounded_series

@@ -63,7 +63,9 @@ def update_analysis_config():
                     data_source_config["metric_table"]["metric"] = data_source_config[
                         "metric_table"
                     ]["metric"][gfx_version]
-                new_panel_config["Panel Config"]["data source"].append(data_source_config)
+                new_panel_config["Panel Config"]["data source"].append(
+                    data_source_config
+                )
             # Write panel config to file
             filename = Path(
                 TARGET_DIR.joinpath(gfx_version, f"{panel_id}_{panel_title}.yaml")
@@ -140,7 +142,9 @@ def update_documentation():
                 for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
                         "rst": panel_config["metrics_description"][metric_name]["rst"],
-                        "unit": panel_config["metrics_description"][metric_name]["unit"],
+                        "unit": panel_config["metrics_description"][metric_name][
+                            "unit"
+                        ],
                     }
                 panel_metric_map[data_source["metric_table"]["id"]] = metrics_info
 

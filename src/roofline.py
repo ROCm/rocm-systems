@@ -27,7 +27,7 @@
 import os
 import textwrap
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
@@ -139,7 +139,6 @@ class Roofline:
         base_path = Path(base_dir)
 
         if base_path.name == "workloads" and base_path.parent == Path(os.getcwd()):
-
             app_name = getattr(self.__args, "name", "default_app_name")
             gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
 
@@ -176,7 +175,9 @@ class Roofline:
         ):
             self.roof_setup()
 
-        console_debug("roofline", "Path: %s" % self.__run_parameters.get("workload_dir"))
+        console_debug(
+            "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
+        )
         self.__ai_data = calc_ai(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
@@ -515,11 +516,12 @@ class Roofline:
 
         # Plot peak BW ceiling(s)
         for cache_level in cache_hierarchy:
-
             if (
                 not self.__ceiling_data
                 or cache_level.lower() not in self.__ceiling_data
-                or not isinstance(self.__ceiling_data[cache_level.lower()], (list, tuple))
+                or not isinstance(
+                    self.__ceiling_data[cache_level.lower()], (list, tuple)
+                )
                 or len(self.__ceiling_data[cache_level.lower()]) < 3
             ):
                 console_error(

@@ -168,7 +168,7 @@ class RocprofTUIApp(App):
         if opened := await self.push_screen_wait(SelectDirectory()):
             self.add_to_recent(str(opened))
             self.main_view.selected_path = opened
-            dropdown = self.query_one(f"#file-dropdown", DropdownMenu)
+            dropdown = self.query_one("#file-dropdown", DropdownMenu)
             dropdown.add_class("hidden")
             self.main_view.run_analysis()
 

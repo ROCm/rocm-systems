@@ -27,7 +27,6 @@
 import argparse
 import os
 import re
-import shutil
 from pathlib import Path
 
 
@@ -119,7 +118,9 @@ Examples:
         dest="name",
         help="\t\t\tAssign a name to workload.",
     )
-    profile_group.add_argument("--target", type=str, default=None, help=argparse.SUPPRESS)
+    profile_group.add_argument(
+        "--target", type=str, default=None, help=argparse.SUPPRESS
+    )
     profile_group.add_argument(
         "-p",
         "--path",
@@ -338,7 +339,18 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=[
+            "FP4",
+            "FP6",
+            "FP8",
+            "FP16",
+            "BF16",
+            "FP32",
+            "FP64",
+            "I8",
+            "I32",
+            "I64",
+        ],
         metavar="",
         nargs="+",
         type=str,
@@ -557,7 +569,18 @@ Examples:
         "-R",
         "--roofline-data-type",
         required=False,
-        choices=["FP4", "FP6", "FP8", "FP16", "BF16", "FP32", "FP64", "I8", "I32", "I64"],
+        choices=[
+            "FP4",
+            "FP6",
+            "FP8",
+            "FP16",
+            "BF16",
+            "FP32",
+            "FP64",
+            "I8",
+            "I32",
+            "I64",
+        ],
         metavar="",
         nargs="+",
         type=str,

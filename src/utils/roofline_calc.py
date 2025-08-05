@@ -442,7 +442,10 @@ def calc_ai(mspec, sort_type, ret_df):
                         * 64
                     )
                     + (
-                        (df["TCC_EA0_WRREQ_sum"][idx] - df["TCC_EA0_WRREQ_64B_sum"][idx])
+                        (
+                            df["TCC_EA0_WRREQ_sum"][idx]
+                            - df["TCC_EA0_WRREQ_64B_sum"][idx]
+                        )
                         * 32
                     )
                     + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64)
@@ -459,7 +462,9 @@ def calc_ai(mspec, sort_type, ret_df):
 
         calls += 1
 
-        if sort_type == "kernels" and (at_end == True or (kernelName != next_kernelName)):
+        if sort_type == "kernels" and (
+            at_end == True or (kernelName != next_kernelName)
+        ):
             myList.append(
                 AI_Data(
                     kernelName,

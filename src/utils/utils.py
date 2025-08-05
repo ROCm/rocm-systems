@@ -35,11 +35,8 @@ import re
 import selectors
 import shutil
 import subprocess
-import sys
 import tempfile
 import time
-from collections import OrderedDict
-from itertools import product
 from pathlib import Path as path
 from typing import Optional
 
@@ -367,14 +364,12 @@ def get_agent_dict(data):
 # Returns a dictionary that maps agent ID to GPU ID
 # starting at 0.
 def get_gpuid_dict(data):
-
     agents = data["rocprofiler-sdk-tool"][0]["agents"]
 
     agent_list = []
 
     # Get agent ID and node_id for GPU agents only
     for agent in agents:
-
         if agent["type"] == 2:
             agent_id = agent["id"]["handle"]
             node_id = agent["node_id"]
@@ -422,12 +417,13 @@ def v3_json_get_dispatches(data):
 
 
 def v3_json_to_csv(json_file_path, csv_file_path):
-
     f = open(json_file_path, "rt")
     data = json.load(f)
 
     dispatch_records = v3_json_get_dispatches(data)
-    dispatches = data["rocprofiler-sdk-tool"][0]["callback_records"]["counter_collection"]
+    dispatches = data["rocprofiler-sdk-tool"][0]["callback_records"][
+        "counter_collection"
+    ]
     kernel_symbols = data["rocprofiler-sdk-tool"][0]["kernel_symbols"]
     agents = get_agent_dict(data)
     pid = data["rocprofiler-sdk-tool"][0]["metadata"]["pid"]
@@ -463,7 +459,6 @@ def v3_json_to_csv(json_file_path, csv_file_path):
         csv_data[key] = []
 
     for d in dispatches:
-
         dispatch_info = d["dispatch_data"]["dispatch_info"]
 
         agent_id = dispatch_info["agent_id"]["handle"]
@@ -999,7 +994,9 @@ def pc_sampling_prof(
         for key, value in options.items():
             new_env[key] = value
         console_debug("pc sampling rocprof sdk env vars: {}".format(new_env))
-        console_debug("pc sampling rocprof sdk user provided command: {}".format(appcmd))
+        console_debug(
+            "pc sampling rocprof sdk user provided command: {}".format(appcmd)
+        )
         success, output = capture_subprocess_output(
             appcmd, new_env=new_env, profileMode=True
         )
@@ -1144,7 +1141,6 @@ def process_hip_trace_output(workload_dir, fbase):
 
 
 def replace_timestamps(workload_dir):
-
     if not path(workload_dir, "timestamps.csv").is_file():
         return
 
@@ -1196,7 +1192,9 @@ def detect_roofline(mspec):
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
         if path(rooflineBinary).exists():
-            msg = "Detected user-supplied binary --> ROOFLINE_BIN = %s\n" % rooflineBinary
+            msg = (
+                "Detected user-supplied binary --> ROOFLINE_BIN = %s\n" % rooflineBinary
+            )
             console_warning("roofline", msg)
             # distro stays marked as override and path value is substituted in
             target_binary["path"] = rooflineBinary
@@ -1237,7 +1235,9 @@ def detect_roofline(mspec):
         distro = "22.04"
 
     else:
-        console_error("roofline", "Cannot find a valid binary for your operating system")
+        console_error(
+            "roofline", "Cannot find a valid binary for your operating system"
+        )
 
     # distro gets assigned, to follow default roofline bin location and nomenclature
     target_binary["distro"] = distro
@@ -1287,7 +1287,9 @@ def mibench(args, mspec):
             break
 
     if not found:
-        console_error("roofline", "Unable to locate expected binary (%s)." % binary_paths)
+        console_error(
+            "roofline", "Unable to locate expected binary (%s)." % binary_paths
+        )
 
     my_args = [
         path_to_binary,
@@ -1520,7 +1522,9 @@ def merge_counters_spatial_multiplex(df_multi_index):
 
             # Process non-counter columns
             for col in [
-                col for col in non_counter_column_index if col not in expired_column_index
+                col
+                for col in non_counter_column_index
+                if col not in expired_column_index
             ]:
                 if col == "Start_Timestamp":
                     # For Start_Timestamp, take the median

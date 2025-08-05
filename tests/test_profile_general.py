@@ -27,13 +27,9 @@
 import inspect
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -296,7 +292,9 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
                     # if 0 show absolute difference
                     diff = round(baseline_data - run_data, 2)
                     if diff > threshold:
-                        print(str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff))
+                        print(
+                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff)
+                        )
         differences["kernel_name"] = [kernel_name]
         differences["test_name"] = [test_name]
         differences["gpu-id"] = [gpu_id]
@@ -506,7 +504,9 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                         )
                         error_df = pd.concat([error_df, new_error])
                         counts = error_df.groupby(["Index"]).cumcount()
-                        reoccurring_metrics = error_df.loc[counts > MAX_REOCCURING_COUNT]
+                        reoccurring_metrics = error_df.loc[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
                         reoccurring_metrics["counts"] = counts[
                             counts > MAX_REOCCURING_COUNT
                         ]
@@ -864,7 +864,13 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
         pytest.skip("Skipping roofline test for MI100")
         return
 
-    options = ["--device", "0", "--roof-only", "--roofline-data-type", "UNSUPPORTED_TYPE"]
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--roofline-data-type",
+        "UNSUPPORTED_TYPE",
+    ]
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(
@@ -1527,7 +1533,9 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '10'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
+    assert test_utils.check_file_pattern(
+        "- '3'", f"{workload_dir}/profiling_config.yaml"
+    )
     assert test_utils.check_file_pattern(
         "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
     )
