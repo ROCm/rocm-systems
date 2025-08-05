@@ -105,12 +105,14 @@ def generate_machine_specs(args, sysinfo: dict = None):
             sysinfo_ver = str(sysinfo["version"])
         except KeyError:
             console_error(
-                "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
+                "Detected mismatch in sysinfo versioning. You need to reprofile "
+                "to update data."
             )
         version = get_version(config.rocprof_compute_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
             console_warning(
-                "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
+                "Detected mismatch in sysinfo versioning. You need to reprofile "
+                "to update data."
             )
         return MachineSpecs(**sysinfo)
     # read timestamp info
@@ -124,7 +126,8 @@ def generate_machine_specs(args, sysinfo: dict = None):
     # set specs version
     vData = get_version(config.rocprof_compute_home)
     version = vData["version"]
-    # NB: Just taking major as specs version. May want to make this more specific in the future
+    # NB: Just taking major as specs version.
+    # May want to make this more specific in the future
     specs_version = version[
         : version.find(".")
     ]  # version will always follow 'major.minor.patch' format
@@ -224,7 +227,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
             % (specs.gpu_arch, e)
         )
     soc_class = getattr(soc_module, specs.gpu_arch + "_soc")
-    soc_obj = soc_class(args, specs)
+    soc_obj = soc_class(args, specs)  # noqa: F841
     # Update arch specific specs
     specs.gpu_model = mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
     specs.num_xcd = mi_gpu_specs.get_num_xcds(
@@ -331,7 +334,10 @@ class MachineSpecs:
     amd_gpu_kernel_version: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The version of the AMDGPU driver installed on the machine. Unimplemented.",
+            "doc": (
+                "[RESERVED] The version of the AMDGPU driver installed on the machine. "
+                "Unimplemented."
+            ),
             "name": "AMD GPU Kernel Version",
         },
     )
@@ -346,7 +352,10 @@ class MachineSpecs:
     gpu_memory: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The total amount of memory available to accelerators/GPUs in the system. Unimplemented.",
+            "doc": (
+                "[RESERVED] The total amount of memory available to accelerators/GPUs "
+                "in the system. Unimplemented."
+            ),
             "unit": "KB",
             "name": "GPU Memory",
         },
@@ -368,14 +377,20 @@ class MachineSpecs:
     compute_partition: str = field(
         default=None,
         metadata={
-            "doc": "The compute partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
+            "doc": (
+                "The compute partitioning mode active on the accelerators/GPUs in the "
+                "system (MI300 only)."
+            ),
             "name": "Compute Partition",
         },
     )
     memory_partition: str = field(
         default=None,
         metadata={
-            "doc": "The memory partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
+            "doc": (
+                "The memory partitioning mode active on the accelerators/GPUs in the "
+                "system (MI300 only)."
+            ),
             "name": "Memory Partition",
         },
     )
@@ -416,7 +431,10 @@ class MachineSpecs:
     gpu_l1: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
+            "doc": (
+                "The size of the vL1D cache (per compute-unit) on the "
+                "accelerators/GPUs."
+            ),
             "name": "GPU L1",
             "unit": "KiB",
         },
@@ -424,7 +442,10 @@ class MachineSpecs:
     gpu_l2: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
+            "doc": (
+                "The size of the vL1D cache (per compute-unit) on the "
+                "accelerators/GPUs."
+            ),
             "name": "GPU L2",
             "unit": "KiB",
         },
@@ -432,52 +453,72 @@ class MachineSpecs:
     cu_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The total number of compute units per accelerator/GPU in the system. On systems with configurable\n"
-            "partitioning, (e.g., MI300) this is the total number of compute units in a partition.",
+            "doc": (
+                "The total number of compute units per accelerator/GPU in the system. "
+                "On systems with configurable partitioning, (e.g., MI300) this is "
+                "the total number of compute units in a partition."
+            ),
             "name": "CU per GPU",
         },
     )
     simd_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The number of SIMD processors in a compute unit for the accelerators/GPUs in the system.",
+            "doc": (
+                "The number of SIMD processors in a compute unit for the "
+                "accelerators/GPUs in the system."
+            ),
             "name": "SIMD per CU",
         },
     )
     se_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of shader engines on the accelerators/GPUs in the system. On systems with configurable\n"
-            "partitioning, (e.g., MI300) this is the total number of shader engines in a partition.",
+            "doc": (
+                "The number of shader engines on the accelerators/GPUs in the system. "
+                "On systems with configurable partitioning, (e.g., MI300) this is "
+                "the total number of shader engines in a partition."
+            ),
             "name": "SE per GPU",
         },
     )
     wave_size: str = field(
         default=None,
         metadata={
-            "doc": "The number work-items in a wavefront on the accelerators/GPUs in the system.",
+            "doc": (
+                "The number work-items in a wavefront on the accelerators/GPUs in "
+                "the system."
+            ),
             "name": "Wave Size",
         },
     )
     workgroup_max_size: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of work-items in a workgroup on the accelerators/GPUs in the system.",
+            "doc": (
+                "The maximum number of work-items in a workgroup on the "
+                "accelerators/GPUs in the system."
+            ),
             "name": "Workgroup Max Size",
         },
     )
     max_waves_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of wavefronts that can be resident on a compute unit on the\n"
-            "accelerators/GPUs in the system",
+            "doc": (
+                "The maximum number of wavefronts that can be resident on a "
+                "compute unit on the accelerators/GPUs in the system"
+            ),
             "name": "Max Waves per CU",
         },
     )
     max_sclk: str = field(
         default=None,
         metadata={
-            "doc": "The maximum engine (compute-unit) clock rate of the accelerators/GPUs in the system.",
+            "doc": (
+                "The maximum engine (compute-unit) clock rate of the "
+                "accelerators/GPUs in the system."
+            ),
             "name": "Max SCLK",
             "unit": "MHz",
         },
@@ -485,7 +526,10 @@ class MachineSpecs:
     max_mclk: str = field(
         default=None,
         metadata={
-            "doc": "The maximum memory clock rate of the accelerators/GPUs in the system.",
+            "doc": (
+                "The maximum memory clock rate of the accelerators/GPUs in the "
+                "system."
+            ),
             "name": "Max MCLK",
             "unit": "MHz",
         },
@@ -493,7 +537,10 @@ class MachineSpecs:
     cur_sclk: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The current engine (compute unit) clock rate of the accelerators/GPUs in the system. Unused.",
+            "doc": (
+                "[RESERVED] The current engine (compute unit) clock rate of the "
+                "accelerators/GPUs in the system. Unused."
+            ),
             "name": "Cur SCLK",
             "unit": "MHz",
         },
@@ -501,54 +548,76 @@ class MachineSpecs:
     cur_mclk: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The current memory clock rate of the accelerators/GPUs in the system. Unused.",
+            "doc": (
+                "[RESERVED] The current memory clock rate of the accelerators/GPUs "
+                "in the system. Unused."
+            ),
             "name": "Cur MCLK",
             "unit": "MHz",
         },
     )
-    _l2_banks: str = None  # NB: This only used in flatten_tcc_info_across_hbm_stacks()
+    _l2_banks: str = None  # NB: Only used in flatten_tcc_info_across_hbm_stacks()
     total_l2_chan: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of L2 cache channels on the accelerators/GPUs in the system. On systems with\n"
-            "configurable partitioning, (e.g., MI300) this is the total number of L2 cache channels in a partition.",
+            "doc": (
+                "The maximum number of L2 cache channels on the accelerators/GPUs "
+                "in the system. On systems with configurable partitioning, "
+                "(e.g., MI300) this is the total number of L2 cache channels "
+                "in a partition."
+            ),
             "name": "Total L2 Channels",
         },
     )
     lds_banks_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The number of banks in the LDS for a compute unit on the accelerators/GPUs in the system.",
+            "doc": (
+                "The number of banks in the LDS for a compute unit on the "
+                "accelerators/GPUs in the system."
+            ),
             "name": "LDS Banks per CU",
         },
     )
     sqc_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of L1I/sL1D caches on the accelerators/GPUs in the system. On systems with\n"
-            "configurable partitioning, (e.g., MI300) this is the total number of L1I/sL1D caches in a partition.",
+            "doc": (
+                "The number of L1I/sL1D caches on the accelerators/GPUs in the "
+                "system. On systems with configurable partitioning, (e.g., MI300) "
+                "this is the total number of L1I/sL1D caches in a partition."
+            ),
             "name": "SQC per GPU",
         },
     )
     pipes_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of scheduler-pipes on the accelerators/GPUs in the system.",
+            "doc": (
+                "The number of scheduler-pipes on the accelerators/GPUs in the "
+                "system."
+            ),
             "name": "Pipes per GPU",
         },
     )
     num_xcd: str = field(
         default=None,
         metadata={
-            "doc": "The total number of accelerator complex dies in a compute partition on the accelerators/GPUs in the\n"
-            "system.  For accelerators without partitioning (i.e., pre-MI300), this is considered to be one.",
+            "doc": (
+                "The total number of accelerator complex dies in a compute partition "
+                "on the accelerators/GPUs in the system. For accelerators without "
+                "partitioning (i.e., pre-MI300), this is considered to be one."
+            ),
             "name": "Num XCDs",
             "unit": "XCDs",
         },
     )
     num_hbm_channels: str = field(
         default=None,
-        metadata={"doc": "Number of HBM channels", "name": "HBM channels"},
+        metadata={
+            "doc": "Number of HBM channels",
+            "name": "HBM channels",
+        },
     )
 
     def get_hbm_channels(self):
@@ -566,16 +635,16 @@ class MachineSpecs:
         all_populated = True
         data = {}
         # dataclass uses an OrderedDict for member variables, ensuring order consistency
-        for field in fields(self):
-            name = field.name
+        for class_field in fields(self):
+            name = class_field.name
             if not name.startswith("_"):
                 value = getattr(self, name)
                 if value is None:
                     # check if we've marked it optional
                     if (
-                        field.metadata
-                        and "optional" in field.metadata
-                        and field.metadata["optional"]
+                        class_field.metadata
+                        and "optional" in class_field.metadata
+                        and class_field.metadata["optional"]
                     ):
                         pass
                     else:
@@ -591,16 +660,22 @@ class MachineSpecs:
         return pd.DataFrame(data, index=[0])
 
     def __repr__(self):
-        topstr = "Machine Specifications: describing the state of the machine that ROCm Compute Profiler data was collected on.\n"
+        topstr = (
+            "Machine Specifications: describing the state of the machine that "
+            "ROCm Compute Profiler data was collected on.\n"
+        )
         data = []
-        for field in fields(self):
-            name = field.name
+        for class_field in fields(self):
+            name = class_field.name
             if not name.startswith("_"):
                 _data = {}
                 value = getattr(self, name)
-                if field.metadata:
+                if class_field.metadata:
                     # check out of table before any re-naming for pretty-printing
-                    if "intable" in field.metadata and not field.metadata["intable"]:
+                    if (
+                        "intable" in class_field.metadata
+                        and not class_field.metadata["intable"]
+                    ):
                         if name == "version":
                             topstr += f"Output version: {value}\n"
                         else:
@@ -608,12 +683,12 @@ class MachineSpecs:
                                 f"Unknown out of table printing field: {name}"
                             )
                         continue
-                    if "name" in field.metadata:
-                        name = field.metadata["name"]
-                    if "unit" in field.metadata:
-                        _data["Unit"] = field.metadata["unit"]
-                    if "doc" in field.metadata:
-                        _data["Description"] = field.metadata["doc"]
+                    if "name" in class_field.metadata:
+                        name = class_field.metadata["name"]
+                    if "unit" in class_field.metadata:
+                        _data["Unit"] = class_field.metadata["unit"]
+                    if "doc" in class_field.metadata:
+                        _data["Description"] = class_field.metadata["doc"]
                 _data["Spec"] = name
                 _data["Value"] = value
                 data.append(_data)
@@ -661,7 +736,10 @@ def run(cmd, exit_on_error=False):
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:
         console_error(
-            f"Unable to parse specs. Can't find ROCm asset: {e.filename}\nTry passing a path to an existing workload results in 'analyze' mode."
+            (
+                f"Unable to parse specs. Can't find ROCm asset: {e.filename}\n"
+                "Try passing a path to an existing workload results in 'analyze' mode."
+            )
         )
 
     if exit_on_error:

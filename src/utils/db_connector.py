@@ -74,7 +74,8 @@ class DatabaseConnector:
                 name = sys_info["workload_name"][0].strip()
             except KeyError as e:
                 console_error(
-                    f"Outdated workload. Cannot find {e} field. Please reprofile to update."
+                    f"Outdated workload. "
+                    f"Cannot find {e} field. Please reprofile to update."
                 )
         else:
             console_error(
@@ -139,7 +140,6 @@ class DatabaseConnector:
         db_to_remove = self.client[self.connection_info["workload"]]
 
         # check the collection names on the database
-        col_list = db_to_remove.list_collection_names()
         self.client.drop_database(db_to_remove)
         db = self.client["workload_names"]
         col = db["names"]
@@ -165,14 +165,17 @@ class DatabaseConnector:
             is_full_workload_name = self.args.workload.count("_") >= 3
             if not is_full_workload_name:
                 console_error(
-                    "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. rocprofiler-compute_asw_vcopy_mi200)"
+                    "-w/--workload is not valid. Please use full workload name "
+                    "as seen in GUI when removing (i.e. "
+                    "rocprofiler-compute_asw_vcopy_mi200)"
                 )
             if (
                 self.connection_info["host"] == None
                 or self.connection_info["username"] == None
             ):
                 console_error(
-                    "-H/--host and -u/--username are required when interaction type is set to %s"
+                    "-H/--host and -u/--username are required when "
+                    "interaction type is set to %s"
                     % self.interaction_type
                 )
             if (
@@ -191,7 +194,8 @@ class DatabaseConnector:
                 or self.connection_info["workload"] == None
             ):
                 console_error(
-                    "-H/--host, -w/--workload, -u/--username, and -t/--team are all required when interaction type is set to %s"
+                    "-H/--host, -w/--workload, -u/--username, and -t/--team are all "
+                    "required when interaction type is set to %s"
                     % self.interaction_type
                 )
 
@@ -219,7 +223,7 @@ class DatabaseConnector:
             else:
                 console_log("database", "Password received")
         else:
-            password = self.connection_info["password"]
+            pass
 
         # Establish client connection
         connection_str = (
@@ -238,5 +242,5 @@ class DatabaseConnector:
         )
         try:
             self.client.server_info()
-        except:
+        except Exception:
             console_error("database", "Unable to connect to the DB server.")

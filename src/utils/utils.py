@@ -73,7 +73,8 @@ def add_counter_extra_config_input_yaml(
     """
     Add a new counter to the rocprofiler-sdk dictionary.
     Initialize missing parts if data is empty or incomplete.
-    Enforces that 'architectures' and 'properties' are lists for correct YAML list serialization.
+    Enforces that 'architectures' and 'properties' are lists
+    for correct YAML list serialization.
     Overwrites the counter if it already exists.
 
     Args:
@@ -188,7 +189,7 @@ def get_version(rocprof_compute_home) -> dict:
                 found = True
                 versionDir = dir
                 break
-        except:
+        except Exception:
             pass
     if not found:
         console_error("Cannot find VERSION file at {}".format(searchDirs))
@@ -203,7 +204,7 @@ def get_version(rocprof_compute_home) -> dict:
             MODE = "dev"
         else:
             raise Exception(output)
-    except:
+    except Exception:
         try:
             shaFile = path(versionDir).joinpath("VERSION.sha").absolute().resolve()
             with open(shaFile, "r") as file:
@@ -262,7 +263,10 @@ def detect_rocprof(args):
         rocprof_path = shutil.which(rocprof_cmd)
         if not rocprof_path:
             console_error(
-                "Please verify installation or set ROCPROF environment variable with full path."
+                (
+                    "Please verify installation or set ROCPROF environment variable "
+                    "with full path."
+                )
             )
     else:
         # Resolve any sym links in file path
@@ -270,7 +274,8 @@ def detect_rocprof(args):
         console_debug("ROC Profiler: " + str(rocprof_path))
 
     console_debug("rocprof_cmd is {}".format(str(rocprof_cmd)))
-    return rocprof_cmd  # TODO: Do we still need to return this? It's not being used in the function call
+    # TODO: Do we still need to return this? It's not being used in the function call
+    return rocprof_cmd
 
 
 def store_app_cmd(args):
@@ -537,7 +542,8 @@ def v3_json_to_csv(json_file_path, csv_file_path):
 
 def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_file):
     """
-    Convert the counter file of csv output for a certain csv from rocprofv3 format to rocprfv2 format.
+    Convert the counter file of csv output for a certain csv from rocprofv3 format
+    to rocprfv2 format.
     This function is not for use of other csv out file such as kernel trace file.
     """
     pd_counter_collections = pd.read_csv(counter_file)
@@ -571,7 +577,8 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
         values="Counter_Value",
     ).reset_index()
 
-    # NB: Agent_Id is int in older rocporfv3, now switched to string with prefix "Agent ". We need to make sure handle both cases.
+    # NB: Agent_Id is int in older rocporfv3, now switched to string with prefix
+    # "Agent ". We need to make sure handle both cases.
     console_debug(
         "The type of Agent ID from counter csv file is {}".format(
             result["Agent_Id"].dtype
@@ -587,9 +594,10 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
             )
         except Exception as e:
             console_error(
-                'Parsing rocprofv3 csv output: Error of getting "Agent_Id", the error message "{}"'.format(
-                    e
-                )
+                (
+                    'Parsing rocprofv3 csv output: Error of getting "Agent_Id", '
+                    'the error message "{}"'
+                ).format(e)
             )
 
     # Grab the Wave_Front_Size column from agent info
@@ -777,7 +785,10 @@ def run_prof(
         # Set rocprofiler sdk counter definitions
         new_env["ROCPROFILER_METRICS_PATH"] = str(tmpfile_path.parent)
         console_debug(
-            f"Adding env var for counter definitions: ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+            (
+                "Adding env var for counter definitions: "
+                f"ROCPROFILER_METRICS_PATH={new_env['ROCPROFILER_METRICS_PATH']}"
+            )
         )
 
     # set required env var for >= mi300
@@ -851,7 +862,10 @@ def run_prof(
             return
         else:
             console_error(
-                "rocpd output format is only supported with rocprofiler-sdk or rocprofv3."
+                (
+                    "rocpd output format is only supported with "
+                    "rocprofiler-sdk or rocprofv3."
+                )
             )
     elif rocprof_cmd.endswith("v2"):
         # rocprofv2 has separate csv files for each process
@@ -878,12 +892,14 @@ def run_prof(
         )
 
         if rocprof_cmd == "rocprofiler-sdk":
-            # TODO: as rocprofv3 --kokkos-trace feature improves, rocprof-compute should make updates accordingly
+            # TODO: as rocprofv3 --kokkos-trace feature improves,
+            # rocprof-compute should make updates accordingly
             if "ROCPROF_HIP_RUNTIME_API_TRACE" in options:
                 process_hip_trace_output(workload_dir, fbase)
         else:
             if "--kokkos-trace" in options:
-                # TODO: as rocprofv3 --kokkos-trace feature improves, rocprof-compute should make updates accordingly
+                # TODO: as rocprofv3 --kokkos-trace feature improves,
+                # rocprof-compute should make updates accordingly
                 process_kokkos_trace_output(workload_dir, fbase)
             elif "--hip-trace" in options:
                 process_hip_trace_output(workload_dir, fbase)
@@ -895,7 +911,10 @@ def run_prof(
             )
         else:
             console_warning(
-                f"Cannot write results for {fbase}.csv due to no counter csv files generated."
+                (
+                    f"Cannot write results for {fbase}.csv due to no counter "
+                    "csv files generated."
+                )
             )
             return
 
@@ -1028,7 +1047,8 @@ def pc_sampling_prof(
 def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
     """
     rocprofv3 specific output processing.
-    takes care of json or csv formats, for csv format, additional processing is performed.
+    takes care of json or csv formats, for csv format,
+    additional processing is performed.
     """
     results_files_csv = {}
 
@@ -1076,12 +1096,15 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
 
             results_files_csv = glob.glob(workload_dir + "/out/pmc_1/*/*_converted.csv")
         elif is_timestamps:
-            # when the input is timestamps, we know counter csv file is not generated and will instead parse kernel trace file
+            # when the input is timestamps, we know counter csv file
+            # is not generated and will instead parse kernel trace file
             results_files_csv = glob.glob(
                 workload_dir + "/out/pmc_1/*/*_kernel_trace.csv"
             )
         else:
-            # when the input is not for timestamps, and counter csv file is not generated, we assume failed rocprof run and will completely bypass the file generation and merging for current pmc
+            # when the input is not for timestamps, and counter csv file
+            # is not generated, we assume failed rocprof run and will completely
+            # bypass the file generation and merging for current pmc
             results_files_csv = []
     else:
         console_error("The output file of rocprofv3 can only support json or csv!!!")
@@ -1220,7 +1243,7 @@ def detect_roofline(mspec):
 
     # Must be a valid SLES machine
     elif (
-        (type(sles_distro) == str and len(sles_distro) >= 3)
+        (isinstance(sles_distro, str) and len(sles_distro) >= 3)
         and sles_distro[:2] == "15"  # confirm string and len
         and int(sles_distro[3]) >= 6  # SLES15 and SP >= 6
     ):
@@ -1277,10 +1300,10 @@ def mibench(args, mspec):
 
     # Distro is valid but cant find rocm ver
     found = False
-    for path in binary_paths:
-        if pathlib.Path(path).exists():
+    for binary_path in binary_paths:
+        if pathlib.Path(binary_path).exists():
             found = True
-            path_to_binary = path
+            path_to_binary = binary_path
             break
 
     if not found:
@@ -1332,7 +1355,7 @@ def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd):
             # filter the channel index only
             p = re.compile(r"\[(\d+)\]")
             # pick up the 1st element only
-            r = (
+            r = (  # noqa: E731
                 lambda match: "["
                 + str(int(match.group(1)) + i * tcc_channel_per_xcd)
                 + "]"
@@ -1463,7 +1486,10 @@ def reverse_multi_index_df_pmc(final_df):
 
 def merge_counters_spatial_multiplex(df_multi_index):
     """
-    For spatial multiplexing, this merges counter values for the same kernel that runs on different devices. For time stamp, start time stamp will use median while for end time stamp, it will be equal to the summation between median start stamp and median delta time.
+    For spatial multiplexing, this merges counter values for the same kernel that
+    runs on different devices. For time stamp, start time stamp will use median
+    while for end time stamp, it will be equal to the summation between median
+    start stamp and median delta time.
     """
     non_counter_column_index = [
         "Dispatch_ID",
@@ -1496,7 +1522,8 @@ def merge_counters_spatial_multiplex(df_multi_index):
 
     result_dfs = []
 
-    # TODO: will need optimize to avoid this convertion to single index format and do merge directly on multi-index dataframe
+    # TODO: will need to optimize to avoid this conversion to single index format
+    # and do merge directly on multi-index dataframe
     dfs, coll_levels = reverse_multi_index_df_pmc(df_multi_index)
 
     for df in dfs:
@@ -1535,7 +1562,8 @@ def merge_counters_spatial_multiplex(df_multi_index):
                     # For other non-counter columns, take the first occurrence (0th row)
                     merged_row[col] = group.iloc[0][col]
 
-            # Process counter columns (assumed to be all columns not in non_counter_column_index)
+            # Process counter columns (assumed to be all columns not in
+            # non_counter_column_index)
             counter_columns = [
                 col for col in group.columns if col not in non_counter_column_index
             ]

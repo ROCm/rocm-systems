@@ -73,7 +73,8 @@ def load_panel_configs(dir):
             if f.endswith(".yaml"):
                 with open(str(Path(root).joinpath(f))) as file:
                     config = yaml.safe_load(file)
-                    # metric key can be None due to some metric tables not having any metrics
+                    # metric key can be None due to some metric tables
+                    # not having any metrics
                     # metric key should be empty dict instead of None
                     for data_source in config["Panel Config"]["data source"]:
                         metric_table = data_source.get("metric_table")
@@ -81,7 +82,8 @@ def load_panel_configs(dir):
                             metric_table["metric"] = {}
                     d[config["Panel Config"]["id"]] = config["Panel Config"]
 
-    # TODO: sort metrics as the header order in case they are not defined in the same order
+    # TODO: sort metrics as the header order in case they-
+    # are not defined in the same order
 
     od = OrderedDict(sorted(d.items()))
     # for key, value in od.items():
@@ -206,8 +208,8 @@ def create_df_pmc(
         dfs = []
         coll_levels = []
 
-        df = pd.DataFrame()
-        new_df = pd.DataFrame()
+        df = pd.DataFrame()  # noqa: F841
+        new_df = pd.DataFrame()  # noqa: F841
         for root, dirs, files in os.walk(raw_data_dir):
             for f in files:
                 # print("file ", f)

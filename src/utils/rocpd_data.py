@@ -4,7 +4,8 @@ from contextlib import closing
 
 from utils.logger import console_error
 
-# From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql in rocprofiler-sdk repository
+# From schema definition in source/share/rocprofiler-sdk-rocpd/data_views.sql
+# in rocprofiler-sdk repository
 COUNTERS_COLLECTION_QUERY = """
 SELECT
     agent_id as GPU_ID,
@@ -50,7 +51,8 @@ def convert_db_to_csv(
 
 def process_rocpd_csv(df):
     """
-    Merge counters across unique dispatches from the input dataframe and return processed dataframe.
+    Merge counters across unique dispatches from the
+    input dataframe and return processed dataframe.
     """
     # Only import pandas if needed
     import pandas as pd
@@ -78,7 +80,8 @@ def process_rocpd_csv(df):
         }
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
-        # Replace end timestamp with median of durations of group, start timestamp is set to 0
+        # Replace end timestamp with median of durations of group,
+        # start timestamp is set to 0
         row["End_Timestamp"] = (
             group_df["End_Timestamp"] - group_df["Start_Timestamp"]
         ).median()

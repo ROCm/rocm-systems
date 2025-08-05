@@ -59,7 +59,8 @@ def make_format_spec(num, align=">"):
 
 def is_value_valid(value):
     """
-    Check if a value is valid and display N/A if not(to be valid, it needs to be not None, and be int or float)
+    Check if a value is valid and display N/A if not
+    (to be valid, it needs to be not None, and be int or float)
     """
     if value is None:
         return False
@@ -81,7 +82,8 @@ def format_text(
     value_align=">",
 ):
     """
-    Format a text string for canvas to display according to input key value pair and make proper aligment
+    Format a text string for canvas to display according to
+    input key value pair and make proper aligment
     For invalid value, it displays N/A
     All strings to be displayed on Canvas need to use this method
     """
@@ -1010,7 +1012,7 @@ class MemChart:
         # Fixme: this is temp solution to filter out non-numeric string
         for k, v in metric_dict.items():
             # print(k, type(v))
-            metric_dict[k] = None if type(v) == str else v
+            metric_dict[k] = None if isinstance(v, str) else v
 
         # Typically, the drawing order would be: left->right, top->down
 

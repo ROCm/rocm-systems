@@ -110,7 +110,10 @@ class ColoredFormatterAll(logging.Formatter):
             if levelname == "INFO":
                 log_fmt = "%(message)s"
             else:
-                log_fmt = f"{COLOR_SEQ % (30 + COLORS[levelname])}%(levelname)s: %(message)s{RESET_SEQ}"
+                log_fmt = (
+                    f"{COLOR_SEQ % (30 + COLORS[levelname])}"
+                    f"%(levelname)s: %(message)s{RESET_SEQ}"
+                )
             formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 

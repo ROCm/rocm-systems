@@ -69,7 +69,8 @@ def kernel_name_shortener(df, level):
                     r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?"
                 )
 
-                # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
+                # works for name:
+                # Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
                 if names_and_args.search(demangled_name):
                     matches = names_and_args.findall(demangled_name)
                 else:
@@ -81,7 +82,8 @@ def kernel_name_shortener(df, level):
 
                 current_level = 0
                 for name in matches:
-                    ##can cause errors if a function name or argument is equal to 'clone'
+                    # can cause errors if a function name-
+                    # or argument is equal to 'clone'
                     if name[0] == "clone":
                         continue
                     if len(name) == 3:
@@ -100,7 +102,8 @@ def kernel_name_shortener(df, level):
                         current_level += name[1].count("<")
 
                     curr_index = 0
-                    # cases include '>'  '> >, ' have to go in depth here to not lose account of commas and current level
+                    # cases include '>'  '> >, ' have to go in depth here to-
+                    # not lose account of commas and current level
                     while name[1].count(">") > 0 and curr_index < len(name[1]):
                         if current_level < level:
                             new_name += name[1][curr_index:]
