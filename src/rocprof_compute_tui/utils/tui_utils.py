@@ -16,7 +16,6 @@ class LogLevel(str, Enum):
 
 
 class Logger:
-
     def __init__(self, output_area=None):
         self.output_area = output_area
         self._setup_logger()
@@ -27,8 +26,9 @@ class Logger:
 
         if not self.logger.handlers:
             handler = logging.StreamHandler()
-            formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s",
-                                          datefmt="%Y-%m-%d %H:%M:%S")
+            formatter = logging.Formatter(
+                "%(asctime)s [%(levelname)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
+            )
             handler.setFormatter(formatter)
             self.logger.addHandler(handler)
 
@@ -59,8 +59,11 @@ class Logger:
 
             if hasattr(self.output_area, "text"):
                 current_text = self.output_area.text
-                self.output_area.text = (f"{current_text}\n{formatted_msg}"
-                                         if current_text else formatted_msg)
+                self.output_area.text = (
+                    f"{current_text}\n{formatted_msg}"
+                    if current_text
+                    else formatted_msg
+                )
                 # HACK: moving curson to end of outpu (Is there a better way to achieve this?)
                 self.output_area.cursor_location = (999999, 0)
 
@@ -91,8 +94,9 @@ def get_top_kernels_and_dispatch_ids(runs):
     if top_kernel_df is None or dispatch_id_df is None:
         return None
 
-    merged_df = pd.merge(top_kernel_df, dispatch_id_df, on="Kernel_Name",
-                         how="outer").sort_values("Pct", ascending=False)
+    merged_df = pd.merge(
+        top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
+    ).sort_values("Pct", ascending=False)
 
     return merged_df.to_dict("records")
 
@@ -152,8 +156,9 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
 
                 df = apply_rounding_logic(df, decimal_precision)
 
-                subsection_name = (str(table_config["id"] // 100) + "." +
-                                   str(table_config["id"] % 100))
+                subsection_name = (
+                    str(table_config["id"] // 100) + "." + str(table_config["id"] % 100)
+                )
                 if "title" in table_config and table_config["title"]:
                     subsection_name += " " + table_config["title"]
 
@@ -164,7 +169,8 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
 
                 if type == "metric_table" and "tui_style" in table_config:
                     result_structure[section_name][subsection_name]["tui_style"] = (
-                        table_config["tui_style"])
+                        table_config["tui_style"]
+                    )
 
     return dict(result_structure)
 
@@ -187,8 +193,9 @@ def apply_rounding_logic(df, decimal_precision):
                     if df_copy[column].dtype == "object":
                         df_copy[column] = df_copy[column].combine(
                             rounded_series,
-                            lambda orig, rounded: (rounded
-                                                   if pd.notna(rounded) else orig),
+                            lambda orig, rounded: (
+                                rounded if pd.notna(rounded) else orig
+                            ),
                         )
                     else:
                         df_copy[column] = rounded_series

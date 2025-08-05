@@ -46,7 +46,6 @@ MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
 
 
 class DatabaseConnector:
-
     def __init__(self, args):
         self.args = args
         self.cache = dict()
@@ -78,11 +77,18 @@ class DatabaseConnector:
                     f"Outdated workload. Cannot find {e} field. Please reprofile to update."
                 )
         else:
-            console_error("database",
-                          "Unable to parse SoC and/or workload name from sysinfo.csv")
+            console_error(
+                "database", "Unable to parse SoC and/or workload name from sysinfo.csv"
+            )
 
-        self.connection_info["db"] = ("rocprofiler-compute_" + str(self.args.team) +
-                                      "_" + str(name) + "_" + str(soc))
+        self.connection_info["db"] = (
+            "rocprofiler-compute_"
+            + str(self.args.team)
+            + "_"
+            + str(name)
+            + "_"
+            + str(soc)
+        )
 
     @demarcate
     def db_import(self):
@@ -96,7 +102,7 @@ class DatabaseConnector:
                     "Uploading: %s" % self.connection_info["workload"] + "/" + file,
                 )
                 try:
-                    fileName = file[0:file.find(".")]
+                    fileName = file[0 : file.find(".")]
                     data = pd.read_csv(self.connection_info["workload"] + "/" + file)
 
                     # Demangle original KernelNames
@@ -111,7 +117,8 @@ class DatabaseConnector:
                             self.connection_info["host"],
                             self.connection_info["port"],
                             self.connection_info["db"],
-                        ))
+                        )
+                    )
                     db = client[self.connection_info["db"]]
                     collection = db[fileName]
                     collection.insert_many(data_dict)
@@ -138,8 +145,9 @@ class DatabaseConnector:
         col = db["names"]
         col.delete_many({"name": self.connection_info["workload"]})
 
-        console_log("database",
-                    "Successfully removed %s" % self.connection_info["workload"])
+        console_log(
+            "database", "Successfully removed %s" % self.connection_info["workload"]
+        )
 
     @abstractmethod
     def pre_processing(self):
@@ -147,7 +155,8 @@ class DatabaseConnector:
         console_debug("database", "pre-processing database connection")
         if not self.args.remove and not self.args.upload:
             console_error(
-                "Either -i/--import or -r/--remove is required in database mode")
+                "Either -i/--import or -r/--remove is required in database mode"
+            )
         self.interaction_type = "import" if self.args.upload else "remove"
 
         # Detect interaction type
@@ -158,37 +167,48 @@ class DatabaseConnector:
                 console_error(
                     "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. rocprofiler-compute_asw_vcopy_mi200)"
                 )
-            if (self.connection_info["host"] == None
-                    or self.connection_info["username"] == None):
+            if (
+                self.connection_info["host"] == None
+                or self.connection_info["username"] == None
+            ):
                 console_error(
                     "-H/--host and -u/--username are required when interaction type is set to %s"
-                    % self.interaction_type)
-            if (self.connection_info["workload"] == "admin"
-                    or self.connection_info["workload"] == "local"):
-                console_error("Cannot remove %s. Try again." %
-                              self.connection_info["workload"])
+                    % self.interaction_type
+                )
+            if (
+                self.connection_info["workload"] == "admin"
+                or self.connection_info["workload"] == "local"
+            ):
+                console_error(
+                    "Cannot remove %s. Try again." % self.connection_info["workload"]
+                )
         else:
             console_debug("database", "validating arguments for --import workflow")
-            if (self.connection_info["host"] == None
-                    or self.connection_info["team"] == None
-                    or self.connection_info["username"] == None
-                    or self.connection_info["workload"] == None):
+            if (
+                self.connection_info["host"] == None
+                or self.connection_info["team"] == None
+                or self.connection_info["username"] == None
+                or self.connection_info["workload"] == None
+            ):
                 console_error(
                     "-H/--host, -w/--workload, -u/--username, and -t/--team are all required when interaction type is set to %s"
-                    % self.interaction_type)
+                    % self.interaction_type
+                )
 
             if Path(self.connection_info["workload"]).absolute().is_dir():
                 is_workload_empty(self.connection_info["workload"])
             else:
                 console_error(
-                    "--workload is invalid. Please pass path to a valid directory.")
+                    "--workload is invalid. Please pass path to a valid directory."
+                )
 
             if len(self.args.team) > 13:
                 console_error("--team exceeds 13 character limit. Try again.")
 
             # format path properly
             self.connection_info["workload"] = str(
-                Path(self.connection_info["workload"]).absolute().resolve())
+                Path(self.connection_info["workload"]).absolute().resolve()
+            )
 
         # Detect password
         if self.connection_info["password"] == "":
@@ -202,12 +222,20 @@ class DatabaseConnector:
             password = self.connection_info["password"]
 
         # Establish client connection
-        connection_str = ("mongodb://" + self.connection_info["username"] + ":" +
-                          self.connection_info["password"] + "@" +
-                          self.connection_info["host"] + ":" +
-                          self.connection_info["port"] + "/?authSource=admin")
-        self.client = MongoClient(connection_str,
-                                  serverSelectionTimeoutMS=MAX_SERVER_SEL_DELAY)
+        connection_str = (
+            "mongodb://"
+            + self.connection_info["username"]
+            + ":"
+            + self.connection_info["password"]
+            + "@"
+            + self.connection_info["host"]
+            + ":"
+            + self.connection_info["port"]
+            + "/?authSource=admin"
+        )
+        self.client = MongoClient(
+            connection_str, serverSelectionTimeoutMS=MAX_SERVER_SEL_DELAY
+        )
         try:
             self.client.server_info()
         except:

@@ -29,8 +29,9 @@ from unittest.mock import patch
 
 import pytest
 
-rocprof_compute = SourceFileLoader("rocprof-compute",
-                                   "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 
 def pytest_addoption(parser):
@@ -51,7 +52,6 @@ def pytest_addoption(parser):
 
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
-
     def _handler(
         config,
         workload_dir,
@@ -61,10 +61,12 @@ def binary_handler_profile_rocprof_compute(request):
         app_name="app_1",
     ):
         if request.config.getoption("--rocprofiler-sdk-library-path"):
-            options.extend([
-                "--rocprofiler-sdk-library-path",
-                request.config.getoption("--rocprofiler-sdk-library-path"),
-            ], )
+            options.extend(
+                [
+                    "--rocprofiler-sdk-library-path",
+                    request.config.getoption("--rocprofiler-sdk-library-path"),
+                ],
+            )
         if request.config.getoption("--call-binary"):
             baseline_opts = [
                 "build/rocprof-compute.bin",
@@ -76,8 +78,10 @@ def binary_handler_profile_rocprof_compute(request):
             if not roof:
                 baseline_opts.append("--no-roof")
             process = subprocess.run(
-                baseline_opts + options + ["--path", workload_dir, "--"] +
-                config[app_name],
+                baseline_opts
+                + options
+                + ["--path", workload_dir, "--"]
+                + config[app_name],
                 text=True,
             )
             # verify run status
@@ -90,9 +94,11 @@ def binary_handler_profile_rocprof_compute(request):
                 baseline_opts.append("--no-roof")
             with pytest.raises(SystemExit) as e:
                 with patch(
-                        "sys.argv",
-                        baseline_opts + options + ["--path", workload_dir, "--"] +
-                        config[app_name],
+                    "sys.argv",
+                    baseline_opts
+                    + options
+                    + ["--path", workload_dir, "--"]
+                    + config[app_name],
                 ):
                     rocprof_compute.main()
             # verify run status
@@ -105,7 +111,6 @@ def binary_handler_profile_rocprof_compute(request):
 
 @pytest.fixture
 def binary_handler_analyze_rocprof_compute(request):
-
     def _handler(arguments):
         if request.config.getoption("--call-binary"):
             process = subprocess.run(
@@ -116,7 +121,7 @@ def binary_handler_analyze_rocprof_compute(request):
         else:
             with pytest.raises(SystemExit) as e:
                 with patch(
-                        "sys.argv",
+                    "sys.argv",
                     ["rocprof-compute", *arguments],
                 ):
                     rocprof_compute.main()

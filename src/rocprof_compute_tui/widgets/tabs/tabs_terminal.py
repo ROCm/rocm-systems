@@ -36,7 +36,6 @@ from textual.widgets import Input, Static
 
 
 class Terimnal(Container):
-
     def __init__(
         self,
         name: Optional[str] = None,
@@ -71,7 +70,8 @@ class Terimnal(Container):
         """Initialize the terminal."""
         # Update status
         self.add_output(
-            f"Support quick/simple terminal commands.\ncwd: {self.current_directory}\n")
+            f"Support quick/simple terminal commands.\ncwd: {self.current_directory}\n"
+        )
 
         # Update the prompt
         self.update_prompt()
@@ -80,8 +80,9 @@ class Terimnal(Container):
     def update_prompt(self) -> None:
         """Update the command prompt in the input field."""
         input_widget = self.query_one("#terminal-input")
-        current_path = (os.path.basename(self.current_directory)
-                        or self.current_directory)
+        current_path = (
+            os.path.basename(self.current_directory) or self.current_directory
+        )
 
         if platform.system() != "Windows":
             prompt = f"{current_path} $ "
@@ -129,8 +130,9 @@ class Terimnal(Container):
     def run_command(self, command: str) -> None:
         """Run a system command and display its output."""
         # Add command to history
-        if command.strip() and (not self.command_history
-                                or command != self.command_history[-1]):
+        if command.strip() and (
+            not self.command_history or command != self.command_history[-1]
+        ):
             self.command_history.append(command)
             self.history_index = len(self.command_history)
 

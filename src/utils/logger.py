@@ -44,7 +44,6 @@ COLORS = {
 
 
 def demarcate(function):
-
     def wrap_function(*args, **kwargs):
         logging.trace("----- [entering function] -> %s()" % (function.__qualname__))
         result = function(*args, **kwargs)
@@ -94,18 +93,17 @@ def trace_logger(message, *args, **kwargs):
 
 # Define the formatter
 class ColoredFormatter(logging.Formatter):
-
     def format(self, record):
         levelname = record.levelname
         if levelname in COLORS:
-            levelname_color = (COLOR_SEQ % (30 + COLORS[levelname]) + levelname +
-                               RESET_SEQ)
+            levelname_color = (
+                COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
+            )
             record.levelname = levelname_color
         return logging.Formatter.format(self, record)
 
 
 class ColoredFormatterAll(logging.Formatter):
-
     def format(self, record):
         levelname = record.levelname
         if levelname in COLORS:
@@ -118,7 +116,6 @@ class ColoredFormatterAll(logging.Formatter):
 
 
 class PlainFormatter(logging.Formatter):
-
     def format(self, record):
         if record.levelno == logging.ERROR:
             self._style._fmt = "%(levelname)s %(message)s"
@@ -200,8 +197,9 @@ def setup_logging_priority(verbosity, quietmode, appmode, guimode):
         elif loglevel in {"ERROR", "error"}:
             loglevel = logging.ERROR
         else:
-            print("Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" %
-                  loglevel)
+            print(
+                "Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" % loglevel
+            )
             sys.exit(1)
 
     # update console loglevel based on command-line args/env settings

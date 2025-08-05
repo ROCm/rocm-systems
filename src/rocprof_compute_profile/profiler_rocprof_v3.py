@@ -31,13 +31,13 @@ from utils.logger import console_error, console_log, demarcate
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
-
     def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
         super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
             and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
-            or not self.get_args().roof_only)
+            or not self.get_args().roof_only
+        )
 
     def get_profiler_options(self, fname, soc):
         app_cmd = shlex.split(self.get_args().remaining)
@@ -93,8 +93,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         """Run profiling."""
         if self.ready_to_profile:
             if self.get_args().roof_only:
-                console_log("roofline",
-                            "Generating pmc_perf.csv (roofline counters only).")
+                console_log(
+                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
+                )
             # Log profiling options and setup filtering
             super().run_profiling(version, prog)
         else:

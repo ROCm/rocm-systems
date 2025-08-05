@@ -34,7 +34,6 @@ from utils.utils import mibench
 
 
 class gfx941_soc(OmniSoC_Base):
-
     def __init__(self, args, mspec):
         super().__init__(args, mspec)
         self.set_arch("gfx941")
@@ -46,7 +45,9 @@ class gfx941_soc(OmniSoC_Base):
                         "profile_configs",
                         "gfx940",
                         "roofline",
-                    )))
+                    )
+                )
+            )
         self.set_compatible_profilers([
             "rocprofv1",
             "rocprofv2",
@@ -83,10 +84,12 @@ class gfx941_soc(OmniSoC_Base):
             pmc_path = str(Path(self.get_args().path).joinpath("pmc_perf.csv"))
             if not Path(pmc_path).is_file():
                 console_warning(
-                    "Incomplete or missing profiling data. Skipping roofline.")
+                    "Incomplete or missing profiling data. Skipping roofline."
+                )
                 return
-            console_log("roofline",
-                        "Checking for roofline.csv in " + str(self.get_args().path))
+            console_log(
+                "roofline", "Checking for roofline.csv in " + str(self.get_args().path)
+            )
             if not Path(self.get_args().path).joinpath("roofline.csv").is_file():
                 mibench(self.get_args(), self._mspec)
             self.roofline_obj.post_processing()
@@ -99,5 +102,6 @@ class gfx941_soc(OmniSoC_Base):
         super().analysis_setup()
         # configure roofline for analysis
         if roofline_parameters:
-            self.roofline_obj = Roofline(self.get_args(), self._mspec,
-                                         roofline_parameters)
+            self.roofline_obj = Roofline(
+                self.get_args(), self._mspec, roofline_parameters
+            )

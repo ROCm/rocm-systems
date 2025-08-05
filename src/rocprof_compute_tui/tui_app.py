@@ -62,9 +62,9 @@ class RocprofTUIApp(App):
         # Binding(key="a", action="analyze", description="Analyze"),
     ]
 
-    def __init__(self,
-                 args: Optional[Any] = None,
-                 supported_archs: Optional[Dict] = None) -> None:
+    def __init__(
+        self, args: Optional[Any] = None, supported_archs: Optional[Dict] = None
+    ) -> None:
         """
         Initialize the application.
         """

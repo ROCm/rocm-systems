@@ -57,7 +57,8 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.start_path = (
             # NOTE: is cwd the best choice?
-            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH))
+            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
+        )
 
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
@@ -128,8 +129,9 @@ class MainView(Horizontal):
 
         try:
             self.logger.info(f"Starting analysis on: {self.selected_path}")
-            self._update_view(f"Running analysis on: {self.selected_path}",
-                              LogLevel.SUCCESS)
+            self._update_view(
+                f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
+            )
 
             # Step 1: Create analyzer
             try:
@@ -137,8 +139,9 @@ class MainView(Horizontal):
                 self.logger.info(f"Step 1: args {self.app.args}")
                 self.logger.info(f"Step 1: arch {self.app.supported_archs}")
                 self.logger.info("Step 1: Creating analyzer")
-                analyzer = tui_analysis(self.app.args, self.app.supported_archs,
-                                        self.selected_path)
+                analyzer = tui_analysis(
+                    self.app.args, self.app.supported_archs, self.selected_path
+                )
                 self.logger.info("Step 1: Analyzer created successfully")
             except Exception as e:
                 self.logger.error(f"Step 1 failed - Error creating analyzer: {str(e)}")
@@ -151,7 +154,8 @@ class MainView(Horizontal):
                 self.logger.info("Step 2: Analyzer sanitized successfully")
             except Exception as e:
                 self.logger.error(
-                    f"Step 2 failed - Error sanitizing analyzer: {str(e)}")
+                    f"Step 2 failed - Error sanitizing analyzer: {str(e)}"
+                )
                 raise
 
             # Step 3: Load sys_info
@@ -188,13 +192,15 @@ class MainView(Horizontal):
                     sys_info = sys_info_df
                 else:
                     raise TypeError(
-                        f"Unexpected type for sys_info: {type(sys_info_df)}")
+                        f"Unexpected type for sys_info: {type(sys_info_df)}"
+                    )
 
                 self.logger.info(f"Step 4: sys_info converted = {sys_info}")
 
             except Exception as e:
                 self.logger.error(
-                    f"Step 4 failed - Error converting sys_info: {str(e)}")
+                    f"Step 4 failed - Error converting sys_info: {str(e)}"
+                )
                 raise
 
             # Step 5: Load SoC specs
@@ -275,8 +281,12 @@ class MainView(Horizontal):
                 self.logger.error("Kernel view not found")
                 return
 
-            if (not hasattr(self, "per_kernel_dfs") or self.per_kernel_dfs is None
-                    or not hasattr(self, "top_kernels") or self.top_kernels is None):
+            if (
+                not hasattr(self, "per_kernel_dfs")
+                or self.per_kernel_dfs is None
+                or not hasattr(self, "top_kernels")
+                or self.top_kernels is None
+            ):
                 self.logger.error("No kernel analysis data available to display")
                 return
 

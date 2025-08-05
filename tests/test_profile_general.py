@@ -38,24 +38,12 @@ import test_utils
 
 # TODO: MI350 What are the gpu models in MI 350 series
 SUPPORTED_ARCHS = {
-    "gfx908": {
-        "mi100": ["MI100"]
-    },
-    "gfx90a": {
-        "mi200": ["MI210", "MI250", "MI250X"]
-    },
-    "gfx940": {
-        "mi300": ["MI300A_A0"]
-    },
-    "gfx941": {
-        "mi300": ["MI300X_A0"]
-    },
-    "gfx942": {
-        "mi300": ["MI300A_A1", "MI300X_A1"]
-    },
-    "gfx950": {
-        "mi350": ["MI350"]
-    },
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+    "gfx950": {"mi350": ["MI350"]},
 }
 
 CHIP_IDS = {
@@ -171,270 +159,72 @@ ROOF_ONLY_FILES = sorted([
 ])
 
 METRIC_THRESHOLDS = {
-    "2.1.12": {
-        "absolute": 0,
-        "relative": 8
-    },
-    "3.1.1": {
-        "absolute": 0,
-        "relative": 10
-    },
-    "3.1.10": {
-        "absolute": 0,
-        "relative": 10
-    },
-    "3.1.11": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "3.1.12": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "3.1.13": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "5.1.0": {
-        "absolute": 0,
-        "relative": 15
-    },
-    "5.2.0": {
-        "absolute": 0,
-        "relative": 15
-    },
-    "6.1.4": {
-        "absolute": 4,
-        "relative": 0
-    },
-    "6.1.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "6.1.0": {
-        "absolute": 0,
-        "relative": 15
-    },
-    "6.1.3": {
-        "absolute": 0,
-        "relative": 11
-    },
-    "6.2.12": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "6.2.13": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.1": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.2": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.1.7": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "7.2.1": {
-        "absolute": 0,
-        "relative": 10
-    },
-    "7.2.3": {
-        "absolute": 0,
-        "relative": 12
-    },
-    "7.2.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.1.4": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.1.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.1.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.1.7": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.3.4": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.3.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "10.3.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "11.2.1": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "11.2.4": {
-        "absolute": 0,
-        "relative": 5
-    },
-    "13.2.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "13.2.2": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "14.2.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "14.2.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "14.2.7": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "14.2.8": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.1.4": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.1.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.1.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.1.7": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.2.4": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "15.2.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.1.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.1.3": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.1": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.2": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.7": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.9": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.10": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.3.11": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.4.3": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.4.4": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "16.5.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "17.3.3": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "17.3.6": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.0": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.1": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.2": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.3": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.5": {
-        "absolute": 0,
-        "relative": 1
-    },
-    "18.1.6": {
-        "absolute": 1,
-        "relative": 0
-    },
+    "2.1.12": {"absolute": 0, "relative": 8},
+    "3.1.1": {"absolute": 0, "relative": 10},
+    "3.1.10": {"absolute": 0, "relative": 10},
+    "3.1.11": {"absolute": 0, "relative": 1},
+    "3.1.12": {"absolute": 0, "relative": 1},
+    "3.1.13": {"absolute": 0, "relative": 1},
+    "5.1.0": {"absolute": 0, "relative": 15},
+    "5.2.0": {"absolute": 0, "relative": 15},
+    "6.1.4": {"absolute": 4, "relative": 0},
+    "6.1.5": {"absolute": 0, "relative": 1},
+    "6.1.0": {"absolute": 0, "relative": 15},
+    "6.1.3": {"absolute": 0, "relative": 11},
+    "6.2.12": {"absolute": 0, "relative": 1},
+    "6.2.13": {"absolute": 0, "relative": 1},
+    "7.1.0": {"absolute": 0, "relative": 1},
+    "7.1.1": {"absolute": 0, "relative": 1},
+    "7.1.2": {"absolute": 0, "relative": 1},
+    "7.1.5": {"absolute": 0, "relative": 1},
+    "7.1.6": {"absolute": 0, "relative": 1},
+    "7.1.7": {"absolute": 0, "relative": 1},
+    "7.2.1": {"absolute": 0, "relative": 10},
+    "7.2.3": {"absolute": 0, "relative": 12},
+    "7.2.6": {"absolute": 0, "relative": 1},
+    "10.1.4": {"absolute": 0, "relative": 1},
+    "10.1.5": {"absolute": 0, "relative": 1},
+    "10.1.6": {"absolute": 0, "relative": 1},
+    "10.1.7": {"absolute": 0, "relative": 1},
+    "10.3.4": {"absolute": 0, "relative": 1},
+    "10.3.5": {"absolute": 0, "relative": 1},
+    "10.3.6": {"absolute": 0, "relative": 1},
+    "11.2.1": {"absolute": 0, "relative": 1},
+    "11.2.4": {"absolute": 0, "relative": 5},
+    "13.2.0": {"absolute": 0, "relative": 1},
+    "13.2.2": {"absolute": 0, "relative": 1},
+    "14.2.0": {"absolute": 0, "relative": 1},
+    "14.2.5": {"absolute": 0, "relative": 1},
+    "14.2.7": {"absolute": 0, "relative": 1},
+    "14.2.8": {"absolute": 0, "relative": 1},
+    "15.1.4": {"absolute": 0, "relative": 1},
+    "15.1.5": {"absolute": 0, "relative": 1},
+    "15.1.6": {"absolute": 0, "relative": 1},
+    "15.1.7": {"absolute": 0, "relative": 1},
+    "15.2.4": {"absolute": 0, "relative": 1},
+    "15.2.5": {"absolute": 0, "relative": 1},
+    "16.1.0": {"absolute": 0, "relative": 1},
+    "16.1.3": {"absolute": 0, "relative": 1},
+    "16.3.0": {"absolute": 0, "relative": 1},
+    "16.3.1": {"absolute": 0, "relative": 1},
+    "16.3.2": {"absolute": 0, "relative": 1},
+    "16.3.5": {"absolute": 0, "relative": 1},
+    "16.3.6": {"absolute": 0, "relative": 1},
+    "16.3.7": {"absolute": 0, "relative": 1},
+    "16.3.9": {"absolute": 0, "relative": 1},
+    "16.3.10": {"absolute": 0, "relative": 1},
+    "16.3.11": {"absolute": 0, "relative": 1},
+    "16.4.3": {"absolute": 0, "relative": 1},
+    "16.4.4": {"absolute": 0, "relative": 1},
+    "16.5.0": {"absolute": 0, "relative": 1},
+    "17.3.3": {"absolute": 0, "relative": 1},
+    "17.3.6": {"absolute": 0, "relative": 1},
+    "18.1.0": {"absolute": 0, "relative": 1},
+    "18.1.1": {"absolute": 0, "relative": 1},
+    "18.1.2": {"absolute": 0, "relative": 1},
+    "18.1.3": {"absolute": 0, "relative": 1},
+    "18.1.5": {"absolute": 0, "relative": 1},
+    "18.1.6": {"absolute": 1, "relative": 0},
 }
 # check for parallel resource allocation
 test_utils.check_resource_allocation()
@@ -491,7 +281,8 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
                     diff = round(baseline_data - run_data, 2)
                     if diff > threshold:
                         print(
-                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff))
+                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff)
+                        )
         differences["kernel_name"] = [kernel_name]
         differences["test_name"] = [test_name]
         differences["gpu-id"] = [gpu_id]
@@ -512,8 +303,10 @@ def gpu_soc():
     ## 1) Parse arch details from rocminfo
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(["rocminfo"], stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE).stdout.decode("utf-8"))
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
     rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
@@ -523,8 +316,11 @@ def gpu_soc():
         print("Cannot find a supported arch in rocminfo")
         assert 0
     else:
-        num_devices = (len(devices) if not "CI_VISIBLE_DEVICES" in os.environ else
-                       os.environ["CI_VISIBLE_DEVICES"])
+        num_devices = (
+            len(devices)
+            if not "CI_VISIBLE_DEVICES" in os.environ
+            else os.environ["CI_VISIBLE_DEVICES"]
+        )
 
     ## 2) Parse chip id from rocminfo
     chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
@@ -549,9 +345,12 @@ os.environ["ROCPROF"] = "rocprofv3"
 
 def using_v3():
     return "ROCPROF" not in os.environ.keys() or (
-        "ROCPROF" in os.environ.keys() and
-        (os.environ["ROCPROF"].endswith("rocprofv3")
-         or os.environ["ROCPROF"] == "rocprofiler-sdk"))
+        "ROCPROF" in os.environ.keys()
+        and (
+            os.environ["ROCPROF"].endswith("rocprofv3")
+            or os.environ["ROCPROF"] == "rocprofiler-sdk"
+        )
+    )
 
 
 Baseline_dir = str(Path("tests/workloads/vcopy/" + soc).resolve())
@@ -567,22 +366,27 @@ def log_counter(file_dict, test_name):
 
             errors = counter_compare(test_name, pd.DataFrame(), df_1, df_2, 5)
             if not errors.empty:
-                if Path(Baseline_dir + "/" + file.split(".")[0] +
-                        "_error_log.csv").exists():
+                if Path(
+                    Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
+                ).exists():
                     error_log = pd.read_csv(
                         Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv",
                         index_col=0,
                     )
                     new_error_log = pd.concat([error_log, errors])
-                    new_error_log = new_error_log.reindex(sorted(new_error_log.columns),
-                                                          axis=1)
+                    new_error_log = new_error_log.reindex(
+                        sorted(new_error_log.columns), axis=1
+                    )
                     new_error_log = new_error_log.sort_values(
-                        by=["test_name", "kernel_name", "gpu-id"])
-                    new_error_log.to_csv(Baseline_dir + "/" + file.split(".")[0] +
-                                         "_error_log.csv")
+                        by=["test_name", "kernel_name", "gpu-id"]
+                    )
+                    new_error_log.to_csv(
+                        Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
+                    )
                 else:
-                    errors.to_csv(Baseline_dir + "/" + file.split(".")[0] +
-                                  "_error_log.csv")
+                    errors.to_csv(
+                        Baseline_dir + "/" + file.split(".")[0] + "_error_log.csv"
+                    )
 
 
 def baseline_compare_metric(test_name, workload_dir, args=[]):
@@ -593,7 +397,9 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
             "analyze",
             "--path",
             Baseline_dir,
-        ] + args + ["--path", workload_dir, "--report-diff", "-1"],
+        ]
+        + args
+        + ["--path", workload_dir, "--report-diff", "-1"],
         stdout=subprocess.PIPE,
     )
     captured_output = t.communicate(timeout=1300)[0].decode("utf-8")
@@ -611,8 +417,9 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
         high_diff_metrics = [x[1] for x in output_metric_errors]
         for metric in high_diff_metrics:
             metric_info = re.findall(
-                r"(^" + metric +
-                r")(?: *)([()0-9A-Za-z- ]+ )(?: *)([0-9.-]*)(?: *)([0-9.-]*)(?: *)\(([-0-9.]*)%\)(?: *)([-0-9.e]*)",
+                r"(^"
+                + metric
+                + r")(?: *)([()0-9A-Za-z- ]+ )(?: *)([0-9.-]*)(?: *)([0-9.-]*)(?: *)\(([-0-9.]*)%\)(?: *)([-0-9.e]*)",
                 captured_output,
                 flags=re.MULTILINE,
             )
@@ -628,20 +435,32 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                     if metric_idx in METRIC_THRESHOLDS.keys():
                         # print(metric_idx+" is in FIXED_METRICS")
                         threshold_type = (
-                            "absolute" if METRIC_THRESHOLDS[metric_idx]["absolute"]
-                            > METRIC_THRESHOLDS[metric_idx]["relative"] else "relative")
+                            "absolute"
+                            if METRIC_THRESHOLDS[metric_idx]["absolute"]
+                            > METRIC_THRESHOLDS[metric_idx]["relative"]
+                            else "relative"
+                        )
 
-                        isValid = ((abs(absolute_diff)
-                                    <= METRIC_THRESHOLDS[metric_idx]["absolute"]) if
-                                   (threshold_type == "absolute") else
-                                   (abs(relative_diff)
-                                    <= METRIC_THRESHOLDS[metric_idx]["relative"]))
+                        isValid = (
+                            (
+                                abs(absolute_diff)
+                                <= METRIC_THRESHOLDS[metric_idx]["absolute"]
+                            )
+                            if (threshold_type == "absolute")
+                            else (
+                                abs(relative_diff)
+                                <= METRIC_THRESHOLDS[metric_idx]["relative"]
+                            )
+                        )
                         if not isValid:
                             print(
-                                "index " + metric_idx + " " + threshold_type +
-                                " difference is supposed to be " +
-                                str(METRIC_THRESHOLDS[metric_idx][threshold_type]) +
-                                ", absolute diff:",
+                                "index "
+                                + metric_idx
+                                + " "
+                                + threshold_type
+                                + " difference is supposed to be "
+                                + str(METRIC_THRESHOLDS[metric_idx][threshold_type])
+                                + ", absolute diff:",
                                 absolute_diff,
                                 "relative diff: ",
                                 relative_diff,
@@ -651,9 +470,12 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
 
                     # Used for debugging metric lists
                     if config["METRIC_LOGGING"] and (
-                        (abs(relative_diff) <= abs(DEFAULT_REL_DIFF) or
-                         (abs(absolute_diff) <= abs(DEFAULT_ABS_DIFF))) and
-                        (False if baseline_val == "" else float(baseline_val) > 0)):
+                        (
+                            abs(relative_diff) <= abs(DEFAULT_REL_DIFF)
+                            or (abs(absolute_diff) <= abs(DEFAULT_ABS_DIFF))
+                        )
+                        and (False if baseline_val == "" else float(baseline_val) > 0)
+                    ):
                         # print("logging...")
                         # print(metric_info)
 
@@ -668,17 +490,19 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                         })
                         error_df = pd.concat([error_df, new_error])
                         counts = error_df.groupby(["Index"]).cumcount()
-                        reoccurring_metrics = error_df.loc[counts >
-                                                           MAX_REOCCURING_COUNT]
-                        reoccurring_metrics["counts"] = counts[counts >
-                                                               MAX_REOCCURING_COUNT]
+                        reoccurring_metrics = error_df.loc[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
+                        reoccurring_metrics["counts"] = counts[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
                         if reoccurring_metrics.any(axis=None):
                             with pd.option_context(
-                                    "display.max_rows",
-                                    None,
-                                    "display.max_columns",
-                                    None,
-                                    #    'display.precision', 3,
+                                "display.max_rows",
+                                None,
+                                "display.max_columns",
+                                None,
+                                #    'display.precision', 3,
                             ):
                                 print(
                                     "These metrics appear alot\n",
@@ -715,12 +539,16 @@ def test_path(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -739,8 +567,9 @@ def test_path_rocpd(binary_handler_profile_rocprof_compute):
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
 
     assert (Path(workload_dir) / "pmc_perf.csv").exists()
-    assert test_utils.check_file_pattern("format_rocprof_output: rocpd",
-                                         f"{workload_dir}/profiling_config.yaml")
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -756,11 +585,9 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only", "--kernel-names"]
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     # assert successful run
     assert returncode == 0
@@ -769,8 +596,11 @@ def test_roof_kernel_names(binary_handler_profile_rocprof_compute):
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     else:
-        expected_files = ([f for f in ROOF_ONLY_FILES if f != "timestamps.csv"] if
-                          using_v3() else ROOF_ONLY_FILES) + ["kernelName_legend.pdf"]
+        expected_files = (
+            [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+            if using_v3()
+            else ROOF_ONLY_FILES
+        ) + ["kernelName_legend.pdf"]
         assert sorted(list(file_dict.keys())) == sorted(expected_files)
 
     validate(
@@ -805,19 +635,19 @@ def test_roof_multiple_data_types(binary_handler_profile_rocprof_compute):
         workload_dir = test_utils.get_output_dir()
 
         try:
-            returncode = binary_handler_profile_rocprof_compute(config,
-                                                                workload_dir,
-                                                                options,
-                                                                check_success=False,
-                                                                roof=True)
+            returncode = binary_handler_profile_rocprof_compute(
+                config, workload_dir, options, check_success=False, roof=True
+            )
 
             if returncode == 0:
                 assert os.path.exists(f"{workload_dir}/pmc_perf.csv")
 
                 file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-                expected_files = ([f for f in ROOF_ONLY_FILES
-                                   if f != "timestamps.csv"] if using_v3() else
-                                  ROOF_ONLY_FILES) + ["kernelName_legend.pdf"]
+                expected_files = (
+                    [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+                    if using_v3()
+                    else ROOF_ONLY_FILES
+                ) + ["kernelName_legend.pdf"]
                 assert sorted(list(file_dict.keys())) == sorted(expected_files)
             else:
                 pass
@@ -845,11 +675,9 @@ def test_roof_invalid_data_type(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
 
     try:
-        returncode = binary_handler_profile_rocprof_compute(config,
-                                                            workload_dir,
-                                                            invalid_options,
-                                                            check_success=False,
-                                                            roof=True)
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, invalid_options, check_success=False, roof=True
+        )
 
         assert returncode >= 0
 
@@ -868,11 +696,9 @@ def test_roof_file_validation(binary_handler_profile_rocprof_compute):
     workload_dir = test_utils.get_output_dir()
 
     try:
-        returncode = binary_handler_profile_rocprof_compute(config,
-                                                            workload_dir,
-                                                            options,
-                                                            check_success=False,
-                                                            roof=True)
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=True
+        )
 
         if returncode == 0:
             assert os.path.exists(f"{workload_dir}/pmc_perf.csv")
@@ -896,8 +722,9 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
 
     assert (Path(workload_dir) / "pmc_perf.csv").exists()
     assert (Path(workload_dir) / "roofline.csv").exists()
-    assert test_utils.check_file_pattern("format_rocprof_output: rocpd",
-                                         f"{workload_dir}/profiling_config.yaml")
+    assert test_utils.check_file_pattern(
+        "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
+    )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -923,7 +750,6 @@ def test_roofline_workload_dir_not_set_error():
         from utils.specs import generate_machine_specs
 
         class MockArgs:
-
             def __init__(self):
                 self.roof_only = True
                 self.kernel_names = False
@@ -972,20 +798,16 @@ def test_roof_workload_dir_validation(binary_handler_profile_rocprof_compute):
     options = ["--device", "0", "--roof-only"]
 
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
     assert returncode == 0
 
     nested_dir = os.path.join(workload_dir, "nested", "structure")
     os.makedirs(nested_dir, exist_ok=True)
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        nested_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, nested_dir, options, check_success=False, roof=True
+    )
     assert returncode == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1011,11 +833,9 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1039,11 +859,9 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1072,11 +890,9 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
     for config_test in plot_configurations:
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(config,
-                                                            workload_dir,
-                                                            config_test["options"],
-                                                            check_success=False,
-                                                            roof=True)
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, config_test["options"], check_success=False, roof=True
+        )
         assert returncode == 0
 
         for expected_file in config_test["expected_files"]:
@@ -1104,11 +920,9 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         options = ["--device", "0", "--roof-only"]
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(config,
-                                                            workload_dir,
-                                                            options,
-                                                            check_success=False,
-                                                            roof=True)
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=True
+        )
 
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
     else:
@@ -1128,11 +942,9 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if os.path.exists(pmc_perf_path):
         os.remove(pmc_perf_path)
 
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1157,7 +969,6 @@ def test_roofline_missing_file_handling(binary_handler_profile_rocprof_compute):
         from utils.specs import generate_machine_specs
 
         class MockArgs:
-
             def __init__(self):
                 self.roof_only = True
                 self.kernel_names = False
@@ -1212,7 +1023,6 @@ def test_roofline_invalid_datatype_cli(binary_handler_profile_rocprof_compute):
         from utils.specs import generate_machine_specs
 
         class MockArgs:
-
             def __init__(self):
                 self.roof_only = True
                 self.kernel_names = False
@@ -1258,11 +1068,9 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     options = ["--device", "0", "--roof-only", "--mem-level", "INVALID_LEVEL"]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1278,12 +1086,16 @@ def test_device_filter(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1312,12 +1124,16 @@ def test_kernel(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1344,12 +1160,16 @@ def test_dispatch_0(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1380,12 +1200,16 @@ def test_dispatch_0_1(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1413,12 +1237,16 @@ def test_dispatch_2(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1449,12 +1277,16 @@ def test_join_type_grid(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1482,12 +1314,16 @@ def test_join_type_kernel(binary_handler_profile_rocprof_compute):
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI100
     elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI200
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI200)
+            [f for f in ALL_CSVS_MI200 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI200
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == sorted(
-            [f for f in ALL_CSVS_MI300
-             if f != "timestamps.csv"] if using_v3() else ALL_CSVS_MI300)
+            [f for f in ALL_CSVS_MI300 if f != "timestamps.csv"]
+            if using_v3()
+            else ALL_CSVS_MI300
+        )
     elif "MI350" in soc:
         assert sorted(list(file_dict.keys())) == sorted(ALL_CSVS_MI350)
     else:
@@ -1514,19 +1350,20 @@ def test_roof_sort_dispatches(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only", "--sort", "dispatches"]
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     # assert successful run
     assert returncode == 0
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    assert (sorted(list(file_dict.keys()))
-            == [f for f in ROOF_ONLY_FILES
-                if f != "timestamps.csv"] if using_v3() else ROOF_ONLY_FILES)
+    assert (
+        sorted(list(file_dict.keys()))
+        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+        if using_v3()
+        else ROOF_ONLY_FILES
+    )
 
     validate(
         inspect.stack()[0][3],
@@ -1548,19 +1385,20 @@ def test_roof_sort_kernels(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only", "--sort", "kernels"]
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     # assert successful run
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (sorted(list(file_dict.keys()))
-            == [f for f in ROOF_ONLY_FILES
-                if f != "timestamps.csv"] if using_v3() else ROOF_ONLY_FILES)
+    assert (
+        sorted(list(file_dict.keys()))
+        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+        if using_v3()
+        else ROOF_ONLY_FILES
+    )
 
     validate(
         inspect.stack()[0][3],
@@ -1582,19 +1420,20 @@ def test_roof_mem_levels_vL1D(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only", "--mem-level", "vL1D"]
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     # assert successful run
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (sorted(list(file_dict.keys()))
-            == [f for f in ROOF_ONLY_FILES
-                if f != "timestamps.csv"] if using_v3() else ROOF_ONLY_FILES)
+    assert (
+        sorted(list(file_dict.keys()))
+        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+        if using_v3()
+        else ROOF_ONLY_FILES
+    )
 
     validate(
         inspect.stack()[0][3],
@@ -1616,19 +1455,20 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
 
     options = ["--device", "0", "--roof-only", "--mem-level", "LDS"]
     workload_dir = test_utils.get_output_dir()
-    returncode = binary_handler_profile_rocprof_compute(config,
-                                                        workload_dir,
-                                                        options,
-                                                        check_success=False,
-                                                        roof=True)
+    returncode = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=False, roof=True
+    )
 
     # assert successful run
     assert returncode == 0
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
 
-    assert (sorted(list(file_dict.keys()))
-            == [f for f in ROOF_ONLY_FILES
-                if f != "timestamps.csv"] if using_v3() else ROOF_ONLY_FILES)
+    assert (
+        sorted(list(file_dict.keys()))
+        == [f for f in ROOF_ONLY_FILES if f != "timestamps.csv"]
+        if using_v3()
+        else ROOF_ONLY_FILES
+    )
 
     validate(
         inspect.stack()[0][3],
@@ -1643,11 +1483,9 @@ def test_roof_mem_levels_LDS(binary_handler_profile_rocprof_compute):
 def test_lds_section(binary_handler_profile_rocprof_compute):
     options = ["--block", "12"]
     workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(config,
-                                               workload_dir,
-                                               options,
-                                               check_success=True,
-                                               roof=False)
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
@@ -1656,8 +1494,9 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
         file_dict,
     )
 
-    assert test_utils.check_file_pattern("- '12'",
-                                         f"{workload_dir}/profiling_config.yaml")
+    assert test_utils.check_file_pattern(
+        "- '12'", f"{workload_dir}/profiling_config.yaml"
+    )
     assert test_utils.check_file_pattern("SQ_INSTS_LDS", f"{workload_dir}/pmc_perf.csv")
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1666,11 +1505,9 @@ def test_lds_section(binary_handler_profile_rocprof_compute):
 def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     options = ["--block", "10", "3"]
     workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(config,
-                                               workload_dir,
-                                               options,
-                                               check_success=True,
-                                               roof=False)
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
@@ -1679,14 +1516,18 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
         file_dict,
     )
 
-    assert test_utils.check_file_pattern("- '10'",
-                                         f"{workload_dir}/profiling_config.yaml")
-    assert test_utils.check_file_pattern("- '3'",
-                                         f"{workload_dir}/profiling_config.yaml")
-    assert test_utils.check_file_pattern("TA_FLAT_WAVEFRONTS",
-                                         f"{workload_dir}/pmc_perf.csv")
-    assert test_utils.check_file_pattern("SQC_TC_DATA_READ_REQ",
-                                         f"{workload_dir}/pmc_perf.csv")
+    assert test_utils.check_file_pattern(
+        "- '10'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- '3'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
+    )
+    assert test_utils.check_file_pattern(
+        "SQC_TC_DATA_READ_REQ", f"{workload_dir}/pmc_perf.csv"
+    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1694,11 +1535,9 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
 def test_lds_sol_section(binary_handler_profile_rocprof_compute):
     options = ["--block", "12.1"]
     workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(config,
-                                               workload_dir,
-                                               options,
-                                               check_success=True,
-                                               roof=False)
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
@@ -1707,10 +1546,12 @@ def test_lds_sol_section(binary_handler_profile_rocprof_compute):
         file_dict,
     )
 
-    assert test_utils.check_file_pattern("- '12.1'",
-                                         f"{workload_dir}/profiling_config.yaml")
-    assert test_utils.check_file_pattern("SQ_ACTIVE_INST_LDS",
-                                         f"{workload_dir}/pmc_perf.csv")
+    assert test_utils.check_file_pattern(
+        "- '12.1'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "SQ_ACTIVE_INST_LDS", f"{workload_dir}/pmc_perf.csv"
+    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1723,11 +1564,9 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     num_kernels = 1
 
     workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(custom_config,
-                                               workload_dir,
-                                               options,
-                                               check_success=True,
-                                               roof=False)
+    _ = binary_handler_profile_rocprof_compute(
+        custom_config, workload_dir, options, check_success=True, roof=False
+    )
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
     validate(
@@ -1736,15 +1575,19 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
         file_dict,
     )
 
-    assert test_utils.check_file_pattern("- '10'",
-                                         f"{workload_dir}/profiling_config.yaml")
-    assert test_utils.check_file_pattern("- global_write",
-                                         f"{workload_dir}/profiling_config.yaml")
-    assert test_utils.check_file_pattern("TA_FLAT_WAVEFRONTS",
-                                         f"{workload_dir}/pmc_perf.csv")
+    assert test_utils.check_file_pattern(
+        "- '10'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- global_write", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
+    )
     assert test_utils.check_file_pattern("global_write", f"{workload_dir}/pmc_perf.csv")
-    assert not test_utils.check_file_pattern("global_read",
-                                             f"{workload_dir}/pmc_perf.csv")
+    assert not test_utils.check_file_pattern(
+        "global_read", f"{workload_dir}/pmc_perf.csv"
+    )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -1752,11 +1595,9 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 def test_list_metrics(binary_handler_profile_rocprof_compute):
     options = ["--list-metrics"]
     workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(config,
-                                               workload_dir,
-                                               options,
-                                               check_success=True,
-                                               roof=False)
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False
+    )
     # workload dir should be empty
     assert not os.listdir(workload_dir)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

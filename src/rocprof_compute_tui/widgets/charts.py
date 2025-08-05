@@ -47,14 +47,18 @@ def simple_bar(df, title=None):
 
     if "Metric" in df.columns and "Avg" in df.columns:
         metric_dict = (
-            pd.DataFrame([df["Metric"],
-                          df["Avg"]]).replace("", 0).replace(float("inf"),
-                                                             -1)  # It should not happen
-            .replace(float("-inf"),
-                     -1).transpose().set_index("Metric").to_dict()["Avg"])
+            pd.DataFrame([df["Metric"], df["Avg"]])
+            .replace("", 0)
+            .replace(float("inf"), -1)  # It should not happen
+            .replace(float("-inf"), -1)
+            .transpose()
+            .set_index("Metric")
+            .to_dict()["Avg"]
+        )
     else:
         raise NameError(
-            f"simple_bar: No Metric or Avg in df columns: {str(df.columns)}")
+            f"simple_bar: No Metric or Avg in df columns: {str(df.columns)}"
+        )
 
     plt.clear_figure()
 
@@ -80,8 +84,9 @@ def simple_multiple_bar(df, title=None):
     # TODO: handle Nan and None properly
 
     plt.clear_figure()
-    t_df = (df.fillna(0).replace("", 0).replace(float("inf"),
-                                                -1).replace(float("-inf"), -1))
+    t_df = (
+        df.fillna(0).replace("", 0).replace(float("inf"), -1).replace(float("-inf"), -1)
+    )
     sub_labels = t_df.transpose().to_dict("split")["index"]
     sub_labels.pop(0)
     data = t_df.transpose().to_dict("split")["data"]
@@ -139,8 +144,9 @@ def simple_box(df, orientation="v", title=None):
     # show unit if provided
 
     labels_length = 0
-    t_df = (df.fillna(0).replace("", 0).replace(float("inf"),
-                                                -1).replace(float("-inf"), -1))
+    t_df = (
+        df.fillna(0).replace("", 0).replace(float("inf"), -1).replace(float("-inf"), -1)
+    )
     for index, row in t_df.iterrows():
         column_name = row.get("Metric") or row.get("Channel")
 
@@ -223,9 +229,7 @@ def px_simple_bar(df, title: str = None, id=None, style: dict = None, orientatio
         y="Metric",
         color=detected_label,
         range_color=range_color,
-        labels={
-            detected_label: label_txt
-        },
+        labels={detected_label: label_txt},
         orientation=orientation,
     ).update_xaxes(range=xrange)
 
@@ -261,13 +265,12 @@ def px_simple_multi_bar(df, title=None, id=None):
                 title=group,
                 x=metric.values(),
                 y=metric.keys(),
-                labels={
-                    "x": df_unit,
-                    "y": ""
-                },
+                labels={"x": df_unit, "y": ""},
                 text=metric.values(),
-            ).update_xaxes(showgrid=False,
-                           rangemode="nonnegative").update_yaxes(showgrid=False))
+            )
+            .update_xaxes(showgrid=False, rangemode="nonnegative")
+            .update_yaxes(showgrid=False)
+        )
     return dfigs
 
 
@@ -341,8 +344,7 @@ class MemoryChart(Static):
                 sys.stdout = original_stdout
 
             plot_str = next(
-                (x for x in [stdout_output,
-                             str(result) if result else None] if x),
+                (x for x in [stdout_output, str(result) if result else None] if x),
                 "No chart data generated",
             )
             self.update(plot_str)
@@ -450,6 +452,7 @@ class SimpleMultiBar(Static):
 
         except Exception as e:
             error_message = (
-                f"Simple Multiple Box error: {str(e)}\n{traceback.format_exc()}")
+                f"Simple Multiple Box error: {str(e)}\n{traceback.format_exc()}"
+            )
             escaped_error = error_message.replace("[", r"\[").replace("]", r"\]")
             self.update(f"Error: {escaped_error}")

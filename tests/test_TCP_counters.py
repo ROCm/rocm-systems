@@ -32,8 +32,9 @@ from pathlib import Path
 import pytest
 import test_utils
 
-rocprof_compute = SourceFileLoader("rocprof-compute",
-                                   "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -44,15 +45,9 @@ config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
 SUPPORTED_ARCHS = {
-    "gfx940": {
-        "mi300": ["MI300A_A0"]
-    },
-    "gfx941": {
-        "mi300": ["MI300X_A0"]
-    },
-    "gfx942": {
-        "mi300": ["MI300A_A1", "MI300X_A1"]
-    },
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
 }
 
 MI300_CHIP_IDS = {
@@ -74,8 +69,10 @@ def gpu_soc():
     ## 1) Parse arch details from rocminfo
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(["rocminfo"], stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE).stdout.decode("utf-8"))
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
     rocminfo = rocminfo.split("\n")
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
@@ -135,8 +132,9 @@ soc = gpu_soc()
 
 
 @pytest.mark.L1_cache
-def test_L1_cache_counters(binary_handler_profile_rocprof_compute,
-                           binary_handler_analyze_rocprof_compute):
+def test_L1_cache_counters(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
     if not soc or "MI300" not in soc:
         pytest.skip("Skipping L1 cache test for non-mi300 socs.")
 

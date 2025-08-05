@@ -39,8 +39,9 @@ def convert_db_to_csv(
             with closing(conn.execute(COUNTERS_COLLECTION_QUERY)) as cursor:
                 with open(csv_file_path, "w", newline="") as csvfile:
                     writer = csv.writer(csvfile)
-                    writer.writerow(
-                        [description[0] for description in cursor.description])
+                    writer.writerow([
+                        description[0] for description in cursor.description
+                    ])
                     for row in cursor:
                         writer.writerow(row)
     except (sqlite3.DatabaseError, IOError) as e:
@@ -57,11 +58,11 @@ def process_rocpd_csv(df):
     data = list()
     # Group by unique kernel and merge into a single row
     for _, group_df in df.groupby([
-            "Dispatch_ID",
-            "Kernel_Name",
-            "Grid_Size",
-            "Workgroup_Size",
-            "LDS_Per_Workgroup",
+        "Dispatch_ID",
+        "Kernel_Name",
+        "Grid_Size",
+        "Workgroup_Size",
+        "LDS_Per_Workgroup",
     ]):
         row = {
             "GPU_ID": group_df["GPU_ID"].iloc[0],
@@ -78,8 +79,9 @@ def process_rocpd_csv(df):
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         # Replace end timestamp with median of durations of group, start timestamp is set to 0
-        row["End_Timestamp"] = (group_df["End_Timestamp"] -
-                                group_df["Start_Timestamp"]).median()
+        row["End_Timestamp"] = (
+            group_df["End_Timestamp"] - group_df["Start_Timestamp"]
+        ).median()
         row["Start_Timestamp"] = 0.0
         data.append(row)
     df = pd.DataFrame(data)

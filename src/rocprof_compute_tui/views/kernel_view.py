@@ -60,8 +60,12 @@ class KernelView(Container):
         self.top_kernel = []
 
         if rocprof_compute_home:
-            config_path = (rocprof_compute_home / "rocprof_compute_tui" / "utils" /
-                           "kernel_view_config.yaml")
+            config_path = (
+                rocprof_compute_home
+                / "rocprof_compute_tui"
+                / "utils"
+                / "kernel_view_config.yaml"
+            )
         self.config_path = config_path
 
         self.keys = None
@@ -96,7 +100,8 @@ class KernelView(Container):
                 top_container.mount(selector)
             except Exception as e:
                 top_container.mount(
-                    Label(f"Error displaying kernel list: {str(e)}", classes="error"))
+                    Label(f"Error displaying kernel list: {str(e)}", classes="error")
+                )
         else:
             top_container.mount(Label("No kernels available", classes="placeholder"))
 
@@ -172,11 +177,13 @@ class KernelView(Container):
         bottom_container.remove_children()
 
         bottom_container.mount(
-            Label("Toggle kernel selection to view detailed analysis."))
+            Label("Toggle kernel selection to view detailed analysis.")
+        )
 
         if self.current_selection and self.current_selection in self.dfs:
             bottom_container.mount(
-                Label(f"Current kernel selection: {self.current_selection}"))
+                Label(f"Current kernel selection: {self.current_selection}")
+            )
             filtered_dfs = self.dfs[self.current_selection]
 
             try:
@@ -185,10 +192,12 @@ class KernelView(Container):
                     bottom_container.mount(section)
             except Exception as e:
                 bottom_container.mount(
-                    Label(f"Error displaying results: {str(e)}", classes="error"))
+                    Label(f"Error displaying results: {str(e)}", classes="error")
+                )
         else:
             bottom_container.mount(
                 Label(
                     f"No data available for kernel: {self.current_selection}",
                     classes="error",
-                ))
+                )
+            )

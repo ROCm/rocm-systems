@@ -61,19 +61,23 @@ def update_analysis_config():
                 data_source_config = copy.deepcopy(data_source_config)
                 if "metric_table" in data_source_config:
                     data_source_config["metric_table"]["metric"] = data_source_config[
-                        "metric_table"]["metric"][gfx_version]
+                        "metric_table"
+                    ]["metric"][gfx_version]
                 new_panel_config["Panel Config"]["data source"].append(
-                    data_source_config)
+                    data_source_config
+                )
             # Write panel config to file
             filename = Path(
-                TARGET_DIR.joinpath(gfx_version, f"{panel_id}_{panel_title}.yaml"))
+                TARGET_DIR.joinpath(gfx_version, f"{panel_id}_{panel_title}.yaml")
+            )
             with open(filename, "w") as file:
                 file.write(AUTOGEN_TEXT)
                 yaml.dump(new_panel_config, file, sort_keys=False)
                 print(f"File write: {filename}")
             # Calculate hash of filename
             HASH_FILE_MAP[str(filename.relative_to(ROOT_DIR))] = hashlib.sha256(
-                filename.read_bytes()).hexdigest()
+                filename.read_bytes()
+            ).hexdigest()
 
 
 def update_documentation():
@@ -132,13 +136,15 @@ def update_documentation():
                 }
                 # Select metrics with descriptions available
                 metric_names = metric_names.intersection(
-                    panel_config["metrics_description"].keys())
+                    panel_config["metrics_description"].keys()
+                )
                 # Add metrics info
                 for metric_name in sorted(list(metric_names)):
                     metrics_info[metric_name] = {
                         "rst": panel_config["metrics_description"][metric_name]["rst"],
-                        "unit":
-                        panel_config["metrics_description"][metric_name]["unit"],
+                        "unit": panel_config["metrics_description"][metric_name][
+                            "unit"
+                        ],
                     }
                 panel_metric_map[data_source["metric_table"]["id"]] = metrics_info
 
@@ -156,7 +162,8 @@ def update_documentation():
         print(f"File write: {filename}")
     # Calculate hash of filename
     HASH_FILE_MAP[str(filename.relative_to(ROOT_DIR))] = hashlib.sha256(
-        filename.read_bytes()).hexdigest()
+        filename.read_bytes()
+    ).hexdigest()
 
 
 def update_hash():

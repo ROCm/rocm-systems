@@ -36,7 +36,6 @@ from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
 class OmniAnalyze_Base:
-
     def __init__(self, args, supported_archs):
         self.__args = args
         self._runs = OrderedDict()
@@ -61,23 +60,25 @@ class OmniAnalyze_Base:
 
     @demarcate
     def generate_configs(self, arch, config_dir, list_stats, filter_metrics, sys_info):
-        single_panel_config = file_io.is_single_panel_config(Path(config_dir),
-                                                             self.__supported_archs)
+        single_panel_config = file_io.is_single_panel_config(
+            Path(config_dir), self.__supported_archs
+        )
 
         ac = schema.ArchConfig()
         if list_stats:
             ac.panel_configs = file_io.top_stats_build_in_config
         else:
-            arch_panel_config = (config_dir
-                                 if single_panel_config else config_dir.joinpath(arch))
+            arch_panel_config = (
+                config_dir if single_panel_config else config_dir.joinpath(arch)
+            )
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(archConfigs=ac,
-                         filter_metrics=filter_metrics,
-                         sys_info=sys_info)
+        parser.build_dfs(
+            archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+        )
         self._arch_configs[arch] = ac
         return self._arch_configs
 
@@ -88,7 +89,8 @@ class OmniAnalyze_Base:
             arch = args.list_metrics
             if arch not in self._arch_configs.keys():
                 sys_info = file_io.load_sys_info(
-                    Path(self.__args.path[0][0], "sysinfo.csv"))
+                    Path(self.__args.path[0][0], "sysinfo.csv")
+                )
                 self.generate_configs(
                     arch,
                     args.config_dir,
@@ -114,9 +116,11 @@ class OmniAnalyze_Base:
                     description = metric_descriptions.get(key, "")
                 print(prefix + key, "->", value + "\n")
                 if description:
-                    print(prefix +
-                          f"\n{prefix}".join(textwrap.wrap(description, width=40)) +
-                          "\n")
+                    print(
+                        prefix
+                        + f"\n{prefix}".join(textwrap.wrap(description, width=40))
+                        + "\n"
+                    )
             sys.exit(0)
         else:
             console_error("Unsupported arch")
@@ -125,14 +129,14 @@ class OmniAnalyze_Base:
     def load_options(self, normalization_filter):
         if not normalization_filter:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(v.dfs, v.dfs_type,
-                                                 self.__args.normal_unit,
-                                                 self._profiling_config)
+                parser.build_metric_value_string(
+                    v.dfs, v.dfs_type, self.__args.normal_unit, self._profiling_config
+                )
         else:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(v.dfs, v.dfs_type,
-                                                 normalization_filter,
-                                                 self._profiling_config)
+                parser.build_metric_value_string(
+                    v.dfs, v.dfs_type, normalization_filter, self._profiling_config
+                )
 
         args = self.__args
         # Error checking for multiple runs and multiple kernel filters
@@ -143,7 +147,8 @@ class OmniAnalyze_Base:
             else:
                 console_error(
                     "analysis"
-                    "The number of -k/--kernel doesn't match the number of --dir.")
+                    "The number of -k/--kernel doesn't match the number of --dir."
+                )
 
     @demarcate
     def initalize_runs(self, normalization_filter=None):
@@ -152,9 +157,12 @@ class OmniAnalyze_Base:
 
         # load required configs
         for d in self.__args.path:
-            sysinfo_path = (Path(d[0]) if self.__args.nodes is None
-                            and self.__args.spatial_multiplexing is not True else
-                            file_io.find_1st_sub_dir(d[0]))
+            sysinfo_path = (
+                Path(d[0])
+                if self.__args.nodes is None
+                and self.__args.spatial_multiplexing is not True
+                else file_io.find_1st_sub_dir(d[0])
+            )
             sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_arch"]
             args = self.__args
@@ -174,15 +182,19 @@ class OmniAnalyze_Base:
             #    For regular single node case, load sysinfo.csv directly
             #    For multi-node, either the default "all", or specified some,
             #    pick up the one in the 1st sub_dir. We could fix it properly later.
-            sysinfo_path = (Path(d[0]) if self.__args.nodes is None
-                            and self.__args.spatial_multiplexing is not True else
-                            file_io.find_1st_sub_dir(d[0]))
+            sysinfo_path = (
+                Path(d[0])
+                if self.__args.nodes is None
+                and self.__args.spatial_multiplexing is not True
+                else file_io.find_1st_sub_dir(d[0])
+            )
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:
-                w.sys_info = parser.correct_sys_info(mspec,
-                                                     self.__args.specs_correction)
+                w.sys_info = parser.correct_sys_info(
+                    mspec, self.__args.specs_correction
+                )
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
@@ -200,7 +212,8 @@ class OmniAnalyze_Base:
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             console_error(
-                "Access denied. Cannot access parent directories in path (i.e. ../)")
+                "Access denied. Cannot access parent directories in path (i.e. ../)"
+            )
         # ensure absolute path
         for dir in self.__args.path:
             full_path = str(Path(dir[0]).absolute().resolve())
@@ -210,8 +223,11 @@ class OmniAnalyze_Base:
             # validate profiling data
 
             # Todo: more err check
-            if not (self.__args.nodes != None or self.__args.list_nodes
-                    or self.__args.spatial_multiplexing):
+            if not (
+                self.__args.nodes != None
+                or self.__args.list_nodes
+                or self.__args.spatial_multiplexing
+            ):
                 is_workload_empty(dir[0])
             # else:
 
@@ -251,8 +267,11 @@ class OmniAnalyze_Base:
         console_debug("analysis", "prepping to do some analysis")
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
-        self._output = (open(self.__args.output_file, "w+")
-                        if self.__args.output_file else sys.stdout)
+        self._output = (
+            open(self.__args.output_file, "w+")
+            if self.__args.output_file
+            else sys.stdout
+        )
 
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(self.__args.path[0][0])

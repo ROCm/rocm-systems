@@ -893,7 +893,8 @@ def test_analyze_join_type_kernel_MI200(binary_handler_analyze_rocprof_compute):
 
 
 def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI300X_A1(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -912,7 +913,8 @@ def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI100(binary_handler_analyze_rocprof_co
 
 
 def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI300A_A1(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -1156,7 +1158,8 @@ def test_analyze_ipblocks_CPC_MI200(binary_handler_analyze_rocprof_compute):
 
 
 def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300X_A1(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -1166,7 +1169,8 @@ def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300X_A1(
 
 
 def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI100(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -1176,7 +1180,8 @@ def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI100(
 
 
 def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300A_A1(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",
@@ -1186,7 +1191,8 @@ def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI300A_A1(
 
 
 def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI200(
-    binary_handler_analyze_rocprof_compute, ):
+    binary_handler_analyze_rocprof_compute,
+):
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
         "--path",

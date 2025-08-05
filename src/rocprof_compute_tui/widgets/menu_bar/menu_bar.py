@@ -78,8 +78,9 @@ class MenuBar(Container):
                 dropdown.add_class("hidden")
                 self.parent_main_view.run_analysis()
 
-        self.app.push_screen(RecentDirectoriesScreen(self.app.recent_dirs),
-                             on_recent_selected)
+        self.app.push_screen(
+            RecentDirectoriesScreen(self.app.recent_dirs), on_recent_selected
+        )
 
     @on(Button.Pressed, "#menu-exit")
     def exit_app(self) -> None:

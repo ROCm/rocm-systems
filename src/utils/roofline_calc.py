@@ -170,8 +170,10 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 
     if dtype in PEAK_OPS_DATATYPES:
         peakOps = float(
-            benchmark_data[dtype +
-                           "{}".format(ops_flops)][roofline_parameters["device_id"]])
+            benchmark_data[dtype + "{}".format(ops_flops)][
+                roofline_parameters["device_id"]
+            ]
+        )
     for i in range(0, len(cacheHierarchy)):
         # Plot BW line
         console_debug("roofline", "Current cache level is %s" % cacheHierarchy[i])
@@ -192,8 +194,11 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         if dtype in MFMA_DATATYPES:
             target_precision = (dtype) if (dtype[:1] == "I") else ("F" + dtype[2:])
 
-            peakMFMA = float(benchmark_data["MFMA{}{}".format(
-                target_precision, ops_flops)][roofline_parameters["device_id"]])
+            peakMFMA = float(
+                benchmark_data["MFMA{}{}".format(target_precision, ops_flops)][
+                    roofline_parameters["device_id"]
+                ]
+            )
             x2_mfma = peakMFMA / peakBw
             y2_mfma = peakMFMA
 
@@ -234,8 +239,9 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma
 
-        console_debug("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA,
-                                                           peakMFMA))
+        console_debug(
+            "MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA)
+        )
         graphPoints["mfma"].append([x0_mfma, XMAX])
         graphPoints["mfma"].append([peakMFMA, peakMFMA])
         graphPoints["mfma"].append(peakMFMA)
@@ -257,7 +263,8 @@ def calc_ai(mspec, sort_type, ret_df):
     total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_bf16 = (
         mfma_flops_f16
     ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = L1cache_data = (
-        L2cache_data) = hbm_data = calls = totalDuration = avgDuration = 0.0
+        L2cache_data
+    ) = hbm_data = calls = totalDuration = avgDuration = 0.0
 
     kernelName = ""
 
@@ -280,22 +287,38 @@ def calc_ai(mspec, sort_type, ret_df):
         kernelName = df["Kernel_Name"][idx]
         try:
             total_flops += (
-                (64 *
-                 (df["SQ_INSTS_VALU_ADD_F16"][idx] + df["SQ_INSTS_VALU_MUL_F16"][idx] +
-                  (2 * df["SQ_INSTS_VALU_FMA_F16"][idx]) +
-                  df["SQ_INSTS_VALU_TRANS_F16"][idx])) +
-                (64 *
-                 (df["SQ_INSTS_VALU_ADD_F32"][idx] + df["SQ_INSTS_VALU_MUL_F32"][idx] +
-                  (2 * df["SQ_INSTS_VALU_FMA_F32"][idx]) +
-                  df["SQ_INSTS_VALU_TRANS_F32"][idx])) +
-                (64 *
-                 (df["SQ_INSTS_VALU_ADD_F64"][idx] + df["SQ_INSTS_VALU_MUL_F64"][idx] +
-                  (2 * df["SQ_INSTS_VALU_FMA_F64"][idx]) +
-                  df["SQ_INSTS_VALU_TRANS_F64"][idx])) +
-                (df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512) +
-                (df["SQ_INSTS_VALU_MFMA_MOPS_BF16"][idx] * 512) +
-                (df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512) +
-                (df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512))
+                (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F16"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F16"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F16"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F16"][idx]
+                    )
+                )
+                + (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F32"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F32"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F32"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F32"][idx]
+                    )
+                )
+                + (
+                    64
+                    * (
+                        df["SQ_INSTS_VALU_ADD_F64"][idx]
+                        + df["SQ_INSTS_VALU_MUL_F64"][idx]
+                        + (2 * df["SQ_INSTS_VALU_FMA_F64"][idx])
+                        + df["SQ_INSTS_VALU_TRANS_F64"][idx]
+                    )
+                )
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F16"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_BF16"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F32"][idx] * 512)
+                + (df["SQ_INSTS_VALU_MFMA_MOPS_F64"][idx] * 512)
+            )
             if "FP8" in supported_dt:
                 total_flops += df["SQ_INSTS_VALU_MFMA_MOPS_F8"][idx] * 512
             if ("FP4" in supported_dt) or ("FP6" in supported_dt):
@@ -308,16 +331,28 @@ def calc_ai(mspec, sort_type, ret_df):
             pass
         try:
             valu_flops += (
-                64 *
-                (df["SQ_INSTS_VALU_ADD_F16"][idx] + df["SQ_INSTS_VALU_MUL_F16"][idx] +
-                 (2 * df["SQ_INSTS_VALU_FMA_F16"][idx]) +
-                 df["SQ_INSTS_VALU_TRANS_F16"][idx]) + 64 *
-                (df["SQ_INSTS_VALU_ADD_F32"][idx] + df["SQ_INSTS_VALU_MUL_F32"][idx] +
-                 (2 * df["SQ_INSTS_VALU_FMA_F32"][idx]) +
-                 df["SQ_INSTS_VALU_TRANS_F32"][idx]) + 64 *
-                (df["SQ_INSTS_VALU_ADD_F64"][idx] + df["SQ_INSTS_VALU_MUL_F64"][idx] +
-                 (2 * df["SQ_INSTS_VALU_FMA_F64"][idx]) +
-                 df["SQ_INSTS_VALU_TRANS_F64"][idx]))
+                64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F16"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F16"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F16"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F16"][idx]
+                )
+                + 64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F32"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F32"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F32"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F32"][idx]
+                )
+                + 64
+                * (
+                    df["SQ_INSTS_VALU_ADD_F64"][idx]
+                    + df["SQ_INSTS_VALU_MUL_F64"][idx]
+                    + (2 * df["SQ_INSTS_VALU_FMA_F64"][idx])
+                    + df["SQ_INSTS_VALU_TRANS_F64"][idx]
+                )
+            )
         except KeyError:
             console_debug(
                 "roofline",
@@ -344,8 +379,10 @@ def calc_ai(mspec, sort_type, ret_df):
 
         try:
             lds_data += (
-                (df["SQ_LDS_IDX_ACTIVE"][idx] - df["SQ_LDS_BANK_CONFLICT"][idx]) * 4 *
-                (mspec.lds_banks_per_cu))
+                (df["SQ_LDS_IDX_ACTIVE"][idx] - df["SQ_LDS_BANK_CONFLICT"][idx])
+                * 4
+                * (mspec.lds_banks_per_cu)
+            )
         except KeyError:
             console_debug(
                 "roofline",
@@ -363,10 +400,12 @@ def calc_ai(mspec, sort_type, ret_df):
             pass
 
         try:
-            L2cache_data += (df["TCP_TCC_WRITE_REQ_sum"][idx] * 64 +
-                             df["TCP_TCC_ATOMIC_WITH_RET_REQ_sum"][idx] * 64 +
-                             df["TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"][idx] * 64 +
-                             df["TCP_TCC_READ_REQ_sum"][idx] * 64)
+            L2cache_data += (
+                df["TCP_TCC_WRITE_REQ_sum"][idx] * 64
+                + df["TCP_TCC_ATOMIC_WITH_RET_REQ_sum"][idx] * 64
+                + df["TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"][idx] * 64
+                + df["TCP_TCC_READ_REQ_sum"][idx] * 64
+            )
         except KeyError:
             console_debug(
                 "roofline",
@@ -376,21 +415,40 @@ def calc_ai(mspec, sort_type, ret_df):
         try:
             if mspec.gpu_series == "MI200":
                 hbm_data += (
-                    (df["TCC_EA_RDREQ_32B_sum"][idx] * 32) +
-                    ((df["TCC_EA_RDREQ_sum"][idx] - df["TCC_EA_RDREQ_32B_sum"][idx]) *
-                     64) + (df["TCC_EA_WRREQ_64B_sum"][idx] * 64) +
-                    ((df["TCC_EA_WRREQ_sum"][idx] - df["TCC_EA_WRREQ_64B_sum"][idx]) *
-                     32))
+                    (df["TCC_EA_RDREQ_32B_sum"][idx] * 32)
+                    + (
+                        (df["TCC_EA_RDREQ_sum"][idx] - df["TCC_EA_RDREQ_32B_sum"][idx])
+                        * 64
+                    )
+                    + (df["TCC_EA_WRREQ_64B_sum"][idx] * 64)
+                    + (
+                        (df["TCC_EA_WRREQ_sum"][idx] - df["TCC_EA_WRREQ_64B_sum"][idx])
+                        * 32
+                    )
+                )
 
             else:
                 # Use TCC_BUBBLE_sum to calculate hbm_data
                 hbm_data += (
-                    (df["TCC_BUBBLE_sum"][idx] * 128) +
-                    (df["TCC_EA0_RDREQ_32B_sum"][idx] * 32) +
-                    ((df["TCC_EA0_RDREQ_sum"][idx] - df["TCC_BUBBLE_sum"][idx] -
-                      df["TCC_EA0_RDREQ_32B_sum"][idx]) * 64) +
-                    ((df["TCC_EA0_WRREQ_sum"][idx] - df["TCC_EA0_WRREQ_64B_sum"][idx]) *
-                     32) + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64))
+                    (df["TCC_BUBBLE_sum"][idx] * 128)
+                    + (df["TCC_EA0_RDREQ_32B_sum"][idx] * 32)
+                    + (
+                        (
+                            df["TCC_EA0_RDREQ_sum"][idx]
+                            - df["TCC_BUBBLE_sum"][idx]
+                            - df["TCC_EA0_RDREQ_32B_sum"][idx]
+                        )
+                        * 64
+                    )
+                    + (
+                        (
+                            df["TCC_EA0_WRREQ_sum"][idx]
+                            - df["TCC_EA0_WRREQ_64B_sum"][idx]
+                        )
+                        * 32
+                    )
+                    + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64)
+                )
         except KeyError:
             console_debug(
                 "roofline",
@@ -403,8 +461,9 @@ def calc_ai(mspec, sort_type, ret_df):
 
         calls += 1
 
-        if sort_type == "kernels" and (at_end == True or
-                                       (kernelName != next_kernelName)):
+        if sort_type == "kernels" and (
+            at_end == True or (kernelName != next_kernelName)
+        ):
             myList.append(
                 AI_Data(
                     kernelName,
@@ -424,15 +483,20 @@ def calc_ai(mspec, sort_type, ret_df):
                     hbm_data / calls,
                     totalDuration,
                     avgDuration / calls,
-                ))
-            console_debug("Just added {} to AI_Data at index {}. # of calls: {}".format(
-                kernelName, idx, calls))
+                )
+            )
+            console_debug(
+                "Just added {} to AI_Data at index {}. # of calls: {}".format(
+                    kernelName, idx, calls
+                )
+            )
             total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
             ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
                 lds_data
             ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = (
-                avgDuration) = 0.0
+                avgDuration
+            ) = 0.0
 
         if sort_type == "dispatches":
             myList.append(
@@ -454,13 +518,15 @@ def calc_ai(mspec, sort_type, ret_df):
                     hbm_data,
                     totalDuration,
                     avgDuration,
-                ))
+                )
+            )
             total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
             ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
                 lds_data
             ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = (
-                avgDuration) = 0.0
+                avgDuration
+            ) = 0.0
 
     myList.sort(key=lambda x: x.totalDuration, reverse=True)
 
@@ -472,24 +538,38 @@ def calc_ai(mspec, sort_type, ret_df):
     while i < TOP_N and i != len(myList):
         if myList[i].total_flops == 0:
             console_debug(
-                "No flops counted for {}, arithmetic intensities will not display on plots."
-                .format(myList[i].KernelName))
+                "No flops counted for {}, arithmetic intensities will not display on plots.".format(
+                    myList[i].KernelName
+                )
+            )
 
         kernelNames.append(myList[i].KernelName)
-        (intensities["ai_l1"].append(myList[i].total_flops / myList[i].L1cache_data)
-         if myList[i].L1cache_data else intensities["ai_l1"].append(0))
+        (
+            intensities["ai_l1"].append(myList[i].total_flops / myList[i].L1cache_data)
+            if myList[i].L1cache_data
+            else intensities["ai_l1"].append(0)
+        )
         # print("cur_ai_L1", myList[i].total_flops/myList[i].L1cache_data) if myList[i].L1cache_data else print("null")
         # print()
-        (intensities["ai_l2"].append(myList[i].total_flops / myList[i].L2cache_data)
-         if myList[i].L2cache_data else intensities["ai_l2"].append(0))
+        (
+            intensities["ai_l2"].append(myList[i].total_flops / myList[i].L2cache_data)
+            if myList[i].L2cache_data
+            else intensities["ai_l2"].append(0)
+        )
         # print("cur_ai_L2", myList[i].total_flops/myList[i].L2cache_data) if myList[i].L2cache_data else print("null")
         # print()
-        (intensities["ai_hbm"].append(myList[i].total_flops / myList[i].hbm_data)
-         if myList[i].hbm_data else intensities["ai_hbm"].append(0))
+        (
+            intensities["ai_hbm"].append(myList[i].total_flops / myList[i].hbm_data)
+            if myList[i].hbm_data
+            else intensities["ai_hbm"].append(0)
+        )
         # print("cur_ai_hbm", myList[i].total_flops/myList[i].hbm_data) if myList[i].hbm_data else print("null")
         # print()
-        (curr_perf.append(myList[i].total_flops / myList[i].avgDuration)
-         if myList[i].avgDuration else curr_perf.append(0))
+        (
+            curr_perf.append(myList[i].total_flops / myList[i].avgDuration)
+            if myList[i].avgDuration
+            else curr_perf.append(0)
+        )
         # print("cur_perf", myList[i].total_flops/myList[i].avgDuration) if myList[i].avgDuration else print("null")
 
         i += 1
@@ -518,9 +598,11 @@ def calc_ai(mspec, sort_type, ret_df):
 def constuct_roof(roofline_parameters, dtype):
     workload_dir = roofline_parameters.get("workload_dir")
     if isinstance(workload_dir, list):
-        base_dir = (workload_dir[0][0] if isinstance(workload_dir[0],
-                                                     (list,
-                                                      tuple)) else workload_dir[0])
+        base_dir = (
+            workload_dir[0][0]
+            if isinstance(workload_dir[0], (list, tuple))
+            else workload_dir[0]
+        )
     else:
         base_dir = workload_dir
 
@@ -529,9 +611,7 @@ def constuct_roof(roofline_parameters, dtype):
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------
-    benchmark_data = (
-        {}
-    )  # TODO: consider changing this to an ordered dict for consistency over py versions
+    benchmark_data = {}  # TODO: consider changing this to an ordered dict for consistency over py versions
     headers = []
     try:
         with open(benchmark_results, "r") as csvfile:

@@ -352,8 +352,8 @@ def test_gpu_ids(binary_handler_analyze_rocprof_compute):
     for dir in indirs:
         # if dir.endswith("MI350") or dir.endswith("MI300X_A1_rocpd"):
         if dir in (
-                "tests/workloads/vcopy/MI350",
-                "tests/workloads/vcopy/MI300X_A1_rocpd",
+            "tests/workloads/vcopy/MI350",
+            "tests/workloads/vcopy/MI300X_A1_rocpd",
         ):
             gpu_id = "0"
         else:
@@ -1065,8 +1065,9 @@ def test_ast_transformer_edge_cases():
         if hasattr(result.func, "id") and result.func.id == "UNKNOWN_FUNCTION":
             assert False, "Function name should have been changed or exception raised"
     except Exception as e:
-        assert "Unknown call" in str(
-            e), f"Expected 'Unknown call' in error, got: {str(e)}"
+        assert "Unknown call" in str(e), (
+            f"Expected 'Unknown call' in error, got: {str(e)}"
+        )
 
     supported_call = ast.Call(
         func=ast.Name(id="MIN", ctx=ast.Load()),
@@ -1094,8 +1095,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     from utils.parser import eval_metric
 
     mock_dfs = {
-        1:
-        pd.DataFrame({
+        1: pd.DataFrame({
             "Metric_ID": ["1.1.0"],
             "Metric": ["Test Metric"],
             "Expr": ["AVG(SQ_WAVES)"],
@@ -1126,8 +1126,7 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     sys_info = MockSysInfo()
 
     raw_pmc_df = {
-        "pmc_perf":
-        pd.DataFrame({
+        "pmc_perf": pd.DataFrame({
             "SQ_WAVES": [100, 200, 150],
             "GRBM_GUI_ACTIVE": [1000, 2000, 1500],
             "End_Timestamp": [1000000, 2000000, 1500000],
@@ -1136,12 +1135,9 @@ def test_analyze_with_debug_mode(binary_handler_analyze_rocprof_compute):
     }
 
     try:
-        eval_metric(mock_dfs,
-                    mock_dfs_type,
-                    sys_info,
-                    raw_pmc_df,
-                    debug=True,
-                    config={})
+        eval_metric(
+            mock_dfs, mock_dfs_type, sys_info, raw_pmc_df, debug=True, config={}
+        )
     except Exception:
         pass
 
@@ -1186,7 +1182,6 @@ def test_apply_filters_direct():
     from utils.parser import apply_filters
 
     class MockWorkload:
-
         def __init__(self):
             self.raw_pmc = pd.DataFrame({
                 ("pmc_perf", "GPU_ID"): [0, 0, 1, 1],

@@ -44,22 +44,14 @@ top_stats_build_in_config = {
     0: {
         "id": 0,
         "title": "Top Kernels",
-        "data source": [{
-            "raw_csv_table": {
-                "id": 1,
-                "source": "pmc_kernel_top.csv"
-            }
-        }],
+        "data source": [{"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}],
     },
     1: {
         "id": 1,
         "title": "Dispatch List",
-        "data source": [{
-            "raw_csv_table": {
-                "id": 2,
-                "source": "pmc_dispatch_info.csv"
-            }
-        }],
+        "data source": [
+            {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
+        ],
     },
 }
 
@@ -151,11 +143,14 @@ def create_df_kernel_top_stats(
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]
 
     # First, create a dispatches file used to populate global vars
-    dispatch_info = (df.loc[:, ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]]
-                     if "Node" in df.columns else
-                     df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]])
-    dispatch_info.to_csv(str(Path(raw_data_dir).joinpath("pmc_dispatch_info.csv")),
-                         index=False)
+    dispatch_info = (
+        df.loc[:, ["Node", "Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+        if "Node" in df.columns
+        else df.loc[:, ["Dispatch_ID", "Kernel_Name", "GPU_ID"]]
+    )
+    dispatch_info.to_csv(
+        str(Path(raw_data_dir).joinpath("pmc_dispatch_info.csv")), index=False
+    )
 
     time_stats = pd.concat(
         [df["Kernel_Name"], (df["End_Timestamp"] - df["Start_Timestamp"])],
@@ -163,8 +158,9 @@ def create_df_kernel_top_stats(
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
-        {"ExeTime": ["count", "sum", "mean", "median"]})
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
+        "ExeTime": ["count", "sum", "mean", "median"]
+    })
 
     time_unit_str = "(" + time_unit + ")"
     grouped.columns = [
@@ -188,17 +184,20 @@ def create_df_kernel_top_stats(
     #   Sort by total time as default.
     if sortby == "sum":
         grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
-        grouped.to_csv(str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")),
-                       index=False)
+        grouped.to_csv(
+            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
+        )
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
-        grouped.to_csv(str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")),
-                       index=False)
+        grouped.to_csv(
+            str(Path(raw_data_dir).joinpath("pmc_kernel_top.csv")), index=False
+        )
 
 
 @demarcate
-def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose,
-                  verbose, config):
+def create_df_pmc(
+    raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose, config
+):
     """
     Load all raw pmc counters and join into one df.
     """
@@ -212,9 +211,9 @@ def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose
         for root, dirs, files in os.walk(raw_data_dir):
             for f in files:
                 # print("file ", f)
-                if (f.endswith(".csv")
-                        and f.startswith("SQ")) or (f == schema.pmc_perf_file_prefix +
-                                                    ".csv"):
+                if (f.endswith(".csv") and f.startswith("SQ")) or (
+                    f == schema.pmc_perf_file_prefix + ".csv"
+                ):
                     tmp_df = pd.read_csv(str(Path(root).joinpath(f)))
                     if config.get("format_rocprof_output") == "rocpd":
                         tmp_df = rocpd_data.process_rocpd_csv(tmp_df)
@@ -242,8 +241,9 @@ def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose
         # todo: more err check
         for subdir in Path(raw_data_root_dir).iterdir():
             if subdir.is_dir():
-                new_df = create_single_df_pmc(subdir, str(subdir.name), kernel_verbose,
-                                              verbose)
+                new_df = create_single_df_pmc(
+                    subdir, str(subdir.name), kernel_verbose, verbose
+                )
                 df = pd.concat([df, new_df])
         return df
 
@@ -251,8 +251,9 @@ def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose
     else:
         # regular single node case
         if nodes is None:
-            return create_single_df_pmc(raw_data_root_dir, None, kernel_verbose,
-                                        verbose)
+            return create_single_df_pmc(
+                raw_data_root_dir, None, kernel_verbose, verbose
+            )
 
         # "empty list" means all nodes
         elif not nodes:
@@ -260,8 +261,9 @@ def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose
             # todo: more err check
             for subdir in Path(raw_data_root_dir).iterdir():
                 if subdir.is_dir():
-                    new_df = create_single_df_pmc(subdir, str(subdir.name),
-                                                  kernel_verbose, verbose)
+                    new_df = create_single_df_pmc(
+                        subdir, str(subdir.name), kernel_verbose, verbose
+                    )
                     df = pd.concat([df, new_df])
             return df
 
@@ -271,8 +273,9 @@ def create_df_pmc(raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose
             # todo: more err check
             for subdir in nodes:
                 p = Path(raw_data_root_dir)
-                new_df = create_single_df_pmc(p.joinpath(subdir), subdir,
-                                              kernel_verbose, verbose)
+                new_df = create_single_df_pmc(
+                    p.joinpath(subdir), subdir, kernel_verbose, verbose
+                )
                 df = pd.concat([df, new_df])
             return df
 

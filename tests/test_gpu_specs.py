@@ -34,75 +34,24 @@ import pytest
 
 from src.utils.specs import generate_machine_specs
 
-rocprof_compute = SourceFileLoader("rocprof-compute",
-                                   "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
-    "29856": {
-        "spx": 6,
-        "tpx": 2
-    },
-    "29876": {
-        "spx": 6,
-        "tpx": 2
-    },
-    "29857": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
-    "29877": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
-    "29858": {
-        "spx": 4,
-        "dpx": 2,
-        "cpx": 1
-    },
-    "29878": {
-        "spx": 4,
-        "dpx": 2,
-        "cpx": 1
-    },
-    "29861": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
-    "29881": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
-    "29864": {
-        "spx": 4,
-        "dpx": 2,
-        "cpx": 1
-    },
-    "29884": {
-        "spx": 4,
-        "dpx": 2,
-        "cpx": 1
-    },
-    "29865": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
-    "29885": {
-        "spx": 8,
-        "dpx": 4,
-        "qpx": 2,
-        "cpx": 1
-    },
+    "29856": {"spx": 6, "tpx": 2},
+    "29876": {"spx": 6, "tpx": 2},
+    "29857": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29877": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29858": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29878": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29861": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29881": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29864": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29884": {"spx": 4, "dpx": 2, "cpx": 1},
+    "29865": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
+    "29885": {"spx": 8, "dpx": 4, "qpx": 2, "cpx": 1},
 }
 
 # helper to strip ANSI color codes if your app uses them
@@ -120,7 +69,8 @@ def parse_table_dict(output: str) -> dict:
     lines = [l for l in output.splitlines() if l.startswith("│")]
     # locate header row (the one containing 'Spec' and 'Value')
     header_idx = next(
-        (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None)
+        (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
+    )
     if header_idx is None:
         raise ValueError("Header row with Spec and Value not found")
 
@@ -130,7 +80,7 @@ def parse_table_dict(output: str) -> dict:
     value_i = header_cells.index("Value")
 
     result = {}
-    for ln in lines[header_idx + 2:]:
+    for ln in lines[header_idx + 2 :]:
         if ln.startswith("├") or ln.startswith("╘"):
             continue
         cells = [c.strip() for c in ln.strip("│").split("│")]
@@ -157,8 +107,10 @@ def get_num_xcds():
     ## 1) Parse arch details from rocminfo
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(["rocminfo"], stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE).stdout.decode("utf-8"))
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
     rocminfo = rocminfo.split("\n")
 
     chip_id = re.compile(r"^\s*Chip ID:\s+ ([a-zA-Z0-9]+)\s*", re.MULTILINE)
@@ -178,8 +130,10 @@ def get_num_xcds():
 def get_gpu_arch():
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
-        subprocess.run(["rocminfo"], stdout=subprocess.PIPE,
-                       stderr=subprocess.PIPE).stdout.decode("utf-8"))
+        subprocess.run(
+            ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        ).stdout.decode("utf-8")
+    )
     rocminfo = rocminfo.split("\n")
 
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
@@ -203,7 +157,8 @@ def test_num_xcds_spec_class(monkeypatch):
     # 3. check results are expected
     assert machine_spec.compute_partition is not None
     assert int(machine_spec.num_xcd) == num_xcds.get(
-        machine_spec.compute_partition.lower(), -1)
+        machine_spec.compute_partition.lower(), -1
+    )
 
 
 @pytest.mark.num_xcds_cli_output
@@ -222,16 +177,18 @@ def test_num_xcds_cli_output():
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert (proc.returncode == 0
-            ), f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    assert proc.returncode == 0, (
+        f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    )
 
     # 3. strip ANSI, parse table
     clean = strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
-    assert ("Compute Partition"
-            in return_dict), "Spec 'Compute Partition' not found in table"
+    assert "Compute Partition" in return_dict, (
+        "Spec 'Compute Partition' not found in table"
+    )
     assert "Num XCDs" in return_dict, "Spec 'Num XCDs' not found in table"
 
     compute_partition_actual = return_dict["Compute Partition"]
@@ -379,9 +336,9 @@ def test_get_num_xcds_no_compute_partition():
     """Test get_num_xcds with no compute partition - covers lines 325-327"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950",
-                                     gpu_model="MI350",
-                                     compute_partition="")
+    result = MIGPUSpecs.get_num_xcds(
+        gpu_arch="gfx950", gpu_model="MI350", compute_partition=""
+    )
 
 
 @pytest.mark.misc
@@ -389,9 +346,9 @@ def test_get_num_xcds_unknown_compute_partition():
     """Test get_num_xcds with unknown compute partition - covers lines 329-332"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950",
-                                     gpu_model="MI350",
-                                     compute_partition="UNKNOWN")
+    result = MIGPUSpecs.get_num_xcds(
+        gpu_arch="gfx950", gpu_model="MI350", compute_partition="UNKNOWN"
+    )
 
 
 @pytest.mark.misc
@@ -401,9 +358,9 @@ def test_get_num_xcds_none_partition_value():
 
     mock_dict = {"mi350": {"spx": None}}
     with patch.object(MIGPUSpecs, "_num_xcds_dict", mock_dict):
-        result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950",
-                                         gpu_model="MI350",
-                                         compute_partition="spx")
+        result = MIGPUSpecs.get_num_xcds(
+            gpu_arch="gfx950", gpu_model="MI350", compute_partition="spx"
+        )
 
 
 @pytest.mark.misc
@@ -411,9 +368,9 @@ def test_get_num_xcds_no_gpu_model():
     """Test get_num_xcds with no gpu model - covers line 342"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950",
-                                     gpu_model="",
-                                     compute_partition="spx")
+    result = MIGPUSpecs.get_num_xcds(
+        gpu_arch="gfx950", gpu_model="", compute_partition="spx"
+    )
 
 
 @pytest.mark.misc
