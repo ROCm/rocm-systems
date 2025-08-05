@@ -157,7 +157,10 @@ class RocProfCompute:
 
     def parse_args(self):
         parser = argparse.ArgumentParser(
-            description="Command line interface for AMD's GPU profiler, ROCm Compute Profiler",
+            description=(
+                "Command line interface for AMD's GPU profiler, "
+                "ROCm Compute Profiler"
+            ),
             prog="tool",
             formatter_class=lambda prog: argparse.RawTextHelpFormatter(
                 prog, max_help_position=30
@@ -174,7 +177,11 @@ class RocProfCompute:
             and self.__args.format_rocprof_output != "rocpd"
         ):
             console_warning(
-                f"The option --format-rocprof-output currently set to {self.__args.format_rocprof_output} will default to rocpd in a future release."
+                (
+                    f"The option --format-rocprof-output currently set to "
+                    f"{self.__args.format_rocprof_output} will default to rocpd "
+                    "in a future release."
+                )
             )
 
         if self.__args.mode == None:
@@ -326,7 +333,10 @@ class RocProfCompute:
         profiler.run_profiling(self.__version["ver"], config.PROJECT_NAME)
         time_end_prof = time.time()
         console_debug(
-            'finished "run_profiling" and finished rocprof\'s workload, time taken was {} m {} sec'.format(
+            (
+                'finished "run_profiling" and finished rocprof\'s workload, '
+                'time taken was {} m {} sec'
+            ).format(
                 int((time_end_prof - time_start_prof) / 60),
                 str((time_end_prof - time_start_prof) % 60),
             )
@@ -335,8 +345,7 @@ class RocProfCompute:
         time_end_post = time.time()
         console_debug(
             'time taken for "post_processing" was {} seconds'.format(
-                int((time_end_post - time_end_prof) / 60),
-                str((time_end_post - time_end_prof) % 60),
+                int(time_end_post - time_end_prof)
             )
         )
         self.__soc[self.__mspec.gpu_arch].post_profiling()
@@ -348,7 +357,8 @@ class RocProfCompute:
         self.print_graphic()
 
         console_warning(
-            "Database update mode is deprecated and will be removed in a future release "
+            "Database update mode is deprecated and will "
+            "be removed in a future release "
             "and no fixes will be made for this mode."
         )
 
