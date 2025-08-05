@@ -1,0 +1,7 @@
+.noscroll-table td {
+    white-space: normal !important;
+}
+
+.wy-nav-content {
+    max-width: 75% !important;
+}

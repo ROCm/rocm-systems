@@ -1,0 +1,4 @@
+# build files
+/build*
+/*.egg-info
+/source/VERSION

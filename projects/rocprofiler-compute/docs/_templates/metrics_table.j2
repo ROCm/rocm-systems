@@ -1,0 +1,12 @@
+.. list-table::
+    :header-rows: 1
+
+    * - Metric
+      - Description
+      - Unit
+
+    {% for metric, metric_info in data.items() %}
+    * - {{ metric }}
+      - {{ metric_info.rst }}
+      - {{ metric_info.unit }}
+    {% endfor %}

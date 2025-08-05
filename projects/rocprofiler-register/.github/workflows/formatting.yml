@@ -1,0 +1,117 @@
+
+name: Formatting
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ amd-mainline, amd-staging ]
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
+      - '.github/workflows/linting.yml'
+      - '.github/workflows/markdown_lint.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cmake:
+    runs-on: AMD-ROCm-Internal-dev1
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        python3 -m pip install -U cmake-format
+
+    - name: Run cmake-format
+      run: |
+        set +e
+        cmake-format -i $(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! CMake code not formatted. Run cmake-format...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  source:
+    runs-on: AMD-ROCm-Internal-dev1
+    container: rocm/dev-ubuntu-22.04:latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install dependencies
+      run: |
+        DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
+        sudo apt-get update
+        sudo apt-get install -y software-properties-common wget curl clang-format-11
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Run clang-format
+      run: |
+        set +e
+        FILES=$(find samples source tests -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        FORMAT_OUT=$(clang-format-11 -i ${FILES})
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! Code not formatted. Run clang-format (version 11)...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi
+
+  python:
+    runs-on: AMD-ROCm-Internal-dev1
+    strategy:
+      matrix:
+        python-version: ['3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Extract branch name
+      shell: bash
+      run: |
+        echo "branch=${GITHUB_HEAD_REF:-${GITHUB_HEAD_REF#refs/heads/}}" >> $GITHUB_OUTPUT
+      id: extract_branch
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install black
+
+    - name: black format
+      run: |
+        black .
+        if [ $(git diff | wc -l) -ne 0 ]; then
+          echo -e "\nError! Python code not formatted. Run black...\n"
+          echo -e "\nFiles:\n"
+          git diff --name-only
+          echo -e "\nFull diff:\n"
+          git diff
+          exit 1
+        fi

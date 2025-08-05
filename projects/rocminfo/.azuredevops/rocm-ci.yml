@@ -1,0 +1,45 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+  pipelines:
+  - pipeline: rocr-runtime_pipeline
+    source: \ROCR-Runtime
+    trigger:
+      branches:
+        include:
+        - master
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - License.txt
+    - README.md
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - License.txt
+    - README.md
+  drafts: false
+
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocminfo.yml@pipelines_repo

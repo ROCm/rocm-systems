@@ -1,0 +1,5 @@
+pmc:  CPC_CPC_UTCL2IU_STALL CPC_ME1_BUSY_FOR_PACKET_DECODE
+
+gpu:
+range:
+kernel:
