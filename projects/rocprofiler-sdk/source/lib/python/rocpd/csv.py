@@ -148,7 +148,7 @@ def write_kernel_csv(importData, config) -> None:
         agent_id = "'Agent ' || agent_log_index"
     elif (
         config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  #  type-relative
+    ):  # type-relative
         agent_id = "agent_type || ' ' || agent_type_index"
     else:
         agent_id = ""
@@ -204,7 +204,7 @@ def write_memory_copy_csv(importData, config) -> None:
         dst_agent_id = "'Agent ' || dst_agent_log_index"
     elif (
         config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  #  type-relative
+    ):  # type-relative
         src_agent_id = "src_agent_type || ' ' || src_agent_type_index"
         dst_agent_id = "dst_agent_type || ' ' || dst_agent_type_index"
     else:
@@ -241,7 +241,7 @@ def write_memory_allocation_csv(importData, config) -> None:
         agent_id = "'Agent ' || agent_log_index"
     elif (
         config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  #  type-relative
+    ):  # type-relative
         agent_id = "agent_type || ' ' || agent_type_index"
     else:
         agent_id = ""
@@ -353,7 +353,7 @@ def write_counters_csv(importData, config) -> None:
         agent_id = "'Agent ' || agent_log_index"
     elif (
         config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  #  type-relative
+    ):  # type-relative
         agent_id = "agent_type || ' ' || agent_type_index"
     else:
         agent_id = ""
@@ -399,7 +399,7 @@ def write_scratch_memory_csv(importData, config) -> None:
         agent_id = "'Agent ' || agent_log_index"
     elif (
         config.agent_index_value == libpyrocpd.agent_indexing.logical_node_type
-    ):  #  type-relative
+    ):  # type-relative
         agent_id = "agent_type || ' ' || agent_type_index"
     else:
         agent_id = ""
