@@ -24,27 +24,24 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
 | `rocminfo`             | EMU             | Pending          |                                       |                                       |
 | `rocm-smi-lib`         | EMU             | Pending          |                                       |                                       |
-| `rocprofiler`          | EMU             | Pending          |                                       |                                       |
+| `rocprofiler`          | EMU             | Completed        |                                       |                                       |
 | `rocprofiler-compute`  | Public          | Pending          |                                       |                                       |
-| `rocprofiler-register` | EMU             | Pending          |                                       |                                       |
+| `rocprofiler-register` | EMU             | Completed        |                                       |                                       |
 | `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
 | `rocprofiler-systems`  | Public          | Pending          |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
 | `rocshmem`             | Public          | Pending          |                                       |                                       |
-| `roctracer`            | EMU             | Pending          |                                       |                                       |
+| `roctracer`            | EMU             | Completed        |                                       |                                       |
 
 
 ## Tentative migration schedule
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `aqlprofile`           | 8/5            |
-| `rocprofiler`          | 8/5            |
-| `rocprofiler-compute`  | 8/5            |
-| `rocprofiler-register` | 8/5            |
-| `rocprofiler-sdk`      | 8/5            |
-| `rocprofiler-systems`  | 8/5            |
-| `roctracer`            | 8/5            |
+| `rocprofiler-compute`  | 8/6            |
+| `rocprofiler-systems`  | 8/6            |
+| `aqlprofile`           | 8/7            |
+| `rocprofiler-sdk`      | 8/7            |
 | `rdc`                  | 8/8            |
 | `rocm-smi-lib`         | 8/8            |
 | `rocminfo`             | 8/11           |
