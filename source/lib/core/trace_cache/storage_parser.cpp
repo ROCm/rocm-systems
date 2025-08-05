@@ -20,9 +20,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "cache_storage_parser.hpp"
+#include "storage_parser.hpp"
 #include "debug.hpp"
-#include "sample_cache/sample_type.hpp"
+#include "trace_cache/sample_type.hpp"
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -30,7 +30,7 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
 void
@@ -208,5 +208,5 @@ storage_parser::invoke_callbacks(entry_type type, const storage_parsed_type_base
         cb(parsed);
     }
 }
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

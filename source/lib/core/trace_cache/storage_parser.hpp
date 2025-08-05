@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "cache_storage.hpp"
+#include "buffer_storage.hpp"
 #include "sample_type.hpp"
 #include <cassert>
 #include <cstdlib>
@@ -37,7 +37,7 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 using postprocessing_callback = std::function<void(const storage_parsed_type_base&)>;
 class cache_manager;
@@ -78,5 +78,5 @@ private:
     std::map<entry_type, std::vector<postprocessing_callback>> m_callbacks;
 };
 
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys
