@@ -89,7 +89,7 @@ jobs:
         set -v
         cd $BUILD_DIR
         cpack -G ${{ matrix.system.package }}
-        ${{ matrix.system.package == 'DEB' && 'dpkg -i' || 'dnf install --skip-broken'}} *.${{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
+        ${{ matrix.system.package == 'DEB' && 'dpkg -i' || 'dnf install --nobest'}} *.${{ matrix.system.package == 'DEB' && 'deb' || 'rpm' }}
 
     - name: Verify Installation
       timeout-minutes: 15
