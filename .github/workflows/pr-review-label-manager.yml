@@ -1,0 +1,195 @@
+name: PR Review Label Manager
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request:
+    types: [synchronize, opened, ready_for_review]
+  pull_request_target:
+    types: [review_requested, review_request_removed]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  manage-review-labels:
+    runs-on: ubuntu-latest
+    # Skip if PR is a draft
+    if: ${{ !github.event.pull_request.draft }}
+    steps:
+      - name: Manage Review Labels
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const pr_number = context.payload.pull_request.number;
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const event_name = context.eventName;
+            const action = context.payload.action;
+            
+            console.log(`Event: ${event_name}, Action: ${action}, PR: #${pr_number}`);
+            
+            // Define our review labels
+            const LABELS = {
+              PEER_REVIEW: 'ready for peer review',
+              SECOND_REVIEW: 'ready for 2nd review',
+              READY_MERGE: 'ready for merge'
+            };
+            
+            // Helper function to ensure labels exist
+            async function ensureLabelsExist() {
+              const labelConfigs = [
+                { name: LABELS.PEER_REVIEW, color: 'd4c5f9', description: 'PR needs initial review' },
+                { name: LABELS.SECOND_REVIEW, color: 'fbca04', description: 'PR has one approval, needs second review' },
+                { name: LABELS.READY_MERGE, color: '0e8a16', description: 'PR has sufficient approvals and is ready to merge' }
+              ];
+              
+              for (const config of labelConfigs) {
+                try {
+                  await github.rest.issues.getLabel({
+                    owner,
+                    repo,
+                    name: config.name
+                  });
+                } catch (error) {
+                  if (error.status === 404) {
+                    console.log(`Creating label: ${config.name}`);
+                    await github.rest.issues.createLabel({
+                      owner,
+                      repo,
+                      name: config.name,
+                      color: config.color,
+                      description: config.description
+                    });
+                  }
+                }
+              }
+            }
+            
+            // Ensure labels exist before proceeding
+            await ensureLabelsExist();
+            
+            // If PR was just synchronized (new commits), reset to peer review
+            if (event_name === 'pull_request' && action === 'synchronize') {
+              console.log('New commits detected, resetting to peer review state');
+              
+              // Remove all review labels
+              for (const label of Object.values(LABELS)) {
+                try {
+                  await github.rest.issues.removeLabel({
+                    owner,
+                    repo,
+                    issue_number: pr_number,
+                    name: label
+                  });
+                } catch (error) {
+                  // Label might not exist on PR, which is fine
+                }
+              }
+              
+              // Add peer review label
+              await github.rest.issues.addLabels({
+                owner,
+                repo,
+                issue_number: pr_number,
+                labels: [LABELS.PEER_REVIEW]
+              });
+              
+              return; // Exit early for synchronize events
+            }
+            
+            // Get all reviews for the PR
+            const reviews = await github.rest.pulls.listReviews({
+              owner,
+              repo,
+              pull_number: pr_number
+            });
+            
+            // Get PR author
+            const pr = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: pr_number
+            });
+            const pr_author = pr.data.user.login;
+            
+            // Get unique reviewers and their latest review state
+            const reviewerStates = {};
+            reviews.data.forEach(review => {
+              // Only consider reviews from users other than the PR author
+              if (review.user.login !== pr_author && review.state !== 'COMMENTED') {
+                // Store the latest review state for each reviewer
+                if (!reviewerStates[review.user.login] || 
+                    new Date(review.submitted_at) > new Date(reviewerStates[review.user.login].submitted_at)) {
+                  reviewerStates[review.user.login] = {
+                    state: review.state,
+                    submitted_at: review.submitted_at
+                  };
+                }
+              }
+            });
+            
+            // Count approvals and changes requested
+            let approvals = 0;
+            let changesRequested = 0;
+            
+            Object.values(reviewerStates).forEach(review => {
+              if (review.state === 'APPROVED') {
+                approvals++;
+              } else if (review.state === 'CHANGES_REQUESTED') {
+                changesRequested++;
+              }
+            });
+            
+            console.log(`Review summary: ${approvals} approvals, ${changesRequested} changes requested`);
+            
+            // Get current labels
+            const labels = await github.rest.issues.listLabelsOnIssue({
+              owner,
+              repo,
+              issue_number: pr_number
+            });
+            
+            const currentLabels = labels.data.map(label => label.name);
+            
+            // Determine target state
+            let targetLabel;
+            if (approvals >= 2 && changesRequested === 0) {
+              targetLabel = LABELS.READY_MERGE;
+            } else if (approvals === 1 && changesRequested === 0) {
+              targetLabel = LABELS.SECOND_REVIEW;
+            } else {
+              targetLabel = LABELS.PEER_REVIEW;
+            }
+            
+            // Remove other review labels and add the target label
+            for (const [key, label] of Object.entries(LABELS)) {
+              if (label === targetLabel) {
+                // Add target label if not present
+                if (!currentLabels.includes(label)) {
+                  await github.rest.issues.addLabels({
+                    owner,
+                    repo,
+                    issue_number: pr_number,
+                    labels: [label]
+                  });
+                  console.log(`Added label: ${label}`);
+                }
+              } else {
+                // Remove non-target labels if present
+                if (currentLabels.includes(label)) {
+                  try {
+                    await github.rest.issues.removeLabel({
+                      owner,
+                      repo,
+                      issue_number: pr_number,
+                      name: label
+                    });
+                    console.log(`Removed label: ${label}`);
+                  } catch (error) {
+                    // Label might have been removed already
+                  }
+                }
+              }
+            }
