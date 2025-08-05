@@ -713,7 +713,8 @@ def get_memchart(mem_data, base_data):
                                         children=[
                                             Path(
                                                 id="p1",
-                                                d="M 100 243.72 L 120 220.28 L 475 220.28 L 495 243.72 Z",
+                                                d="M 100 243.72 L 120 220.28 L "
+                                                  "475 220.28 L 495 243.72 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -763,7 +764,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 62 L 411.89 65.51 L 413.63 62.01 L 411.88 58.51 Z",
+                                                d="M 418.88 62 L 411.89 65.51 L "
+                                                  "413.63 62.01 L 411.88 58.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -773,7 +775,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 112 L 411.88 115.49 L 413.63 112 L 411.88 108.49 Z",
+                                                d="M 418.88 112 L 411.88 115.49 L "
+                                                  "413.63 112 L 411.88 108.49 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -783,7 +786,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 162 L 411.88 165.51 L 413.63 162 L 411.88 158.51 Z",
+                                                d="M 418.88 162 L 411.88 165.51 L "
+                                                  "413.63 162 L 411.88 158.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -793,7 +797,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 212 L 411.88 215.5 L 413.63 212 L 411.88 208.5 Z",
+                                                d="M 418.88 212 L 411.88 215.5 "
+                                                "L 413.63 212 L 411.88 208.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -803,7 +808,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 262 L 411.88 265.5 L 413.63 262 L 411.88 258.5 Z",
+                                                d="M 418.88 262 L 411.88 265.5 L "
+                                                "413.63 262 L 411.88 258.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -813,7 +819,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 312 L 411.89 315.51 L 413.63 312.01 L 411.88 308.51 Z",
+                                                d="M 418.88 312 L 411.89 315.51 L "
+                                                "413.63 312.01 L 411.88 308.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -823,7 +830,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 362 L 411.88 365.5 L 413.63 362 L 411.88 358.5 Z",
+                                                d="M 418.88 362 L 411.88 365.5 L "
+                                                "413.63 362 L 411.88 358.5 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -833,7 +841,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#ff8000",
                                             ),
                                             Path(
-                                                d="M 418.88 409 L 411.87 412.47 L 413.63 408.97 L 411.9 405.47 Z",
+                                                d="M 418.88 409 L 411.87 412.47 L "
+                                                "413.63 408.97 L 411.9 405.47 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -843,7 +852,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 647.12 207 L 654.12 203.5 L 652.37 207 L 654.12 210.5 Z",
+                                                d="M 647.12 207 L 654.12 203.5 L "
+                                                "652.37 207 L 654.12 210.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -853,17 +863,20 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 748.88 236.01 L 741.9 239.54 L 743.63 236.03 L 741.86 232.54 Z",
+                                                d="M 748.88 236.01 L 741.9 239.54 L "
+                                                "743.63 236.03 L 741.86 232.54 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 750 502 L 110 502 Q 100 502 100 492 L 100 468.37",
+                                                d="M 750 502 L 110 502 Q 100 "
+                                                "502 100 492 L 100 468.37",
                                                 fill="none",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 100 463.12 L 103.5 470.12 L 100 468.37 L 96.5 470.12 Z",
+                                                d="M 100 463.12 L 103.5 470.12 L "
+                                                "100 468.37 L 96.5 470.12 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -873,7 +886,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 937.12 504 L 944.12 500.5 L 942.37 504 L 944.12 507.5 Z",
+                                                d="M 937.12 504 L 944.12 500.5 L "
+                                                "942.37 504 L 944.12 507.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -883,7 +897,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1528.81 242.93 L 1535.81 239.43 L 1534.06 242.93 L 1535.81 246.43 Z",
+                                                d="M 1528.81 242.93 L 1535.81 239.43 L "
+                                                "1534.06 242.93 L 1535.81 246.43 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -893,7 +908,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1596.57 274.64 L 1589.57 278.14 L 1591.32 274.64 L 1589.57 271.14 Z",
+                                                d="M 1596.57 274.64 L 1589.57 278.14 L "
+                                                "1591.32 274.64 L 1589.57 271.14 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -903,7 +919,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1413 127.12 L 1416.5 134.12 L 1413 132.37 L 1409.5 134.12 Z",
+                                                d="M 1413 127.12 L 1416.5 134.12 L "
+                                                "1413 132.37 L 1409.5 134.12 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -913,7 +930,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1443 194.88 L 1439.5 187.88 L 1443 189.63 L 1446.5 187.88 Z",
+                                                d="M 1443 194.88 L 1439.5 187.88 L "
+                                                "1443 189.63 L 1446.5 187.88 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -923,7 +941,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1413.01 372.12 L 1416.54 379.1 L 1413.03 377.37 L 1409.54 379.14 Z",
+                                                d="M 1413.01 372.12 L 1416.54 379.1 L "
+                                                "1413.03 377.37 L 1409.54 379.14 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -933,12 +952,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1443.35 437.38 L 1439.82 430.4 L 1443.33 432.13 L 1446.82 430.36 Z",
+                                                d="M 1443.35 437.38 L 1439.82 430.4 L "
+                                                "1443.33 432.13 L 1446.82 430.36 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1145.25 341.38 L 1141.75 334.38 L 1145.25 336.13 L 1148.75 334.38 Z",
+                                                d="M 1145.25 341.38 L 1141.75 334.38 L "
+                                                "1145.25 336.13 L 1148.75 334.38 Z",
                                                 fill="rgb(0, 0, 0)",
                                                 stroke="rgb(0, 0, 0)",
                                             ),
@@ -948,7 +969,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 647.12 82 L 654.12 78.5 L 652.37 82 L 654.12 85.5 Z",
+                                                d="M 647.12 82 L 654.12 78.5 L 652.37 "
+                                                "82 L 654.12 85.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -958,7 +980,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 651.12 386.75 L 658.12 383.25 L 656.37 386.75 L 658.12 390.25 Z",
+                                                d="M 651.12 386.75 L 658.12 383.25 L "
+                                                "656.37 386.75 L 658.12 390.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -968,12 +991,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 646.12 269 L 653.12 265.5 L 651.37 269 L 653.12 272.5 Z",
+                                                d="M 646.12 269 L 653.12 265.5 L "
+                                                "651.37 269 L 653.12 272.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 748.88 269 L 741.88 272.5 L 743.63 269 L 741.88 265.5 Z",
+                                                d="M 748.88 269 L 741.88 272.5 L "
+                                                "743.63 269 L 741.88 265.5 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -983,7 +1008,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 939.12 206.41 L 946.12 202.91 L 944.37 206.41 L 946.12 209.91 Z",
+                                                d="M 939.12 206.41 L 946.12 202.91 L "
+                                                "944.37 206.41 L 946.12 209.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -993,7 +1019,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 235.42 L 1033.9 238.95 L 1035.63 235.44 L 1033.86 231.95 Z",
+                                                d="M 1040.88 235.42 L 1033.9 238.95 L "
+                                                "1035.63 235.44 L 1033.86 231.95 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1003,12 +1030,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 938.12 268.41 L 945.12 264.91 L 943.37 268.41 L 945.12 271.91 Z",
+                                                d="M 938.12 268.41 L 945.12 264.91 L "
+                                                "943.37 268.41 L 945.12 271.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 268.41 L 1033.88 271.91 L 1035.63 268.41 L 1033.88 264.91 Z",
+                                                d="M 1040.88 268.41 L 1033.88 271.91 L "
+                                                "1035.63 268.41 L 1033.88 264.91 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1018,7 +1047,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 939.12 354.32 L 946.12 350.82 L 944.37 354.32 L 946.12 357.82 Z",
+                                                d="M 939.12 354.32 L 946.12 350.82 L "
+                                                "944.37 354.32 L 946.12 357.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1028,7 +1058,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 383.33 L 1033.9 386.86 L 1035.63 383.35 L 1033.86 379.86 Z",
+                                                d="M 1040.88 383.33 L 1033.9 386.86 L "
+                                                "1035.63 383.35 L 1033.86 379.86 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1038,12 +1069,14 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 938.12 416.32 L 945.12 412.82 L 943.37 416.32 L 945.12 419.82 Z",
+                                                d="M 938.12 416.32 L 945.12 412.82 L "
+                                                "943.37 416.32 L 945.12 419.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1040.88 416.32 L 1033.88 419.82 L 1035.63 416.32 L 1033.88 412.82 Z",
+                                                d="M 1040.88 416.32 L 1033.88 419.82 L "
+                                                "1035.63 416.32 L 1033.88 412.82 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1053,7 +1086,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1252.12 245.75 L 1259.12 242.25 L 1257.37 245.75 L 1259.12 249.25 Z",
+                                                d="M 1252.12 245.75 L 1259.12 242.25 L "
+                                                "1257.37 245.75 L 1259.12 249.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1063,7 +1097,8 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1353.88 274.76 L 1346.9 278.29 L 1348.63 274.78 L 1346.86 271.29 Z",
+                                                d="M 1353.88 274.76 L 1346.9 278.29 L "
+                                                "1348.63 274.78 L 1346.86 271.29 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
@@ -1073,18 +1108,21 @@ def get_memchart(mem_data, base_data):
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1251.12 307.75 L 1258.12 304.25 L 1256.37 307.75 L 1258.12 311.25 Z",
+                                                d="M 1251.12 307.75 L 1258.12 304.25 L "
+                                                "1256.37 307.75 L 1258.12 311.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
-                                                d="M 1353.88 307.75 L 1346.88 311.25 L 1348.63 307.75 L 1346.88 304.25 Z",
+                                                d="M 1353.88 307.75 L 1346.88 311.25 L "
+                                                "1348.63 307.75 L 1346.88 304.25 Z",
                                                 fill="#00cccc",
                                                 stroke="#00cccc",
                                             ),
                                             Path(
                                                 id="p2",
-                                                d="M 235 67 L 245 57 L 265 57 L 275 67 Z",
+                                                d="M 235 67 L 245 57 L "
+                                                "265 57 L 275 67 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1110,7 +1148,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p3",
-                                                d="M 235 117 L 245 107 L 265 107 L 275 117 Z",
+                                                d="M 235 117 L 245 107 L 265 "
+                                                "107 L 275 117 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1136,7 +1175,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p4",
-                                                d="M 235 167 L 245 157 L 265 157 L 275 167 Z",
+                                                d="M 235 167 L 245 157 L "
+                                                "265 157 L 275 167 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1162,7 +1202,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p5",
-                                                d="M 235 217 L 245 207 L 265 207 L 275 217 Z",
+                                                d="M 235 217 L 245 207 L "
+                                                "265 207 L 275 217 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1188,7 +1229,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p6",
-                                                d="M 235 267 L 245 257 L 265 257 L 275 267 Z",
+                                                d="M 235 267 L 245 257 L "
+                                                "265 257 L 275 267 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1214,7 +1256,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p7",
-                                                d="M 235 317 L 245 307 L 265 307 L 275 317 Z",
+                                                d="M 235 317 L 245 307 L "
+                                                "265 307 L 275 317 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1240,7 +1283,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p8",
-                                                d="M 235 367 L 245 357 L 265 357 L 275 367 Z",
+                                                d="M 235 367 L 245 357 L "
+                                                "265 357 L 275 367 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -1266,7 +1310,8 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 id="p9",
-                                                d="M 235 417 L 245 407 L 265 407 L 275 417 Z",
+                                                d="M 235 417 L 245 407 L "
+                                                "265 407 L 275 417 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
