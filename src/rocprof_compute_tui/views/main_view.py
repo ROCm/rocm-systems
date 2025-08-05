@@ -170,7 +170,11 @@ class MainView(Horizontal):
                 sys_info_df = file_io.load_sys_info(sysinfo_path)
                 self.logger.info(f"Step 3: sys_info_df type = {type(sys_info_df)}")
                 self.logger.info(
-                    f"Step 3: sys_info_df shape = {sys_info_df.shape if hasattr(sys_info_df, 'shape') else 'No shape attribute'}"
+                    f"Step 3: sys_info_df shape = {(
+                        sys_info_df.shape
+                        if hasattr(sys_info_df, 'shape')
+                        else 'No shape attribute'
+                    )}"
                 )
 
             except Exception as e:
@@ -238,7 +242,10 @@ class MainView(Horizontal):
                 # TODO: add per kernel Roofline support when available
 
                 if not self.per_kernel_dfs or not self.top_kernels:
-                    warning_msg = "Step 8: Per Kernel Analysis completed but not all data was returned"
+                    warning_msg = (
+                        "Step 8: Per Kernel Analysis completed but not all data "
+                        "was returned"
+                    )
                     self._update_view(warning_msg, LogLevel.WARNING)
                     self.logger.warning(warning_msg)
                 else:

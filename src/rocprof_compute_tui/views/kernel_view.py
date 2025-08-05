@@ -77,7 +77,10 @@ class KernelView(Container):
         """
         with VerticalScroll(id="top-container"):
             yield Label(
-                "Open a workload directory to run analysis and view individual kernel analysis results.",
+                (
+                    "Open a workload directory to run analysis and view individual "
+                    "kernel analysis results."
+                ),
                 classes="placeholder",
             )
 

@@ -57,7 +57,10 @@ def load_config(config_path) -> Dict[str, Any]:
             return yaml.safe_load(file)
     except FileNotFoundError:
         raise FileNotFoundError(
-            f"Configuration file {config_path} not found, \nplease populate the analysis_config.yaml file."
+            (
+                f"Configuration file {config_path} not found, \n"
+                "please populate the analysis_config.yaml file."
+            )
         )
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML configuration: {e}")
@@ -85,7 +88,7 @@ def get_tui_style_from_path(dfs: Dict[str, Any], path: List[str]) -> Optional[st
 
 def create_widget_from_data(df: pd.DataFrame, tui_style: Optional[str] = None) -> Any:
     if df is not None and not df.empty:
-        match tui_style:
+        match tui_style: # noqa: E999
             case None:
                 return create_table(df)
 
@@ -194,7 +197,10 @@ def build_kernel_sections(
     def create_safe_widget(subsection_name: str, data: dict, section_name: str):
         if not (isinstance(data, dict) and "df" in data):
             add_warning(
-                f"Invalid data structure for '{subsection_name}' in section '{section_name}'"
+                (
+                    f"Invalid data structure for '{subsection_name}' "
+                    f"in section '{section_name}'"
+                )
             )
             return None
 
@@ -241,7 +247,10 @@ def build_kernel_sections(
                             kernel_children.append(collapsible)
                 except Exception as e:
                     add_warning(
-                        f"Error processing subsection '{subsection_name}' in section '{section_name}': {str(e)}"
+                        (
+                            f"Error processing subsection '{subsection_name}' "
+                            f"in section '{section_name}': {str(e)}"
+                        )
                     )
 
             if kernel_children:
@@ -252,7 +261,10 @@ def build_kernel_sections(
                     children.append(section_collapsible)
                 except Exception as e:
                     add_warning(
-                        f"Failed to create collapsible for section '{section_name}': {str(e)}"
+                        (
+                            "Failed to create collapsible for section "
+                            f"'{section_name}': {str(e)}"
+                        )
                     )
 
     except Exception as e:

@@ -64,7 +64,8 @@ class Logger:
                     if current_text
                     else formatted_msg
                 )
-                # HACK: moving curson to end of outpu (Is there a better way to achieve this?)
+                # HACK: moving curson to end of output
+                # (Is there a better way to achieve this?)
                 self.output_area.cursor_location = (999999, 0)
 
     def info(self, message, update_ui=True):
