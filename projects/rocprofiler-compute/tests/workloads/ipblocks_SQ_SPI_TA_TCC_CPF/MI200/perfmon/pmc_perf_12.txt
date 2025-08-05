@@ -1,0 +1,5 @@
+pmc:  SQC_DCACHE_REQ_READ_1 SQC_DCACHE_REQ_READ_2 SQC_DCACHE_REQ_READ_4
+
+gpu:
+range:
+kernel:

@@ -1,0 +1,62 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ amd-mainline ]
+    paths:
+      - 'docs/archive/docs-2.x/**'
+      - 'docs/archive/docs-1.x/**'
+      - '.github/workflows/docs.yml'
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: true
+
+jobs:
+  # Build job
+  build:
+    runs-on: ubuntu-latest
+    container:
+       image: sphinxdoc/sphinx
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Additional python packages
+        run: pip3 install -r docs/archive/requirements-doc.txt
+      - name: Setup Pages
+        uses: actions/configure-pages@v4
+      - name: Build 1.x docs
+        run: |
+          cd docs/archive/docs-1.x
+          make html
+      - name: Build 2.x docs
+        run: |
+          cd docs/archive/docs-2.x
+          make html
+      - name: Relocate 1.x docs
+        run: |
+          mv docs/archive/docs-1.x/_build/html docs/archive/_build/html/1.x
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs/archive/_build/html
+
+  # Deployment job
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
