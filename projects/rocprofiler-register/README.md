@@ -26,9 +26,7 @@ etc.
 
 ## Contributing
 
-The default branch is `amd-mainline` but the only branch that should target that branch in a pull requests is the `amd-staging` branch.
-
-> _**All pull-requests should target the `amd-staging` branch**_
+All pull-requests should target the `amd-staging` branch.
 
 ### Creating a feature branch
 
