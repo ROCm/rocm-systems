@@ -1,0 +1,26 @@
+GPU     :	0
+Name    :	gfx90a
+configs :
+   Method              :	host_trap
+   Unit                :	time
+   Min_Interval        :	1
+   Max_Interval        :	18446744073709551615
+   Flags               :	none
+
+GPU:0
+Name:gfx90a
+Counter_Name        :	processor_id_low
+Description         :	Constant value processor_id_low from agent properties
+
+
+Counter_Name        :	ALUStalledByLDS
+Description         :	The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
+Expression          :	400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
+Dimensions          :	DIMENSION_INSTANCE[0:0]
+
+Counter_Name        :	SQ_WAVES
+Description         :	Count number of waves sent to distributed sequencers (SQs). This value represents the number of waves that are sent to each SQ. This only counts new waves sent since the start of collection (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it is the timeframe between start_context and read counter data). A sum of all SQ_WAVES values will give the total number of waves started by the application during the collection timeframe. Returns one value per-SE (aggregates of SIMD values).
+Block               :	SQ
+Dimensions          :	DIMENSION_INSTANCE[0:0] DIMENSION_SHADER_ENGINE[0:7]
+
+...

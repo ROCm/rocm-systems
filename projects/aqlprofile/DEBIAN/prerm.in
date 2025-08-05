@@ -1,0 +1,22 @@
+#!/bin/bash
+
+set -e
+
+# left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
+rm_ldconfig() {
+  if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+    rm -f /etc/ld.so.conf.d/libhsa-amd-aqlprofile64.conf
+    ldconfig
+  fi
+}
+
+case "$1" in
+  ( remove | upgrade )
+    rm_ldconfig
+  ;;
+  ( purge )
+  ;;
+  ( * )
+    exit 0
+  ;;
+esac

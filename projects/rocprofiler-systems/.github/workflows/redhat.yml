@@ -1,0 +1,180 @@
+name: RedHat Linux (GCC, Python, ROCm)
+run-name: redhat
+
+on:
+  push:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+  pull_request:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  rhel:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        os-release: [ '8.10', '9.3', '9.4' ]
+        rocm-version: [ '0.0', '6.3', '6.4' ]
+        build-type: ['Release']
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure Env
+      shell: bash
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        env
+
+    - name: Install Packages
+      shell: bash
+      run: |
+          if [ $OS_VERSION_MAJOR -eq 8 ]; then
+            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+            chmod +x /opt/trace_processor/bin/trace_processor_shell
+          fi
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+
+    - name: Install ROCm Packages
+      if: ${{ matrix.rocm-version > 0 }}
+      timeout-minutes: 30
+      shell: bash
+      run: |
+        RPM_TAG=".el${OS_VERSION_MAJOR}"
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
+        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
+        yum install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
+        yum install -y rocm-dev rocdecode-devel
+        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip" &&
+        USE_HIP=OFF &&
+        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_HIP=ON; TAG="${TAG}-rocm-${{ matrix.rocm-version }}"; fi &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${TAG}
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_ROCM=${USE_HIP}
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_USE_MPI_HEADERS=ON
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
+
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test Install
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        set -v
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime,python}=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi

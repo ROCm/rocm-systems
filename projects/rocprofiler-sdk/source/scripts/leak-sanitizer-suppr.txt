@@ -1,0 +1,12 @@
+#
+# LeakSanitizer suppressions file for rocprofiler project.
+#
+
+leak:amd_comgr
+leak:hsa-runtime
+leak:amdhip
+leak:python
+leak:hsa-amd-aqlprofile
+leak:__new_exitfn
+leak:omptarget
+leak:llvm

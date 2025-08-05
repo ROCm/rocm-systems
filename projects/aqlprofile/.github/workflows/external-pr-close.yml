@@ -1,0 +1,102 @@
+name: Close external PR
+
+on:
+  pull_request_target:
+    types: [closed]
+    branches: 
+      - amd-staging
+
+jobs:
+  git-mirror:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == 'AMD-ROCm-Internal/aqlprofile' && contains(github.event.pull_request.head.ref, 'external-pr')
+    steps:
+      - name: Get Current PR Body
+        id: current_pr
+        run: |
+          # Use the PR body directly from the event payload
+          # This is the body as it was when the 'opened' or 'edited' event was triggered.
+          RAW_PR_BODY="${{ github.event.pull_request.body }}"
+
+          # Handle cases where the body might be null (e.g., an empty PR description)
+          # In bash, an unset or null variable in quotes becomes an empty string,
+          # but it's good practice to be explicit or test.
+          # If RAW_PR_BODY is null from the JSON payload, it will be treated as an empty string here by bash.
+          # For more robust null handling if needed elsewhere: PR_BODY_FOR_SCRIPT="${RAW_PR_BODY:-}"
+          PR_BODY_FOR_SCRIPT="$RAW_PR_BODY"
+
+          echo "PR Body from event payload (first 500 chars):"
+          echo "${PR_BODY_FOR_SCRIPT:0:500}" # Print a snippet for logging
+          echo "-------------------"
+
+          # If you need to pass this body to subsequent steps via GITHUB_OUTPUT,
+          # the multiline escaping is still crucial.
+          ESCAPED_PR_BODY="${RAW_PR_BODY//'%'/'%25'}"
+          ESCAPED_PR_BODY="${ESCAPED_PR_BODY//$'\n'/'%0A'}"
+          ESCAPED_PR_BODY="${ESCAPED_PR_BODY//$'\r'/'%0D'}"
+
+          echo "PR_BODY_CONTENT<<EOF" >> $GITHUB_OUTPUT
+          echo "$ESCAPED_PR_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Extract Remote PR URL and Info
+        id: remote_pr_info
+        run: |
+          PR_BODY="${{ steps.current_pr.outputs.PR_BODY_CONTENT }}"
+          echo "Current PR Body:"
+          echo "${PR_BODY}"
+          echo "-------------------"
+
+          # Regex to find GitHub PR URLs. This is a common pattern.
+          # It captures owner, repo, and pr_number.
+          REMOTE_PR_URL_REGEX="https://github.com/([^/]+)/([^/]+)/pull/([0-9]+)"
+
+          if [[ "$PR_BODY" =~ $REMOTE_PR_URL_REGEX ]]; then
+            REMOTE_PR_URL="${BASH_REMATCH[0]}"
+            REMOTE_OWNER="${BASH_REMATCH[1]}"
+            REMOTE_REPO="${BASH_REMATCH[2]}"
+            REMOTE_PR_NUMBER="${BASH_REMATCH[3]}"
+
+            echo "Found Remote PR URL: $REMOTE_PR_URL"
+            echo "Remote Owner: $REMOTE_OWNER"
+            echo "Remote Repo: $REMOTE_REPO"
+            echo "Remote PR Number: $REMOTE_PR_NUMBER"
+
+            echo "REMOTE_PR_URL=$REMOTE_PR_URL" >> $GITHUB_OUTPUT
+            echo "REMOTE_OWNER=$REMOTE_OWNER" >> $GITHUB_OUTPUT
+            echo "REMOTE_REPO=$REMOTE_REPO" >> $GITHUB_OUTPUT
+            echo "REMOTE_PR_NUMBER=$REMOTE_PR_NUMBER" >> $GITHUB_OUTPUT
+            echo "FOUND_URL=true" >> $GITHUB_OUTPUT
+          else
+            echo "::warning::No GitHub PR URL found in the current PR body."
+            echo "FOUND_URL=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Output Results
+        if: steps.remote_pr_info.outputs.FOUND_URL == 'true'
+        run: |
+          echo "Successfully retrieved branch info from remote PR."
+          echo "Remote PR URL: ${{ steps.remote_pr_info.outputs.REMOTE_PR_URL }}"
+
+      - name: Handle No URL Found
+        if: steps.remote_pr_info.outputs.FOUND_URL == 'false'
+        run: |
+          echo "No remote PR URL was found in the body of PR #${{ github.event.pull_request.number }}."
+      
+      - name: Comment on and Close External PR
+        if: steps.remote_pr_info.outputs.FOUND_URL == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.EXT_TOKEN }}
+          EXTERNAL_PR_NUMBER: ${{ steps.remote_pr_info.outputs.REMOTE_PR_NUMBER }}
+          EXTERNAL_REPO: "ROCm/aqlprofile"
+        run: |
+          COMMENT_BODY="This pull request has been closed in the internal repository. Thank you for your contribution!"
+
+          gh pr comment "$EXTERNAL_PR_NUMBER" \
+            --repo "$EXTERNAL_REPO" \
+            --body "$COMMENT_BODY"
+
+          gh pr close "$EXTERNAL_PR_NUMBER" \
+            --repo "$EXTERNAL_REPO"
+
+          echo "Commented on and Closed external PR #${EXTERNAL_PR_NUMBER}"
