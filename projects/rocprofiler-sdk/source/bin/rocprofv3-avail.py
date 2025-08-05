@@ -458,6 +458,9 @@ def process_pmc_check(args):
 
 
 def main(argv=None):
+    if argv is None or len(argv) == 0:
+        avail.fatal_error("No arguments provided")
+    
     ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
@@ -468,8 +471,6 @@ def main(argv=None):
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
     args = parse_arguments(argv)
-    if argv is None or len(argv) == 0:
-        avail.fatal_error("No arguments provided")
     if args.command:
         args.func(args)
 
