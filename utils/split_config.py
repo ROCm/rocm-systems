@@ -6,9 +6,9 @@
 # Read utils/unified_config.yaml and split it into metric tables per documentation section
 # WARNING: This script will overwrite existing docs/data/metrics_description.yaml
 
+import copy
 import hashlib
 import re
-import copy
 from pathlib import Path
 
 import yaml
@@ -34,7 +34,10 @@ def update_analysis_config():
         new_panel_config = {"Panel Config": {}}
         new_panel_config["Panel Config"]["id"] = panel_config["id"]
         new_panel_config["Panel Config"]["title"] = panel_config["title"]
-        new_panel_config["Panel Config"]["metrics_description"] = {key: value["plain"] for key, value in panel_config.get("metrics_description", {}).items()}
+        new_panel_config["Panel Config"]["metrics_description"] = {
+            key: value["plain"]
+            for key, value in panel_config.get("metrics_description", {}).items()
+        }
         # Convert int into str with 4 digits
         panel_id = str(panel_config["id"]).zfill(4)
         # Replace parentehsis, hyphen, slash and space with underscore
@@ -57,7 +60,9 @@ def update_analysis_config():
             for data_source_config in panel_config["data source"]:
                 data_source_config = copy.deepcopy(data_source_config)
                 if "metric_table" in data_source_config:
-                    data_source_config["metric_table"]["metric"] = data_source_config["metric_table"]["metric"][gfx_version]
+                    data_source_config["metric_table"]["metric"] = data_source_config[
+                        "metric_table"
+                    ]["metric"][gfx_version]
                 new_panel_config["Panel Config"]["data source"].append(data_source_config)
             # Write panel config to file
             filename = Path(
@@ -121,12 +126,23 @@ def update_documentation():
         for data_source in panel_config["data source"]:
             if "metric_table" in data_source:
                 metrics_info = {}
-                for key in panel_config["metrics_description"]:
-                    metrics_info[key] = {
-                        "rst": panel_config["metrics_description"][key]["rst"],
-                        "unit": panel_config["metrics_description"][key]["unit"],
+                # Metric names from data source
+                metric_names = {
+                    metric
+                    for _, gfx_data in data_source["metric_table"]["metric"].items()
+                    for metric in gfx_data
+                }
+                # Select metrics with descriptions available
+                metric_names = metric_names.intersection(
+                    panel_config["metrics_description"].keys()
+                )
+                # Add metrics info
+                for metric_name in sorted(list(metric_names)):
+                    metrics_info[metric_name] = {
+                        "rst": panel_config["metrics_description"][metric_name]["rst"],
+                        "unit": panel_config["metrics_description"][metric_name]["unit"],
                     }
-                panel_metric_map[data_source["metric_table"]["id"]] = metrics_info 
+                panel_metric_map[data_source["metric_table"]["id"]] = metrics_info
 
     # Merge panel_metric_map with section_panel_map
     section_metric_map = {}

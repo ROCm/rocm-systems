@@ -63,6 +63,9 @@ Panel Config:
       unit by the address processor summed over all compute units on the accelerator,
       per normalization unit. This is expected to be the sum of global/generic and
       spill/stack atomics in the address processor.
+    Write Ack Instructions: The total number of write acknowledgements submitted by
+      data-return unit to SQ, summed over all compute units on the accelerator, per
+      normalization unit.
   data source:
   - metric_table:
       id: 1501

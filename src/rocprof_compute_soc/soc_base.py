@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import ctypes
 import glob
@@ -517,6 +519,14 @@ class OmniSoC_Base:
                 rocprof_counters.update(counters)
 
         elif str(rocprof_cmd) == "rocprofiler-sdk":
+            # Point to rocprofiler sdk counter definition
+            old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
+            os.environ["ROCPROFILER_METRICS_PATH"] = str(
+                Path(self.get_args().rocprofiler_sdk_library_path)
+                .resolve()
+                .parent.parent.joinpath("share", "rocprofiler-sdk")
+            )
+
             sys.path.append(
                 str(
                     Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
@@ -527,7 +537,7 @@ class OmniSoC_Base:
 
             avail.loadLibrary.libname = str(
                 Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                / "libexec"
+                / "lib"
                 / "rocprofiler-sdk"
                 / "librocprofv3-list-avail.so"
             )
@@ -549,6 +559,12 @@ class OmniSoC_Base:
                     counter_defs_contents = fp.read()
                 counters, _ = self.parse_counters_text(counter_defs_contents)
                 rocprof_counters.update(counters)
+
+            # Reset env. var.
+            if old_rocprofiler_metrics_path is None:
+                del os.environ["ROCPROFILER_METRICS_PATH"]
+            else:
+                os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         else:
             console_error(

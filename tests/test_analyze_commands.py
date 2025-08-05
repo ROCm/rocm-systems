@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,21 +10,23 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import os
 import shutil
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pandas as pd
 import pytest
@@ -42,7 +44,7 @@ indirs = [
     "tests/workloads/vcopy/MI350",
 ]
 
-time_units = {"s": 10 ** 9, "ms": 10 ** 6, "us": 10 ** 3, "ns": 1}
+time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
 
 
 @pytest.mark.misc
@@ -1308,9 +1310,9 @@ def test_mathematical_correctness_all_units(sample_time_data, original_ns_values
     from utils.tty import convert_time_columns
 
     test_cases = [
-        ("s", 10 ** 9),  # 1 second = 10^9 nanoseconds
-        ("ms", 10 ** 6),  # 1 millisecond = 10^6 nanoseconds
-        ("us", 10 ** 3),  # 1 microsecond = 10^3 nanoseconds
+        ("s", 10**9),  # 1 second = 10^9 nanoseconds
+        ("ms", 10**6),  # 1 millisecond = 10^6 nanoseconds
+        ("us", 10**3),  # 1 microsecond = 10^3 nanoseconds
         ("ns", 1),  # 1 nanosecond = 1 nanosecond
     ]
 
