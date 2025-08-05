@@ -22,6 +22,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
+import csv
 import pandas as pd
 import pytest
 import json
@@ -49,6 +50,12 @@ def pytest_addoption(parser):
         "--otf2-input",
         action="store",
         help="Path to OTF2 trace file.",
+    )
+    parser.addoption(
+        "--csv-input",
+        action="store",
+        nargs="+",
+        help="Paths to CSV files.",
     )
     parser.addoption(
         "--summary-input",
@@ -81,6 +88,14 @@ def otf2_data(request):
     if not os.path.exists(filename):
         raise FileExistsError(f"{filename} does not exist")
     return OTF2Reader(filename).read()[0]
+
+
+@pytest.fixture
+def csv_data(request):
+    filenames = request.config.getoption("--csv-input")
+    return [
+        (filename, list(csv.DictReader(open(filename, "r")))) for filename in filenames
+    ]
 
 
 @pytest.fixture
