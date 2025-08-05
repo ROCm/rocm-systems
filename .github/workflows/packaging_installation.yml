@@ -37,6 +37,10 @@ jobs:
         echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        echo "ROCM_VERSION=${{ matrix.system.rocm-version }}" >> $GITHUB_ENV &&
+        echo "ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        echo "ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')" >> $GITHUB_ENV &&
+        echo "ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))" >> $GITHUB_ENV &&
         env
 
     - name: Setup ROCm (ubuntu)
@@ -45,11 +49,6 @@ jobs:
       shell: bash
       run: |
         set -v
-        ROCM_VERSION=${{ matrix.system.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os }}/${{ contains(matrix.system.os-release, '22') && 'jammy' || 'noble' }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
@@ -62,10 +61,6 @@ jobs:
       run: |
         set -v
         RPM_TAG=".el${OS_VERSION_MAJOR}"
-        ROCM_VERSION=${{ matrix.system.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
         dnf install -y https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os }}/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
@@ -78,21 +73,8 @@ jobs:
       shell: bash
       run: |
         set -v
-        ROCM_VERSION=${{ matrix.system.rocm-version }}
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
-        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         zypper install -y perl-File-BaseDir
-        tee --append /etc/zypp/repos.d/rocm.repo <<EOF
-        [ROCm-${ROCM_VERSION}]
-        name=ROCm${ROCM_VERSION}
-        baseurl=https://repo.radeon.com/rocm/zyp/${ROCM_VERSION}/main
-        enabled=1
-        gpgcheck=1
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-        EOF
-        zypper --non-interactive refresh
-        zypper --non-interactive install https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        zypper --non-interactive --no-gpg-checks install https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
         zypper --non-interactive install rocm-dev rocdecode-devel python3-devel
 
     - name: Build rocprofiler-systems
@@ -111,10 +93,10 @@ jobs:
         set -v
         cd $BUILD_DIR
         DISTRO=${{ matrix.system.os }}
-        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE=deb; else PACKAGE=rpm; fi
-        if [ "${DISTRO}" -eq "ubuntu"]; then PACKAGE_MANAGER=dpkg; fi
-        if [ "${DISTRO}" -eq "rhel"]; then PACKAGE_MANAGER=dnf; fi
-        if [ "${DISTRO}" -eq "opensuse"]; then PACKAGE_MANAGER=zypper; fi
+        if [ "${DISTRO}" -eq "ubuntu" ]; then PACKAGE=deb; else PACKAGE=rpm; fi
+        if [ "${DISTRO}" -eq "ubuntu" ]; then PACKAGE_MANAGER=dpkg; fi
+        if [ "${DISTRO}" -eq "rhel" ]; then PACKAGE_MANAGER=dnf; fi
+        if [ "${DISTRO}" -eq "opensuse" ]; then PACKAGE_MANAGER=zypper; fi
         cpack -G ${PACKAGE}
         ${PACKAGE_MANAGER} ${{ matrix.system.os == 'ubuntu' && '-i' || 'install --skip-broken'}} *.${PACKAGE}
 
