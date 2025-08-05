@@ -999,6 +999,7 @@ def test_parser_error_handling():
     except SystemExit:
         pass
 
+
 @pytest.mark.misc
 def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
     """Test handling of missing files"""

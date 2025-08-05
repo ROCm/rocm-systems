@@ -527,8 +527,7 @@ class MachineSpecs:
         default=None,
         metadata={
             "doc": (
-                "The maximum memory clock rate of the accelerators/GPUs in the "
-                "system."
+                "The maximum memory clock rate of the accelerators/GPUs in the system."
             ),
             "name": "Max MCLK",
             "unit": "MHz",
@@ -594,8 +593,7 @@ class MachineSpecs:
         default=None,
         metadata={
             "doc": (
-                "The number of scheduler-pipes on the accelerators/GPUs in the "
-                "system."
+                "The number of scheduler-pipes on the accelerators/GPUs in the system."
             ),
             "name": "Pipes per GPU",
         },

@@ -63,8 +63,8 @@ class MIGPUSpecs:
     _perfmon_config = {}  # key: gpu_arch
 
     _gpu_arch_to_compute_partition_dict = {}  # key: gpu_arch, used for gpu archs
-                                               # containing only one gpu model and
-                                               # thus one compute partition
+    # containing only one gpu model and
+    # thus one compute partition
 
     _initialized = False
 
@@ -182,7 +182,6 @@ class MIGPUSpecs:
                         "arch found: %s -> %s (partition: %s)"
                         % (gpu_arch, single_model, compute_partition)
                     )
-
 
     @classmethod
     def get_gpu_series_dict(cls):

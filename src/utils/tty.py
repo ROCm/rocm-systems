@@ -321,23 +321,21 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                         #       requirement
                                         if (
                                             header in ["Value", "Count", "Avg"]
-                                            and t_df_pretty.abs().gt(
-                                                args.report_diff
-                                            ).any()
+                                            and t_df_pretty.abs()
+                                            .gt(args.report_diff)
+                                            .any()
                                         ):
                                             df["Abs Diff"] = absolute_diff
                                             if args.report_diff:
                                                 violation_idx = t_df_pretty.index[
-                                                    t_df_pretty.abs()
-                                                    > args.report_diff
+                                                    t_df_pretty.abs() > args.report_diff
                                                 ]
                                                 console_warning(
                                                     "Dataframe diff exceeds %s "
                                                     "threshold requirement\n"
                                                     "See metric %s"
                                                     % (
-                                                        str(args.report_diff)
-                                                        + "%",
+                                                        str(args.report_diff) + "%",
                                                         violation_idx.to_numpy(),
                                                     )
                                                 )

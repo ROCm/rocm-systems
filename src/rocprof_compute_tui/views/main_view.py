@@ -170,11 +170,13 @@ class MainView(Horizontal):
                 sys_info_df = file_io.load_sys_info(sysinfo_path)
                 self.logger.info(f"Step 3: sys_info_df type = {type(sys_info_df)}")
                 self.logger.info(
-                    f"Step 3: sys_info_df shape = {(
-                        sys_info_df.shape
-                        if hasattr(sys_info_df, 'shape')
-                        else 'No shape attribute'
-                    )}"
+                    f"Step 3: sys_info_df shape = {
+                        (
+                            sys_info_df.shape
+                            if hasattr(sys_info_df, 'shape')
+                            else 'No shape attribute'
+                        )
+                    }"
                 )
 
             except Exception as e:

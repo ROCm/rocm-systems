@@ -57,11 +57,7 @@ if __name__ == "__main__":
                         "'rocprof-compute', "
                         "'analyze', "
                         "'--path', "
-                        "'"
-                        + workload
-                        + "/"
-                        + arch
-                        + "']"
+                        "'" + workload + "/" + arch + "']"
                         "):\n\t\t\trocprof_compute.main()"
                     )
                     + "\n\tassert e.value.code == 0"

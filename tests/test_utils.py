@@ -833,6 +833,7 @@ def test_get_agent_dict_non_integer_handles():
     assert result["agent_1"]["node_id"] == 100
     assert result["agent_2"]["node_id"] == 200
 
+
 # =========================================================================
 # Tests for get_gpuid_dict function
 # =========================================================================
@@ -2190,6 +2191,7 @@ def test_check_file_pattern_match_found():
     finally:
         os.unlink(temp_file_path)
 
+
 def test_check_file_pattern_file_not_found():
     """
     Test check_file_pattern when the file doesn't exist.
@@ -2481,13 +2483,10 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     profiler_options = {
-        "APP_CMD": [
-            "./test_app"
-        ],
+        "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": workload_dir,
-        "ROCP_TOOL_LIBRARIES":
-            "/opt/rocm/lib/rocprofiler-sdk/"
-            "librocprofiler-sdk-tool.so",
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
+        "librocprofiler-sdk-tool.so",
     }
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
@@ -2894,7 +2893,8 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     assert flatten_called
 
 
-import utils.utils as utils_mod # noqa
+import utils.utils as utils_mod  # noqa
+
 
 class MockMSpec:
     def __init__(
@@ -3092,9 +3092,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     profiler_options_sdk_hip = {
         "APP_CMD": "my_app",
         "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
-        "ROCP_TOOL_LIBRARIES":
-            "/opt/rocm/lib/rocprofiler-sdk/"
-            "librocprofiler-sdk-tool.so",
+        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/"
+        "librocprofiler-sdk-tool.so",
     }
     hip_trace_called_with = None
     kokkos_trace_called_with = None
@@ -3469,6 +3468,7 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     assert len(result) == 2
     assert str(converted_file1) in result
     assert str(converted_file2) in result
+
 
 def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     """
@@ -4796,7 +4796,7 @@ def test_mibench_override_distro_success(tmp_path, monkeypatch):
     utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
 
     assert len(subprocess_calls) == 1
-    expected_args = [ #noqa
+    expected_args = [  # noqa
         str(override_binary_path),
         "-o",
         str(tmp_path) + "/roofline.csv",
@@ -4958,7 +4958,7 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
     utils_mod.mibench(MockArgs(), SimpleNamespace(rocm_version="0.x.x"))
 
     assert len(subprocess_calls) == 1
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "2"] #noqa
+    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "2"]  # noqa
 
 
 def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
@@ -5115,7 +5115,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
         "-d",
         "0",
     ]
-    expected_full_args = expected_base_args + ["-", "-", "q", "u", "i", "e", "t"] # noqa
+    expected_full_args = expected_base_args + ["-", "-", "q", "u", "i", "e", "t"]  # noqa
 
     subprocess_calls.clear()
 
@@ -5129,7 +5129,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
 
     utils_mod.mibench(MockArgsQuiet(), SimpleNamespace(rocm_version="0.x.x"))
 
-    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "0"] # noqa
+    expected_args = [str(binary_path), "-o", str(tmp_path) + "/roofline.csv", "-d", "0"]  # noqa
 
 
 def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
@@ -5952,7 +5952,7 @@ def test_get_submodules_empty_name_parts():
         with patch("pkgutil.walk_packages", return_value=mock_submodules):
             try:
                 result = utils_mod.get_submodules("test_package")
-                expected = ["", "", "double"]  # noqa - Empty strings for edge cases 
+                expected = ["", "", "double"]  # noqa - Empty strings for edge cases
                 assert len(result) == 3
             except IndexError:
                 pytest.skip("Function doesn't handle edge case module names gracefully")
@@ -6930,7 +6930,7 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
                     "Failed to set locale to the current UTF-8-based locale."
                     in console_error_calls[0][0][0]
                 )
-                assert console_error_calls[0][1]["exit"] == False # noqa
+                assert console_error_calls[0][1]["exit"] == False  # noqa
                 assert console_error_calls[1][0][0] == fallback_error
 
 
@@ -6965,7 +6965,7 @@ def test_set_locale_encoding_no_utf8_locale_available():
                     "locale is available on your system."
                     in console_error_calls[0][0][0]
                 )
-                assert console_error_calls[0][1]["exit"] == False # noqa
+                assert console_error_calls[0][1]["exit"] == False  # noqa
 
 
 def test_set_locale_encoding_getdefaultlocale_returns_none():
@@ -6997,8 +6997,7 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale "
-                    "is available on your system."
-                    in console_error_calls[0][0][0]
+                    "is available on your system." in console_error_calls[0][0][0]
                 )
 
 
@@ -7040,8 +7039,7 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale is "
-                    "available on your system."
-                    in console_error_calls[0][0][0]
+                    "available on your system." in console_error_calls[0][0][0]
                 )
 
 
@@ -7111,8 +7109,7 @@ def test_set_locale_encoding_empty_encoding():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale "
-                    "is available on your system."
-                    in console_error_calls[0][0][0]
+                    "is available on your system." in console_error_calls[0][0][0]
                 )
 
 
@@ -7292,7 +7289,7 @@ def test_set_locale_encoding_console_error_parameters():
                 args, kwargs = console_error_calls[0]
                 assert len(args) == 1
                 assert "exit" in kwargs
-                assert kwargs["exit"] == False # noqa
+                assert kwargs["exit"] == False  # noqa
 
 
 def test_set_locale_encoding_return_value():
@@ -8503,10 +8500,10 @@ def test_add_counter_overwrite_existing():
         == initial_expression
     )
 
-    updated_description = "Updated version" # noqa
-    updated_expression = "updated_expr" # noqa
-    updated_architectures = ["gfx908"] # noqa
-    updated_properties = ["P_UPDATED", "P_NEW"] # noqa
+    updated_description = "Updated version"  # noqa
+    updated_expression = "updated_expr"  # noqa
+    updated_architectures = ["gfx908"]  # noqa
+    updated_properties = ["P_UPDATED", "P_NEW"]  # noqa
 
 
 # =================================================================================
@@ -8702,7 +8699,7 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     fake_library_path = "/some/invalid/path/to/librocprofiler_sdk.so"
     args = MockArgs(rocprofiler_sdk_library_path=fake_library_path)
 
-    with mock.patch("utils.utils.console_debug") as mock_console_debug: # noqa
+    with mock.patch("utils.utils.console_debug") as mock_console_debug:  # noqa
         utils.detect_rocprof(args)
 
     expected_error_message = (
@@ -8714,7 +8711,7 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     mock_path_instance.exists.assert_called_once()
 
 
-class MockArgs: #noqa
+class MockArgs:  # noqa
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 

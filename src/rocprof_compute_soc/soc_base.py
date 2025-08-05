@@ -174,7 +174,7 @@ class OmniSoC_Base:
             # The output of `amd-smi static --clock --json` is a dict with
             # amd-smi>=26.0.0.
             amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"][
-            "frequency_levels"
+                "frequency_levels"
             ]
         else:
             # For backward compatibility: the output of `amd-smi static --clock --json`

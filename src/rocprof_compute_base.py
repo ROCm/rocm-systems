@@ -158,8 +158,7 @@ class RocProfCompute:
     def parse_args(self):
         parser = argparse.ArgumentParser(
             description=(
-                "Command line interface for AMD's GPU profiler, "
-                "ROCm Compute Profiler"
+                "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
             ),
             prog="tool",
             formatter_class=lambda prog: argparse.RawTextHelpFormatter(
@@ -335,7 +334,7 @@ class RocProfCompute:
         console_debug(
             (
                 'finished "run_profiling" and finished rocprof\'s workload, '
-                'time taken was {} m {} sec'
+                "time taken was {} m {} sec"
             ).format(
                 int((time_end_prof - time_start_prof) / 60),
                 str((time_end_prof - time_start_prof) % 60),

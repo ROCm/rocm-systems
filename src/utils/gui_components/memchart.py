@@ -714,7 +714,7 @@ def get_memchart(mem_data, base_data):
                                             Path(
                                                 id="p1",
                                                 d="M 100 243.72 L 120 220.28 L "
-                                                  "475 220.28 L 495 243.72 Z",
+                                                "475 220.28 L 495 243.72 Z",
                                                 fill="#ffffff",
                                                 stroke="#ff8000",
                                             ),
@@ -765,7 +765,7 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 d="M 418.88 62 L 411.89 65.51 L "
-                                                  "413.63 62.01 L 411.88 58.51 Z",
+                                                "413.63 62.01 L 411.88 58.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -776,7 +776,7 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 d="M 418.88 112 L 411.88 115.49 L "
-                                                  "413.63 112 L 411.88 108.49 Z",
+                                                "413.63 112 L 411.88 108.49 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),
@@ -787,7 +787,7 @@ def get_memchart(mem_data, base_data):
                                             ),
                                             Path(
                                                 d="M 418.88 162 L 411.88 165.51 L "
-                                                  "413.63 162 L 411.88 158.51 Z",
+                                                "413.63 162 L 411.88 158.51 Z",
                                                 fill="#ff8000",
                                                 stroke="#ff8000",
                                             ),

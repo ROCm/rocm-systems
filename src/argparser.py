@@ -142,8 +142,7 @@ Examples:
         default="gpu",
         required=False,
         help=(
-            "\t\t\tSpecify the type of subpath to save workload: "
-            "node_name, gpu_model."
+            "\t\t\tSpecify the type of subpath to save workload: node_name, gpu_model."
         ),
     )
     profile_group.add_argument(
@@ -292,8 +291,7 @@ Examples:
         default=1048576,
         help=(
             "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t   For stochastic sampling, the interval is in cycles.\n"
-            (
+            "\t\t\t   For stochastic sampling, the interval is in cycles.\n"(
                 "\t\t\t   For host_trap sampling, the interval is in microsecond "
                 "(DEFAULT: 1048576)."
             )
@@ -702,7 +700,7 @@ Examples:
         metavar="",
         type=int,
         default=10,
-        help='\t\tSpecify the maximum number of stats shown in '
+        help="\t\tSpecify the maximum number of stats shown in "
         '"Top Stats" tables (DEFAULT: 10)',
     )
     analyze_advanced_group.add_argument(

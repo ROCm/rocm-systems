@@ -463,9 +463,7 @@ def calc_ai(mspec, sort_type, ret_df):
 
         calls += 1
 
-        if sort_type == "kernels" and (
-            at_end or (kernelName != next_kernelName)
-        ):
+        if sort_type == "kernels" and (at_end or (kernelName != next_kernelName)):
             myList.append(
                 AI_Data(
                     kernelName,
@@ -541,9 +539,7 @@ def calc_ai(mspec, sort_type, ret_df):
         if myList[i].total_flops == 0:
             console_debug(
                 "No flops counted for {}, arithmetic intensities will not "
-                "display on plots.".format(
-                    myList[i].KernelName
-                )
+                "display on plots.".format(myList[i].KernelName)
             )
 
         kernelNames.append(myList[i].KernelName)

@@ -175,8 +175,7 @@ class DatabaseConnector:
             ):
                 console_error(
                     "-H/--host and -u/--username are required when "
-                    "interaction type is set to %s"
-                    % self.interaction_type
+                    "interaction type is set to %s" % self.interaction_type
                 )
             if (
                 self.connection_info["workload"] == "admin"

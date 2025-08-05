@@ -27,7 +27,7 @@ extend-exclude = [
 [tool.ruff.lint]
 # Enable Pyflakes (F), pycodestyle (E, W for PEP8), and isort (I) rules.
 select = ["E", "W", "F", "I"]
-ignore = ["E713"]
+ignore = ["E713", "E711"]
 fixable = ["ALL"]
 unfixable = []
 

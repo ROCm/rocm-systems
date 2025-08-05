@@ -163,6 +163,7 @@ for pref in preferences:
         pygments_style = pref
         break
 
+
 # app setup hook
 def setup(app):
     app.add_config_value(

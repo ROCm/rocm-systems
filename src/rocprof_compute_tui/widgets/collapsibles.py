@@ -88,7 +88,7 @@ def get_tui_style_from_path(dfs: Dict[str, Any], path: List[str]) -> Optional[st
 
 def create_widget_from_data(df: pd.DataFrame, tui_style: Optional[str] = None) -> Any:
     if df is not None and not df.empty:
-        match tui_style: # noqa
+        match tui_style:  # noqa
             case None:
                 return create_table(df)
 

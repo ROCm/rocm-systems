@@ -76,16 +76,14 @@ class Roofline:
             run_parameters
             if run_parameters
             else {
-            "workload_dir": None,  # in some cases (i.e. --specs),
-            # path will not be given
-            "device_id": 0,
-            "sort_type": "kernels",
-            "mem_level": "ALL",
-            "include_kernel_names": False,
-            "is_standalone": False,
-            "roofline_data_type": [
-                "FP32"
-            ],  # default to FP32
+                "workload_dir": None,  # in some cases (i.e. --specs),
+                # path will not be given
+                "device_id": 0,
+                "sort_type": "kernels",
+                "mem_level": "ALL",
+                "include_kernel_names": False,
+                "is_standalone": False,
+                "roofline_data_type": ["FP32"],  # default to FP32
             }
         )
         self.__ai_data = None
@@ -918,15 +916,9 @@ class Roofline:
                 # directly out of this module
 
         elif self.__args.no_roof:
-            console_log(
-                "roofline",
-                "Skipping roofline."
-            )
+            console_log("roofline", "Skipping roofline.")
         else:
-            mibench(
-                self.__args,
-                self.__mspec
-            )
+            mibench(self.__args, self.__mspec)
 
     # NB: Currently the post_prossesing() method is the only one being used by
     # rocprofiler-compute, we include pre_processing() and profile() methods for

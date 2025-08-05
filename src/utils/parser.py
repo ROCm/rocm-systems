@@ -257,8 +257,8 @@ class CodeTransformer(ast.NodeTransformer):
 
         if isinstance(node.body, ast.Num):
             raise Exception(
-            "Don't support body of IF with number only! Has to be expr with "
-            "df['column']."
+                "Don't support body of IF with number only! Has to be expr with "
+                "df['column']."
             )
 
         new_node = ast.Expr(
@@ -469,11 +469,11 @@ def gen_counter_list(formula):
             formula.replace("$normUnit", "SQ_WAVES")
             .replace("$denom", "SQ_WAVES")
             .replace(
-            "$numActiveCUs",
-            "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-            "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
-            "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
-            "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
+                "$numActiveCUs",
+                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
+                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
+                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
+                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
             )
             .replace("$", "")
         )
@@ -698,10 +698,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                         or (data_source_idx == "0")  # no filter
                         or (data_source_idx in filter_metrics)
                     ):
-                        if (
-                            "columnwise" in data_config
-                            and data_config["columnwise"]
-                        ):
+                        if "columnwise" in data_config and data_config["columnwise"]:
                             df = pd.DataFrame(
                                 [data_config["source"]], columns=["from_csv_columnwise"]
                             )
@@ -965,7 +962,10 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                         console_warning(
                                             "Skipping entry. Encountered a missing "
                                             "counter\n{} has been assigned to None\n{}"
-                                            .format(expr, np.nan)
+                                            .format(
+                                                expr,
+                                                np.nan,
+                                            )
                                         )
                                     except AttributeError as ae:
                                         if (
@@ -978,9 +978,7 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                                 "csv\n{}".format(np.nan)
                                             )
                                         else:
-                                            console_error(
-                                                "analysis", str(ae)
-                                            )
+                                            console_error("analysis", str(ae))
 
                                 try:
                                     out = eval(compile(row[expr], "<string>", "eval"))
