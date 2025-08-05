@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from pathlib import Path
 
 import config
@@ -33,13 +32,13 @@ from utils.utils import replace_timestamps, store_app_cmd
 
 
 class rocprof_v1_profiler(RocProfCompute_Base):
+
     def __init__(self, profiling_args, profiler_mode, soc, supported_archs):
         super().__init__(profiling_args, profiler_mode, soc, supported_archs)
         self.ready_to_profile = (
             self.get_args().roof_only
             and not Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
-            or not self.get_args().roof_only
-        )
+            or not self.get_args().roof_only)
 
     def get_profiler_options(self, fname, soc):
         fbase = Path(fname).stem
@@ -50,9 +49,7 @@ class rocprof_v1_profiler(RocProfCompute_Base):
         if soc.get_arch() == "gfx908":
             metrics_path = str(
                 Path(str(config.rocprof_compute_home)).joinpath(
-                    "rocprof_compute_soc", "profile_configs", "metrics.xml"
-                )
-            )
+                    "rocprof_compute_soc", "profile_configs", "metrics.xml"))
             args += ["-m", metrics_path]
 
         args += [
@@ -66,15 +63,13 @@ class rocprof_v1_profiler(RocProfCompute_Base):
             '"' + app_cmd + '"',
         ]
         # store original args for debug message
-        store_app_cmd(
-            [
-                "--timestamp",
-                "on",
-                "-o",
-                self.get_args().path + "/" + fbase + ".csv",
-                app_cmd,
-            ]
-        )
+        store_app_cmd([
+            "--timestamp",
+            "on",
+            "-o",
+            self.get_args().path + "/" + fbase + ".csv",
+            app_cmd,
+        ])
         return args
 
     # -----------------------
@@ -90,9 +85,8 @@ class rocprof_v1_profiler(RocProfCompute_Base):
         """Run profiling."""
         if self.ready_to_profile:
             if self.get_args().roof_only:
-                console_log(
-                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
-                )
+                console_log("roofline",
+                            "Generating pmc_perf.csv (roofline counters only).")
             # Log profiling options and setup filtering
             super().run_profiling(version, prog)
         else:

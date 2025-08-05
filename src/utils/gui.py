@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import colorlover
 import pandas as pd
 import plotly.express as px
@@ -32,9 +31,8 @@ from dash import dash_table, html
 from utils import schema
 from utils.logger import console_error
 
-pd.set_option(
-    "mode.chained_assignment", None
-)  # ignore SettingWithCopyWarning pandas warning
+pd.set_option("mode.chained_assignment",
+              None)  # ignore SettingWithCopyWarning pandas warning
 
 IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 
@@ -87,40 +85,36 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
         color = "white" if i > len(bounds) / 2.0 else "inherit"
 
         for column in df_numeric_columns:
-            styles.append(
-                {
-                    "if": {
-                        "filter_query": (
-                            "{{{column}}} >= {min_bound}"
-                            + (
-                                " && {{{column}}} < {max_bound}"
-                                if (i < len(bounds) - 1)
-                                else ""
-                            )
-                        ).format(
-                            column=column, min_bound=min_bound, max_bound=max_bound
-                        ),
-                        "column_id": column,
-                    },
-                    "backgroundColor": backgroundColor,
-                    "color": color,
-                }
-            )
+            styles.append({
+                "if": {
+                    "filter_query":
+                    ("{{{column}}} >= {min_bound}" +
+                     (" && {{{column}}} < {max_bound}" if
+                      (i < len(bounds) - 1) else "")).format(column=column,
+                                                             min_bound=min_bound,
+                                                             max_bound=max_bound),
+                    "column_id":
+                    column,
+                },
+                "backgroundColor": backgroundColor,
+                "color": color,
+            })
         legend.append(
             html.Div(
-                style={"display": "inline-block", "width": "60px"},
+                style={
+                    "display": "inline-block",
+                    "width": "60px"
+                },
                 children=[
                     html.Div(
                         style={
                             "backgroundColor": backgroundColor,
                             "borderLeft": "1px rgb(50, 50, 50) solid",
                             "height": "10px",
-                        }
-                    ),
+                        }),
                     html.Small(round(min_bound, 2), style={"paddingLeft": "2px"}),
                 ],
-            )
-        )
+            ))
 
     return (styles, html.Div(legend, style={"padding": "5px 0 5px 0"}))
 
@@ -149,8 +143,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                 labels={"Avg": "# of {}".format(df_unit.lower())},
                 height=400,
                 orientation="h",
-            )
-        )
+            ))
 
     # Multi bar chart
     elif table_config["id"] in barchart_elements["multi_bar"]:
@@ -166,15 +159,15 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     title=group,
                     x=metric.values(),
                     y=metric.keys(),
-                    labels={"x": df_unit, "y": ""},
+                    labels={
+                        "x": df_unit,
+                        "y": ""
+                    },
                     text=metric.values(),
                     orientation="h",
                     height=200,
-                )
-                .update_xaxes(showgrid=False, rangemode="nonnegative")
-                .update_yaxes(showgrid=False)
-                .update_layout(title_x=0.5)
-            )
+                ).update_xaxes(showgrid=False, rangemode="nonnegative").update_yaxes(
+                    showgrid=False).update_layout(title_x=0.5))
     # L2 Cache per channel
     # elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
     # nested_bar = {}
@@ -217,14 +210,15 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     y="Metric",
                     color="Avg",
                     range_color=[0, 100],
-                    labels={"Avg": "%"},
+                    labels={
+                        "Avg": "%"
+                    },
                     height=220,
                     orientation="h",
-                ).update_xaxes(range=[0, 110], ticks="inside", title="%")
-            )  # append first % chart
+                ).update_xaxes(range=[0, 110], ticks="inside",
+                               title="%"))  # append first % chart
             hbm_bw = float(
-                display_df[display_df["Metric"] == "HBM Bandwidth"]["Avg"].iloc[0]
-            )
+                display_df[display_df["Metric"] == "HBM Bandwidth"]["Avg"].iloc[0])
             d_figs.append(
                 px.bar(
                     display_df[display_df["Unit"] == "Gb/s"],
@@ -232,11 +226,12 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     y="Metric",
                     color="Avg",
                     range_color=[0, hbm_bw],
-                    labels={"Avg": "GB/s"},
+                    labels={
+                        "Avg": "GB/s"
+                    },
                     height=220,
                     orientation="h",
-                ).update_xaxes(range=[0, hbm_bw])
-            )  # append second GB/s chart
+                ).update_xaxes(range=[0, hbm_bw]))  # append second GB/s chart
         elif table_config["id"] == 1101:
             # Special formatting reference 'Pct of Peak' value
             display_df["Pct of Peak"] = [
@@ -250,11 +245,12 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     y="Metric",
                     color="Pct of Peak",
                     range_color=[0, 100],
-                    labels={"Avg": "%"},
+                    labels={
+                        "Avg": "%"
+                    },
                     height=400,
                     orientation="h",
-                ).update_xaxes(range=[0, 110])
-            )
+                ).update_xaxes(range=[0, 110]))
         else:
             d_figs.append(
                 px.bar(
@@ -263,15 +259,15 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     y="Metric",
                     color="Avg",
                     range_color=[0, 100],
-                    labels={"Avg": "%"},
+                    labels={
+                        "Avg": "%"
+                    },
                     height=400,
                     orientation="h",
-                ).update_xaxes(range=[0, 110])
-            )
+                ).update_xaxes(range=[0, 110]))
     else:
-        console_error(
-            "Table id %s. Cannot determine barchart type." % table_config["id"]
-        )
+        console_error("Table id %s. Cannot determine barchart type." %
+                      table_config["id"])
 
     # update layout for each of the charts
     for fig in d_figs:
@@ -284,9 +280,8 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
     return d_figs
 
 
-def build_table_chart(
-    display_df, table_config, original_df, display_columns, comparable_columns, decimal
-):
+def build_table_chart(display_df, table_config, original_df, display_columns,
+                      comparable_columns, decimal):
     """
     Read data into a DashTable
     """
@@ -294,19 +289,15 @@ def build_table_chart(
     # build comlumns/header with formatting
     formatted_columns = []
     for col in display_df.columns:
-        if (
-            str(col).lower() == "pct"
-            or str(col).lower() == "pop"
-            or str(col).lower() == "percentage"
-        ):
+        if (str(col).lower() == "pct" or str(col).lower() == "pop"
+                or str(col).lower() == "percentage"):
             formatted_columns.append(
                 dict(
                     id=col,
                     name=col,
                     type="numeric",
                     format={"specifier": ".{}f".format(decimal)},
-                )
-            )
+                ))
         elif col in comparable_columns:
             formatted_columns.append(
                 dict(
@@ -314,30 +305,21 @@ def build_table_chart(
                     name=col,
                     type="numeric",
                     format={"specifier": ".{}f".format(decimal)},
-                )
-            )
+                ))
         else:
             formatted_columns.append(dict(id=col, name=col, type="text"))
 
     # tooltip shows only on the 1st col for now if 'Metric Description' available
-    table_tooltip = (
-        [
-            {
-                column: {
-                    "value": (
-                        str(row["Description"])
-                        if column == display_columns[0] and row["Description"]
-                        else ""
-                    ),
-                    "type": "markdown",
-                }
-                for column, value in row.items()
-            }
-            for row in original_df.to_dict("records")
-        ]
-        if "Description" in original_df.columns.values.tolist()
-        else None
-    )
+    table_tooltip = ([{
+        column: {
+            "value": (str(row["Description"])
+                      if column == display_columns[0] and row["Description"] else ""),
+            "type":
+            "markdown",
+        }
+        for column, value in row.items()
+    } for row in original_df.to_dict("records")]
+                     if "Description" in original_df.columns.values.tolist() else None)
 
     # build data table with columns, tooltip, df and other properties
     d_t = dash_table.DataTable(
@@ -347,38 +329,34 @@ def build_table_chart(
         columns=formatted_columns,
         tooltip_data=table_tooltip,
         # left-aligning the text of the 1st col
-        style_cell_conditional=[
-            {"if": {"column_id": display_columns[0]}, "textAlign": "left"}
-        ],
+        style_cell_conditional=[{
+            "if": {
+                "column_id": display_columns[0]
+            },
+            "textAlign": "left"
+        }],
         # style cell
         style_cell={"maxWidth": "500px"},
         # display style
-        style_header=(
+        style_header=({
+            "backgroundColor": "rgb(30, 30, 30)",
+            "color": "white",
+            "fontWeight": "bold",
+        } if IS_DARK else {}),
+        style_data=({
+            "backgroundColor": "rgb(50, 50, 50)",
+            "color": "white",
+            "whiteSpace": "normal",
+            "height": "auto",
+        } if IS_DARK else {}),
+        style_data_conditional=([
             {
-                "backgroundColor": "rgb(30, 30, 30)",
-                "color": "white",
-                "fontWeight": "bold",
-            }
-            if IS_DARK
-            else {}
-        ),
-        style_data=(
-            {
-                "backgroundColor": "rgb(50, 50, 50)",
-                "color": "white",
-                "whiteSpace": "normal",
-                "height": "auto",
-            }
-            if IS_DARK
-            else {}
-        ),
-        style_data_conditional=(
-            [
-                {"if": {"row_index": "odd"}, "backgroundColor": "rgb(60, 60, 60)"},
-            ]
-            if IS_DARK
-            else []
-        ),
+                "if": {
+                    "row_index": "odd"
+                },
+                "backgroundColor": "rgb(60, 60, 60)"
+            },
+        ] if IS_DARK else []),
         # the df to display
         data=display_df.to_dict("records"),
     )

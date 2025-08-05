@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import csv
 import glob
 import os
@@ -54,6 +53,7 @@ from utils.utils import (
 
 
 class RocProfCompute_Base:
+
     def __init__(self, args, profiler_mode, soc, supported_archs):
         self.__args = args
         self.__profiler = profiler_mode
@@ -105,28 +105,23 @@ class RocProfCompute_Base:
             if self.get_args().hip_trace:
                 # remove hip api trace ouputs from this list
                 files = [
-                    f
-                    for f in files
+                    f for f in files
                     if not re.compile(r"^.*_hip_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
+                        os.path.basename(f))
                 ]
 
             if self.get_args().kokkos_trace:
                 # remove marker api trace ouputs from this list
                 files = [
-                    f
-                    for f in files
+                    f for f in files
                     if not re.compile(r"^.*_marker_api_trace\.csv$").match(
-                        os.path.basename(f)
-                    )
+                        os.path.basename(f))
                 ]
         elif type(self.__args.path) == list:
             files = self.__args.path
         else:
-            console_error(
-                "Invalid workload directory. Cannot resolve %s" % self.__args.path
-            )
+            console_error("Invalid workload directory. Cannot resolve %s" %
+                          self.__args.path)
 
         df = None
         for i, file in enumerate(files):
@@ -136,18 +131,11 @@ class RocProfCompute_Base:
                 _df["key"] = _df.Kernel_Name + " - " + key.astype(str)
             elif self.__args.join_type == "grid":
                 key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
-                _df["key"] = (
-                    _df["Kernel_Name"]
-                    + " - "
-                    + _df["Grid_Size"].astype(str)
-                    + " - "
-                    + key.astype(str)
-                )
+                _df["key"] = (_df["Kernel_Name"] + " - " +
+                              _df["Grid_Size"].astype(str) + " - " + key.astype(str))
             else:
-                console_error(
-                    "%s is an unrecognized option for --join-type"
-                    % self.__args.join_type
-                )
+                console_error("%s is an unrecognized option for --join-type" %
+                              self.__args.join_type)
 
             if df is None:
                 df = _df
@@ -162,15 +150,12 @@ class RocProfCompute_Base:
         duplicate_cols = {
             "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
             "Grid_Size": [col for col in df.columns if col.startswith("Grid_Size")],
-            "Workgroup_Size": [
-                col for col in df.columns if col.startswith("Workgroup_Size")
-            ],
-            "LDS_Per_Workgroup": [
-                col for col in df.columns if col.startswith("LDS_Per_Workgroup")
-            ],
-            "Scratch_Per_Workitem": [
-                col for col in df.columns if col.startswith("Scratch_Per_Workitem")
-            ],
+            "Workgroup_Size":
+            [col for col in df.columns if col.startswith("Workgroup_Size")],
+            "LDS_Per_Workgroup":
+            [col for col in df.columns if col.startswith("LDS_Per_Workgroup")],
+            "Scratch_Per_Workitem":
+            [col for col in df.columns if col.startswith("Scratch_Per_Workitem")],
             "SGPR": [col for col in df.columns if col.startswith("SGPR")],
         }
         # Check for vgpr counter in ROCm < 5.3
@@ -190,8 +175,7 @@ class RocProfCompute_Base:
             _df = df[cols]
             if not test_df_column_equality(_df):
                 msg = "Detected differing {} values while joining pmc_perf.csv".format(
-                    key
-                )
+                    key)
                 console_warning(msg)
             else:
                 msg = "Successfully joined {} in pmc_perf.csv".format(key)
@@ -199,61 +183,48 @@ class RocProfCompute_Base:
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
-        df = df[
-            [
-                k
-                for k in df.keys()
-                if not any(
-                    k.startswith(check)
-                    for check in [
-                        # rocprofv2 headers
-                        "GPU_ID_",
-                        "Grid_Size_",
-                        "Workgroup_Size_",
-                        "LDS_Per_Workgroup_",
-                        "Scratch_Per_Workitem_",
-                        "vgpr_",
-                        "Arch_VGPR_",
-                        "Accum_VGPR_",
-                        "SGPR_",
-                        "Dispatch_ID_",
-                        "Queue_ID",
-                        "Queue_Index",
-                        "PID",
-                        "TID",
-                        "SIG",
-                        "OBJ",
-                        "Correlation_ID_",
-                        "Wave_Size_",
-                        # rocscope specific merged counters, keep original
-                        "dispatch_",
-                        # extras
-                        "sig",
-                        "queue-id",
-                        "queue-index",
-                        "pid",
-                        "tid",
-                        "fbar",
-                    ]
-                )
-            ]
-        ]
+        df = df[[
+            k for k in df.keys() if not any(
+                k.startswith(check) for check in [
+                    # rocprofv2 headers
+                    "GPU_ID_",
+                    "Grid_Size_",
+                    "Workgroup_Size_",
+                    "LDS_Per_Workgroup_",
+                    "Scratch_Per_Workitem_",
+                    "vgpr_",
+                    "Arch_VGPR_",
+                    "Accum_VGPR_",
+                    "SGPR_",
+                    "Dispatch_ID_",
+                    "Queue_ID",
+                    "Queue_Index",
+                    "PID",
+                    "TID",
+                    "SIG",
+                    "OBJ",
+                    "Correlation_ID_",
+                    "Wave_Size_",
+                    # rocscope specific merged counters, keep original
+                    "dispatch_",
+                    # extras
+                    "sig",
+                    "queue-id",
+                    "queue-index",
+                    "pid",
+                    "tid",
+                    "fbar",
+                ])
+        ]]
         #   B) any timestamps that are _not_ the duration, which is the one we care about
-        df = df[
-            [
-                k
-                for k in df.keys()
-                if not any(
-                    check in k
-                    for check in [
-                        "DispatchNs",
-                        "CompleteNs",
-                        # rocscope specific timestamp
-                        "HostDuration",
-                    ]
-                )
-            ]
-        ]
+        df = df[[
+            k for k in df.keys() if not any(check in k for check in [
+                "DispatchNs",
+                "CompleteNs",
+                # rocscope specific timestamp
+                "HostDuration",
+            ])
+        ]]
         #   C) sanity check the name and key
         namekeys = [k for k in df.keys() if "Kernel_Name" in k]
         assert len(namekeys)
@@ -299,19 +270,15 @@ class RocProfCompute_Base:
 
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
-            console_error(
-                "%s is not enabled in %s. Available profilers include: %s"
-                % (
-                    self._soc.get_arch(),
-                    self.__profiler,
-                    self._soc.get_compatible_profilers(),
-                )
-            )
+            console_error("%s is not enabled in %s. Available profilers include: %s" % (
+                self._soc.get_arch(),
+                self.__profiler,
+                self._soc.get_compatible_profilers(),
+            ))
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             console_error(
-                "Access denied. Cannot access parent directories in path (i.e. ../)"
-            )
+                "Access denied. Cannot access parent directories in path (i.e. ../)")
 
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
@@ -319,9 +286,8 @@ class RocProfCompute_Base:
             # Ensure that command points to an executable
             if not shutil.which(self.__args.remaining[0]):
                 console_error(
-                    "Your command %s doesn't point to a executable. Please verify."
-                    % self.__args.remaining[0]
-                )
+                    "Your command %s doesn't point to a executable. Please verify." %
+                    self.__args.remaining[0])
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
             console_error(
@@ -340,9 +306,8 @@ class RocProfCompute_Base:
     @abstractmethod
     def run_profiling(self, version: str, prog: str):
         """Run profiling."""
-        console_debug(
-            "profiling", "performing profiling using %s profiler" % self.__profiler
-        )
+        console_debug("profiling",
+                      "performing profiling using %s profiler" % self.__profiler)
 
         # log basic info
         console_log(str(prog).title() + " version: " + str(version))
@@ -358,11 +323,8 @@ class RocProfCompute_Base:
             console_log("Report Sections: " + str(self.get_args().filter_blocks))
 
         msg = "Collecting Performance Counters"
-        (
-            print_status(msg)
-            if not self.__args.roof_only
-            else print_status(msg + " (Roofline Only)")
-        )
+        (print_status(msg)
+         if not self.__args.roof_only else print_status(msg + " (Roofline Only)"))
 
         # Run profiling on each input file
         input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
@@ -388,18 +350,14 @@ class RocProfCompute_Base:
 
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        "s%^(kernel:).*%"
-                        + "kernel: "
-                        + ",".join(self.__args.kernel)
-                        + "%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(kernel:).*%" + "kernel: " + ",".join(self.__args.kernel) +
+                    "%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -408,18 +366,14 @@ class RocProfCompute_Base:
 
             # Dispatch filtering (inplace replacement)
             if not self.__args.dispatch == None:
-                success, output = capture_subprocess_output(
-                    [
-                        "sed",
-                        "-i",
-                        "-r",
-                        "s%^(range:).*%"
-                        + "range: "
-                        + " ".join(self.__args.dispatch)
-                        + "%g",
-                        fname,
-                    ]
-                )
+                success, output = capture_subprocess_output([
+                    "sed",
+                    "-i",
+                    "-r",
+                    "s%^(range:).*%" + "range: " + " ".join(self.__args.dispatch) +
+                    "%g",
+                    fname,
+                ])
                 # log output from profile filtering
                 if not success:
                     console_error(output)
@@ -428,12 +382,9 @@ class RocProfCompute_Base:
             console_log("profiling", "Current input file: %s" % fname)
 
             options = self.get_profiler_options(fname, self._soc)
-            if (
-                self.__profiler == "rocprofv1"
-                or self.__profiler == "rocprofv2"
-                or self.__profiler == "rocprofv3"
-                or self.__profiler == "rocprofiler-sdk"
-            ):
+            if (self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2"
+                    or self.__profiler == "rocprofv3"
+                    or self.__profiler == "rocprofiler-sdk"):
                 start_run_prof = time.time()
                 run_prof(
                     fname=fname,
@@ -446,24 +397,21 @@ class RocProfCompute_Base:
                 )
                 end_run_prof = time.time()
                 actual_profiling_duration = end_run_prof - start_run_prof
-                console_debug(
-                    "The time of run_prof of {} is {} m {} sec".format(
-                        fname,
-                        int((end_run_prof - start_run_prof) / 60),
-                        str((end_run_prof - start_run_prof) % 60),
-                    )
-                )
+                console_debug("The time of run_prof of {} is {} m {} sec".format(
+                    fname,
+                    int((end_run_prof - start_run_prof) / 60),
+                    str((end_run_prof - start_run_prof) % 60),
+                ))
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
         # PC sampling data is only collected when block "21" is specified
         if "21" in self.get_args().filter_blocks and self.__profiler in (
-            "rocprofv3",
-            "rocprofiler-sdk",
+                "rocprofv3",
+                "rocprofiler-sdk",
         ):
             console_log(
-                f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]"
-            )
+                f"[Run {total_runs + 1}/{total_runs + 1}][PC sampling profile run]")
             start_run_prof = time.time()
             pc_sampling_prof(
                 method=self.get_args().pc_sampling_method,
@@ -472,16 +420,15 @@ class RocProfCompute_Base:
                 appcmd=shlex.split(
                     self.get_args().remaining
                 ),  # FIXME: the right solution is applying it when argparsing once!
-                rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
+                rocprofiler_sdk_library_path=self.get_args().
+                rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()
             pc_sampling_duration = end_run_prof - start_run_prof
-            console_debug(
-                "The time of pc sampling profiling is {} m {} sec".format(
-                    int((pc_sampling_duration) / 60),
-                    str((pc_sampling_duration) % 60),
-                )
-            )
+            console_debug("The time of pc sampling profiling is {} m {} sec".format(
+                int((pc_sampling_duration) / 60),
+                str((pc_sampling_duration) % 60),
+            ))
 
     @abstractmethod
     def post_processing(self):

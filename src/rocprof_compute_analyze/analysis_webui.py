@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import copy
 import random
 from pathlib import Path
@@ -41,11 +40,12 @@ from utils.logger import console_debug, console_error, console_warning, demarcat
 
 
 class webui_analysis(OmniAnalyze_Base):
+
     def __init__(self, args, supported_archs):
         super().__init__(args, supported_archs)
-        self.app = dash.Dash(
-            __name__, title=PROJECT_NAME, external_stylesheets=[dbc.themes.CYBORG]
-        )
+        self.app = dash.Dash(__name__,
+                             title=PROJECT_NAME,
+                             external_stylesheets=[dbc.themes.CYBORG])
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch = None
 
@@ -82,19 +82,20 @@ class webui_analysis(OmniAnalyze_Base):
         for kernel_id in base_data.filter_kernel_ids:
             filt_kernel_names.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
 
-        self.app.layout.children = html.Div(
-            children=[
-                dbc.Spinner(
-                    children=[
-                        get_header(base_data.raw_pmc, input_filters, filt_kernel_names),
-                        html.Div(id="container", children=[]),
-                    ],
-                    fullscreen=True,
-                    color="primary",
-                    spinner_style={"width": "6rem", "height": "6rem"},
-                )
-            ]
-        )
+        self.app.layout.children = html.Div(children=[
+            dbc.Spinner(
+                children=[
+                    get_header(base_data.raw_pmc, input_filters, filt_kernel_names),
+                    html.Div(id="container", children=[]),
+                ],
+                fullscreen=True,
+                color="primary",
+                spinner_style={
+                    "width": "6rem",
+                    "height": "6rem"
+                },
+            )
+        ])
 
         @self.app.callback(
             Output("container", "children"),
@@ -105,9 +106,8 @@ class webui_analysis(OmniAnalyze_Base):
             [Input("top-n-filt", "value")],
             [State("container", "children")],
         )
-        def generate_from_filter(
-            disp_filt, kernel_filter, gcd_filter, norm_filt, top_n_filt, div_children
-        ):
+        def generate_from_filter(disp_filt, kernel_filter, gcd_filter, norm_filt,
+                                 top_n_filt, div_children):
             console_debug("analysis", "gui normalization is %s" % norm_filt)
 
             # Re-initalizes everything
@@ -126,8 +126,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             if self.get_args().spatial_multiplexing:
                 base_data[base_run].raw_pmc = self.spatial_multiplex_merge_counters(
-                    base_data[base_run].raw_pmc
-                )
+                    base_data[base_run].raw_pmc)
 
             console_debug("analysis", "gui dispatch filter is %s" % disp_filt)
             console_debug("analysis", "gui kernel filter is %s" % kernel_filter)
@@ -180,8 +179,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             # Append memory chart and roofline
             div_children.append(
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
-            )
+                get_memchart(panel_configs[300]["data source"], base_data[base_run]))
             has_roofline = Path(self.dest_dir).joinpath("roofline.csv").is_file()
             if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
                 # update roofline for visualization in GUI
@@ -194,31 +192,21 @@ class webui_analysis(OmniAnalyze_Base):
                         "include_kernel_names": False,
                         "is_standalone": False,
                         "roofline_data_type": self.__roofline_data_type,
-                    }
-                )
+                    })
                 roof_obj = self.get_socs()[self.arch].roofline_obj
                 div_children.append(
-                    roof_obj.empirical_roofline(
-                        ret_df=parser.apply_filters(
-                            workload=base_data[base_run],
-                            dir=self.dest_dir,
-                            is_gui=True,
-                            debug=self.get_args().debug,
-                        )
-                    )
-                )
+                    roof_obj.empirical_roofline(ret_df=parser.apply_filters(
+                        workload=base_data[base_run],
+                        dir=self.dest_dir,
+                        is_gui=True,
+                        debug=self.get_args().debug,
+                    )))
 
             # Iterate over each section as defined in panel configs
             for panel_id, panel in panel_configs.items():
                 title = str(panel_id // 100) + ". " + panel["title"]
-                section_title = (
-                    panel["title"]
-                    .replace("(", "")
-                    .replace(")", "")
-                    .replace("/", "")
-                    .replace(" ", "_")
-                    .lower()
-                )
+                section_title = (panel["title"].replace("(", "").replace(
+                    ")", "").replace("/", "").replace(" ", "_").lower())
                 html_section = []
 
                 if panel["title"] not in self.__hidden_sections:
@@ -227,10 +215,8 @@ class webui_analysis(OmniAnalyze_Base):
                         for t_type, table_config in data_source.items():
                             original_df = base_data[base_run].dfs[table_config["id"]]
                             # The sys info table need to add index back
-                            if (
-                                t_type == "raw_csv_table"
-                                and "Info" in original_df.keys()
-                            ):
+                            if (t_type == "raw_csv_table"
+                                    and "Info" in original_df.keys()):
                                 original_df.reset_index(inplace=True)
 
                             content = determine_chart_type(
@@ -251,12 +237,10 @@ class webui_analysis(OmniAnalyze_Base):
                                         className="float-child",
                                         children=content,
                                         style={"width": "100%"},
-                                    )
-                                )
+                                    ))
                             else:
                                 html_section.append(
-                                    html.Div(className="float-child", children=content)
-                                )
+                                    html.Div(className="float-child", children=content))
 
                     # Append the new section with all of it's contents
                     div_children.append(
@@ -267,12 +251,10 @@ class webui_analysis(OmniAnalyze_Base):
                                     children=title,
                                     style={"color": "white"},
                                 ),
-                                html.Div(
-                                    className="float-container", children=html_section
-                                ),
+                                html.Div(className="float-container",
+                                         children=html_section),
                             ],
-                        )
-                    )
+                        ))
 
             # Display pop-up message if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
@@ -281,11 +263,11 @@ class webui_analysis(OmniAnalyze_Base):
                         id="popup",
                         children=[
                             html.Div(
-                                children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
+                                children=
+                                "To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
                             ),
                         ],
-                    )
-                )
+                    ))
 
             return div_children
 
@@ -312,9 +294,7 @@ class webui_analysis(OmniAnalyze_Base):
             if self.get_args().spatial_multiplexing:
                 self._runs[self.dest_dir].raw_pmc = (
                     self.spatial_multiplex_merge_counters(
-                        self._runs[self.dest_dir].raw_pmc
-                    )
-                )
+                        self._runs[self.dest_dir].raw_pmc))
 
             file_io.create_df_kernel_top_stats(
                 df_in=self._runs[self.dest_dir].raw_pmc,
@@ -327,16 +307,14 @@ class webui_analysis(OmniAnalyze_Base):
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # create the loaded kernel stats
-            parser.load_kernel_top(
-                self._runs[self.dest_dir], self.dest_dir, self.get_args()
-            )
+            parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir,
+                                   self.get_args())
             # set architecture
             self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
 
         else:
             console_error(
-                "Multiple runs not yet supported in GUI. Retry without --gui flag."
-            )
+                "Multiple runs not yet supported in GUI. Retry without --gui flag.")
 
     @demarcate
     def run_analysis(self):
@@ -384,25 +362,21 @@ def determine_chart_type(
     # a) Barchart
     if original_df.empty:
         console_warning(
-            f"The dataframe with id={table_config['id']} is empty! Not displaying it."
-        )
+            f"The dataframe with id={table_config['id']} is empty! Not displaying it.")
     elif table_config["id"] in [x for i in barchart_elements.values() for x in i]:
         d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
         # Smaller formatting if barchart yeilds several graphs
-        if (
-            len(d_figs)
-            > 2
-            # and not table_config["id"]
-            # in barchart_elements["l2_cache_per_chan"]
-        ):
+        if (len(d_figs) > 2
+                # and not table_config["id"]
+                # in barchart_elements["l2_cache_per_chan"]
+            ):
             temp_obj = []
             for fig in d_figs:
                 temp_obj.append(
                     html.Div(
                         className="float-child",
                         children=[dcc.Graph(figure=fig, style={"margin": "2%"})],
-                    )
-                )
+                    ))
             content.append(html.Div(className="float-container", children=temp_obj))
         # Normal formatting if < 2 graphs
         else:
@@ -423,14 +397,8 @@ def determine_chart_type(
 
     # subtitle for each table in a panel if existing
     if "title" in table_config and table_config["title"]:
-        subtitle = (
-            str(table_config["id"] // 100)
-            + "."
-            + str(table_config["id"] % 100)
-            + " "
-            + table_config["title"]
-            + "\n"
-        )
+        subtitle = (str(table_config["id"] // 100) + "." +
+                    str(table_config["id"] % 100) + " " + table_config["title"] + "\n")
 
         content.insert(
             0,

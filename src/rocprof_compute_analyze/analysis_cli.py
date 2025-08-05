@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -53,8 +52,7 @@ class cli_analysis(OmniAnalyze_Base):
 
             if self.get_args().spatial_multiplexing:
                 self._runs[d[0]].raw_pmc = self.spatial_multiplex_merge_counters(
-                    self._runs[d[0]].raw_pmc
-                )
+                    self._runs[d[0]].raw_pmc)
 
             file_io.create_df_kernel_top_stats(
                 df_in=self._runs[d[0]].raw_pmc,
@@ -68,9 +66,8 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
             # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(
-                self._runs[d[0]].raw_pmc, self.get_args().kernel_verbose
-            )
+            kernel_name_shortener(self._runs[d[0]].raw_pmc,
+                                  self.get_args().kernel_verbose)
 
             # create the loaded table
             parser.load_table_data(
@@ -90,27 +87,24 @@ class cli_analysis(OmniAnalyze_Base):
             tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ],
+                self._arch_configs[self._runs[self.get_args().path[0]
+                                              [0]].sys_info.iloc[0]["gpu_arch"]],
                 self._output,
             )
         else:
             roof_plot = None
             # 1. check if not baseline && compatible soc:
             if (len(self.get_args().path)) == 1 and self._runs[
-                self.get_args().path[0][0]
-            ].sys_info.iloc[0]["gpu_arch"] in [
-                "gfx90a",
-                "gfx940",
-                "gfx941",
-                "gfx942",
-                "gfx950",
-            ]:
+                    self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"] in [
+                        "gfx90a",
+                        "gfx940",
+                        "gfx941",
+                        "gfx942",
+                        "gfx950",
+                    ]:
                 # add roofline plot to cli output
-                roof_obj = self.get_socs()[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ].roofline_obj
+                roof_obj = self.get_socs()[self._runs[self.get_args().path[0][0]].
+                                           sys_info.iloc[0]["gpu_arch"]].roofline_obj
 
                 if roof_obj:
                     # NOTE: using default data type
@@ -119,9 +113,8 @@ class cli_analysis(OmniAnalyze_Base):
             tty.show_all(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ],
+                self._arch_configs[self._runs[self.get_args().path[0]
+                                              [0]].sys_info.iloc[0]["gpu_arch"]],
                 self._output,
                 self._profiling_config,
                 roof_plot=roof_plot,

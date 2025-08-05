@@ -22,7 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
 """Get host/gpu specs."""
 
 import importlib
@@ -82,16 +81,15 @@ def detect_gpu_chip_id(_rocminfo):
 
     if not gpu_chip_id:
         console_warning("No Chip ID detected: " + str(gpu_chip_id))
-    elif (
-        gpu_chip_id not in mi_gpu_specs.get_chip_id_dict().keys()
-        and int(gpu_chip_id) not in mi_gpu_specs.get_chip_id_dict().keys()
-    ):
+    elif (gpu_chip_id not in mi_gpu_specs.get_chip_id_dict().keys()
+          and int(gpu_chip_id) not in mi_gpu_specs.get_chip_id_dict().keys()):
         console_warning("Unknown Chip ID detected: " + str(gpu_chip_id))
     return gpu_chip_id
 
 
 # Custom decorator to mimic the behavior of kw_only found in Python 3.10
 def kw_only(cls):
+
     def __init__(self, *args, **kwargs):
         for name, value in kwargs.items():
             setattr(self, name, value)
@@ -109,7 +107,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
         version = get_version(config.rocprof_compute_home)["version"]
-        if sysinfo_ver != version[: version.find(".")]:
+        if sysinfo_ver != version[:version.find(".")]:
             console_warning(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
@@ -126,9 +124,8 @@ def generate_machine_specs(args, sysinfo: dict = None):
     vData = get_version(config.rocprof_compute_home)
     version = vData["version"]
     # NB: Just taking major as specs version. May want to make this more specific in the future
-    specs_version = version[
-        : version.find(".")
-    ]  # version will always follow 'major.minor.patch' format
+    specs_version = version[:version.find(
+        ".")]  # version will always follow 'major.minor.patch' format
 
     ##########################################
     ## A. Machine Specs
@@ -138,10 +135,8 @@ def generate_machine_specs(args, sysinfo: dict = None):
     version = path("/proc/version").read_text()
     os_release = path("/etc/os-release").read_text()
     cpu_model = search(r"^model name\s*: (.*?)$", cpuinfo)
-    sbios = (
-        path("/sys/class/dmi/id/bios_vendor").read_text().strip()
-        + path("/sys/class/dmi/id/bios_version").read_text().strip()
-    )
+    sbios = (path("/sys/class/dmi/id/bios_vendor").read_text().strip() +
+             path("/sys/class/dmi/id/bios_version").read_text().strip())
     linux_kernel_version = search(r"version (\S*)", version)
     amd_gpu_kernel_version = ""  # TODO: Extract amdgpu kernel version
     cpu_memory = search(r"MemTotal:\s*(\S*)", meminfo)
@@ -179,11 +174,8 @@ def generate_machine_specs(args, sysinfo: dict = None):
     if memory_partition is None:
         memory_partition = "NA"
 
-    console_debug(
-        "vbios is {}, compute partition is {}, memory partition is {}".format(
-            vbios, compute_partition, memory_partition
-        )
-    )
+    console_debug("vbios is {}, compute partition is {}, memory partition is {}".format(
+        vbios, compute_partition, memory_partition))
 
     ##########################################
     ## B. SoC Specs
@@ -192,7 +184,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocminfo_full = run(["rocminfo"])
     _rocminfo = rocminfo_full.split("\n")
     gpu_arch, idx = detect_arch(_rocminfo)
-    _rocminfo = _rocminfo[idx + 1 :]  # update rocminfo for target section
+    _rocminfo = _rocminfo[idx + 1:]  # update rocminfo for target section
     gpu_chip_id = detect_gpu_chip_id(_rocminfo)
     specs = MachineSpecs(
         version=specs_version,
@@ -216,24 +208,20 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Load above SoC specs via module import
     try:
-        soc_module = importlib.import_module(
-            "rocprof_compute_soc.soc_" + specs.gpu_arch
-        )
+        soc_module = importlib.import_module("rocprof_compute_soc.soc_" +
+                                             specs.gpu_arch)
     except ModuleNotFoundError as e:
         console_error(
-            "Arch %s marked as supported, but couldn't find class implementation %s."
-            % (specs.gpu_arch, e)
-        )
+            "Arch %s marked as supported, but couldn't find class implementation %s." %
+            (specs.gpu_arch, e))
     soc_class = getattr(soc_module, specs.gpu_arch + "_soc")
     soc_obj = soc_class(args, specs)
     # Update arch specific specs
     specs.gpu_model = mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
-    specs.num_xcd = mi_gpu_specs.get_num_xcds(
-        specs.gpu_arch, specs.gpu_model, specs.compute_partition
-    )
-    specs.total_l2_chan: str = total_l2_banks(
-        specs.gpu_arch, specs.gpu_model, specs._l2_banks, specs.compute_partition
-    )
+    specs.num_xcd = mi_gpu_specs.get_num_xcds(specs.gpu_arch, specs.gpu_model,
+                                              specs.compute_partition)
+    specs.total_l2_chan: str = total_l2_banks(specs.gpu_arch, specs.gpu_model,
+                                              specs._l2_banks, specs.compute_partition)
     specs.num_hbm_channels: str = str(specs.get_hbm_channels())
     return specs
 
@@ -302,11 +290,17 @@ class MachineSpecs:
     ##########################################
     hostname: str = field(
         default=None,
-        metadata={"doc": "The hostname of the machine.", "name": "Hostname"},
+        metadata={
+            "doc": "The hostname of the machine.",
+            "name": "Hostname"
+        },
     )
     cpu_model: str = field(
         default=None,
-        metadata={"doc": "The model name of the CPU used.", "name": "CPU Model"},
+        metadata={
+            "doc": "The model name of the CPU used.",
+            "name": "CPU Model"
+        },
     )
     sbios: str = field(
         default=None,
@@ -332,7 +326,8 @@ class MachineSpecs:
     amd_gpu_kernel_version: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The version of the AMDGPU driver installed on the machine. Unimplemented.",
+            "doc":
+            "[RESERVED] The version of the AMDGPU driver installed on the machine. Unimplemented.",
             "name": "AMD GPU Kernel Version",
         },
     )
@@ -347,7 +342,8 @@ class MachineSpecs:
     gpu_memory: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The total amount of memory available to accelerators/GPUs in the system. Unimplemented.",
+            "doc":
+            "[RESERVED] The total amount of memory available to accelerators/GPUs in the system. Unimplemented.",
             "unit": "KB",
             "name": "GPU Memory",
         },
@@ -369,14 +365,16 @@ class MachineSpecs:
     compute_partition: str = field(
         default=None,
         metadata={
-            "doc": "The compute partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
+            "doc":
+            "The compute partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
             "name": "Compute Partition",
         },
     )
     memory_partition: str = field(
         default=None,
         metadata={
-            "doc": "The memory partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
+            "doc":
+            "The memory partitioning mode active on the accelerators/GPUs in the system (MI300 only).",
             "name": "Memory Partition",
         },
     )
@@ -417,7 +415,8 @@ class MachineSpecs:
     gpu_l1: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
+            "doc":
+            "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
             "name": "GPU L1",
             "unit": "KiB",
         },
@@ -425,7 +424,8 @@ class MachineSpecs:
     gpu_l2: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
+            "doc":
+            "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
             "name": "GPU L2",
             "unit": "KiB",
         },
@@ -433,52 +433,62 @@ class MachineSpecs:
     cu_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The total number of compute units per accelerator/GPU in the system. On systems with configurable\n"
+            "doc":
+            "The total number of compute units per accelerator/GPU in the system. On systems with configurable\n"
             "partitioning, (e.g., MI300) this is the total number of compute units in a partition.",
-            "name": "CU per GPU",
+            "name":
+            "CU per GPU",
         },
     )
     simd_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The number of SIMD processors in a compute unit for the accelerators/GPUs in the system.",
+            "doc":
+            "The number of SIMD processors in a compute unit for the accelerators/GPUs in the system.",
             "name": "SIMD per CU",
         },
     )
     se_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of shader engines on the accelerators/GPUs in the system. On systems with configurable\n"
+            "doc":
+            "The number of shader engines on the accelerators/GPUs in the system. On systems with configurable\n"
             "partitioning, (e.g., MI300) this is the total number of shader engines in a partition.",
-            "name": "SE per GPU",
+            "name":
+            "SE per GPU",
         },
     )
     wave_size: str = field(
         default=None,
         metadata={
-            "doc": "The number work-items in a wavefront on the accelerators/GPUs in the system.",
+            "doc":
+            "The number work-items in a wavefront on the accelerators/GPUs in the system.",
             "name": "Wave Size",
         },
     )
     workgroup_max_size: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of work-items in a workgroup on the accelerators/GPUs in the system.",
+            "doc":
+            "The maximum number of work-items in a workgroup on the accelerators/GPUs in the system.",
             "name": "Workgroup Max Size",
         },
     )
     max_waves_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of wavefronts that can be resident on a compute unit on the\n"
+            "doc":
+            "The maximum number of wavefronts that can be resident on a compute unit on the\n"
             "accelerators/GPUs in the system",
-            "name": "Max Waves per CU",
+            "name":
+            "Max Waves per CU",
         },
     )
     max_sclk: str = field(
         default=None,
         metadata={
-            "doc": "The maximum engine (compute-unit) clock rate of the accelerators/GPUs in the system.",
+            "doc":
+            "The maximum engine (compute-unit) clock rate of the accelerators/GPUs in the system.",
             "name": "Max SCLK",
             "unit": "MHz",
         },
@@ -486,7 +496,8 @@ class MachineSpecs:
     max_mclk: str = field(
         default=None,
         metadata={
-            "doc": "The maximum memory clock rate of the accelerators/GPUs in the system.",
+            "doc":
+            "The maximum memory clock rate of the accelerators/GPUs in the system.",
             "name": "Max MCLK",
             "unit": "MHz",
         },
@@ -494,7 +505,8 @@ class MachineSpecs:
     cur_sclk: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The current engine (compute unit) clock rate of the accelerators/GPUs in the system. Unused.",
+            "doc":
+            "[RESERVED] The current engine (compute unit) clock rate of the accelerators/GPUs in the system. Unused.",
             "name": "Cur SCLK",
             "unit": "MHz",
         },
@@ -502,7 +514,8 @@ class MachineSpecs:
     cur_mclk: str = field(
         default=None,
         metadata={
-            "doc": "[RESERVED] The current memory clock rate of the accelerators/GPUs in the system. Unused.",
+            "doc":
+            "[RESERVED] The current memory clock rate of the accelerators/GPUs in the system. Unused.",
             "name": "Cur MCLK",
             "unit": "MHz",
         },
@@ -511,45 +524,57 @@ class MachineSpecs:
     total_l2_chan: str = field(
         default=None,
         metadata={
-            "doc": "The maximum number of L2 cache channels on the accelerators/GPUs in the system. On systems with\n"
+            "doc":
+            "The maximum number of L2 cache channels on the accelerators/GPUs in the system. On systems with\n"
             "configurable partitioning, (e.g., MI300) this is the total number of L2 cache channels in a partition.",
-            "name": "Total L2 Channels",
+            "name":
+            "Total L2 Channels",
         },
     )
     lds_banks_per_cu: str = field(
         default=None,
         metadata={
-            "doc": "The number of banks in the LDS for a compute unit on the accelerators/GPUs in the system.",
+            "doc":
+            "The number of banks in the LDS for a compute unit on the accelerators/GPUs in the system.",
             "name": "LDS Banks per CU",
         },
     )
     sqc_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of L1I/sL1D caches on the accelerators/GPUs in the system. On systems with\n"
+            "doc":
+            "The number of L1I/sL1D caches on the accelerators/GPUs in the system. On systems with\n"
             "configurable partitioning, (e.g., MI300) this is the total number of L1I/sL1D caches in a partition.",
-            "name": "SQC per GPU",
+            "name":
+            "SQC per GPU",
         },
     )
     pipes_per_gpu: str = field(
         default=None,
         metadata={
-            "doc": "The number of scheduler-pipes on the accelerators/GPUs in the system.",
+            "doc":
+            "The number of scheduler-pipes on the accelerators/GPUs in the system.",
             "name": "Pipes per GPU",
         },
     )
     num_xcd: str = field(
         default=None,
         metadata={
-            "doc": "The total number of accelerator complex dies in a compute partition on the accelerators/GPUs in the\n"
+            "doc":
+            "The total number of accelerator complex dies in a compute partition on the accelerators/GPUs in the\n"
             "system.  For accelerators without partitioning (i.e., pre-MI300), this is considered to be one.",
-            "name": "Num XCDs",
-            "unit": "XCDs",
+            "name":
+            "Num XCDs",
+            "unit":
+            "XCDs",
         },
     )
     num_hbm_channels: str = field(
         default=None,
-        metadata={"doc": "Number of HBM channels", "name": "HBM channels"},
+        metadata={
+            "doc": "Number of HBM channels",
+            "name": "HBM channels"
+        },
     )
 
     def get_hbm_channels(self):
@@ -573,17 +598,13 @@ class MachineSpecs:
                 value = getattr(self, name)
                 if value is None:
                     # check if we've marked it optional
-                    if (
-                        field.metadata
-                        and "optional" in field.metadata
-                        and field.metadata["optional"]
-                    ):
+                    if (field.metadata and "optional" in field.metadata
+                            and field.metadata["optional"]):
                         pass
                     else:
                         console_warning(
                             f"Incomplete class definition for {self.gpu_arch}. "
-                            f"Expecting populated {name} but detected None."
-                        )
+                            f"Expecting populated {name} but detected None.")
                         all_populated = False
                 data[name] = value
 
@@ -606,8 +627,7 @@ class MachineSpecs:
                             topstr += f"Output version: {value}\n"
                         else:
                             console_error(
-                                f"Unknown out of table printing field: {name}"
-                            )
+                                f"Unknown out of table printing field: {name}")
                         continue
                     if "name" in field.metadata:
                         name = field.metadata["name"]
@@ -643,16 +663,15 @@ def get_rocm_ver():
         if ROCM_VER_USER is not None:
             console_log(
                 "profiling",
-                "Overriding missing ROCm version detection with ROCM_VER = %s"
-                % ROCM_VER_USER,
+                "Overriding missing ROCm version detection with ROCM_VER = %s" %
+                ROCM_VER_USER,
             )
             rocm_ver = ROCM_VER_USER
         else:
             _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
             console_warning("Unable to detect a complete local ROCm installation.")
-            console_warning(
-                "The expected %s/.info/ versioning directory is missing." % _rocm_path
-            )
+            console_warning("The expected %s/.info/ versioning directory is missing." %
+                            _rocm_path)
             console_error("Ensure you have valid ROCm installation.")
     return rocm_ver
 

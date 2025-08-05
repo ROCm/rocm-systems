@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 #
 # Define all common data storage classes,
 # predifned dict and global functions.

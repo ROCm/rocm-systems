@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import re
 import subprocess
 from pathlib import Path
@@ -37,6 +36,7 @@ cache = dict()
 
 # Note: shortener is now dependent on a rocprof install with llvm
 def kernel_name_shortener(df, level):
+
     def shorten_file(df, level):
         global cache
 
@@ -55,9 +55,9 @@ def kernel_name_shortener(df, level):
 
                 cmd = [cpp_filt, original_name]
 
-                proc = subprocess.Popen(
-                    cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE
-                )
+                proc = subprocess.Popen(cmd,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE)
 
                 demangled_name, e = proc.communicate()
                 demangled_name = str(demangled_name, "UTF-8").strip()
@@ -67,8 +67,7 @@ def kernel_name_shortener(df, level):
                 matches = ""
 
                 names_and_args = re.compile(
-                    r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?"
-                )
+                    r"(?P<name>[( )A-Za-z0-9_]+)([ ,*<>()]+)(::)?")
 
                 # works for name Kokkos::namespace::init_lock_array_kernel_threadid(int) [clone .kd]
                 if names_and_args.search(demangled_name):
@@ -94,9 +93,8 @@ def kernel_name_shortener(df, level):
                     # closing '>' is to be taken account by the while loop
                     if name[1].count(">") == 0:
                         if current_level < level:
-                            if not (
-                                current_level == level - 1 and name[1].count("<") > 0
-                            ):
+                            if not (current_level == level - 1
+                                    and name[1].count("<") > 0):
                                 new_name += name[1]
                         current_level += name[1].count("<")
 
@@ -123,9 +121,8 @@ def kernel_name_shortener(df, level):
     if level < 5:
         cpp_filt = str(Path("/usr").joinpath("bin", "c++filt"))
         if not Path(cpp_filt).is_file():
-            console_error(
-                "Could not resolve c++filt in expected directory: %s" % cpp_filt
-            )
+            console_error("Could not resolve c++filt in expected directory: %s" %
+                          cpp_filt)
 
         try:
             modified_df = shorten_file(df, level)

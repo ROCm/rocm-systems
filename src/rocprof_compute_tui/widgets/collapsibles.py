@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
@@ -108,9 +107,8 @@ def create_widget_from_data(df: pd.DataFrame, tui_style: Optional[str] = None) -
         return Label(f"Data not available for display in {tui_style}.")
 
 
-def build_subsection(
-    subsection_config: Dict[str, Any], dfs: Dict[str, Any]
-) -> Collapsible:
+def build_subsection(subsection_config: Dict[str, Any], dfs: Dict[str,
+                                                                  Any]) -> Collapsible:
     title = subsection_config["title"]
     collapsed = subsection_config.get("collapsed", True)
     tui_style = subsection_config.get("tui_style")
@@ -120,19 +118,17 @@ def build_subsection(
         data_path = subsection_config["data_path"]
 
         if tui_style is None:
-            tui_style = (
-                get_tui_style_from_path(dfs, data_path) if dfs is not None else None
-            )
+            tui_style = (get_tui_style_from_path(dfs, data_path)
+                         if dfs is not None else None)
 
         df = get_data_from_path(dfs, data_path)
 
         if df is None and tui_style is None:
             error_msg = (
-                f"{title} data not available: Path {' -> '.join(data_path)} not found"
-            )
-            return Collapsible(
-                Label(error_msg, classes="warning"), title=title, collapsed=collapsed
-            )
+                f"{title} data not available: Path {' -> '.join(data_path)} not found")
+            return Collapsible(Label(error_msg, classes="warning"),
+                               title=title,
+                               collapsed=collapsed)
 
         # Create main widget
         widget = create_widget_from_data(df, tui_style)
@@ -142,8 +138,7 @@ def build_subsection(
         if "header_label" in subsection_config:
             header_class = subsection_config.get("header_class", "")
             widgets.append(
-                Label(subsection_config["header_label"], classes=header_class)
-            )
+                Label(subsection_config["header_label"], classes=header_class))
 
         widgets.append(widget)
 
@@ -169,9 +164,8 @@ def build_subsection(
     return collapsible
 
 
-def build_kernel_sections(
-    dfs: Dict[str, Any], skip_sections: List[str]
-) -> List[Collapsible]:
+def build_kernel_sections(dfs: Dict[str, Any],
+                          skip_sections: List[str]) -> List[Collapsible]:
     children = []
 
     def add_warning(message: str):
@@ -247,9 +241,9 @@ def build_kernel_sections(
 
             if kernel_children:
                 try:
-                    section_collapsible = Collapsible(
-                        *kernel_children, title=section_name, collapsed=True
-                    )
+                    section_collapsible = Collapsible(*kernel_children,
+                                                      title=section_name,
+                                                      collapsed=True)
                     children.append(section_collapsible)
                 except Exception as e:
                     add_warning(
@@ -262,18 +256,16 @@ def build_kernel_sections(
     return children
 
 
-def build_section_from_config(
-    section_config: Dict[str, Any], dfs: Dict[str, Any]
-) -> Collapsible:
+def build_section_from_config(section_config: Dict[str, Any],
+                              dfs: Dict[str, Any]) -> Collapsible:
     title = section_config["title"]
     collapsed = section_config.get("collapsed", True)
     css_class = section_config.get("class")
 
     # Handle under construction sections
     if section_config.get("under_construction", False):
-        construction_label = section_config.get(
-            "construction_label", "Under Construction"
-        )
+        construction_label = section_config.get("construction_label",
+                                                "Under Construction")
         construction_class = section_config.get("construction_class", "")
         children = [Label(construction_label, classes=construction_class)]
 
@@ -292,8 +284,7 @@ def build_section_from_config(
                     children.append(subsection)
             except Exception as e:
                 error_msg = (
-                    f"{subsection_config.get('title', 'Unknown')} error: {str(e)}"
-                )
+                    f"{subsection_config.get('title', 'Unknown')} error: {str(e)}")
                 children.append(Label(error_msg, classes="warning"))
     else:
         children = [Label("No configuration provided for this section")]

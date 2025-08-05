@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import copy
 import textwrap
 from pathlib import Path
@@ -44,7 +43,7 @@ def string_multiple_lines(source, width, max_rows):
     idx = 0
     lines = []
     while idx < len(source) and len(lines) < max_rows:
-        lines.append(source[idx : idx + width])
+        lines.append(source[idx:idx + width])
         idx += width
 
     if idx < len(source):
@@ -62,11 +61,8 @@ def get_table_string(df, transpose=False, decimal=2):
     wrap_width = 40
     for col in wrap_columns:
         if col in df_to_show.columns:
-            df_to_show[col] = (
-                df_to_show[col]
-                .astype(str)
-                .apply(lambda x: textwrap.fill(x, width=wrap_width))
-            )
+            df_to_show[col] = (df_to_show[col].astype(str).apply(
+                lambda x: textwrap.fill(x, width=wrap_width)))
     return tabulate(
         df_to_show,
         headers="keys",
@@ -95,12 +91,10 @@ def convert_time_columns(df, time_unit):
             mask = time_rows
             if mask.any():
                 try:
-                    numeric_values = pd.to_numeric(
-                        df_copy.loc[mask, col], errors="coerce"
-                    )
-                    df_copy.loc[mask, col] = (
-                        numeric_values / config.TIME_UNITS[time_unit]
-                    )
+                    numeric_values = pd.to_numeric(df_copy.loc[mask, col],
+                                                   errors="coerce")
+                    df_copy.loc[mask,
+                                col] = (numeric_values / config.TIME_UNITS[time_unit])
                 except:
                     pass
 
@@ -154,18 +148,11 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 # If block filtering not used in profiling config, show all panels
                 # Skip this table if table id or panel id is not present in block filters
                 # However, always show panel id <= 100
-                if (
-                    not args.filter_metrics
-                    and filter_panel_ids
-                    and table_config["id"] not in filter_panel_ids
-                    and panel_id not in filter_panel_ids
-                    and panel_id > 100
-                ):
-                    table_id_str = (
-                        str(table_config["id"] // 100)
-                        + "."
-                        + str(table_config["id"] % 100)
-                    )
+                if (not args.filter_metrics and filter_panel_ids
+                        and table_config["id"] not in filter_panel_ids
+                        and panel_id not in filter_panel_ids and panel_id > 100):
+                    table_id_str = (str(table_config["id"] // 100) + "." +
+                                    str(table_config["id"] % 100))
                     console_log(
                         f"Not showing table not selected during profiling: {table_id_str} {table_config['title']}"
                     )
@@ -174,19 +161,16 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 # Show roofline
                 # Check if we have filter_metrics for analyze stage:
                 # no filter_metrics = show all, filter_metrics containing "4" = user requesting roofline chart
-                if panel_id == 400 and (
-                    not args.filter_metrics or "4" in args.filter_metrics
-                ):
+                if panel_id == 400 and (not args.filter_metrics
+                                        or "4" in args.filter_metrics):
                     show_roof_plot(roof_plot)
                     continue
 
                 # Metrics baseline comparison mode
                 # We cannot guarantee that all runs have the same metrics. Only show common metrics.
-                if (
-                    type == "metric_table"
-                    and "Metric" in table_config["header"].values()
-                    and len(runs) > 1
-                ):
+                if (type == "metric_table"
+                        and "Metric" in table_config["header"].values()
+                        and len(runs) > 1):
                     # Common metrics across all runs
                     common_metrics = set()
                     for _, data in runs.items():
@@ -194,17 +178,14 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                             common_metrics = set(data.dfs[table_config["id"]]["Metric"])
                         else:
                             common_metrics &= set(
-                                data.dfs[table_config["id"]]["Metric"]
-                            )
+                                data.dfs[table_config["id"]]["Metric"])
                     # Apply common metrics across all runs
                     # Reindex all runs based on first run
                     initial_index = None
                     for key in runs.keys():
                         runs[key].dfs[table_config["id"]] = (
-                            runs[key]
-                            .dfs[table_config["id"]]
-                            .loc[lambda d: d["Metric"].isin(common_metrics)]
-                        )
+                            runs[key].dfs[table_config["id"]].
+                            loc[lambda d: d["Metric"].isin(common_metrics)])
                         if initial_index is None:
                             initial_index = runs[key].dfs[table_config["id"]].index
                         else:
@@ -222,31 +203,22 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 for header in list(base_df.keys()):
                     # For raw csv table, columns cannot be filtered
                     # If columns are filtered, then skip the headers not in filtered columns
-                    if (
-                        type == "raw_csv_table"
-                        or not args.cols
-                        or base_df.columns.get_loc(header) in args.cols
-                    ):
+                    if (type == "raw_csv_table" or not args.cols
+                            or base_df.columns.get_loc(header) in args.cols):
                         if header in hidden_cols:
                             pass
                         elif header not in comparable_columns:
-                            if (
-                                type == "raw_csv_table"
-                                and (
-                                    table_config["source"] == "pmc_kernel_top.csv"
-                                    or table_config["source"] == "pmc_dispatch_info.csv"
-                                )
-                                and header == "Kernel_Name"
-                            ):
+                            if (type == "raw_csv_table" and
+                                (table_config["source"] == "pmc_kernel_top.csv"
+                                 or table_config["source"] == "pmc_dispatch_info.csv")
+                                    and header == "Kernel_Name"):
                                 # NB: the width of kernel name might depend on the header of the table.
                                 if table_config["source"] == "pmc_kernel_top.csv":
                                     adjusted_name = base_df["Kernel_Name"].apply(
-                                        lambda x: string_multiple_lines(x, 40, 3)
-                                    )
+                                        lambda x: string_multiple_lines(x, 40, 3))
                                 else:
                                     adjusted_name = base_df["Kernel_Name"].apply(
-                                        lambda x: string_multiple_lines(x, 80, 4)
-                                    )
+                                        lambda x: string_multiple_lines(x, 80, 4))
                                 df = pd.concat([df, adjusted_name], axis=1)
                             elif type == "raw_csv_table" and header == "Info":
                                 for run, data in runs.items():
@@ -260,13 +232,11 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
 
                                 if args.time_unit and has_time_data(base_df):
                                     cur_df = convert_time_columns(
-                                        cur_df, args.time_unit
-                                    )
+                                        cur_df, args.time_unit)
 
                                 if (type == "raw_csv_table") or (
-                                    type == "metric_table"
-                                    and (not header in hidden_cols)
-                                ):
+                                        type == "metric_table" and
+                                    (not header in hidden_cols)):
                                     if run != base_run:
                                         # calc percentage over the baseline
                                         base_df[header] = [
@@ -284,86 +254,60 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                             ],
                                             axis=1,
                                         )
-                                        absolute_diff = (
-                                            t_df.iloc[:, 1] - t_df.iloc[:, 0]
-                                        ).round(args.decimal)
+                                        absolute_diff = (t_df.iloc[:, 1] -
+                                                         t_df.iloc[:, 0]).round(
+                                                             args.decimal)
                                         t_df = absolute_diff / t_df.iloc[:, 0].replace(
-                                            0, 1
-                                        )
+                                            0, 1)
                                         if args.verbose >= 2:
                                             console_log("---------", header, t_df)
 
                                         t_df_pretty = (
-                                            t_df.astype(float)
-                                            .mul(100)
-                                            .round(args.decimal)
-                                        )
+                                            t_df.astype(float).mul(100).round(
+                                                args.decimal))
                                         # show value + percentage
                                         # TODO: better alignment
-                                        t_df = (
-                                            cur_df[header]
-                                            .astype(float)
-                                            .round(args.decimal)
-                                            .map(str)
-                                            .astype(str)
-                                            + " ("
-                                            + t_df_pretty.map(str)
-                                            + "%)"
-                                        )
+                                        t_df = (cur_df[header].astype(float).round(
+                                            args.decimal).map(str).astype(str) + " (" +
+                                                t_df_pretty.map(str) + "%)")
                                         df = pd.concat([df, t_df], axis=1)
 
                                         # DEBUG: When in a CI setting and flag is set,
                                         #       then verify metrics meet threshold requirement
-                                        if (
-                                            header in ["Value", "Count", "Avg"]
-                                            and t_df_pretty.abs()
-                                            .gt(args.report_diff)
-                                            .any()
-                                        ):
+                                        if (header in ["Value", "Count", "Avg"]
+                                                and t_df_pretty.abs().gt(
+                                                    args.report_diff).any()):
                                             df["Abs Diff"] = absolute_diff
                                             if args.report_diff:
                                                 violation_idx = t_df_pretty.index[
-                                                    t_df_pretty.abs() > args.report_diff
-                                                ]
+                                                    t_df_pretty.abs() >
+                                                    args.report_diff]
                                                 console_warning(
                                                     "Dataframe diff exceeds %s threshold requirement\nSee metric %s"
                                                     % (
                                                         str(args.report_diff) + "%",
                                                         violation_idx.to_numpy(),
-                                                    )
-                                                )
+                                                    ))
                                                 console_warning(df)
 
                                     else:
                                         cur_df_copy = copy.deepcopy(cur_df)
-                                        cur_df_copy[header] = [
-                                            (
-                                                round(float(x), args.decimal)
-                                                if x != ""
-                                                else x
-                                            )
-                                            for x in base_df[header]
-                                        ]
-                                        df = pd.concat(
-                                            [df, cur_df_copy[header]], axis=1
-                                        )
+                                        cur_df_copy[header] = [(round(
+                                            float(x), args.decimal) if x != "" else x)
+                                                               for x in base_df[header]]
+                                        df = pd.concat([df, cur_df_copy[header]],
+                                                       axis=1)
 
                 if not df.empty:
                     # subtitle for each table in a panel if existing
-                    table_id_str = (
-                        str(table_config["id"] // 100)
-                        + "."
-                        + str(table_config["id"] % 100)
-                    )
+                    table_id_str = (str(table_config["id"] // 100) + "." +
+                                    str(table_config["id"] % 100))
 
                     # Check if any column in df is empty
-                    is_empty_columns_exist = any(
-                        [
-                            df.columns[col_idx]
-                            for col_idx in range(len(df.columns))
-                            if df.replace("", None).iloc[:, col_idx].isnull().all()
-                        ]
-                    )
+                    is_empty_columns_exist = any([
+                        df.columns[col_idx] for col_idx in range(len(df.columns))
+                        if df.replace("", None).iloc[:, col_idx].isnull().all()
+                    ])
                     # Do not print the table if any column is empty
                     if is_empty_columns_exist:
                         if "title" in table_config:
@@ -374,11 +318,8 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                             console_log(
                                 f"Not showing table with empty column(s): {table_id_str}"
                             )
-                    if (
-                        "title" in table_config
-                        and table_config["title"]
-                        and not is_empty_columns_exist
-                    ):
+                    if ("title" in table_config and table_config["title"]
+                            and not is_empty_columns_exist):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
                     if args.df_file_dir:
@@ -394,9 +335,8 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                             )
                     # Only show top N kernels (as specified in --max-kernel-num) in "Top Stats" section
                     if type == "raw_csv_table" and (
-                        table_config["source"] == "pmc_kernel_top.csv"
-                        or table_config["source"] == "pmc_dispatch_info.csv"
-                    ):
+                            table_config["source"] == "pmc_kernel_top.csv"
+                            or table_config["source"] == "pmc_dispatch_info.csv"):
                         df = df.head(args.max_stat_num)
                     # NB:
                     # "columnwise: True" is a special attr of a table/df
@@ -404,36 +344,27 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     # df when load it, because we need those items in column.
                     # For metric_table, we only need to show the data in column
                     # fash for now.
-                    transpose = (
-                        type != "raw_csv_table"
-                        and "columnwise" in table_config
-                        and table_config["columnwise"] == True
-                    )
+                    transpose = (type != "raw_csv_table"
+                                 and "columnwise" in table_config
+                                 and table_config["columnwise"] == True)
                     if not is_empty_columns_exist:
                         # enable mem_chart only with single run
-                        if (
-                            "cli_style" in table_config
-                            and table_config["cli_style"] == "mem_chart"
-                            and len(runs) == 1
-                        ):
+                        if ("cli_style" in table_config
+                                and table_config["cli_style"] == "mem_chart"
+                                and len(runs) == 1):
                             # NB: to avoid broken test with arbitrary number with "--cols" option
                             if "Metric" in df.columns and "Value" in df.columns:
                                 ss += mem_chart.plot_mem_chart(
                                     "",
                                     args.normal_unit,
-                                    pd.DataFrame([df["Metric"], df["Value"]])
-                                    .transpose()
-                                    .set_index("Metric")
-                                    .to_dict()["Value"],
+                                    pd.DataFrame([df["Metric"],
+                                                  df["Value"]]).transpose().set_index(
+                                                      "Metric").to_dict()["Value"],
                                 )
                                 ss += "\n"
                         else:
-                            ss += (
-                                get_table_string(
-                                    df, transpose=transpose, decimal=args.decimal
-                                )
-                                + "\n"
-                            )
+                            ss += (get_table_string(
+                                df, transpose=transpose, decimal=args.decimal) + "\n")
 
         if ss:
             print("\n" + "-" * 80, file=output)

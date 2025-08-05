@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import copy
 from pathlib import Path
 
@@ -38,6 +37,7 @@ from utils.logger import console_error, demarcate
 
 
 class tui_analysis(OmniAnalyze_Base):
+
     def __init__(self, args, supported_archs, path):
         super().__init__(args, supported_archs)
         self.path = str(path)
@@ -68,8 +68,7 @@ class tui_analysis(OmniAnalyze_Base):
 
         if self.get_args().spatial_multiplexing:
             self._runs[self.path].raw_pmc = self.spatial_multiplex_merge_counters(
-                self._runs[self.path].raw_pmc
-            )
+                self._runs[self.path].raw_pmc)
 
         file_io.create_df_kernel_top_stats(
             df_in=self._runs[self.path].raw_pmc,
@@ -82,14 +81,13 @@ class tui_analysis(OmniAnalyze_Base):
             kernel_verbose=self.get_args().kernel_verbose,
         )
 
-        kernel_name_shortener(
-            self._runs[self.path].raw_pmc, self.get_args().kernel_verbose
-        )
+        kernel_name_shortener(self._runs[self.path].raw_pmc,
+                              self.get_args().kernel_verbose)
 
         # 1. load top kernel
-        parser.load_kernel_top(
-            workload=self._runs[self.path], dir=self.path, args=self.get_args()
-        )
+        parser.load_kernel_top(workload=self._runs[self.path],
+                               dir=self.path,
+                               args=self.get_args())
 
         # 2. load table data for each kernel
         self.raw_dfs.clear()
@@ -140,8 +138,7 @@ class tui_analysis(OmniAnalyze_Base):
         self.kernel_dfs.clear()
         for kernel_name, df in self.raw_dfs.items():
             self.kernel_dfs[kernel_name] = process_panels_to_dataframes(
-                self.get_args(), df, self._arch_configs[self.arch], roof_plot=None
-            )
+                self.get_args(), df, self._arch_configs[self.arch], roof_plot=None)
         return self.kernel_dfs
 
     @demarcate

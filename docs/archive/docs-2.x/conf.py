@@ -56,11 +56,9 @@ extensions = [
 
 show_authors = True
 
-
 myst_heading_anchors = 4
 # enable replacement of (tm) & friends
 myst_enable_extensions = ["replacements", "dollarmath"]
-
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -110,7 +108,6 @@ pygments_style = None
 latex_engine = "lualatex"
 latex_show_urls = "footnote"
 
-
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -132,7 +129,6 @@ html_static_path = ["_static"]
 latex_elements = {
     "sphinxsetup": "verbatimwrapslines=true, verbatimforcewraps=true",
 }
-
 
 # -- Options for HTMLHelp output ---------------------------------------------
 

@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import logging
 
 logging.trace = lambda *args, **kwargs: None
@@ -133,8 +132,7 @@ def clean_output_dir(cleanup, output_dir):
                 shutil.rmtree(output_dir)
             except OSError:
                 print(
-                    "WARNING: shutil.rmdir(output_dir): directory may not be empty..."
-                )
+                    "WARNING: shutil.rmdir(output_dir): directory may not be empty...")
     return
 
 
@@ -181,9 +179,8 @@ def test_get_version_finds_version_in_home(tmp_path, monkeypatch):
     version_content = "1.2.3"
     version_file = tmp_path / "VERSION"
     version_file.write_text(version_content)
-    monkeypatch.setattr(
-        utils, "capture_subprocess_output", lambda *a, **k: (True, "abc123")
-    )
+    monkeypatch.setattr(utils, "capture_subprocess_output", lambda *a, **k:
+                        (True, "abc123"))
     monkeypatch.setattr(
         utils,
         "console_error",
@@ -210,9 +207,8 @@ def test_get_version_finds_version_in_parent(tmp_path, monkeypatch):
     version_content = "2.0.0"
     version_file = parent / "VERSION"
     version_file.write_text(version_content)
-    monkeypatch.setattr(
-        utils, "capture_subprocess_output", lambda *a, **k: (True, "def456")
-    )
+    monkeypatch.setattr(utils, "capture_subprocess_output", lambda *a, **k:
+                        (True, "def456"))
     monkeypatch.setattr(
         utils,
         "console_error",
@@ -264,9 +260,8 @@ def test_get_version_git_success(tmp_path, monkeypatch):
     version_content = "1.0.0"
     version_file = tmp_path / "VERSION"
     version_file.write_text(version_content)
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "abc123")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "abc123"))
     monkeypatch.setattr(
         "utils.utils.console_error",
         lambda *a, **k: pytest.fail("console_error should not be called"),
@@ -365,9 +360,8 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     # Track calls to console_warning and console_error
     warnings = []
     errors = []
-    monkeypatch.setattr(
-        "utils.utils.console_warning", lambda msg, *a, **k: warnings.append(msg)
-    )
+    monkeypatch.setattr("utils.utils.console_warning",
+                        lambda msg, *a, **k: warnings.append(msg))
 
     def fake_console_error(msg, *a, **k):
         errors.append(msg)
@@ -379,10 +373,8 @@ def test_detect_rocprof_env_rocprof_not_found(monkeypatch):
     with pytest.raises(RuntimeError, match="console_error called"):
         utils_mod.detect_rocprof(DummyArgs())
     assert any("Unable to resolve path to rocprofv3 binary" in w for w in warnings)
-    assert any(
-        "Please verify installation or set ROCPROF environment variable" in e
-        for e in errors
-    )
+    assert any("Please verify installation or set ROCPROF environment variable" in e
+               for e in errors)
 
 
 def test_detect_rocprof_env_rocprof_found(monkeypatch):
@@ -396,24 +388,20 @@ def test_detect_rocprof_env_rocprof_found(monkeypatch):
 
     monkeypatch.setenv("ROCPROF", "rocprof")
     # shutil.which returns a fake path for 'rocprof'
-    monkeypatch.setattr(
-        "shutil.which", lambda cmd: "/usr/bin/rocprof" if cmd == "rocprof" else None
-    )
+    monkeypatch.setattr("shutil.which", lambda cmd: "/usr/bin/rocprof"
+                        if cmd == "rocprof" else None)
     # Path.resolve returns the same path for simplicity
     monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
     # Track debug logs
     logs = []
-    monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
-    )
+    monkeypatch.setattr("utils.utils.console_debug",
+                        lambda msg, *a, **k: logs.append(str(msg)))
     import utils.utils as utils_mod
 
     result = utils_mod.detect_rocprof(DummyArgs())
     assert result == "rocprof"
-    assert any(
-        "ROC Profiler: /usr/bin/rocprof" in l or "rocprof_cmd is rocprof" in l
-        for l in logs
-    )
+    assert any("ROC Profiler: /usr/bin/rocprof" in l or "rocprof_cmd is rocprof" in l
+               for l in logs)
 
 
 def test_detect_rocprof_env_not_set(monkeypatch):
@@ -427,21 +415,19 @@ def test_detect_rocprof_env_not_set(monkeypatch):
 
     monkeypatch.delenv("ROCPROF", raising=False)
     monkeypatch.setattr(
-        "shutil.which", lambda cmd: "/usr/bin/rocprofv3" if cmd == "rocprofv3" else None
-    )
+        "shutil.which", lambda cmd: "/usr/bin/rocprofv3"
+        if cmd == "rocprofv3" else None)
     monkeypatch.setattr("pathlib.Path.resolve", lambda self: self)
     logs = []
-    monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
-    )
+    monkeypatch.setattr("utils.utils.console_debug",
+                        lambda msg, *a, **k: logs.append(str(msg)))
     import utils.utils as utils_mod
 
     result = utils_mod.detect_rocprof(DummyArgs())
     assert result == "rocprofv3"
     assert any(
         "ROC Profiler: /usr/bin/rocprofv3" in l or "rocprof_cmd is rocprofv3" in l
-        for l in logs
-    )
+        for l in logs)
 
 
 def test_detect_rocprof_sdk(monkeypatch):
@@ -456,9 +442,8 @@ def test_detect_rocprof_sdk(monkeypatch):
     monkeypatch.setenv("ROCPROF", "rocprofiler-sdk")
     monkeypatch.setattr("pathlib.Path.exists", lambda self: True)
     logs = []
-    monkeypatch.setattr(
-        "utils.utils.console_debug", lambda msg, *a, **k: logs.append(str(msg))
-    )
+    monkeypatch.setattr("utils.utils.console_debug",
+                        lambda msg, *a, **k: logs.append(str(msg)))
     import utils.utils as utils_mod
 
     result = utils_mod.detect_rocprof(DummyArgs())
@@ -473,10 +458,12 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
     """
 
     class DummyProcess:
+
         def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
+            self.stdout = type("MockStdout", (), {
+                "readline": lambda: "",
+                "fileno": lambda: 1
+            })()
             self._poll_count = 0
 
         def poll(self):
@@ -498,6 +485,7 @@ def test_capture_subprocess_output_with_new_env(monkeypatch):
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
 
     class DummySelector:
+
         def register(self, fileobj, event, callback):
             pass
 
@@ -528,10 +516,12 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     """
 
     class DummyProcess:
+
         def __init__(self):
-            self.stdout = type(
-                "MockStdout", (), {"readline": lambda: "", "fileno": lambda: 1}
-            )()
+            self.stdout = type("MockStdout", (), {
+                "readline": lambda: "",
+                "fileno": lambda: 1
+            })()
 
         def poll(self):
             return 0
@@ -542,6 +532,7 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
     monkeypatch.setattr("subprocess.Popen", lambda *a, **k: DummyProcess())
 
     class DummySelector:
+
         def register(self, fileobj, event, callback):
             pass
 
@@ -557,9 +548,9 @@ def test_capture_subprocess_output_profile_mode(monkeypatch):
 
     import utils.utils as utils_mod
 
-    success, output = utils_mod.capture_subprocess_output(
-        ["echo", "test"], profileMode=True, enable_logging=False
-    )
+    success, output = utils_mod.capture_subprocess_output(["echo", "test"],
+                                                          profileMode=True,
+                                                          enable_logging=False)
 
     assert success is True
     assert isinstance(output, str)
@@ -572,6 +563,7 @@ def test_capture_subprocess_output_failure(monkeypatch):
     lines = ["fail\n"]
 
     class DummyStdout:
+
         def __init__(self, lines):
             self._lines = lines
             self._idx = 0
@@ -584,6 +576,7 @@ def test_capture_subprocess_output_failure(monkeypatch):
             return ""
 
     class DummyProcess:
+
         def __init__(self):
             self.stdout = DummyStdout(lines)
             self._poll_count = 0
@@ -605,6 +598,7 @@ def test_capture_subprocess_output_failure(monkeypatch):
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
 
     class DummySelector:
+
         def __init__(self):
             self._registered = []
 
@@ -644,6 +638,7 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
     """
 
     class DummyStdout:
+
         def __init__(self):
             self._called = False
 
@@ -654,6 +649,7 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
             return ""
 
     class DummyProcess:
+
         def __init__(self):
             self.stdout = DummyStdout()
             self._poll_count = 0
@@ -675,6 +671,7 @@ def test_capture_subprocess_output_unicode_decode(monkeypatch):
     monkeypatch.setattr("subprocess.Popen", dummy_popen)
 
     class DummySelector:
+
         def __init__(self):
             self._registered = []
 
@@ -718,14 +715,24 @@ def test_get_agent_dict_basic():
     Test get_agent_dict correctly maps agent IDs to agent objects.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 100},
-                    {"id": {"handle": 2}, "type": 2, "node_id": 200},
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 1
+                    },
+                    "type": 2,
+                    "node_id": 100
+                },
+                {
+                    "id": {
+                        "handle": 2
+                    },
+                    "type": 2,
+                    "node_id": 200
+                },
+            ]
+        }]
     }
 
     result = utils.get_agent_dict(data)
@@ -778,14 +785,26 @@ def test_get_agent_dict_duplicate_agent_ids():
     The function should overwrite previous entries with the same ID.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 1}, "type": 2, "node_id": 100, "name": "first"},
-                    {"id": {"handle": 1}, "type": 2, "node_id": 200, "name": "second"},
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 1
+                    },
+                    "type": 2,
+                    "node_id": 100,
+                    "name": "first"
+                },
+                {
+                    "id": {
+                        "handle": 1
+                    },
+                    "type": 2,
+                    "node_id": 200,
+                    "name": "second"
+                },
+            ]
+        }]
     }
 
     result = utils.get_agent_dict(data)
@@ -800,14 +819,24 @@ def test_get_agent_dict_non_integer_handles():
     Test get_agent_dict with non-integer handle values.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": "agent_1"}, "type": 2, "node_id": 100},
-                    {"id": {"handle": "agent_2"}, "type": 2, "node_id": 200},
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": "agent_1"
+                    },
+                    "type": 2,
+                    "node_id": 100
+                },
+                {
+                    "id": {
+                        "handle": "agent_2"
+                    },
+                    "type": 2,
+                    "node_id": 200
+                },
+            ]
+        }]
     }
 
     result = utils.get_agent_dict(data)
@@ -826,15 +855,31 @@ def test_get_gpuid_dict_basic():
         None: Asserts that agent IDs are correctly mapped to GPU IDs based on node_id ordering.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 2},  # GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 2},  # GPU agent
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 100
+                    },
+                    "node_id": 5,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "node_id": 3,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "node_id": 7,
+                    "type": 2
+                },  # GPU agent
+            ]
+        }]
     }
 
     expected = {101: 0, 100: 1, 102: 2}
@@ -851,15 +896,31 @@ def test_get_gpuid_dict_no_gpu_agents():
         None: Asserts that an empty dictionary is returned when there are no GPU agents.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 1},  # Non-GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 3},  # Non-GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 0},  # Non-GPU agent
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 100
+                    },
+                    "node_id": 5,
+                    "type": 1
+                },  # Non-GPU agent
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "node_id": 3,
+                    "type": 3
+                },  # Non-GPU agent
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "node_id": 7,
+                    "type": 0
+                },  # Non-GPU agent
+            ]
+        }]
     }
 
     result = utils.get_gpuid_dict(data)
@@ -874,16 +935,38 @@ def test_get_gpuid_dict_mixed_agents():
         None: Asserts that only GPU agents (type 2) are included in the mapping.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 3, "type": 1},  # Non-GPU agent
-                    {"id": {"handle": 102}, "node_id": 7, "type": 2},  # GPU agent
-                    {"id": {"handle": 103}, "node_id": 2, "type": 0},  # Non-GPU agent
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 100
+                    },
+                    "node_id": 5,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "node_id": 3,
+                    "type": 1
+                },  # Non-GPU agent
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "node_id": 7,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 103
+                    },
+                    "node_id": 2,
+                    "type": 0
+                },  # Non-GPU agent
+            ]
+        }]
     }
 
     # Expected mapping after sorting by node_id and filtering by type 2: 100->0, 102->1
@@ -901,16 +984,38 @@ def test_get_gpuid_dict_sorting():
         None: Asserts that GPU agents are sorted by node_id before being assigned sequential GPU IDs.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "agents": [
-                    {"id": {"handle": 100}, "node_id": 10, "type": 2},  # GPU agent
-                    {"id": {"handle": 101}, "node_id": 5, "type": 2},  # GPU agent
-                    {"id": {"handle": 102}, "node_id": 8, "type": 2},  # GPU agent
-                    {"id": {"handle": 103}, "node_id": 1, "type": 2},  # GPU agent
-                ]
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "agents": [
+                {
+                    "id": {
+                        "handle": 100
+                    },
+                    "node_id": 10,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "node_id": 5,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "node_id": 8,
+                    "type": 2
+                },  # GPU agent
+                {
+                    "id": {
+                        "handle": 103
+                    },
+                    "node_id": 1,
+                    "type": 2
+                },  # GPU agent
+            ]
+        }]
     }
 
     expected = {103: 0, 101: 1, 102: 2, 100: 3}
@@ -941,27 +1046,37 @@ def test_v3_json_get_counters_normal_case():
     and creates a mapping using (agent_id, counter_id) tuples as keys.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "counters": [
-                    {
-                        "id": {"handle": 1},
-                        "agent_id": {"handle": 100},
-                        "name": "counter1",
+        "rocprofiler-sdk-tool": [{
+            "counters": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": 2},
-                        "agent_id": {"handle": 100},
-                        "name": "counter2",
+                    "agent_id": {
+                        "handle": 100
                     },
-                    {
-                        "id": {"handle": 1},
-                        "agent_id": {"handle": 200},
-                        "name": "counter3",
+                    "name": "counter1",
+                },
+                {
+                    "id": {
+                        "handle": 2
                     },
-                ]
-            }
-        ]
+                    "agent_id": {
+                        "handle": 100
+                    },
+                    "name": "counter2",
+                },
+                {
+                    "id": {
+                        "handle": 1
+                    },
+                    "agent_id": {
+                        "handle": 200
+                    },
+                    "name": "counter3",
+                },
+            ]
+        }]
     }
 
     counter_map = utils.v3_json_get_counters(data)
@@ -993,22 +1108,28 @@ def test_v3_json_get_counters_duplicate_keys():
     the last counter overwrites previous ones in the returned dictionary.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "counters": [
-                    {
-                        "id": {"handle": 1},
-                        "agent_id": {"handle": 100},
-                        "name": "counter1",
+        "rocprofiler-sdk-tool": [{
+            "counters": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": 1},
-                        "agent_id": {"handle": 100},
-                        "name": "counter2",
+                    "agent_id": {
+                        "handle": 100
                     },
-                ]
-            }
-        ]
+                    "name": "counter1",
+                },
+                {
+                    "id": {
+                        "handle": 1
+                    },
+                    "agent_id": {
+                        "handle": 100
+                    },
+                    "name": "counter2",
+                },
+            ]
+        }]
     }
 
     counter_map = utils.v3_json_get_counters(data)
@@ -1024,27 +1145,37 @@ def test_v3_json_get_counters_various_value_types():
     (integers and strings) for the handle values.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "counters": [
-                    {
-                        "id": {"handle": 1},
-                        "agent_id": {"handle": 100},
-                        "name": "counter1",
+        "rocprofiler-sdk-tool": [{
+            "counters": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": "2"},
-                        "agent_id": {"handle": 100},
-                        "name": "counter2",
+                    "agent_id": {
+                        "handle": 100
                     },
-                    {
-                        "id": {"handle": 3},
-                        "agent_id": {"handle": "200"},
-                        "name": "counter3",
+                    "name": "counter1",
+                },
+                {
+                    "id": {
+                        "handle": "2"
                     },
-                ]
-            }
-        ]
+                    "agent_id": {
+                        "handle": 100
+                    },
+                    "name": "counter2",
+                },
+                {
+                    "id": {
+                        "handle": 3
+                    },
+                    "agent_id": {
+                        "handle": "200"
+                    },
+                    "name": "counter3",
+                },
+            ]
+        }]
     }
 
     counter_map = utils.v3_json_get_counters(data)
@@ -1061,11 +1192,15 @@ def test_v3_json_get_counters_missing_key():
     This test verifies that the function raises a KeyError when the agent_id key is missing.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "counters": [{"id": {"handle": 1}, "name": "counter1"}]
-            }  # Missing agent_id
-        ]
+        "rocprofiler-sdk-tool": [{
+            "counters": [{
+                "id": {
+                    "handle": 1
+                },
+                "name": "counter1"
+            }]
+        }  # Missing agent_id
+                                 ]
     }
 
     with pytest.raises(KeyError):
@@ -1079,9 +1214,15 @@ def test_v3_json_get_counters_missing_nested_key():
     is missing from the id dictionary.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {"counters": [{"id": {}, "agent_id": {"handle": 100}, "name": "counter1"}]}
-        ]
+        "rocprofiler-sdk-tool": [{
+            "counters": [{
+                "id": {},
+                "agent_id": {
+                    "handle": 100
+                },
+                "name": "counter1"
+            }]
+        }]
     }
 
     with pytest.raises(KeyError):
@@ -1095,8 +1236,12 @@ def test_v3_json_get_counters_data_structure():
     not just selected fields.
     """
     counter_object = {
-        "id": {"handle": 1},
-        "agent_id": {"handle": 100},
+        "id": {
+            "handle": 1
+        },
+        "agent_id": {
+            "handle": 100
+        },
         "name": "counter1",
         "description": "Test counter",
         "block": "SQ",
@@ -1127,29 +1272,33 @@ def test_v3_json_get_dispatches_normal_case():
         None: Asserts the function correctly maps all dispatch records by their correlation IDs.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "id1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
+        "rocprofiler-sdk-tool": [{
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "id1"
                         },
-                        {
-                            "correlation_id": {"internal": "id2"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "id2"
                         },
-                        {
-                            "correlation_id": {"internal": "id3"},
-                            "start_timestamp": 500,
-                            "end_timestamp": 600,
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "id3"
                         },
-                    ]
-                }
+                        "start_timestamp": 500,
+                        "end_timestamp": 600,
+                    },
+                ]
             }
-        ]
+        }]
     }
 
     result = utils.v3_json_get_dispatches(data)
@@ -1194,9 +1343,13 @@ def test_v3_json_get_dispatches_missing_fields():
         utils.v3_json_get_dispatches(data)
 
     data = {
-        "rocprofiler-sdk-tool": [
-            {"buffer_records": {"kernel_dispatch": [{"start_timestamp": 100}]}}
-        ]
+        "rocprofiler-sdk-tool": [{
+            "buffer_records": {
+                "kernel_dispatch": [{
+                    "start_timestamp": 100
+                }]
+            }
+        }]
     }
 
     with pytest.raises(KeyError):
@@ -1214,29 +1367,33 @@ def test_v3_json_get_dispatches_duplicate_ids():
         None: Asserts that when duplicate correlation IDs exist, the function keeps the latest record.
     """
     data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "id1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
+        "rocprofiler-sdk-tool": [{
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "id1"
                         },
-                        {
-                            "correlation_id": {"internal": "id1"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
-                        },  # Duplicate ID
-                        {
-                            "correlation_id": {"internal": "id3"},
-                            "start_timestamp": 500,
-                            "end_timestamp": 600,
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "id1"
                         },
-                    ]
-                }
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },  # Duplicate ID
+                    {
+                        "correlation_id": {
+                            "internal": "id3"
+                        },
+                        "start_timestamp": 500,
+                        "end_timestamp": 600,
+                    },
+                ]
             }
-        ]
+        }]
     }
 
     result = utils.v3_json_get_dispatches(data)
@@ -1262,66 +1419,87 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
     """
 
     valid_json = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
-                    }
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    }
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "TestKernel",
-                        "private_segment_size": 0,
-                    }
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [{
+                "id": {
+                    "handle": 1
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        }
-                    ]
+                "type": 2,
+                "node_id": 0,
+                "wave_front_size": 64,
+            }],
+            "counters": [{
+                "id": {
+                    "handle": 101
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 0,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 1, "y": 1, "z": 1},
-                                    "workgroup_size": {"x": 64, "y": 1, "z": 1},
-                                },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
-                                },
+                "agent_id": {
+                    "handle": 1
+                },
+                "name": "COUNTER1",
+            }],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "TestKernel",
+                    "private_segment_size": 0,
+                }
+            },
+            "buffer_records": {
+                "kernel_dispatch": [{
+                    "correlation_id": {
+                        "internal": "corr1"
+                    },
+                    "start_timestamp": 100,
+                    "end_timestamp": 200,
+                }]
+            },
+            "callback_records": {
+                "counter_collection": [{
+                    "thread_id":
+                    67890,
+                    "lds_block_size_v":
+                    0,
+                    "arch_vgpr_count":
+                    32,
+                    "sgpr_count":
+                    16,
+                    "dispatch_data": {
+                        "dispatch_info": {
+                            "dispatch_id": 1,
+                            "agent_id": {
+                                "handle": 1
                             },
-                            "records": [{"counter_id": {"handle": 101}, "value": 42}],
-                        }
-                    ]
-                },
-            }
-        ]
+                            "queue_id": {
+                                "handle": 2
+                            },
+                            "kernel_id": "kernel1",
+                            "grid_size": {
+                                "x": 1,
+                                "y": 1,
+                                "z": 1
+                            },
+                            "workgroup_size": {
+                                "x": 64,
+                                "y": 1,
+                                "z": 1
+                            },
+                        },
+                        "correlation_id": {
+                            "internal": "corr1",
+                            "external": "ext1",
+                        },
+                    },
+                    "records": [{
+                        "counter_id": {
+                            "handle": 101
+                        },
+                        "value": 42
+                    }],
+                }]
+            },
+        }]
     }
 
     json_path = tmp_path / "test.json"
@@ -1334,9 +1512,9 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": valid_json["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0]
+            "corr1":
+            valid_json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][0
+                                                                                       ]
         },
     )
     monkeypatch.setattr(
@@ -1345,9 +1523,10 @@ def test_v3_json_to_csv_basic_functionality(tmp_path, monkeypatch):
         lambda data: {1: valid_json["rocprofiler-sdk-tool"][0]["agents"][0]},
     )
     monkeypatch.setattr(utils, "get_gpuid_dict", lambda data: {1: 0})
-    monkeypatch.setattr(
-        utils, "v3_json_get_counters", lambda data: {(1, 101): {"name": "COUNTER1"}}
-    )
+    monkeypatch.setattr(utils, "v3_json_get_counters",
+                        lambda data: {(1, 101): {
+                                          "name": "COUNTER1"
+                                      }})
 
     utils.v3_json_to_csv(json_path, csv_path)
 
@@ -1377,23 +1556,27 @@ def test_v3_json_to_csv_no_dispatches(tmp_path, monkeypatch):
     """
 
     empty_json = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
-                    }
-                ],
-                "counters": [],
-                "kernel_symbols": {},
-                "buffer_records": {"kernel_dispatch": []},
-                "callback_records": {"counter_collection": []},
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [{
+                "id": {
+                    "handle": 1
+                },
+                "type": 2,
+                "node_id": 0,
+                "wave_front_size": 64,
+            }],
+            "counters": [],
+            "kernel_symbols": {},
+            "buffer_records": {
+                "kernel_dispatch": []
+            },
+            "callback_records": {
+                "counter_collection": []
+            },
+        }]
     }
 
     json_path = tmp_path / "empty.json"
@@ -1432,66 +1615,87 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     """
 
     json_data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
-                    }
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER_ACCUM",
-                    }
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "TestKernel",
-                        "private_segment_size": 0,
-                    }
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [{
+                "id": {
+                    "handle": 1
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        }
-                    ]
+                "type": 2,
+                "node_id": 0,
+                "wave_front_size": 64,
+            }],
+            "counters": [{
+                "id": {
+                    "handle": 101
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 0,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 1, "y": 1, "z": 1},
-                                    "workgroup_size": {"x": 64, "y": 1, "z": 1},
-                                },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
-                                },
+                "agent_id": {
+                    "handle": 1
+                },
+                "name": "COUNTER_ACCUM",
+            }],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "TestKernel",
+                    "private_segment_size": 0,
+                }
+            },
+            "buffer_records": {
+                "kernel_dispatch": [{
+                    "correlation_id": {
+                        "internal": "corr1"
+                    },
+                    "start_timestamp": 100,
+                    "end_timestamp": 200,
+                }]
+            },
+            "callback_records": {
+                "counter_collection": [{
+                    "thread_id":
+                    67890,
+                    "lds_block_size_v":
+                    0,
+                    "arch_vgpr_count":
+                    32,
+                    "sgpr_count":
+                    16,
+                    "dispatch_data": {
+                        "dispatch_info": {
+                            "dispatch_id": 1,
+                            "agent_id": {
+                                "handle": 1
                             },
-                            "records": [{"counter_id": {"handle": 101}, "value": 42}],
-                        }
-                    ]
-                },
-            }
-        ]
+                            "queue_id": {
+                                "handle": 2
+                            },
+                            "kernel_id": "kernel1",
+                            "grid_size": {
+                                "x": 1,
+                                "y": 1,
+                                "z": 1
+                            },
+                            "workgroup_size": {
+                                "x": 64,
+                                "y": 1,
+                                "z": 1
+                            },
+                        },
+                        "correlation_id": {
+                            "internal": "corr1",
+                            "external": "ext1",
+                        },
+                    },
+                    "records": [{
+                        "counter_id": {
+                            "handle": 101
+                        },
+                        "value": 42
+                    }],
+                }]
+            },
+        }]
     }
 
     json_path = tmp_path / "accum.json"
@@ -1504,9 +1708,8 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0]
+            "corr1":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][0]
         },
     )
     monkeypatch.setattr(
@@ -1518,7 +1721,9 @@ def test_v3_json_to_csv_accumulated_counters(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER_ACCUM"}},
+        lambda data: {(1, 101): {
+                          "name": "COUNTER_ACCUM"
+                      }},
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -1542,74 +1747,106 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
     """
 
     json_data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
-                    }
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                    {
-                        "id": {"handle": 102},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "TestKernel",
-                        "private_segment_size": 0,
-                    }
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [{
+                "id": {
+                    "handle": 1
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        }
-                    ]
+                "type": 2,
+                "node_id": 0,
+                "wave_front_size": 64,
+            }],
+            "counters": [
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 0,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 1, "y": 1, "z": 1},
-                                    "workgroup_size": {"x": 64, "y": 1, "z": 1},
-                                },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
-                                },
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
+                },
+            ],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "TestKernel",
+                    "private_segment_size": 0,
+                }
+            },
+            "buffer_records": {
+                "kernel_dispatch": [{
+                    "correlation_id": {
+                        "internal": "corr1"
+                    },
+                    "start_timestamp": 100,
+                    "end_timestamp": 200,
+                }]
+            },
+            "callback_records": {
+                "counter_collection": [{
+                    "thread_id":
+                    67890,
+                    "lds_block_size_v":
+                    0,
+                    "arch_vgpr_count":
+                    32,
+                    "sgpr_count":
+                    16,
+                    "dispatch_data": {
+                        "dispatch_info": {
+                            "dispatch_id": 1,
+                            "agent_id": {
+                                "handle": 1
                             },
-                            "records": [
-                                {"counter_id": {"handle": 101}, "value": 42},
-                                {"counter_id": {"handle": 102}, "value": 58},
-                            ],
-                        }
-                    ]
-                },
-            }
-        ]
+                            "queue_id": {
+                                "handle": 2
+                            },
+                            "kernel_id": "kernel1",
+                            "grid_size": {
+                                "x": 1,
+                                "y": 1,
+                                "z": 1
+                            },
+                            "workgroup_size": {
+                                "x": 64,
+                                "y": 1,
+                                "z": 1
+                            },
+                        },
+                        "correlation_id": {
+                            "internal": "corr1",
+                            "external": "ext1",
+                        },
+                    },
+                    "records": [
+                        {
+                            "counter_id": {
+                                "handle": 101
+                            },
+                            "value": 42
+                        },
+                        {
+                            "counter_id": {
+                                "handle": 102
+                            },
+                            "value": 58
+                        },
+                    ],
+                }]
+            },
+        }]
     }
 
     json_path = tmp_path / "duplicate.json"
@@ -1622,9 +1859,8 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0]
+            "corr1":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][0]
         },
     )
     monkeypatch.setattr(
@@ -1636,7 +1872,14 @@ def test_v3_json_to_csv_duplicate_counters(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER1"}},
+        lambda data: {
+            (1, 101): {
+                "name": "COUNTER1"
+            },
+            (1, 102): {
+                "name": "COUNTER1"
+            }
+        },
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -1687,12 +1930,10 @@ def test_v3_json_to_csv_missing_required_keys(tmp_path):
     """
 
     invalid_json = {
-        "rocprofiler-sdk-tool": [
-            {
-                # Missing "metadata", "agents", etc.
-                "kernel_symbols": {}
-            }
-        ]
+        "rocprofiler-sdk-tool": [{
+            # Missing "metadata", "agents", etc.
+            "kernel_symbols": {}
+        }]
     }
 
     json_path = tmp_path / "missing_keys.json"
@@ -1716,107 +1957,157 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     """
 
     complex_json = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": 2},
-                        "type": 2,
-                        "node_id": 1,
-                        "wave_front_size": 32,
-                    },
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                    {
-                        "id": {"handle": 102},
-                        "agent_id": {"handle": 2},
-                        "name": "COUNTER2",
-                    },
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "Kernel1",
-                        "private_segment_size": 16,
-                    },
-                    "kernel2": {
-                        "formatted_kernel_name": "Kernel2",
-                        "private_segment_size": 32,
-                    },
+                    "type": 2,
+                    "node_id": 0,
+                    "wave_front_size": 64,
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        },
-                        {
-                            "correlation_id": {"internal": "corr2"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
-                        },
-                    ]
+                {
+                    "id": {
+                        "handle": 2
+                    },
+                    "type": 2,
+                    "node_id": 1,
+                    "wave_front_size": 32,
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 64,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 2, "y": 3, "z": 4},
-                                    "workgroup_size": {"x": 8, "y": 4, "z": 2},
+            ],
+            "counters": [
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
+                },
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "agent_id": {
+                        "handle": 2
+                    },
+                    "name": "COUNTER2",
+                },
+            ],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "Kernel1",
+                    "private_segment_size": 16,
+                },
+                "kernel2": {
+                    "formatted_kernel_name": "Kernel2",
+                    "private_segment_size": 32,
+                },
+            },
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "corr1"
+                        },
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "corr2"
+                        },
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },
+                ]
+            },
+            "callback_records": {
+                "counter_collection": [
+                    {
+                        "thread_id": 67890,
+                        "lds_block_size_v": 64,
+                        "arch_vgpr_count": 32,
+                        "sgpr_count": 16,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 1,
+                                "agent_id": {
+                                    "handle": 1
                                 },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
+                                "queue_id": {
+                                    "handle": 2
+                                },
+                                "kernel_id": "kernel1",
+                                "grid_size": {
+                                    "x": 2,
+                                    "y": 3,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 8,
+                                    "y": 4,
+                                    "z": 2
                                 },
                             },
-                            "records": [{"counter_id": {"handle": 101}, "value": 42}],
+                            "correlation_id": {
+                                "internal": "corr1",
+                                "external": "ext1",
+                            },
                         },
-                        {
-                            "thread_id": 67891,
-                            "lds_block_size_v": 128,
-                            "arch_vgpr_count": 64,
-                            "sgpr_count": 32,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 2,
-                                    "agent_id": {"handle": 2},
-                                    "queue_id": {"handle": 3},
-                                    "kernel_id": "kernel2",
-                                    "grid_size": {"x": 16, "y": 8, "z": 4},
-                                    "workgroup_size": {"x": 16, "y": 16, "z": 1},
+                        "records": [{
+                            "counter_id": {
+                                "handle": 101
+                            },
+                            "value": 42
+                        }],
+                    },
+                    {
+                        "thread_id": 67891,
+                        "lds_block_size_v": 128,
+                        "arch_vgpr_count": 64,
+                        "sgpr_count": 32,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 2,
+                                "agent_id": {
+                                    "handle": 2
                                 },
-                                "correlation_id": {
-                                    "internal": "corr2",
-                                    "external": "ext2",
+                                "queue_id": {
+                                    "handle": 3
+                                },
+                                "kernel_id": "kernel2",
+                                "grid_size": {
+                                    "x": 16,
+                                    "y": 8,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 16,
+                                    "y": 16,
+                                    "z": 1
                                 },
                             },
-                            "records": [{"counter_id": {"handle": 102}, "value": 84}],
+                            "correlation_id": {
+                                "internal": "corr2",
+                                "external": "ext2",
+                            },
                         },
-                    ]
-                },
-            }
-        ]
+                        "records": [{
+                            "counter_id": {
+                                "handle": 102
+                            },
+                            "value": 84
+                        }],
+                    },
+                ]
+            },
+        }]
     }
 
     json_path = tmp_path / "complex.json"
@@ -1829,12 +2120,12 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": complex_json["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0],
-            "corr2": complex_json["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][1],
+            "corr1":
+            complex_json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"
+                                                                      ][0],
+            "corr2":
+            complex_json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"]
+            [1],
         },
     )
     monkeypatch.setattr(
@@ -1849,7 +2140,14 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER1"}, (2, 102): {"name": "COUNTER2"}},
+        lambda data: {
+            (1, 101): {
+                "name": "COUNTER1"
+            },
+            (2, 102): {
+                "name": "COUNTER2"
+            }
+        },
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -1885,111 +2183,157 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     """
 
     json_data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": 2},
-                        "type": 2,
-                        "node_id": 1,
-                        "wave_front_size": 32,
-                    },
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                    {
-                        "id": {"handle": 102},
-                        "agent_id": {"handle": 2},
-                        "name": "COUNTER2",
-                    },
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "Kernel1",
-                        "private_segment_size": 16,
-                    },
-                    "kernel2": {
-                        "formatted_kernel_name": "Kernel2",
-                        "private_segment_size": 32,
-                    },
+                    "type": 2,
+                    "node_id": 0,
+                    "wave_front_size": 64,
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        },
-                        {
-                            "correlation_id": {"internal": "corr2"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
-                        },
-                    ]
+                {
+                    "id": {
+                        "handle": 2
+                    },
+                    "type": 2,
+                    "node_id": 1,
+                    "wave_front_size": 32,
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 64,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 2, "y": 3, "z": 4},
-                                    "workgroup_size": {"x": 8, "y": 4, "z": 2},
+            ],
+            "counters": [
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
+                },
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "agent_id": {
+                        "handle": 2
+                    },
+                    "name": "COUNTER2",
+                },
+            ],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "Kernel1",
+                    "private_segment_size": 16,
+                },
+                "kernel2": {
+                    "formatted_kernel_name": "Kernel2",
+                    "private_segment_size": 32,
+                },
+            },
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "corr1"
+                        },
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "corr2"
+                        },
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },
+                ]
+            },
+            "callback_records": {
+                "counter_collection": [
+                    {
+                        "thread_id": 67890,
+                        "lds_block_size_v": 64,
+                        "arch_vgpr_count": 32,
+                        "sgpr_count": 16,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 1,
+                                "agent_id": {
+                                    "handle": 1
                                 },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
+                                "queue_id": {
+                                    "handle": 2
+                                },
+                                "kernel_id": "kernel1",
+                                "grid_size": {
+                                    "x": 2,
+                                    "y": 3,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 8,
+                                    "y": 4,
+                                    "z": 2
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 101}, "value": 42}
-                            ],  # Only COUNTER1
+                            "correlation_id": {
+                                "internal": "corr1",
+                                "external": "ext1",
+                            },
                         },
-                        {
-                            "thread_id": 67891,
-                            "lds_block_size_v": 128,
-                            "arch_vgpr_count": 64,
-                            "sgpr_count": 32,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 2,
-                                    "agent_id": {"handle": 2},
-                                    "queue_id": {"handle": 3},
-                                    "kernel_id": "kernel2",
-                                    "grid_size": {"x": 16, "y": 8, "z": 4},
-                                    "workgroup_size": {"x": 16, "y": 16, "z": 1},
+                        "records": [{
+                            "counter_id": {
+                                "handle": 101
+                            },
+                            "value": 42
+                        }],  # Only COUNTER1
+                    },
+                    {
+                        "thread_id": 67891,
+                        "lds_block_size_v": 128,
+                        "arch_vgpr_count": 64,
+                        "sgpr_count": 32,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 2,
+                                "agent_id": {
+                                    "handle": 2
                                 },
-                                "correlation_id": {
-                                    "internal": "corr2",
-                                    "external": "ext2",
+                                "queue_id": {
+                                    "handle": 3
+                                },
+                                "kernel_id": "kernel2",
+                                "grid_size": {
+                                    "x": 16,
+                                    "y": 8,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 16,
+                                    "y": 16,
+                                    "z": 1
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 102}, "value": 84}
-                            ],  # Only COUNTER2
+                            "correlation_id": {
+                                "internal": "corr2",
+                                "external": "ext2",
+                            },
                         },
-                    ]
-                },
-            }
-        ]
+                        "records": [{
+                            "counter_id": {
+                                "handle": 102
+                            },
+                            "value": 84
+                        }],  # Only COUNTER2
+                    },
+                ]
+            },
+        }]
     }
 
     json_path = tmp_path / "missing_counters.json"
@@ -2002,12 +2346,12 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0],
-            "corr2": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][1],
+            "corr1":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][0
+                                                                                      ],
+            "corr2":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][1
+                                                                                      ],
         },
     )
     monkeypatch.setattr(
@@ -2022,7 +2366,14 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER1"}, (2, 102): {"name": "COUNTER2"}},
+        lambda data: {
+            (1, 101): {
+                "name": "COUNTER1"
+            },
+            (2, 102): {
+                "name": "COUNTER2"
+            }
+        },
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -2163,113 +2514,181 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     """
 
     complex_json = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [
+                {
+                    "id": {
+                        "handle": 1
                     },
-                    {
-                        "id": {"handle": 2},
-                        "type": 2,
-                        "node_id": 1,
-                        "wave_front_size": 32,
-                    },
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                    {
-                        "id": {"handle": 102},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER2",
-                    },
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "Kernel1",
-                        "private_segment_size": 16,
-                    },
-                    "kernel2": {
-                        "formatted_kernel_name": "Kernel2",
-                        "private_segment_size": 32,
-                    },
+                    "type": 2,
+                    "node_id": 0,
+                    "wave_front_size": 64,
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        },
-                        {
-                            "correlation_id": {"internal": "corr2"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
-                        },
-                    ]
+                {
+                    "id": {
+                        "handle": 2
+                    },
+                    "type": 2,
+                    "node_id": 1,
+                    "wave_front_size": 32,
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 64,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 2, "y": 3, "z": 4},
-                                    "workgroup_size": {"x": 8, "y": 4, "z": 2},
+            ],
+            "counters": [
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
+                },
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER2",
+                },
+            ],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "Kernel1",
+                    "private_segment_size": 16,
+                },
+                "kernel2": {
+                    "formatted_kernel_name": "Kernel2",
+                    "private_segment_size": 32,
+                },
+            },
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "corr1"
+                        },
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "corr2"
+                        },
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },
+                ]
+            },
+            "callback_records": {
+                "counter_collection": [
+                    {
+                        "thread_id":
+                        67890,
+                        "lds_block_size_v":
+                        64,
+                        "arch_vgpr_count":
+                        32,
+                        "sgpr_count":
+                        16,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 1,
+                                "agent_id": {
+                                    "handle": 1
                                 },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
+                                "queue_id": {
+                                    "handle": 2
+                                },
+                                "kernel_id": "kernel1",
+                                "grid_size": {
+                                    "x": 2,
+                                    "y": 3,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 8,
+                                    "y": 4,
+                                    "z": 2
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 101}, "value": 42},
-                                {"counter_id": {"handle": 102}, "value": 24},
-                            ],
+                            "correlation_id": {
+                                "internal": "corr1",
+                                "external": "ext1",
+                            },
                         },
-                        {
-                            "thread_id": 67891,
-                            "lds_block_size_v": 128,
-                            "arch_vgpr_count": 64,
-                            "sgpr_count": 32,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 2,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 3},
-                                    "kernel_id": "kernel2",
-                                    "grid_size": {"x": 16, "y": 8, "z": 4},
-                                    "workgroup_size": {"x": 16, "y": 16, "z": 1},
+                        "records": [
+                            {
+                                "counter_id": {
+                                    "handle": 101
                                 },
-                                "correlation_id": {
-                                    "internal": "corr2",
-                                    "external": "ext2",
+                                "value": 42
+                            },
+                            {
+                                "counter_id": {
+                                    "handle": 102
+                                },
+                                "value": 24
+                            },
+                        ],
+                    },
+                    {
+                        "thread_id":
+                        67891,
+                        "lds_block_size_v":
+                        128,
+                        "arch_vgpr_count":
+                        64,
+                        "sgpr_count":
+                        32,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 2,
+                                "agent_id": {
+                                    "handle": 1
+                                },
+                                "queue_id": {
+                                    "handle": 3
+                                },
+                                "kernel_id": "kernel2",
+                                "grid_size": {
+                                    "x": 16,
+                                    "y": 8,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 16,
+                                    "y": 16,
+                                    "z": 1
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 101}, "value": 84},
-                                {"counter_id": {"handle": 102}, "value": 36},
-                            ],
+                            "correlation_id": {
+                                "internal": "corr2",
+                                "external": "ext2",
+                            },
                         },
-                    ]
-                },
-            }
-        ]
+                        "records": [
+                            {
+                                "counter_id": {
+                                    "handle": 101
+                                },
+                                "value": 84
+                            },
+                            {
+                                "counter_id": {
+                                    "handle": 102
+                                },
+                                "value": 36
+                            },
+                        ],
+                    },
+                ]
+            },
+        }]
     }
 
     json_path = tmp_path / "complex.json"
@@ -2282,12 +2701,12 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": complex_json["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0],
-            "corr2": complex_json["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][1],
+            "corr1":
+            complex_json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"
+                                                                      ][0],
+            "corr2":
+            complex_json["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"]
+            [1],
         },
     )
     monkeypatch.setattr(
@@ -2302,7 +2721,14 @@ def test_v3_json_to_csv_complex_dispatch(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER2"}},
+        lambda data: {
+            (1, 101): {
+                "name": "COUNTER1"
+            },
+            (1, 102): {
+                "name": "COUNTER2"
+            }
+        },
     )
 
     utils.v3_json_to_csv(json_path, csv_path)
@@ -2340,105 +2766,147 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     """
 
     json_data = {
-        "rocprofiler-sdk-tool": [
-            {
-                "metadata": {"pid": 12345},
-                "agents": [
-                    {
-                        "id": {"handle": 1},
-                        "type": 2,
-                        "node_id": 0,
-                        "wave_front_size": 64,
-                    }
-                ],
-                "counters": [
-                    {
-                        "id": {"handle": 101},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER1",
-                    },
-                    {
-                        "id": {"handle": 102},
-                        "agent_id": {"handle": 1},
-                        "name": "COUNTER2",
-                    },
-                ],
-                "kernel_symbols": {
-                    "kernel1": {
-                        "formatted_kernel_name": "Kernel1",
-                        "private_segment_size": 16,
-                    },
-                    "kernel2": {
-                        "formatted_kernel_name": "Kernel2",
-                        "private_segment_size": 32,
-                    },
+        "rocprofiler-sdk-tool": [{
+            "metadata": {
+                "pid": 12345
+            },
+            "agents": [{
+                "id": {
+                    "handle": 1
                 },
-                "buffer_records": {
-                    "kernel_dispatch": [
-                        {
-                            "correlation_id": {"internal": "corr1"},
-                            "start_timestamp": 100,
-                            "end_timestamp": 200,
-                        },
-                        {
-                            "correlation_id": {"internal": "corr2"},
-                            "start_timestamp": 300,
-                            "end_timestamp": 400,
-                        },
-                    ]
+                "type": 2,
+                "node_id": 0,
+                "wave_front_size": 64,
+            }],
+            "counters": [
+                {
+                    "id": {
+                        "handle": 101
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER1",
                 },
-                "callback_records": {
-                    "counter_collection": [
-                        {
-                            "thread_id": 67890,
-                            "lds_block_size_v": 64,
-                            "arch_vgpr_count": 32,
-                            "sgpr_count": 16,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 1,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 2},
-                                    "kernel_id": "kernel1",
-                                    "grid_size": {"x": 2, "y": 3, "z": 4},
-                                    "workgroup_size": {"x": 8, "y": 4, "z": 2},
+                {
+                    "id": {
+                        "handle": 102
+                    },
+                    "agent_id": {
+                        "handle": 1
+                    },
+                    "name": "COUNTER2",
+                },
+            ],
+            "kernel_symbols": {
+                "kernel1": {
+                    "formatted_kernel_name": "Kernel1",
+                    "private_segment_size": 16,
+                },
+                "kernel2": {
+                    "formatted_kernel_name": "Kernel2",
+                    "private_segment_size": 32,
+                },
+            },
+            "buffer_records": {
+                "kernel_dispatch": [
+                    {
+                        "correlation_id": {
+                            "internal": "corr1"
+                        },
+                        "start_timestamp": 100,
+                        "end_timestamp": 200,
+                    },
+                    {
+                        "correlation_id": {
+                            "internal": "corr2"
+                        },
+                        "start_timestamp": 300,
+                        "end_timestamp": 400,
+                    },
+                ]
+            },
+            "callback_records": {
+                "counter_collection": [
+                    {
+                        "thread_id": 67890,
+                        "lds_block_size_v": 64,
+                        "arch_vgpr_count": 32,
+                        "sgpr_count": 16,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 1,
+                                "agent_id": {
+                                    "handle": 1
                                 },
-                                "correlation_id": {
-                                    "internal": "corr1",
-                                    "external": "ext1",
+                                "queue_id": {
+                                    "handle": 2
+                                },
+                                "kernel_id": "kernel1",
+                                "grid_size": {
+                                    "x": 2,
+                                    "y": 3,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 8,
+                                    "y": 4,
+                                    "z": 2
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 101}, "value": 42}
-                            ],  # Only COUNTER1
+                            "correlation_id": {
+                                "internal": "corr1",
+                                "external": "ext1",
+                            },
                         },
-                        {
-                            "thread_id": 67891,
-                            "lds_block_size_v": 128,
-                            "arch_vgpr_count": 64,
-                            "sgpr_count": 32,
-                            "dispatch_data": {
-                                "dispatch_info": {
-                                    "dispatch_id": 2,
-                                    "agent_id": {"handle": 1},
-                                    "queue_id": {"handle": 3},
-                                    "kernel_id": "kernel2",
-                                    "grid_size": {"x": 16, "y": 8, "z": 4},
-                                    "workgroup_size": {"x": 16, "y": 16, "z": 1},
+                        "records": [{
+                            "counter_id": {
+                                "handle": 101
+                            },
+                            "value": 42
+                        }],  # Only COUNTER1
+                    },
+                    {
+                        "thread_id": 67891,
+                        "lds_block_size_v": 128,
+                        "arch_vgpr_count": 64,
+                        "sgpr_count": 32,
+                        "dispatch_data": {
+                            "dispatch_info": {
+                                "dispatch_id": 2,
+                                "agent_id": {
+                                    "handle": 1
                                 },
-                                "correlation_id": {
-                                    "internal": "corr2",
-                                    "external": "ext2",
+                                "queue_id": {
+                                    "handle": 3
+                                },
+                                "kernel_id": "kernel2",
+                                "grid_size": {
+                                    "x": 16,
+                                    "y": 8,
+                                    "z": 4
+                                },
+                                "workgroup_size": {
+                                    "x": 16,
+                                    "y": 16,
+                                    "z": 1
                                 },
                             },
-                            "records": [
-                                {"counter_id": {"handle": 102}, "value": 84}
-                            ],  # Only COUNTER2
+                            "correlation_id": {
+                                "internal": "corr2",
+                                "external": "ext2",
+                            },
                         },
-                    ]
-                },
-            }
-        ]
+                        "records": [{
+                            "counter_id": {
+                                "handle": 102
+                            },
+                            "value": 84
+                        }],  # Only COUNTER2
+                    },
+                ]
+            },
+        }]
     }
 
     json_path = tmp_path / "missing_counters.json"
@@ -2451,12 +2919,12 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
         utils,
         "v3_json_get_dispatches",
         lambda data: {
-            "corr1": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][0],
-            "corr2": json_data["rocprofiler-sdk-tool"][0]["buffer_records"][
-                "kernel_dispatch"
-            ][1],
+            "corr1":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][0
+                                                                                      ],
+            "corr2":
+            json_data["rocprofiler-sdk-tool"][0]["buffer_records"]["kernel_dispatch"][1
+                                                                                      ],
         },
     )
     monkeypatch.setattr(
@@ -2468,7 +2936,14 @@ def test_v3_json_to_csv_missing_counters_handling(tmp_path, monkeypatch):
     monkeypatch.setattr(
         utils,
         "v3_json_get_counters",
-        lambda data: {(1, 101): {"name": "COUNTER1"}, (1, 102): {"name": "COUNTER2"}},
+        lambda data: {
+            (1, 101): {
+                "name": "COUNTER1"
+            },
+            (1, 102): {
+                "name": "COUNTER2"
+            }
+        },
     )
 
     try:
@@ -2596,8 +3071,7 @@ def test_parse_text_mixed_lines(tmp_path):
     """
     test_file = tmp_path / "mixed_lines.txt"
     test_file.write_text(
-        "line1\npmc: counter1 counter2\nline3\npmc: counter3 counter4\nline5"
-    )
+        "line1\npmc: counter1 counter2\nline3\npmc: counter3 counter4\nline5")
 
     result = utils.parse_text(str(test_file))
     assert result == ["counter1", "counter2", "counter3", "counter4"]
@@ -2682,6 +3156,7 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
         f.write(csv_content)
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi250x"
             self._l2_banks = 32
@@ -2691,16 +3166,14 @@ def test_run_prof_success_v2(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: False)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"]
-    )
+    monkeypatch.setattr("glob.glob",
+                        lambda pattern: [workload_dir + "/out/pmc_1/results_0.csv"])
 
     import utils.utils as utils_mod
 
@@ -2726,6 +3199,7 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2737,16 +3211,14 @@ def test_run_prof_success_v3_csv(tmp_path, monkeypatch):
     csv_files = [workload_dir + "/out/pmc_1/converted.csv"]
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
-    )
+    monkeypatch.setattr("utils.utils.process_rocprofv3_output",
+                        lambda *a, **k: csv_files)
 
     mock_df = pd.DataFrame({"Dispatch_ID": [0], "GPU_ID": [0], "Kernel_Name": ["test"]})
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
@@ -2773,6 +3245,7 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2784,13 +3257,13 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
     profiler_options = {
         "APP_CMD": ["./test_app"],
         "ROCPROF_OUTPUT_PATH": workload_dir,
-        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        "ROCP_TOOL_LIBRARIES":
+        "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
     }
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofiler-sdk")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.parse_text", lambda f: ["SQ_WAVES"])
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
@@ -2800,9 +3273,8 @@ def test_run_prof_success_rocprofiler_sdk(tmp_path, monkeypatch):
 
     import utils.utils as utils_mod
 
-    utils_mod.run_prof(
-        str(fname), profiler_options, workload_dir, mspec, logging.INFO, "csv"
-    )
+    utils_mod.run_prof(str(fname), profiler_options, workload_dir, mspec, logging.INFO,
+                       "csv")
 
 
 def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
@@ -2823,6 +3295,7 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2832,18 +3305,18 @@ def test_run_prof_with_yaml_config(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "yaml.safe_load", lambda _: {"rocprofiler-sdk": {"counters": ["counter"]}}
-    )
+    monkeypatch.setattr("yaml.safe_load",
+                        lambda _: {"rocprofiler-sdk": {
+                            "counters": ["counter"]
+                        }})
 
     import utils.utils as utils_mod
 
@@ -2866,6 +3339,7 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2875,9 +3349,8 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (False, "error output")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (False, "error output"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
@@ -2892,9 +3365,8 @@ def test_run_prof_failure_subprocess(tmp_path, monkeypatch):
     import utils.utils as utils_mod
 
     with pytest.raises(RuntimeError, match="console_error called"):
-        utils_mod.run_prof(
-            str(fname), ["--arg"], workload_dir, mspec, logging.INFO, "csv"
-        )
+        utils_mod.run_prof(str(fname), ["--arg"], workload_dir, mspec, logging.INFO,
+                           "csv")
 
 
 def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
@@ -2913,6 +3385,7 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2929,9 +3402,8 @@ def test_run_prof_mi300_environment_setup(tmp_path, monkeypatch):
         return (True, "success")
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", mock_capture_subprocess_output
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output",
+                        mock_capture_subprocess_output)
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("utils.utils.process_rocprofv3_output", lambda *a, **k: [])
@@ -2965,6 +3437,7 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -2980,25 +3453,21 @@ def test_run_prof_timestamps_special_case(tmp_path, monkeypatch):
     csv_files = [workload_dir + "/kernel_trace.csv"]
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv3")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: True)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
-    monkeypatch.setattr(
-        "utils.utils.process_rocprofv3_output", lambda *a, **k: csv_files
-    )
+    monkeypatch.setattr("utils.utils.process_rocprofv3_output",
+                        lambda *a, **k: csv_files)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_warning", lambda *a, **k: None)
 
-    mock_df = pd.DataFrame(
-        {
-            "Dispatch_ID": [0],
-            "Start_Timestamp": [100],
-            "End_Timestamp": [200],
-        }
-    )
+    mock_df = pd.DataFrame({
+        "Dispatch_ID": [0],
+        "Start_Timestamp": [100],
+        "End_Timestamp": [200],
+    })
     monkeypatch.setattr("pandas.read_csv", lambda *a, **k: mock_df)
     monkeypatch.setattr("pandas.concat", lambda *a, **k: mock_df)
 
@@ -3023,6 +3492,7 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -3032,9 +3502,8 @@ def test_run_prof_no_results_files(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: False)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
     monkeypatch.setattr("glob.glob", lambda pattern: [])  # No files found
@@ -3064,6 +3533,7 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     os.makedirs(workload_dir + "/out/pmc_1", exist_ok=True)
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -3073,31 +3543,26 @@ def test_run_prof_header_standardization(tmp_path, monkeypatch):
     mspec = MockSpec()
 
     csv_content = (
-        "KernelName,Index,grd,gpu-id,BeginNs,EndNs\ntest_kernel,0,64,0,100,200"
-    )
+        "KernelName,Index,grd,gpu-id,BeginNs,EndNs\ntest_kernel,0,64,0,100,200")
     with open(workload_dir + "/out/pmc_1/results_test.csv", "w") as f:
         f.write(csv_content)
 
-    old_headers_df = pd.DataFrame(
-        {
-            "KernelName": ["test_kernel"],
-            "Index": [0],
-            "grd": [64],
-            "gpu-id": [0],
-            "BeginNs": [100],
-            "EndNs": [200],
-        }
-    )
+    old_headers_df = pd.DataFrame({
+        "KernelName": ["test_kernel"],
+        "Index": [0],
+        "grd": [64],
+        "gpu-id": [0],
+        "BeginNs": [100],
+        "EndNs": [200],
+    })
 
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: False)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
-    monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/out/pmc_1/results_test.csv"]
-    )
+    monkeypatch.setattr("glob.glob",
+                        lambda pattern: [workload_dir + "/out/pmc_1/results_test.csv"])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
@@ -3145,6 +3610,7 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     workload_dir = str(tmp_path / "workload")
 
     class MockSpec:
+
         def __init__(self):
             self.gpu_model = "mi300x"
             self.gpu_arch = "gfx942"
@@ -3158,28 +3624,23 @@ def test_run_prof_tcc_flattening_mi300(tmp_path, monkeypatch):
     def mock_flatten_tcc_info_across_xcds(file, xcds, l2_banks):
         nonlocal flatten_called
         flatten_called = True
-        return pd.DataFrame(
-            {
-                "Dispatch_ID": [0],
-                "TCC_HIT[0]": [100],
-                "TCC_HIT[16]": [200],
-            }
-        )
+        return pd.DataFrame({
+            "Dispatch_ID": [0],
+            "TCC_HIT[0]": [100],
+            "TCC_HIT[16]": [200],
+        })
 
     # Mock functions
     monkeypatch.setattr("utils.utils.rocprof_cmd", "rocprofv2")
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "success"))
     monkeypatch.setattr("utils.utils.using_v3", lambda: False)
     monkeypatch.setattr("utils.utils.using_v1", lambda: False)
-    monkeypatch.setattr(
-        "utils.utils.flatten_tcc_info_across_xcds", mock_flatten_tcc_info_across_xcds
-    )
+    monkeypatch.setattr("utils.utils.flatten_tcc_info_across_xcds",
+                        mock_flatten_tcc_info_across_xcds)
     monkeypatch.setattr("utils.utils.mi_gpu_specs.get_num_xcds", lambda *a: 2)
-    monkeypatch.setattr(
-        "glob.glob", lambda pattern: [workload_dir + "/results_test.csv"]
-    )
+    monkeypatch.setattr("glob.glob",
+                        lambda pattern: [workload_dir + "/results_test.csv"])
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
     monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: None)
 
@@ -3201,9 +3662,12 @@ import utils.utils as utils_mod
 
 
 class MockMSpec:
-    def __init__(
-        self, gpu_model="mi300a", gpu_arch="gfx942", compute_partition=None, l2_banks=32
-    ):
+
+    def __init__(self,
+                 gpu_model="mi300a",
+                 gpu_arch="gfx942",
+                 compute_partition=None,
+                 l2_banks=32):
         self.gpu_model = gpu_model
         self.gpu_arch = gpu_arch
         self.compute_partition = compute_partition
@@ -3231,18 +3695,16 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         capture_subprocess_called_with_env = new_env
         return (True, "Success")
 
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", mock_capture_subprocess
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output",
+                        mock_capture_subprocess)
 
     def mock_console_error_no_exit(msg, exit=True):
         print(f"Mocked console_error: {msg}, exit={exit}")
 
     monkeypatch.setattr("utils.utils.console_error", mock_console_error_no_exit)
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
-    monkeypatch.setattr(
-        "utils.utils.parse_text", lambda *a, **k: ["COUNTER1", "COUNTER2"]
-    )
+    monkeypatch.setattr("utils.utils.parse_text",
+                        lambda *a, **k: ["COUNTER1", "COUNTER2"])
 
     mock_fname_path_obj = mock.Mock(spec=pathlib.Path)
     mock_fname_path_obj.stem = "counters"
@@ -3261,11 +3723,8 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
                 return mock_out_path_obj
             if p_arg.endswith("counters.txt"):
                 return mock_fname_path_obj
-        if (
-            p_arg == mock_fname_path_obj
-            and args == ()
-            and hasattr(p_arg, "with_suffix")
-        ):
+        if (p_arg == mock_fname_path_obj and args == ()
+                and hasattr(p_arg, "with_suffix")):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
@@ -3296,12 +3755,11 @@ def test_run_prof_sdk_creates_new_env_copy(tmp_path, monkeypatch):
         format_rocprof_output,
     )
 
+    assert (capture_subprocess_called_with_env
+            is not None), "new_env should have been created"
     assert (
-        capture_subprocess_called_with_env is not None
-    ), "new_env should have been created"
-    assert (
-        "EXISTING_VAR" in capture_subprocess_called_with_env
-    ), "new_env should be a copy of os.environ"
+        "EXISTING_VAR"
+        in capture_subprocess_called_with_env), "new_env should be a copy of os.environ"
     assert capture_subprocess_called_with_env["EXISTING_VAR"] == original_env_var
     assert "ROCPROF_COUNTERS" in capture_subprocess_called_with_env
     assert "APP_CMD" not in capture_subprocess_called_with_env
@@ -3320,9 +3778,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     workload_dir_str = str(tmp_path)
     (tmp_path / "out" / "pmc_1").mkdir(parents=True, exist_ok=True)
 
-    monkeypatch.setattr(
-        "utils.utils.capture_subprocess_output", lambda *a, **k: (True, "Success")
-    )
+    monkeypatch.setattr("utils.utils.capture_subprocess_output", lambda *a, **k:
+                        (True, "Success"))
     monkeypatch.setattr(
         "utils.utils.process_rocprofv3_output",
         lambda *a, **k: [str(tmp_path / "results1.csv")],
@@ -3364,11 +3821,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
             return mock_out_path_obj
         if isinstance(p_arg, str) and p_arg.endswith("counters.txt"):
             return mock_fname_path_obj
-        if (
-            p_arg == mock_fname_path_obj
-            and args == ()
-            and hasattr(p_arg, "with_suffix")
-        ):
+        if (p_arg == mock_fname_path_obj and args == ()
+                and hasattr(p_arg, "with_suffix")):
             return mock_fname_path_obj
         return mock_fname_path_obj
 
@@ -3393,7 +3847,8 @@ def test_run_prof_v3_sdk_and_cli_calls_trace_processing(tmp_path, monkeypatch):
     profiler_options_sdk_hip = {
         "APP_CMD": "my_app",
         "ROCPROF_HIP_RUNTIME_API_TRACE": "1",
-        "ROCP_TOOL_LIBRARIES": "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
+        "ROCP_TOOL_LIBRARIES":
+        "/opt/rocm/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so",
     }
     hip_trace_called_with = None
     kokkos_trace_called_with = None
@@ -3519,9 +3974,8 @@ def test_process_rocprofv3_output_csv_format_with_counter_files(tmp_path, monkey
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         Path(output_path).write_text("converted,data\ntest,value")
 
-    monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
-    )
+    monkeypatch.setattr("utils.utils.v3_counter_csv_to_v2_csv",
+                        mock_v3_counter_csv_to_v2_csv)
 
     import utils.utils as utils_mod
 
@@ -3562,9 +4016,8 @@ def test_process_rocprofv3_output_csv_format_conversion_error(tmp_path, monkeypa
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         raise ValueError("Conversion failed")
 
-    monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
-    )
+    monkeypatch.setattr("utils.utils.v3_counter_csv_to_v2_csv",
+                        mock_v3_counter_csv_to_v2_csv)
 
     warnings = []
     monkeypatch.setattr("utils.utils.console_warning", lambda msg: warnings.append(msg))
@@ -3645,8 +4098,7 @@ def test_process_rocprofv3_output_csv_format_timestamps_fallback(tmp_path, monke
 
 
 def test_process_rocprofv3_output_csv_format_no_files_non_timestamps(
-    tmp_path, monkeypatch
-):
+        tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output returns empty list when no files found for non-timestamps.
 
@@ -3687,8 +4139,8 @@ def test_process_rocprofv3_output_invalid_format(monkeypatch):
     import utils.utils as utils_mod
 
     with pytest.raises(
-        RuntimeError, match="The output file of rocprofv3 can only support json or csv"
-    ):
+            RuntimeError,
+            match="The output file of rocprofv3 can only support json or csv"):
         utils_mod.process_rocprofv3_output("invalid", "/tmp", False)
 
 
@@ -3715,8 +4167,7 @@ def test_process_rocprofv3_output_json_format_no_files(tmp_path, monkeypatch):
 
 
 def test_process_rocprofv3_output_csv_format_multiple_counter_files(
-    tmp_path, monkeypatch
-):
+        tmp_path, monkeypatch):
     """
     Test process_rocprofv3_output processes multiple counter collection files.
 
@@ -3756,9 +4207,8 @@ def test_process_rocprofv3_output_csv_format_multiple_counter_files(
     def mock_v3_counter_csv_to_v2_csv(counter_path, agent_path, output_path):
         Path(output_path).write_text(f"converted,data\n{Path(counter_path).stem},value")
 
-    monkeypatch.setattr(
-        "utils.utils.v3_counter_csv_to_v2_csv", mock_v3_counter_csv_to_v2_csv
-    )
+    monkeypatch.setattr("utils.utils.v3_counter_csv_to_v2_csv",
+                        mock_v3_counter_csv_to_v2_csv)
 
     import utils.utils as utils_mod
 
@@ -3775,6 +4225,7 @@ def test_capture_subprocess_output_failure(monkeypatch):
     """
 
     class DummyProcess:
+
         def __init__(self):
             self.stdout = io.StringIO("error message\n")
 
@@ -3805,6 +4256,7 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     """
 
     class DummyProcess:
+
         def __init__(self):
             self.stdout = io.StringIO("test output\n")
 
@@ -3821,16 +4273,14 @@ def test_capture_subprocess_output_with_logging_disabled(monkeypatch):
     )
 
     log_calls = []
-    monkeypatch.setattr(
-        "utils.utils.console_log", lambda *a, **k: log_calls.append((a, k))
-    )
+    monkeypatch.setattr("utils.utils.console_log", lambda *a, **k: log_calls.append(
+        (a, k)))
     monkeypatch.setattr("utils.utils.console_debug", lambda *a, **k: None)
 
     import utils.utils as utils_mod
 
-    success, output = utils_mod.capture_subprocess_output(
-        ["echo", "test"], enable_logging=False
-    )
+    success, output = utils_mod.capture_subprocess_output(["echo", "test"],
+                                                          enable_logging=False)
 
     assert success is True
     assert len(log_calls) == 0
@@ -3922,9 +4372,8 @@ def test_process_kokkos_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert (
-        len(df) == 4
-    ), "The final DataFrame does not contain the correct number of rows."
+    assert (len(df) == 4
+            ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "kokkos_malloc" in df["marker_name"].values
     assert "kokkos_parallel_reduce" in df["marker_name"].values
@@ -3976,8 +4425,7 @@ def test_process_kokkos_trace_output_no_files_found(tmp_path, monkeypatch):
     except ValueError:
         # pandas.concat() raises ValueError when passed empty list
         pytest.skip(
-            "process_kokkos_trace_output doesn't handle empty file list gracefully"
-        )
+            "process_kokkos_trace_output doesn't handle empty file list gracefully")
 
 
 def test_process_kokkos_trace_output_mixed_file_states(tmp_path, monkeypatch):
@@ -4254,11 +4702,9 @@ def test_process_kokkos_trace_output_different_schemas(tmp_path, monkeypatch):
 
     # Different column order and types
     csv1.write_text(
-        "marker_id,marker_name,start_time\n1,kokkos_begin,1000\n2,kokkos_end,2000\n"
-    )
+        "marker_id,marker_name,start_time\n1,kokkos_begin,1000\n2,kokkos_end,2000\n")
     csv2.write_text(
-        "marker_name,duration,thread_id\nkokkos_malloc,500,0\nkokkos_free,200,1\n"
-    )
+        "marker_name,duration,thread_id\nkokkos_malloc,500,0\nkokkos_free,200,1\n")
 
     fbase = "schema_test"
 
@@ -4321,7 +4767,6 @@ def test_process_kokkos_trace_output_permission_error(tmp_path, monkeypatch):
 # =============================================================================
 # HIP TRACE PROCESSING TESTS
 # =============================================================================
-
 """
 These test cases comprehensively cover:
 
@@ -4373,11 +4818,9 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     csv1 = sub1 / "test_hip_api_trace.csv"
     csv2 = sub2 / "test_hip_api_trace.csv"
     csv1.write_text(
-        "timestamp,api_name,duration\n1000,hipMalloc,500\n2000,hipMemcpy,300\n"
-    )
+        "timestamp,api_name,duration\n1000,hipMalloc,500\n2000,hipMemcpy,300\n")
     csv2.write_text(
-        "timestamp,api_name,duration\n3000,hipFree,200\n4000,hipLaunchKernel,800\n"
-    )
+        "timestamp,api_name,duration\n3000,hipFree,200\n4000,hipLaunchKernel,800\n")
 
     fbase = "test_workload"
     import utils.utils as utils_mod
@@ -4388,9 +4831,8 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     assert output_file.exists(), "The primary output file was not created."
 
     df = pd.read_csv(output_file)
-    assert (
-        len(df) == 4
-    ), "The final DataFrame does not contain the correct number of rows."
+    assert (len(df) == 4
+            ), "The final DataFrame does not contain the correct number of rows."
     assert set(df["timestamp"]) == {1000, 2000, 3000, 4000}
     assert "hipMalloc" in df["api_name"].values
     assert "hipLaunchKernel" in df["api_name"].values
@@ -4399,8 +4841,7 @@ def test_process_hip_trace_output_multiple_files(tmp_path, monkeypatch):
     assert copied_file.exists(), "The copied output file was not created."
     df_copy = pd.read_csv(copied_file)
     assert df.equals(
-        df_copy
-    ), "The copied file content does not match the primary output."
+        df_copy), "The copied file content does not match the primary output."
 
 
 def test_process_hip_trace_output_single_file(tmp_path, monkeypatch):
@@ -4473,8 +4914,7 @@ def test_process_hip_trace_output_no_files_found(tmp_path, monkeypatch):
 
     except (ValueError, pd.errors.EmptyDataError):
         pytest.skip(
-            "process_hip_trace_output doesn't handle empty file list gracefully"
-        )
+            "process_hip_trace_output doesn't handle empty file list gracefully")
 
 
 def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
@@ -4524,8 +4964,7 @@ def test_process_hip_trace_output_files_not_exist(tmp_path, monkeypatch):
 
     except ValueError:
         pytest.skip(
-            "process_hip_trace_output doesn't handle empty file filtering gracefully"
-        )
+            "process_hip_trace_output doesn't handle empty file filtering gracefully")
 
 
 def test_process_hip_trace_output_empty_csv_files(tmp_path, monkeypatch):
@@ -5157,10 +5596,12 @@ def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
     binary_path.chmod(0o755)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5173,6 +5614,7 @@ def test_mibench_standard_distro_first_path_exists(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5234,10 +5676,12 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
     binary_path.chmod(0o755)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5250,6 +5694,7 @@ def test_mibench_standard_distro_second_path_exists(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5306,10 +5751,12 @@ def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
     install_root.mkdir(parents=True)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5322,6 +5769,7 @@ def test_mibench_no_binary_found_error(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5377,10 +5825,12 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
     binary_path.chmod(0o755)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5393,6 +5843,7 @@ def test_mibench_quiet_flag_handling_bug(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5483,10 +5934,12 @@ def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
     binary_path.chmod(0o755)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5499,6 +5952,7 @@ def test_mibench_sles_distro_mapping(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5648,10 +6102,12 @@ def test_mibench_unknown_distro_mapping(tmp_path, monkeypatch):
     install_root.mkdir(parents=True)
 
     class MockConfig:
+
         def __init__(self):
             self.rocprof_compute_home = self.MockPath(rocprof_home, install_root)
 
         class MockPath:
+
             def __init__(self, home_path, install_path):
                 self._home_path = home_path
                 self._install_path = install_path
@@ -5664,6 +6120,7 @@ def test_mibench_unknown_distro_mapping(tmp_path, monkeypatch):
                 return self._home_path / other
 
             class MockParent:
+
                 def __init__(self, install_path):
                     self.parent = install_path
 
@@ -5740,7 +6197,6 @@ def test_mibench_console_log_called(tmp_path, monkeypatch):
 # =============================================================================
 # TESTS FOR flatten_tcc_info_across_xcds
 # =============================================================================
-
 """
 Normal Functionality:
 
@@ -5792,9 +6248,9 @@ def test_flatten_tcc_info_across_xcds_zero_xcds(tmp_path):
     import utils.utils as utils_mod
 
     with pytest.raises(ValueError, match="range\\(\\) arg 3 must not be zero"):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=0, tcc_channel_per_xcd=4
-        )
+        utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                               xcds=0,
+                                               tcc_channel_per_xcd=4)
 
 
 def test_flatten_tcc_info_across_xcds_insufficient_data(tmp_path):
@@ -5817,9 +6273,9 @@ def test_flatten_tcc_info_across_xcds_insufficient_data(tmp_path):
     import utils.utils as utils_mod
 
     with pytest.raises(ValueError, match="cannot set a row with mismatched columns"):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=3, tcc_channel_per_xcd=4
-        )
+        utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                               xcds=3,
+                                               tcc_channel_per_xcd=4)
 
 
 def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
@@ -5850,9 +6306,9 @@ def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
     import utils.utils as utils_mod
 
     try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=4
-        )
+        result = utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                                        xcds=2,
+                                                        tcc_channel_per_xcd=4)
 
         assert len(result) == 1
         assert "TCC_HIT_SPECIAL[0]" in result.columns
@@ -5864,8 +6320,7 @@ def test_flatten_tcc_info_across_xcds_irregular_tcc_column_names(tmp_path):
     except ValueError as e:
         if "The truth value of a Series is ambiguous" in str(e):
             pytest.skip(
-                "Function has pandas Series ambiguity issue in boolean evaluation"
-            )
+                "Function has pandas Series ambiguity issue in boolean evaluation")
         else:
             raise
 
@@ -5893,9 +6348,9 @@ def test_flatten_tcc_info_across_xcds_regex_pattern_validation(tmp_path):
     import utils.utils as utils_mod
 
     try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=128
-        )
+        result = utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                                        xcds=2,
+                                                        tcc_channel_per_xcd=128)
 
         assert len(result) == 1
         assert "TCC_HIT[0]" in result.columns
@@ -5910,8 +6365,7 @@ def test_flatten_tcc_info_across_xcds_regex_pattern_validation(tmp_path):
     except ValueError as e:
         if "The truth value of a Series is ambiguous" in str(e):
             pytest.skip(
-                "Function has pandas Series ambiguity issue in boolean evaluation"
-            )
+                "Function has pandas Series ambiguity issue in boolean evaluation")
         else:
             raise
 
@@ -5935,22 +6389,22 @@ def test_flatten_tcc_info_across_xcds_edge_case_validation(tmp_path):
     df.to_csv(csv_file, index=False)
 
     with pytest.raises(ValueError):
-        utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=0, tcc_channel_per_xcd=4
-        )
+        utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                               xcds=0,
+                                               tcc_channel_per_xcd=4)
 
     try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=-1, tcc_channel_per_xcd=4
-        )
+        result = utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                                        xcds=-1,
+                                                        tcc_channel_per_xcd=4)
         assert len(result) == 0
     except ValueError:
         pass
 
     with pytest.raises(FileNotFoundError):
-        utils_mod.flatten_tcc_info_across_xcds(
-            "nonexistent.csv", xcds=2, tcc_channel_per_xcd=4
-        )
+        utils_mod.flatten_tcc_info_across_xcds("nonexistent.csv",
+                                               xcds=2,
+                                               tcc_channel_per_xcd=4)
 
 
 def test_flatten_tcc_info_across_xcds_pandas_filter_issue(tmp_path):
@@ -5976,9 +6430,9 @@ def test_flatten_tcc_info_across_xcds_pandas_filter_issue(tmp_path):
     import utils.utils as utils_mod
 
     try:
-        result = utils_mod.flatten_tcc_info_across_xcds(
-            str(csv_file), xcds=2, tcc_channel_per_xcd=4
-        )
+        result = utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                                        xcds=2,
+                                                        tcc_channel_per_xcd=4)
 
         assert len(result) == 1
         assert "Kernel_Name" in result.columns
@@ -6017,9 +6471,9 @@ def test_flatten_tcc_info_across_xcds_successful_cases_only(tmp_path):
     csv_file = tmp_path / "test_simple_success.csv"
     df.to_csv(csv_file, index=False)
 
-    result = utils_mod.flatten_tcc_info_across_xcds(
-        str(csv_file), xcds=2, tcc_channel_per_xcd=4
-    )
+    result = utils_mod.flatten_tcc_info_across_xcds(str(csv_file),
+                                                    xcds=2,
+                                                    tcc_channel_per_xcd=4)
 
     assert len(result) == 1
     assert "TCC_HIT[0]" in result.columns
@@ -6033,7 +6487,6 @@ def test_flatten_tcc_info_across_xcds_successful_cases_only(tmp_path):
 # =============================================================================
 # TESTS FOR flatten_tcc_info_across_xcds
 # =============================================================================
-
 """
 Normal Functionality:
 
@@ -6519,9 +6972,8 @@ def test_get_submodules_docstring_verification():
     import utils.utils as utils_mod
 
     assert utils_mod.get_submodules.__doc__ is not None
-    assert (
-        "List all submodules for a target package" in utils_mod.get_submodules.__doc__
-    )
+    assert ("List all submodules for a target package"
+            in utils_mod.get_submodules.__doc__)
 
     mock_package = MagicMock()
     mock_package.__path__ = ["/fake/path"]
@@ -6543,7 +6995,6 @@ def test_get_submodules_docstring_verification():
 # =============================================================================
 # TESTS FOR EMPTY WORKLOAD
 # =============================================================================
-
 """
 Normal Functionality:
 
@@ -7116,7 +7567,6 @@ def test_is_workload_empty_pandas_import_dependency():
 # =============================================================================
 # TESTS FOR LOCAL ENCODING FUNCTION
 # =============================================================================
-
 """
 Normal Functionality:
 
@@ -7241,10 +7691,8 @@ def test_set_locale_encoding_c_utf8_fails_fallback_also_fails():
                 utils_mod.set_locale_encoding()
 
                 assert len(console_error_calls) == 2
-                assert (
-                    "Failed to set locale to the current UTF-8-based locale."
-                    in console_error_calls[0][0][0]
-                )
+                assert ("Failed to set locale to the current UTF-8-based locale."
+                        in console_error_calls[0][0][0])
                 assert console_error_calls[0][1]["exit"] == False
                 assert console_error_calls[1][0][0] == fallback_error
 
@@ -7277,8 +7725,7 @@ def test_set_locale_encoding_no_utf8_locale_available():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
+                    in console_error_calls[0][0][0])
                 assert console_error_calls[0][1]["exit"] == False
 
 
@@ -7310,8 +7757,7 @@ def test_set_locale_encoding_getdefaultlocale_returns_none():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
+                    in console_error_calls[0][0][0])
 
 
 def test_set_locale_encoding_getdefaultlocale_partial_none():
@@ -7351,8 +7797,7 @@ def test_set_locale_encoding_getdefaultlocale_partial_none():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
+                    in console_error_calls[0][0][0])
 
 
 def test_set_locale_encoding_utf8_case_variations():
@@ -7421,8 +7866,7 @@ def test_set_locale_encoding_empty_encoding():
                 assert len(console_error_calls) == 1
                 assert (
                     "Please ensure that a UTF-8-based locale is available on your system."
-                    in console_error_calls[0][0][0]
-                )
+                    in console_error_calls[0][0][0])
 
 
 def test_set_locale_encoding_locale_with_utf8_substring():
@@ -7789,13 +8233,15 @@ def test_set_locale_encoding_comprehensive_error_handling():
             "expected_errors": 0,
         },
         {
-            "name": "Both fail with UTF-8 locale",
+            "name":
+            "Both fail with UTF-8 locale",
             "setlocale_side_effect": [
                 locale.Error("C.UTF-8 fail"),
                 locale.Error("Fallback fail"),
             ],
             "getdefaultlocale_return": ("en_US", "UTF-8"),
-            "expected_errors": 2,
+            "expected_errors":
+            2,
         },
         {
             "name": "No UTF-8 locale available",
@@ -7813,20 +8259,17 @@ def test_set_locale_encoding_comprehensive_error_handling():
                 with patch("utils.utils.console_error", side_effect=mock_console_error):
                     mock_setlocale.side_effect = scenario["setlocale_side_effect"]
                     mock_getdefaultlocale.return_value = scenario[
-                        "getdefaultlocale_return"
-                    ]
+                        "getdefaultlocale_return"]
 
                     utils_mod.set_locale_encoding()
 
-                    assert (
-                        len(console_error_calls) == scenario["expected_errors"]
-                    ), f"Failed scenario: {scenario['name']}"
+                    assert (len(console_error_calls) == scenario["expected_errors"]
+                            ), f"Failed scenario: {scenario['name']}"
 
 
 # =============================================================================
 # TESTS FOR reverse_multi_index_df_pmc FUNCTION
 # =============================================================================
-
 """
 Normal Functionality:
 
@@ -8804,10 +9247,8 @@ def test_add_counter_overwrite_existing():
     assert len(data["rocprofiler-sdk"]["counters"]) == 1
     assert data["rocprofiler-sdk"]["counters"][0]["name"] == counter_name
     assert data["rocprofiler-sdk"]["counters"][0]["description"] == initial_description
-    assert (
-        data["rocprofiler-sdk"]["counters"][0]["definitions"][0]["expression"]
-        == initial_expression
-    )
+    assert (data["rocprofiler-sdk"]["counters"][0]["definitions"][0]["expression"] ==
+            initial_expression)
 
     updated_description = "Updated version"
     updated_expression = "updated_expr"
@@ -8826,62 +9267,51 @@ def test_extract_counter_info_returns_none_when_not_found():
     when the counter is not found or data structure is incomplete.
     """
     data_empty = {}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(data_empty, "ANY_COUNTER")
-        is None
-    )
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_empty, "ANY_COUNTER") is None)
 
     data_no_counters_key = {"rocprofiler-sdk": {}}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_no_counters_key, "ANY_COUNTER"
-        )
-        is None
-    )
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_no_counters_key, "ANY_COUNTER") is None)
 
     data_empty_counters_list = {"rocprofiler-sdk": {"counters": []}}
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_empty_counters_list, "ANY_COUNTER"
-        )
-        is None
-    )
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_empty_counters_list, "ANY_COUNTER") is None)
 
     data_with_other_counters = {
         "rocprofiler-sdk": {
             "counters": [
-                {"name": "EXISTING_COUNTER_1", "value": "val1"},
-                {"name": "EXISTING_COUNTER_2", "value": "val2"},
+                {
+                    "name": "EXISTING_COUNTER_1",
+                    "value": "val1"
+                },
+                {
+                    "name": "EXISTING_COUNTER_2",
+                    "value": "val2"
+                },
             ]
         }
     }
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_other_counters, "NON_EXISTENT_COUNTER"
-        )
-        is None
-    )
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_with_other_counters, "NON_EXISTENT_COUNTER") is None)
 
     data_with_malformed_counter = {
         "rocprofiler-sdk": {
             "counters": [
-                {"value": "val1"},  # No 'name' key
-                {"name": "EXISTING_COUNTER_2", "value": "val2"},
+                {
+                    "value": "val1"
+                },  # No 'name' key
+                {
+                    "name": "EXISTING_COUNTER_2",
+                    "value": "val2"
+                },
             ]
         }
     }
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_malformed_counter, "EXISTING_COUNTER_1"
-        )
-        is None
-    )
-    assert (
-        utils.extract_counter_info_extra_config_input_yaml(
-            data_with_malformed_counter, "EXISTING_COUNTER_2"
-        )
-        is not None
-    )
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_with_malformed_counter, "EXISTING_COUNTER_1") is None)
+    assert (utils.extract_counter_info_extra_config_input_yaml(
+        data_with_malformed_counter, "EXISTING_COUNTER_2") is not None)
 
 
 def test_extract_counter_info_returns_counter_when_found():
@@ -8910,14 +9340,12 @@ def test_extract_counter_info_returns_counter_when_found():
     }
 
     extracted_counter1 = utils.extract_counter_info_extra_config_input_yaml(
-        data, "MY_COUNTER_1"
-    )
+        data, "MY_COUNTER_1")
     assert extracted_counter1 is not None
     assert extracted_counter1 == counter1_details
 
     extracted_counter2 = utils.extract_counter_info_extra_config_input_yaml(
-        data, "MY_COUNTER_2"
-    )
+        data, "MY_COUNTER_2")
     assert extracted_counter2 is not None
     assert extracted_counter2 == counter2_details
 
@@ -8932,9 +9360,10 @@ def test_using_v1_rocprof_set_and_ends_with_rocprof_returns_true():
     Covers the case where "ROCPROF" is in os.environ and its value ends with "rocprof".
     This makes the entire expression True, so the function returns True.
     """
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "/opt/rocm/bin/rocprof", "OTHER_VAR": "value"}
-    ):
+    with mock.patch.dict(os.environ, {
+            "ROCPROF": "/opt/rocm/bin/rocprof",
+            "OTHER_VAR": "value"
+    }):
         assert utils.using_v1() is True
 
 
@@ -8944,14 +9373,16 @@ def test_using_v1_rocprof_set_but_not_ends_with_rocprof_returns_false():
     The second part of the 'and' (os.environ["ROCPROF"].endswith("rocprof")) is False.
     So the function returns False.
     """
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "/opt/rocm/bin/rocprofv2", "OTHER_VAR": "value"}
-    ):
+    with mock.patch.dict(os.environ, {
+            "ROCPROF": "/opt/rocm/bin/rocprofv2",
+            "OTHER_VAR": "value"
+    }):
         assert utils.using_v1() is False
 
-    with mock.patch.dict(
-        os.environ, {"ROCPROF": "some/path/to/rocprof_tool", "OTHER_VAR": "value"}
-    ):
+    with mock.patch.dict(os.environ, {
+            "ROCPROF": "some/path/to/rocprof_tool",
+            "OTHER_VAR": "value"
+    }):
         assert utils.using_v1() is False
 
 
@@ -8984,6 +9415,7 @@ def test_using_v1_rocprof_is_empty_string_returns_false():
 # additional test detect_rocprof console error
 # =============================================================================
 class MockArgs:
+
     def __init__(self, rocprofiler_sdk_library_path):
         self.rocprofiler_sdk_library_path = rocprofiler_sdk_library_path
 
@@ -8992,8 +9424,7 @@ class MockArgs:
 @mock.patch("utils.utils.console_error")
 @mock.patch("utils.utils.path")
 def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
-    mock_path_constructor, mock_console_error_func
-):
+        mock_path_constructor, mock_console_error_func):
     """
     Tests that detect_rocprof calls console_error when ROCPROF is 'rocprofiler-sdk'
     and the rocprofiler_sdk_library_path does not exist.
@@ -9009,9 +9440,8 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
     with mock.patch("utils.utils.console_debug") as mock_console_debug:
         utils.detect_rocprof(args)
 
-    expected_error_message = (
-        "Could not find rocprofiler-sdk library at " + fake_library_path
-    )
+    expected_error_message = ("Could not find rocprofiler-sdk library at " +
+                              fake_library_path)
     mock_console_error_func.assert_called_once_with(expected_error_message)
 
     mock_path_constructor.assert_called_once_with(fake_library_path)
@@ -9019,6 +9449,7 @@ def test_detect_rocprof_calls_console_error_if_sdk_path_invalid(
 
 
 class MockArgs:
+
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)
 
@@ -9044,9 +9475,8 @@ def test_store_app_cmd_sets_global_rocprof_args():
     else:
         pass
     utils.store_app_cmd(sample_args_object)
-    assert (
-        utils.rocprof_args is sample_args_object
-    ), "Global rocprof_args should be the same object as the passed args"
+    assert (utils.rocprof_args is sample_args_object
+            ), "Global rocprof_args should be the same object as the passed args"
 
 
 # =============================================================================
@@ -9060,46 +9490,41 @@ def create_csv_string(data_dict):
 
 @mock.patch("utils.utils.console_error")
 @mock.patch("utils.utils.console_debug")
-def test_v3_to_v2_agent_id_parsing_success_and_error(
-    mock_console_debug, mock_console_error, tmp_path
-):
+def test_v3_to_v2_agent_id_parsing_success_and_error(mock_console_debug,
+                                                     mock_console_error, tmp_path):
     """
     Tests Line 1: Successful parsing of 'Agent Id' string.
     Tests Line 2: Error during parsing of 'Agent Id' string, triggering console_error.
     """
-    agent_info_content = create_csv_string(
-        {
-            "Node_Id": [0, 1],
-            "Agent_Type": ["CPU", "GPU"],
-            "Wave_Front_Size": [0, 64],
-        }
-    )
+    agent_info_content = create_csv_string({
+        "Node_Id": [0, 1],
+        "Agent_Type": ["CPU", "GPU"],
+        "Wave_Front_Size": [0, 64],
+    })
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted.csv"
-    counter_content_success = create_csv_string(
-        {
-            "Correlation_Id": [1],
-            "Dispatch_Id": [10],
-            "Agent_Id": ["Agent 1"],
-            "Queue_Id": [100],
-            "Process_Id": [1000],
-            "Thread_Id": [10000],
-            "Grid_Size": [256],
-            "Kernel_Id": [1],
-            "Kernel_Name": ["kernelA"],
-            "Workgroup_Size": [64],
-            "LDS_Block_Size": [32],
-            "Scratch_Size": [0],
-            "VGPR_Count": [16],
-            "Accum_VGPR_Count": [0],
-            "SGPR_Count": [32],
-            "Start_Timestamp": [100000],
-            "End_Timestamp": [100100],
-            "Counter_Name": ["Cycles"],
-            "Counter_Value": [5000],
-        }
-    )
+    counter_content_success = create_csv_string({
+        "Correlation_Id": [1],
+        "Dispatch_Id": [10],
+        "Agent_Id": ["Agent 1"],
+        "Queue_Id": [100],
+        "Process_Id": [1000],
+        "Thread_Id": [10000],
+        "Grid_Size": [256],
+        "Kernel_Id": [1],
+        "Kernel_Name": ["kernelA"],
+        "Workgroup_Size": [64],
+        "LDS_Block_Size": [32],
+        "Scratch_Size": [0],
+        "VGPR_Count": [16],
+        "Accum_VGPR_Count": [0],
+        "SGPR_Count": [32],
+        "Start_Timestamp": [100000],
+        "End_Timestamp": [100100],
+        "Counter_Name": ["Cycles"],
+        "Counter_Value": [5000],
+    })
     counter_filepath_success = tmp_path / "counter_success.csv"
     counter_filepath_success.write_text(counter_content_success)
 
@@ -9117,29 +9542,27 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
 
     mock_console_error.reset_mock()
 
-    counter_content_error = create_csv_string(
-        {
-            "Correlation_Id": [2],
-            "Dispatch_Id": [20],
-            "Agent_Id": ["Malformed Agent X"],
-            "Queue_Id": [200],
-            "Process_Id": [2000],
-            "Thread_Id": [20000],
-            "Grid_Size": [512],
-            "Kernel_Id": [2],
-            "Kernel_Name": ["kernelB"],
-            "Workgroup_Size": [128],
-            "LDS_Block_Size": [64],
-            "Scratch_Size": [0],
-            "VGPR_Count": [32],
-            "Accum_VGPR_Count": [0],
-            "SGPR_Count": [64],
-            "Start_Timestamp": [200000],
-            "End_Timestamp": [200200],
-            "Counter_Name": ["Instructions"],
-            "Counter_Value": [10000],
-        }
-    )
+    counter_content_error = create_csv_string({
+        "Correlation_Id": [2],
+        "Dispatch_Id": [20],
+        "Agent_Id": ["Malformed Agent X"],
+        "Queue_Id": [200],
+        "Process_Id": [2000],
+        "Thread_Id": [20000],
+        "Grid_Size": [512],
+        "Kernel_Id": [2],
+        "Kernel_Name": ["kernelB"],
+        "Workgroup_Size": [128],
+        "LDS_Block_Size": [64],
+        "Scratch_Size": [0],
+        "VGPR_Count": [32],
+        "Accum_VGPR_Count": [0],
+        "SGPR_Count": [64],
+        "Start_Timestamp": [200000],
+        "End_Timestamp": [200200],
+        "Counter_Name": ["Instructions"],
+        "Counter_Value": [10000],
+    })
     counter_filepath_error = tmp_path / "counter_error.csv"
     counter_filepath_error.write_text(counter_content_error)
 
@@ -9155,10 +9578,8 @@ def test_v3_to_v2_agent_id_parsing_success_and_error(
     mock_console_error.assert_called_once()
     call_args = mock_console_error.call_args[0][0]
     assert 'Parsing rocprofv3 csv output: Error of getting "Agent_Id"' in call_args
-    assert (
-        "AttributeError" in call_args
-        or "'NoneType' object has no attribute 'group'" in call_args
-    )
+    assert ("AttributeError" in call_args
+            or "'NoneType' object has no attribute 'group'" in call_args)
 
 
 @mock.patch("utils.utils.console_debug")  # To suppress debug output
@@ -9167,13 +9588,11 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     Tests Line 3: Renaming of a column ending with '_ACCUM' to 'SQ_ACCUM_PREV_HIRES'.
     """
     # --- Setup ---
-    agent_info_content = create_csv_string(
-        {
-            "Node_Id": [0],
-            "Agent_Type": ["GPU"],
-            "Wave_Front_Size": [64],
-        }
-    )
+    agent_info_content = create_csv_string({
+        "Node_Id": [0],
+        "Agent_Type": ["GPU"],
+        "Wave_Front_Size": [64],
+    })
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_accum.csv"
@@ -9203,9 +9622,8 @@ def test_v3_to_v2_accum_column_rename(mock_console_debug, tmp_path):
     counter_filepath = tmp_path / "counter_accum.csv"
     counter_filepath.write_text(counter_content)
 
-    utils.v3_counter_csv_to_v2_csv(
-        str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath)
-    )
+    utils.v3_counter_csv_to_v2_csv(str(counter_filepath), str(agent_info_filepath),
+                                   str(converted_csv_filepath))
 
     result_df = pd.read_csv(converted_csv_filepath)
     assert "SQ_ACCUM_PREV_HIRES" in result_df.columns
@@ -9220,45 +9638,40 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
     """
     Tests Line 4: 'Accum_VGPR_Count' is added and set to 0 if not present in input.
     """
-    agent_info_content = create_csv_string(
-        {
-            "Node_Id": [0],
-            "Agent_Type": ["GPU"],
-            "Wave_Front_Size": [64],
-        }
-    )
+    agent_info_content = create_csv_string({
+        "Node_Id": [0],
+        "Agent_Type": ["GPU"],
+        "Wave_Front_Size": [64],
+    })
     agent_info_filepath = tmp_path / "agent_info.csv"
     agent_info_filepath.write_text(agent_info_content)
     converted_csv_filepath = tmp_path / "converted_no_accum_vgpr.csv"
 
-    counter_content = create_csv_string(
-        {
-            "Correlation_Id": [1],
-            "Dispatch_Id": [10],
-            "Agent_Id": [0],
-            "Queue_Id": [100],
-            "Process_Id": [1000],
-            "Thread_Id": [10000],
-            "Grid_Size": [256],
-            "Kernel_Id": [1],
-            "Kernel_Name": ["kernelA"],
-            "Workgroup_Size": [64],
-            "LDS_Block_Size": [32],
-            "Scratch_Size": [0],
-            "VGPR_Count": [16],
-            "SGPR_Count": [32],
-            "Start_Timestamp": [100000],
-            "End_Timestamp": [100100],
-            "Counter_Name": ["Cycles"],
-            "Counter_Value": [5000],
-        }
-    )
+    counter_content = create_csv_string({
+        "Correlation_Id": [1],
+        "Dispatch_Id": [10],
+        "Agent_Id": [0],
+        "Queue_Id": [100],
+        "Process_Id": [1000],
+        "Thread_Id": [10000],
+        "Grid_Size": [256],
+        "Kernel_Id": [1],
+        "Kernel_Name": ["kernelA"],
+        "Workgroup_Size": [64],
+        "LDS_Block_Size": [32],
+        "Scratch_Size": [0],
+        "VGPR_Count": [16],
+        "SGPR_Count": [32],
+        "Start_Timestamp": [100000],
+        "End_Timestamp": [100100],
+        "Counter_Name": ["Cycles"],
+        "Counter_Value": [5000],
+    })
     counter_filepath = tmp_path / "counter_no_accum_vgpr.csv"
     counter_filepath.write_text(counter_content)
 
-    utils.v3_counter_csv_to_v2_csv(
-        str(counter_filepath), str(agent_info_filepath), str(converted_csv_filepath)
-    )
+    utils.v3_counter_csv_to_v2_csv(str(counter_filepath), str(agent_info_filepath),
+                                   str(converted_csv_filepath))
 
     result_df = pd.read_csv(converted_csv_filepath)
     assert "Accum_VGPR" in result_df.columns
@@ -9275,8 +9688,7 @@ def test_v3_to_v2_default_accum_vgpr_count(mock_console_debug, tmp_path):
 @mock.patch("utils.utils.console_error")
 @mock.patch("utils.utils.console_debug")
 def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
+        mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path):
     """
     Edge Case: rocprofiler_sdk_library_path is valid, but librocprofiler-sdk-tool.so
     is NOT found next to it (or in rocprofiler-sdk subdir).
@@ -9295,15 +9707,13 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
         rocprofiler_sdk_library_path = str(sdk_lib_dir / "librocprofiler_sdk.so")
         pathlib.Path(rocprofiler_sdk_library_path).touch()
 
-        expected_tool_path = str(
-            sdk_lib_dir / "rocprofiler-sdk" / "librocprofiler-sdk-tool.so"
-        )
+        expected_tool_path = str(sdk_lib_dir / "rocprofiler-sdk" /
+                                 "librocprofiler-sdk-tool.so")
 
         mock_capture_subprocess.return_value = (True, "Success output")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd,
+                               rocprofiler_sdk_library_path)
 
         assert mock_capture_subprocess.called
         call_args = mock_capture_subprocess.call_args
@@ -9320,9 +9730,8 @@ def test_pc_sampling_prof_sdk_path_nonexistent_librocprofiler_sdk_tool(
 @mock.patch("utils.utils.capture_subprocess_output")
 @mock.patch("utils.utils.console_error")
 @mock.patch("utils.utils.console_debug")
-def test_pc_sampling_prof_subprocess_fails(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
+def test_pc_sampling_prof_subprocess_fails(mock_console_debug, mock_console_error,
+                                           mock_capture_subprocess, tmp_path):
     """
     Edge Case: The capture_subprocess_output returns success=False.
     This should trigger the console_error("PC sampling failed.").
@@ -9336,9 +9745,8 @@ def test_pc_sampling_prof_subprocess_fails(
 
         mock_capture_subprocess.return_value = (False, "Error output from subprocess")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd,
+                               rocprofiler_sdk_library_path)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -9360,9 +9768,8 @@ def test_pc_sampling_prof_subprocess_fails(
             "Error output from SDK subprocess",
         )
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd,
+                               rocprofiler_sdk_library_path_sdk)
 
         mock_capture_subprocess.assert_called_once()
         mock_console_error.assert_called_once_with("PC sampling failed.")
@@ -9371,9 +9778,8 @@ def test_pc_sampling_prof_subprocess_fails(
 @mock.patch("utils.utils.capture_subprocess_output")
 @mock.patch("utils.utils.console_error")
 @mock.patch("utils.utils.console_debug")
-def test_pc_sampling_prof_empty_appcmd(
-    mock_console_debug, mock_console_error, mock_capture_subprocess, tmp_path
-):
+def test_pc_sampling_prof_empty_appcmd(mock_console_debug, mock_console_error,
+                                       mock_capture_subprocess, tmp_path):
     """
     Edge Case: The appcmd is an empty string.
     The function should still attempt to run it. The behavior of
@@ -9388,9 +9794,8 @@ def test_pc_sampling_prof_empty_appcmd(
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-        )
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd,
+                               rocprofiler_sdk_library_path)
 
         assert mock_capture_subprocess.called
         options_list = mock_capture_subprocess.call_args[0][0]
@@ -9410,9 +9815,8 @@ def test_pc_sampling_prof_empty_appcmd(
 
         mock_capture_subprocess.return_value = (True, "Output with empty appcmd SDK")
 
-        utils.pc_sampling_prof(
-            method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path_sdk
-        )
+        utils.pc_sampling_prof(method, interval, workload_dir, appcmd,
+                               rocprofiler_sdk_library_path_sdk)
 
         assert mock_capture_subprocess.called
         assert mock_capture_subprocess.call_args[0][0] == ""
@@ -9431,9 +9835,9 @@ def create_dummy_csv(filepath, data_dict):
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("utils.utils.path")
-def test_replace_timestamps_no_timestamps_csv_returns_early(
-    mock_path_util, mock_console_warning, tmp_path
-):
+def test_replace_timestamps_no_timestamps_csv_returns_early(mock_path_util,
+                                                            mock_console_warning,
+                                                            tmp_path):
     """
     Edge Case: timestamps.csv does not exist in workload_dir.
     The function should return early.
@@ -9444,9 +9848,8 @@ def test_replace_timestamps_no_timestamps_csv_returns_early(
     mock_timestamps_path_obj = mock.Mock()
     mock_timestamps_path_obj.is_file.return_value = False
 
-    mock_path_util.side_effect = lambda *args: (
-        mock_timestamps_path_obj if args[1] == "timestamps.csv" else mock.DEFAULT
-    )
+    mock_path_util.side_effect = lambda *args: (mock_timestamps_path_obj if args[1] ==
+                                                "timestamps.csv" else mock.DEFAULT)
 
     utils.replace_timestamps(workload_dir)
 
@@ -9459,8 +9862,7 @@ def test_replace_timestamps_no_timestamps_csv_returns_early(
 @mock.patch("glob.glob")  # Mock glob.glob
 @mock.patch("utils.utils.path")
 def test_replace_timestamps_timestamps_csv_missing_columns_warns(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
+        mock_path_util, mock_glob, mock_console_warning, tmp_path):
     """
     Edge Case: timestamps.csv exists but is missing 'Start_Timestamp' or 'End_Timestamp'.
     The function should call console_warning.
@@ -9476,25 +9878,23 @@ def test_replace_timestamps_timestamps_csv_missing_columns_warns(
     mock_timestamps_path_obj.name = "timestamps.csv"
 
     mock_path_util.side_effect = lambda *args, **kwargs: (
-        mock_timestamps_path_obj if args[-1] == "timestamps.csv" else mock.DEFAULT
-    )
+        mock_timestamps_path_obj if args[-1] == "timestamps.csv" else mock.DEFAULT)
 
     utils.replace_timestamps(workload_dir)
 
     mock_path_util.assert_any_call(workload_dir, "timestamps.csv")
     mock_timestamps_path_obj.is_file.assert_called_once()
     mock_console_warning.assert_called_once_with(
-        "Incomplete profiling data detected. Unable to update timestamps.\n"
-    )
+        "Incomplete profiling data detected. Unable to update timestamps.\n")
     mock_glob.assert_not_called()
 
 
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
 @mock.patch("utils.utils.path")
-def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
+def test_replace_timestamps_updates_other_csvs_skips_sysinfo(mock_path_util, mock_glob,
+                                                             mock_console_warning,
+                                                             tmp_path):
     """
     Edge Case: timestamps.csv is valid. Other CSVs exist, including sysinfo.csv.
     Only non-sysinfo.csv files should be updated.
@@ -9509,16 +9909,27 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
     new_end_ts = [1500, 2500]
     create_dummy_csv(
         timestamps_csv_path_str,
-        {"Start_Timestamp": new_start_ts, "End_Timestamp": new_end_ts},
+        {
+            "Start_Timestamp": new_start_ts,
+            "End_Timestamp": new_end_ts
+        },
     )
 
     create_dummy_csv(
         data_csv_path_str,
-        {"Kernel_Name": ["A", "B"], "Start_Timestamp": [1, 2], "End_Timestamp": [3, 4]},
+        {
+            "Kernel_Name": ["A", "B"],
+            "Start_Timestamp": [1, 2],
+            "End_Timestamp": [3, 4]
+        },
     )
     create_dummy_csv(
         sysinfo_csv_path_str,
-        {"Info": ["CPU", "MEM"], "Start_Timestamp": [5, 6], "End_Timestamp": [7, 8]},
+        {
+            "Info": ["CPU", "MEM"],
+            "Start_Timestamp": [5, 6],
+            "End_Timestamp": [7, 8]
+        },
     )
 
     def path_side_effect(*args, **kwargs):
@@ -9556,9 +9967,8 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
         df_data_updated["Start_Timestamp"],
         pd.Series(new_start_ts, name="Start_Timestamp"),
     )
-    pd.testing.assert_series_equal(
-        df_data_updated["End_Timestamp"], pd.Series(new_end_ts, name="End_Timestamp")
-    )
+    pd.testing.assert_series_equal(df_data_updated["End_Timestamp"],
+                                   pd.Series(new_end_ts, name="End_Timestamp"))
 
     df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
     assert list(df_sysinfo_original["Start_Timestamp"]) == [5, 6]
@@ -9568,9 +9978,8 @@ def test_replace_timestamps_updates_other_csvs_skips_sysinfo(
 @mock.patch("utils.utils.console_warning")
 @mock.patch("glob.glob")
 @mock.patch("utils.utils.path")
-def test_replace_timestamps_no_other_csvs_to_update(
-    mock_path_util, mock_glob, mock_console_warning, tmp_path
-):
+def test_replace_timestamps_no_other_csvs_to_update(mock_path_util, mock_glob,
+                                                    mock_console_warning, tmp_path):
     """
     Edge Case: timestamps.csv is valid, but no other *.csv files (or only sysinfo.csv) exist.
     The loop for updating files should not do anything or not run.
@@ -9580,12 +9989,17 @@ def test_replace_timestamps_no_other_csvs_to_update(
     timestamps_csv_path_str = os.path.join(workload_dir, "timestamps.csv")
     sysinfo_csv_path_str = os.path.join(workload_dir, "sysinfo.csv")
 
-    create_dummy_csv(
-        timestamps_csv_path_str, {"Start_Timestamp": [100], "End_Timestamp": [200]}
-    )
+    create_dummy_csv(timestamps_csv_path_str, {
+        "Start_Timestamp": [100],
+        "End_Timestamp": [200]
+    })
     create_dummy_csv(
         sysinfo_csv_path_str,
-        {"Info": ["CPU"], "Start_Timestamp": [5], "End_Timestamp": [7]},
+        {
+            "Info": ["CPU"],
+            "Start_Timestamp": [5],
+            "End_Timestamp": [7]
+        },
     )
 
     def path_side_effect(*args, **kwargs):

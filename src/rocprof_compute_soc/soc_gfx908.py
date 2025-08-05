@@ -23,13 +23,13 @@
 
 ##############################################################################
 
-
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_error, demarcate
 from utils.mi_gpu_spec import mi_gpu_specs
 
 
 class gfx908_soc(OmniSoC_Base):
+
     def __init__(self, args, mspec):
         super().__init__(args, mspec)
         self.set_arch("gfx908")

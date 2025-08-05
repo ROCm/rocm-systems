@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
@@ -46,12 +45,10 @@ def create_span(input):
 
 
 def get_header(raw_pmc, input_filters, kernel_names):
-    kernel_names = list(
-        map(
-            str,
-            raw_pmc[schema.pmc_perf_file_prefix]["Kernel_Name"],
-        )
-    )
+    kernel_names = list(map(
+        str,
+        raw_pmc[schema.pmc_perf_file_prefix]["Kernel_Name"],
+    ))
     kernel_names = [x.strip() for x in kernel_names]
     return html.Header(
         id="home",
@@ -67,9 +64,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                 children=[
                                     dbc.DropdownMenu(
                                         [
-                                            dbc.DropdownMenuItem(
-                                                "Overview", header=True
-                                            ),
+                                            dbc.DropdownMenuItem("Overview",
+                                                                 header=True),
                                             dbc.DropdownMenuItem(
                                                 "Roofline",
                                                 href="#roofline",
@@ -90,9 +86,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 href="#system_speed-of-light",
                                                 external_link=True,
                                             ),
-                                            dbc.DropdownMenuItem(
-                                                "Compute", header=True
-                                            ),
+                                            dbc.DropdownMenuItem("Compute",
+                                                                 header=True),
                                             dbc.DropdownMenuItem(
                                                 "Command Processor (CPF/CPC)",
                                                 href="#command_processor_cpccpf",
@@ -136,7 +131,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                             ),
                                             dbc.DropdownMenuItem(
                                                 "Address Processing Unit and Data Return Path (TA/TD)",
-                                                href="#address_processing_unit_and_data_return_path_tatd",
+                                                href=
+                                                "#address_processing_unit_and_data_return_path_tatd",
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
@@ -163,158 +159,141 @@ def get_header(raw_pmc, input_filters, kernel_names):
                             html.Li(
                                 className="filter",
                                 children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
-                                                children=["Normalization:"],
-                                            ),
-                                            dcc.Dropdown(
-                                                avail_normalizations,
-                                                id="norm-filt",
-                                                value=input_filters["normalization"],
-                                                clearable=False,
-                                                style={"width": "150px"},
-                                            ),
-                                        ]
-                                    )
+                                    html.Div(children=[
+                                        html.A(
+                                            className="smoothscroll",
+                                            children=["Normalization:"],
+                                        ),
+                                        dcc.Dropdown(
+                                            avail_normalizations,
+                                            id="norm-filt",
+                                            value=input_filters["normalization"],
+                                            clearable=False,
+                                            style={"width": "150px"},
+                                        ),
+                                    ])
                                 ],
                             ),
                             html.Li(
                                 className="filter",
                                 children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
-                                                children=["GCD:"],
-                                            ),
-                                            dcc.Dropdown(
-                                                list_unique(
-                                                    list(
-                                                        map(
-                                                            str,
-                                                            raw_pmc[
-                                                                schema.pmc_perf_file_prefix
-                                                            ]["GPU_ID"],
-                                                        )
-                                                    ),
-                                                    True,
-                                                ),  # list avail gcd ids
-                                                id="gcd-filt",
-                                                multi=True,
-                                                value=input_filters[
-                                                    "gpu"
-                                                ],  # default to any gpu filters passed as args
-                                                placeholder="ALL",
-                                                clearable=False,
-                                                style={"width": "60px"},
-                                            ),
-                                        ]
-                                    )
-                                ],
-                            ),
-                            html.Li(
-                                className="filter",
-                                children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
-                                                children=["Dispatch Filter:"],
-                                            ),
-                                            dcc.Dropdown(
+                                    html.Div(children=[
+                                        html.A(
+                                            className="smoothscroll",
+                                            children=["GCD:"],
+                                        ),
+                                        dcc.Dropdown(
+                                            list_unique(
                                                 list(
                                                     map(
                                                         str,
                                                         raw_pmc[
-                                                            schema.pmc_perf_file_prefix
-                                                        ]["Dispatch_ID"],
-                                                    )
-                                                ),
-                                                id="disp-filt",
-                                                multi=True,
-                                                value=input_filters[
-                                                    "dispatch"
-                                                ],  # default to any dispatch filters passed as args
-                                                placeholder="ALL",
-                                                style={"width": "150px"},
-                                            ),
-                                        ]
-                                    )
+                                                            schema.pmc_perf_file_prefix]
+                                                        ["GPU_ID"],
+                                                    )),
+                                                True,
+                                            ),  # list avail gcd ids
+                                            id="gcd-filt",
+                                            multi=True,
+                                            value=input_filters[
+                                                "gpu"],  # default to any gpu filters passed as args
+                                            placeholder="ALL",
+                                            clearable=False,
+                                            style={"width": "60px"},
+                                        ),
+                                    ])
                                 ],
                             ),
                             html.Li(
                                 className="filter",
                                 children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
-                                                children=["Top N:"],
-                                            ),
-                                            dcc.Dropdown(
-                                                [1, 5, 10, 15, 20, 50, 100],
-                                                id="top-n-filt",
-                                                value=input_filters[
-                                                    "top_n"
-                                                ],  # default to any dispatch filters passed as args
-                                                clearable=False,
-                                                style={"width": "50px"},
-                                            ),
-                                        ]
-                                    )
+                                    html.Div(children=[
+                                        html.A(
+                                            className="smoothscroll",
+                                            children=["Dispatch Filter:"],
+                                        ),
+                                        dcc.Dropdown(
+                                            list(
+                                                map(
+                                                    str,
+                                                    raw_pmc[schema.pmc_perf_file_prefix]
+                                                    ["Dispatch_ID"],
+                                                )),
+                                            id="disp-filt",
+                                            multi=True,
+                                            value=input_filters[
+                                                "dispatch"],  # default to any dispatch filters passed as args
+                                            placeholder="ALL",
+                                            style={"width": "150px"},
+                                        ),
+                                    ])
                                 ],
                             ),
                             html.Li(
                                 className="filter",
                                 children=[
-                                    html.Div(
-                                        children=[
-                                            html.A(
-                                                className="smoothscroll",
-                                                children=["Kernels:"],
-                                            ),
-                                            dcc.Dropdown(
-                                                list(
-                                                    map(
-                                                        create_span,
-                                                        list_unique(
-                                                            orig_list=kernel_names,
-                                                            is_numeric=False,
-                                                        ),  # list avail kernel names
-                                                    )
-                                                ),
-                                                id="kernel-filt",
-                                                multi=True,
-                                                value=input_filters["kernel"],
-                                                optionHeight=150,
-                                                placeholder="ALL",
-                                                style={
-                                                    "width": "600px",  # TODO: Change these widths to % rather than fixed value
-                                                },
-                                            ),
-                                        ]
-                                    )
+                                    html.Div(children=[
+                                        html.A(
+                                            className="smoothscroll",
+                                            children=["Top N:"],
+                                        ),
+                                        dcc.Dropdown(
+                                            [1, 5, 10, 15, 20, 50, 100],
+                                            id="top-n-filt",
+                                            value=input_filters[
+                                                "top_n"],  # default to any dispatch filters passed as args
+                                            clearable=False,
+                                            style={"width": "50px"},
+                                        ),
+                                    ])
+                                ],
+                            ),
+                            html.Li(
+                                className="filter",
+                                children=[
+                                    html.Div(children=[
+                                        html.A(
+                                            className="smoothscroll",
+                                            children=["Kernels:"],
+                                        ),
+                                        dcc.Dropdown(
+                                            list(
+                                                map(
+                                                    create_span,
+                                                    list_unique(
+                                                        orig_list=kernel_names,
+                                                        is_numeric=False,
+                                                    ),  # list avail kernel names
+                                                )),
+                                            id="kernel-filt",
+                                            multi=True,
+                                            value=input_filters["kernel"],
+                                            optionHeight=150,
+                                            placeholder="ALL",
+                                            style={
+                                                "width":
+                                                "600px",  # TODO: Change these widths to % rather than fixed value
+                                            },
+                                        ),
+                                    ])
                                 ],
                             ),
                             html.Div(
                                 className="nav-right",
                                 children=[
-                                    html.Li(
-                                        children=[
-                                            # Report bug button
-                                            html.A(
-                                                href="https://github.com/ROCm/rocprofiler-compute/issues",
-                                                children=[
-                                                    html.Button(
-                                                        className="report",
-                                                        children=["Report Bug"],
-                                                    )
-                                                ],
-                                            )
-                                        ]
-                                    )
+                                    html.Li(children=[
+                                        # Report bug button
+                                        html.A(
+                                            href=
+                                            "https://github.com/ROCm/rocprofiler-compute/issues",
+                                            children=[
+                                                html.Button(
+                                                    className="report",
+                                                    children=["Report Bug"],
+                                                )
+                                            ],
+                                        )
+                                    ])
                                 ],
                             ),
                         ],

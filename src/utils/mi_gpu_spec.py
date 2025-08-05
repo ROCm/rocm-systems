@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import os
 from dataclasses import dataclass
 from typing import Any, Dict
@@ -47,7 +46,6 @@ MI_CONSTANS = {
     MI300: "mi300",
     MI350: "mi350",
 }
-
 
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
@@ -146,19 +144,15 @@ class MIGPUSpecs:
                 for models in archs["models"]:
                     curr_gpu_model = models["gpu_model"]
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
-                    cls._num_xcds_dict[curr_gpu_model] = (
-                        models.get("partition_mode", {})
-                        .get("compute_partition_mode", {})
-                        .get("num_xcds", {})
-                    )
+                    cls._num_xcds_dict[curr_gpu_model] = (models.get(
+                        "partition_mode", {}).get("compute_partition_mode",
+                                                  {}).get("num_xcds", {}))
                     if "chip_ids" in models and "physical" in models["chip_ids"]:
                         cls._chip_id_dict[models["chip_ids"]["physical"]] = (
-                            curr_gpu_model
-                        )
+                            curr_gpu_model)
                     if "chip_ids" in models and "virtual" in models["chip_ids"]:
                         cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
-                            curr_gpu_model
-                        )
+                            curr_gpu_model)
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -176,20 +170,17 @@ class MIGPUSpecs:
 
                 if compute_partition is not None:
                     cls._gpu_arch_to_compute_partition_dict[gpu_arch] = (
-                        compute_partition
-                    )
+                        compute_partition)
                     console_debug(
                         "[populate_single_arch_partition_dict] Single model arch found: "
-                        "%s -> %s (partition: %s)"
-                        % (gpu_arch, single_model, compute_partition)
-                    )
+                        "%s -> %s (partition: %s)" %
+                        (gpu_arch, single_model, compute_partition))
 
     @classmethod
     def get_gpu_series_dict(cls):
         if not cls._gpu_series_dict:
             console_error(
-                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?"
-            )
+                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?")
             return None
         return cls._gpu_series_dict
 
@@ -197,14 +188,12 @@ class MIGPUSpecs:
     def get_gpu_series(cls, gpu_arch_):
         if not cls._gpu_series_dict:
             console_error(
-                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?"
-            )
+                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?")
             return None
 
         # Normalize the key by checking both the raw and lowercase versions
         gpu_series = cls._gpu_series_dict.get(gpu_arch_) or cls._gpu_series_dict.get(
-            gpu_arch_.lower()
-        )
+            gpu_arch_.lower())
         if gpu_series:
             return gpu_series.upper()
 
@@ -216,8 +205,7 @@ class MIGPUSpecs:
         # Check that gpu_model_dict is populated first
         if not cls._perfmon_config:
             console_error(
-                "gpu_model_dict not yet populated. Did you run parse_mi_gpu_spec()?"
-            )
+                "gpu_model_dict not yet populated. Did you run parse_mi_gpu_spec()?")
             return None
 
         gpu_arch_lower = gpu_arch_.lower()
@@ -229,8 +217,7 @@ class MIGPUSpecs:
         # Check that gpu_model_dict is populated first
         if not cls._gpu_model_dict:
             console_error(
-                "gpu_model_dict not yet populated. Did you run parse_mi_gpu_spec()?"
-            )
+                "gpu_model_dict not yet populated. Did you run parse_mi_gpu_spec()?")
             return None
 
         gpu_arch_lower = gpu_arch_.lower()
@@ -269,18 +256,17 @@ class MIGPUSpecs:
             f"Unable to determine xcd count from:\n\t"
             f"GPU arch: '{gpu_arch}', model: '{gpu_model}', partition: '{compute_partition}'"
         )
-        console_warning(
-            f"Applying default gfx942 settings:\n"
-            f"\t- Compute partition: {DEFAULT_COMPUTE_PARTITION}\n"
-            f"\t- Number of XCDs: {DEFAULT_NUM_XCD}"
-        )
+        console_warning(f"Applying default gfx942 settings:\n"
+                        f"\t- Compute partition: {DEFAULT_COMPUTE_PARTITION}\n"
+                        f"\t- Number of XCDs: {DEFAULT_NUM_XCD}")
 
         return DEFAULT_NUM_XCD
 
     @classmethod
-    def get_num_xcds(
-        cls, gpu_arch: str = None, gpu_model: str = None, compute_partition: str = None
-    ):
+    def get_num_xcds(cls,
+                     gpu_arch: str = None,
+                     gpu_model: str = None,
+                     compute_partition: str = None):
         """
         Retrieve the number of XCDs based on GPU architecture, model, and compute partition.
 
@@ -325,15 +311,13 @@ class MIGPUSpecs:
                 )
             elif gpu_model_norm not in cls._num_xcds_dict:
                 console_warning(
-                    f"Unknown gpu model provided for num xcds lookup: {gpu_model}."
-                )
+                    f"Unknown gpu model provided for num xcds lookup: {gpu_model}.")
             else:
                 model_dict = cls._num_xcds_dict[gpu_model_norm]
 
                 if not partition_norm:
                     console_warning(
-                        "No compute partition provided for model-based lookup"
-                    )
+                        "No compute partition provided for model-based lookup")
                 elif partition_norm not in model_dict:
                     console_warning(
                         f"Unknown compute partition '{compute_partition}' for model '{gpu_model}'"

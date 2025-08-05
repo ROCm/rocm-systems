@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import logging
 from unittest.mock import MagicMock, Mock, patch
 
@@ -50,6 +49,7 @@ The tests use mocks instead of a real MongoDB server for speed and reliability.
 
 
 class TestDatabaseConnector:
+
     @pytest.fixture
     def mock_args_import(self):
         """Mock arguments for import operation"""
@@ -109,12 +109,10 @@ class TestDatabaseConnector:
         mock_path.return_value.joinpath.return_value = "/fake/path/sysinfo.csv"
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {
-                "gpu_model": ["MI100 "],
-                "workload_name": [" test_workload"],
-            }
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100 "],
+            "workload_name": [" test_workload"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(mock_args_import)
@@ -132,15 +130,13 @@ class TestDatabaseConnector:
 
         connector = DatabaseConnector(mock_args_import)
 
-        with patch(
-            "db_connector.console_error", side_effect=SystemExit(1)
-        ) as mock_console_error:
+        with patch("db_connector.console_error",
+                   side_effect=SystemExit(1)) as mock_console_error:
             with pytest.raises(SystemExit):
                 connector.prep_import()
 
             mock_console_error.assert_called_with(
-                "database", "Unable to parse SoC and/or workload name from sysinfo.csv"
-            )
+                "database", "Unable to parse SoC and/or workload name from sysinfo.csv")
 
     @patch("db_connector.pd.read_csv")
     @patch("db_connector.Path")
@@ -154,9 +150,8 @@ class TestDatabaseConnector:
 
         connector = DatabaseConnector(mock_args_import)
 
-        with patch(
-            "db_connector.console_error", side_effect=SystemExit(1)
-        ) as mock_console_error:
+        with patch("db_connector.console_error",
+                   side_effect=SystemExit(1)) as mock_console_error:
             with pytest.raises(SystemExit):
                 connector.prep_import()
 
@@ -210,8 +205,7 @@ class TestDatabaseConnector:
         with patch.object(connector, "prep_import") as mock_prep:
             mock_prep.return_value = None
             connector.connection_info["db"] = (
-                "rocprofiler-compute_test_team_test_workload_MI100"
-            )
+                "rocprofiler-compute_test_team_test_workload_MI100")
 
             connector.db_import()
 
@@ -240,8 +234,7 @@ class TestDatabaseConnector:
 
         mock_client.drop_database.assert_called_once_with(mock_db_to_remove)
         mock_names_col.delete_many.assert_called_once_with(
-            {"name": "rocprofiler-compute_test_team_workload_mi100"}
-        )
+            {"name": "rocprofiler-compute_test_team_workload_mi100"})
 
     def test_pre_processing_no_action_specified(self, mock_args_import):
         """Test pre_processing when neither upload nor remove is specified"""
@@ -305,8 +298,7 @@ class TestDatabaseConnector:
 
         mock_path.return_value.absolute.return_value.is_dir.return_value = True
         mock_path.return_value.absolute.return_value.resolve.return_value = (
-            "/resolved/path"
-        )
+            "/resolved/path")
 
         mock_client_instance = MagicMock()
         mock_mongo_client.return_value = mock_client_instance
@@ -321,14 +313,13 @@ class TestDatabaseConnector:
     @patch("db_connector.Path")
     @patch("db_connector.is_workload_empty")
     @patch("db_connector.MongoClient")
-    def test_pre_processing_import_connection_failure(
-        self, mock_mongo_client, mock_is_workload_empty, mock_path, mock_args_import
-    ):
+    def test_pre_processing_import_connection_failure(self, mock_mongo_client,
+                                                      mock_is_workload_empty, mock_path,
+                                                      mock_args_import):
         """Test pre_processing import with MongoDB connection failure"""
         mock_path.return_value.absolute.return_value.is_dir.return_value = True
         mock_path.return_value.absolute.return_value.resolve.return_value = (
-            "/resolved/path"
-        )
+            "/resolved/path")
 
         mock_client_instance = MagicMock()
         mock_mongo_client.return_value = mock_client_instance
@@ -342,9 +333,8 @@ class TestDatabaseConnector:
 
     @patch("db_connector.Path")
     @patch("db_connector.is_workload_empty")
-    def test_pre_processing_import_missing_required_fields(
-        self, mock_is_workload_empty, mock_path, mock_args_import
-    ):
+    def test_pre_processing_import_missing_required_fields(self, mock_is_workload_empty,
+                                                           mock_path, mock_args_import):
         """Test pre_processing import with missing required fields"""
         mock_args_import.host = None
 
@@ -355,9 +345,8 @@ class TestDatabaseConnector:
                 connector.pre_processing()
 
     @patch("db_connector.Path")
-    def test_pre_processing_import_invalid_workload_path(
-        self, mock_path, mock_args_import
-    ):
+    def test_pre_processing_import_invalid_workload_path(self, mock_path,
+                                                         mock_args_import):
         """Test pre_processing import with invalid workload path"""
         mock_path.return_value.absolute.return_value.is_dir.return_value = False
 
@@ -397,16 +386,13 @@ class TestDatabaseConnectorIntegration:
         args.kernel_verbose = False
 
         mock_path.return_value.joinpath.return_value = (
-            "/app/tests/workloads/device_filter/MI100/sysinfo.csv"
-        )
+            "/app/tests/workloads/device_filter/MI100/sysinfo.csv")
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {
-                "gpu_model": ["MI100"],
-                "workload_name": ["device_filter"],
-            }
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100"],
+            "workload_name": ["device_filter"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(args)
