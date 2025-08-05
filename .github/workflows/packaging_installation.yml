@@ -38,9 +38,8 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         echo "ROCM_VERSION=${{ matrix.system.rocm-version }}" >> $GITHUB_ENV &&
-        echo "ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
-        echo "ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')" >> $GITHUB_ENV &&
-        env
+        echo "ROCM_MAJOR=$(echo (${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}'))" >> $GITHUB_ENV &&
+        echo "ROCM_MINOR=$(echo (${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}'))" >> $GITHUB_ENV &&
         echo "ROCM_VERSN=$((echo (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))" >> $GITHUB_ENV &&
         env
 
