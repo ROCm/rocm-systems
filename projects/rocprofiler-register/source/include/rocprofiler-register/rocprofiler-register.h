@@ -190,8 +190,8 @@ rocprofiler_register_iterate_registration_info(
 /// @brief Helper macro for users to generate versioning int expected by
 /// rocprofiler-register when the library maintains a major, minor, patch, and tweak
 /// version numbers
-#define ROCPROFILER_REGISTER_COMPUTE_VERSION_3(                                          \
-    MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION)                                         \
+#define ROCPROFILER_REGISTER_COMPUTE_VERSION_4(                                          \
+    MAJOR_VERSION, MINOR_VERSION, PATCH_VERSION, TWEAK_VERSION)                          \
     (ROCPROFILER_REGISTER_COMPUTE_VERSION_2(MAJOR_VERSION, MINOR_VERSION) +              \
      (PATCH_VERSION))
 
