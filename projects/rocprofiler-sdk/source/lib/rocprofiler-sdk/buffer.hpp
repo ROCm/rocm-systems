@@ -43,7 +43,7 @@ struct instance
     using buffer_t = common::container::record_header_buffer;
 
     mutable std::array<buffer_t, 2> buffers       = {};
-    mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT;
+    mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT; // writer and reader lock.
     mutable std::atomic<uint32_t>   buffer_idx    = {};  // array index
     mutable std::atomic<uint64_t>   drop_count    = {};
     uint64_t                        watermark     = 0;
@@ -118,8 +118,14 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
     // get the index of the current buffer
     auto get_idx = [this]() { return buffer_idx.load(std::memory_order_acquire) % buffers.size(); };
 
+    while(syncer.test_and_set())
+    {
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::microseconds{10});
+    }
     auto idx     = get_idx();
     auto success = buffers.at(idx).emplace(category, kind, value);
+    syncer.clear();
     if(!success)
     {
         if(buffers.at(idx).capacity() < sizeof(value))
@@ -138,8 +144,14 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
             do
             {
                 buffer::flush(buffer_id, true);
+                while(syncer.test_and_set())
+                {
+                    std::this_thread::yield();
+                    std::this_thread::sleep_for(std::chrono::microseconds{10});
+                }
                 idx     = get_idx();
                 success = buffers.at(idx).emplace(category, kind, value);
+                syncer.clear();
             } while(!success);
         }
         else
