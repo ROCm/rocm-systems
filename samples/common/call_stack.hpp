@@ -51,7 +51,6 @@ print_call_stack(std::string         ofname,
                  const char*         env_variable = "ROCPROFILER_SAMPLE_OUTPUT_FILE")
 {
     // Use secure filename validation
-    std::cout << "Gopesh$$$$$$$$$$$$$$$$$$" << std::endl;
     ofname = common::secure::get_safe_filename(env_variable, ofname);
 
     std::ostream* ofs     = nullptr;
