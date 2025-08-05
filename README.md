@@ -24,14 +24,14 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocm-core`            | EMU             | Pending          |                                       |                                       |
 | `rocminfo`             | EMU             | Pending          |                                       |                                       |
 | `rocm-smi-lib`         | EMU             | Pending          |                                       |                                       |
-| `rocprofiler`          | EMU             | Completed        |                                       |                                       |
+| `rocprofiler`          | Public          | Pending          |                                       |                                       |
 | `rocprofiler-compute`  | Public          | Pending          |                                       |                                       |
-| `rocprofiler-register` | EMU             | Completed        |                                       |                                       |
+| `rocprofiler-register` | Public          | Pending          |                                       |                                       |
 | `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
 | `rocprofiler-systems`  | Public          | Pending          |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
 | `rocshmem`             | Public          | Pending          |                                       |                                       |
-| `roctracer`            | EMU             | Completed        |                                       |                                       |
+| `roctracer`            | Public          | Pending          |                                       |                                       |
 
 
 ## Tentative migration schedule
