@@ -27,7 +27,7 @@
 // THE SOFTWARE.
 
 #include "core/agent.hpp"
-#include "core/sample_cache/cache_manager.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
@@ -41,8 +41,8 @@
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/data_processor.hpp"
-#include "core/sample_cache/metadata_storage.hpp"
 #include "core/state.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "library/amd_smi.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
@@ -89,7 +89,8 @@ get_data_processor()
 void
 metadata_initialize_category()
 {
-    sample_cache::get_cache_metadata().add_string(trait::name<category::amd_smi>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::amd_smi>::value);
 }
 
 void
@@ -97,13 +98,13 @@ metadata_initialize_smi_tracks()
 {
     const auto thread_id = std::nullopt;
 
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::amd_smi_mm_busy>::value, thread_id, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::amd_smi_power>::value, thread_id, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::amd_smi_temp>::value, thread_id, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::amd_smi_memory_usage>::value, thread_id, "{}" });
 }
 
@@ -125,25 +126,25 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     auto  agent_handle =
         agent_mngr.get_agent_by_type_index(gpu_id, agent_type::GPU).handle;
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_mm_busy>::value, "Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
           COMPONENT, "$", "ABS", BLOCK, EXPRESSION, 0, 0, "{}" });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_temp>::value, "Temp",
           trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
           CELSIUS_DEGREES, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_power>::value, "Pow",
           trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
           "w", "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,

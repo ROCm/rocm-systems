@@ -47,14 +47,6 @@ set(core_sources
     ${CMAKE_CURRENT_LIST_DIR}/state.cpp
     ${CMAKE_CURRENT_LIST_DIR}/timemory.cpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd/data_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd/json.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/rocpd/data_storage/database.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_manager.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_storage.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/metadata_storage.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/cache_storage_parser.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/sample_cache/rocpd_post_processing.cpp
     ${CMAKE_CURRENT_LIST_DIR}/agent_manager.cpp
     ${CMAKE_CURRENT_LIST_DIR}/node_info.cpp
 )
@@ -104,6 +96,7 @@ add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
 add_subdirectory(rocpd)
+add_subdirectory(trace_cache)
 
 target_include_directories(
     rocprofiler-systems-core-library

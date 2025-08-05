@@ -26,8 +26,8 @@
 #include "core/config.hpp"
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
-#include "core/sample_cache/cache_manager.hpp"
-#include "core/sample_cache/sample_type.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/tracing.hpp"
 
 #include <timemory/units.hpp>
@@ -83,9 +83,9 @@ metadata_initialize_comm_data_categories()
     static bool _is_initialized = false;
     if(_is_initialized) return;
 
-    sample_cache::get_cache_metadata().add_string(
+    trace_cache::get_metadata_registry().add_string(
         trait::name<category::comm_data>::value);
-    sample_cache::get_cache_metadata().add_string(trait::name<category::mpi>::value);
+    trace_cache::get_metadata_registry().add_string(trait::name<category::mpi>::value);
 
     _is_initialized = true;
 }
@@ -95,7 +95,7 @@ void
 metadata_initialize_track()
 {
     auto _init_track = [&](const char* label) {
-        sample_cache::get_cache_metadata().add_track({ label, std::nullopt, "{}" });
+        trace_cache::get_metadata_registry().add_track({ label, std::nullopt, "{}" });
     };
 
     static std::once_flag _once{};
@@ -122,11 +122,11 @@ metadata_initialize_comm_data_pmc()
         agent_mngr.get_agent_by_type_index(DEVICE_ID, agent_type::CPU).handle;
 
 #if defined(ROCPROFSYS_USE_MPI)
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, comm_data::mpi_send::label,
           "Tracks MPI communication data sizes", trait::name<category::mpi>::description,
           LONG_DESCRIPTION, COMPONENT, MSG, "ABS", BLOCK, EXPRESSION, 0, 0 });
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, comm_data::mpi_recv::label,
           "Tracks MPI communication data sizes", trait::name<category::mpi>::description,
           LONG_DESCRIPTION, COMPONENT, MSG, "ABS", BLOCK, EXPRESSION, 0, 0 });
@@ -158,8 +158,8 @@ cache_cpu_usage_events(const uint32_t device_id, int bytes)
     const std::string line_info       = "{}";
     const size_t      agent_handle    = agent.handle;
 
-    sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::pmc_event_with_sample, track_name.c_str(), timestamp_ns,
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::pmc_event_with_sample, track_name.c_str(), timestamp_ns,
         event_metadata.c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack.c_str(), line_info.c_str(), agent_handle, track_name.c_str(), value);
 }

@@ -20,7 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "cache_storage.hpp"
+#include "buffer_storage.hpp"
 #include "library/ptl.hpp"
 #include <chrono>
 #include <mutex>
@@ -30,7 +30,7 @@ using namespace std::chrono_literals;
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
 namespace
@@ -38,7 +38,7 @@ namespace
 constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 }  // namespace
 
-cache_storage::cache_storage()
+buffer_storage::buffer_storage()
 {
     tasking::general::get_task_group().exec([this]() {
         std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
@@ -102,7 +102,7 @@ cache_storage::cache_storage()
 }
 
 void
-cache_storage::shutdown()
+buffer_storage::shutdown()
 {
     m_running = false;
     m_shutdown_condition.notify_all();
@@ -112,7 +112,7 @@ cache_storage::shutdown()
 }
 
 void
-cache_storage::fragment_memory()
+buffer_storage::fragment_memory()
 {
     auto* _data = m_buffer->data();
     memset(_data + m_head, 0xFFFF, buffer_size - m_head);
@@ -124,7 +124,7 @@ cache_storage::fragment_memory()
 }
 
 uint8_t*
-cache_storage::reserve_memory_space(size_t len)
+buffer_storage::reserve_memory_space(size_t len)
 {
     size_t _size;
     {
@@ -144,10 +144,10 @@ cache_storage::reserve_memory_space(size_t len)
 }
 
 bool
-cache_storage::is_running() const
+buffer_storage::is_running() const
 {
     return m_running;
 }
 
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

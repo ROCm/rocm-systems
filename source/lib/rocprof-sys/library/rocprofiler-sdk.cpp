@@ -30,11 +30,11 @@
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/json.hpp"
-#include "core/sample_cache/cache_manager.hpp"
-#include "core/sample_cache/cache_storage.hpp"
-#include "core/sample_cache/metadata_storage.hpp"
-#include "core/sample_cache/sample_type.hpp"
 #include "core/state.hpp"
+#include "core/trace_cache/buffer_storage.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/amd_smi.hpp"
 #include "library/components/category_region.hpp"
 #include "library/rocprofiler-sdk.hpp"
@@ -468,20 +468,20 @@ template <typename Category>
 void
 cache_category()
 {
-    sample_cache::get_cache_metadata().add_string(trait::name<Category>::value);
+    trace_cache::get_metadata_registry().add_string(trait::name<Category>::value);
 }
 
 void
 cache_add_thread_info(uint64_t tid)
 {
-    sample_cache::get_cache_metadata().add_thread_info(
+    trace_cache::get_metadata_registry().add_thread_info(
         { getppid(), getpid(), tid, 0, 0, "{}" });
 }
 
 void
 cache_add_track(const char* track_name, uint64_t tid)
 {
-    sample_cache::get_cache_metadata().add_track({ track_name, tid, "{}" });
+    trace_cache::get_metadata_registry().add_track({ track_name, tid, "{}" });
 }
 
 size_t
@@ -527,8 +527,8 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
              const std::string& args_str, const std::string& category)
 
 {
-    sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::region,
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::region,
         record->thread_id,
         static_cast<int32_t>(record->kind),
         static_cast<int32_t>(record->operation),
@@ -547,11 +547,11 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
     auto stream_handle = get_stream_id(record).handle;
     auto queue_handle  = record->dispatch_info.queue_id.handle;
 
-    sample_cache::get_cache_metadata().add_queue(queue_handle);
-    sample_cache::get_cache_metadata().add_stream(stream_handle);
+    trace_cache::get_metadata_registry().add_queue(queue_handle);
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
 
-    sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::kernel_dispatch,
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::kernel_dispatch,
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -577,8 +577,8 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
 {
     auto stream_handle = get_stream_id(record).handle;
 
-    sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::memory_copy,
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::memory_copy,
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -600,9 +600,9 @@ cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* r
 {
     auto stream_handle = get_stream_id(record).handle;
 
-    sample_cache::get_cache_metadata().add_stream(stream_handle);
-    sample_cache::get_cache_storage().store(
-        sample_cache::entry_type::memory_alloc,
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
+    trace_cache::get_buffer_storage().store(
+        trace_cache::entry_type::memory_alloc,
         record->start_timestamp,
         record->end_timestamp,
         record->thread_id,
@@ -882,7 +882,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                     _data.emplace_back(
                         code_object_callback_record_t{ ts, record, data_v });
                 });
-                sample_cache::get_cache_metadata().add_code_object(data_v);
+                trace_cache::get_metadata_registry().add_code_object(data_v);
             }
             else if(record.operation ==
                     ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
@@ -893,7 +893,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                         _data.emplace_back(
                             new kernel_symbol_callback_record_t{ ts, record, data_v });
                     });
-                sample_cache::get_cache_metadata().add_kernel_symbol(data_v);
+                trace_cache::get_metadata_registry().add_kernel_symbol(data_v);
             }
         }
         return;
@@ -1689,8 +1689,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     // Insert the default stream and queue info to ensure that the default entry is
     {
-        sample_cache::get_cache_metadata().add_stream(0);
-        sample_cache::get_cache_metadata().add_queue(0);
+        trace_cache::get_metadata_registry().add_stream(0);
+        trace_cache::get_metadata_registry().add_queue(0);
     }
     // ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
     //     _data->primary_ctx, ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT, nullptr, 0,

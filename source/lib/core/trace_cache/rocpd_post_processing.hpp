@@ -21,47 +21,40 @@
 // SOFTWARE.
 
 #pragma once
-
-#include "cache_storage.hpp"
-#include "cache_storage_parser.hpp"
-#include "core/sample_cache/rocpd_post_processing.hpp"
-#include "metadata_storage.hpp"
+#include "core/node_info.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/storage_parser.hpp"
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
-class cache_manager
+class rocpd_post_processing
 {
 public:
-    static cache_manager& get_instance();
-    cache_storage&        get_cache() { return m_storage; }
-    metadata&             get_metadata() { return m_metadata; }
-    void                  shutdown();
-    void                  post_process();
+    rocpd_post_processing(metadata_registry& metadata);
+
+    void register_parser_callback(storage_parser& parser);
+    void post_process_metadata();
 
 private:
-    void post_process_metadata();
-    cache_manager();
+    using primary_key = size_t;
 
-    cache_storage         m_storage;
-    metadata              m_metadata;
-    storage_parser        m_parser;
-    rocpd_post_processing m_postprocessing;
+    inline void rocpd_insert_thread_id(info::thread& t_info, const node_info& n_info,
+                                       const info::process& process_info) const;
+
+    postprocessing_callback get_kernel_dispatch_callback() const;
+    postprocessing_callback get_memory_copy_callback() const;
+#if(ROCPROFILER_VERSION >= 600)
+    postprocessing_callback get_memory_allocate_callback() const;
+#endif
+    postprocessing_callback get_region_callback() const;
+    postprocessing_callback get_in_time_sample_callback() const;
+    postprocessing_callback get_pmc_event_with_sample_callback() const;
+
+    metadata_registry& m_metadata;
 };
 
-inline metadata&
-get_cache_metadata()
-{
-    return cache_manager::get_instance().get_metadata();
-}
-
-inline cache_storage&
-get_cache_storage()
-{
-    return cache_manager::get_instance().get_cache();
-}
-
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

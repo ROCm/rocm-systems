@@ -38,14 +38,14 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
 class cache_manager;
-class cache_storage
+class buffer_storage
 {
 public:
-    static cache_storage& get_instance();
+    static buffer_storage& get_instance();
 
     template <typename... T>
     void store(entry_type type, T&&... values)
@@ -81,7 +81,7 @@ public:
 
 private:
     friend class cache_manager;
-    cache_storage();
+    buffer_storage();
     void     shutdown();
     bool     is_running() const;
     void     fragment_memory();
@@ -119,5 +119,5 @@ private:
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
 };
 
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

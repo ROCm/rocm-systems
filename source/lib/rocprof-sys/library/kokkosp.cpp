@@ -32,8 +32,8 @@
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/json.hpp"
-#include "core/sample_cache/cache_manager.hpp"
-#include "core/sample_cache/sample_type.hpp"
+#include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "library/components/category_region.hpp"
 #include "library/runtime.hpp"
 #include <optional>
@@ -162,14 +162,14 @@ namespace
 void
 metadata_initialize_kokkos_category()
 {
-    rocprofsys::sample_cache::get_cache_metadata().add_string(
+    rocprofsys::trace_cache::get_metadata_registry().add_string(
         rocprofsys::trait::name<category::kokkos>::value);
 }
 
 void
 metadata_initialize_kokkos_track()
 {
-    rocprofsys::sample_cache::get_cache_metadata().add_track(
+    rocprofsys::trace_cache::get_metadata_registry().add_track(
         { rocprofsys::trait::name<category::kokkos>::value, std::nullopt, "{}" });
 }
 
@@ -189,8 +189,8 @@ cache_kokkos_event(const char* name, const char* event_type, const char* target,
     const char*  call_stack      = "{}";
     const char*  line_info       = "{}";
 
-    rocprofsys::sample_cache::get_cache_storage().store(
-        rocprofsys::sample_cache::entry_type::in_time_sample,
+    rocprofsys::trace_cache::get_buffer_storage().store(
+        rocprofsys::trace_cache::entry_type::in_time_sample,
         rocprofsys::trait::name<category::kokkos>::value, timestamp_ns,
         event_metadata->to_string().c_str(), stack_id, parent_stack_id, correlation_id,
         call_stack, line_info);

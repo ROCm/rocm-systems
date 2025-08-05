@@ -29,8 +29,8 @@
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/data_processor.hpp"
-#include "core/sample_cache/cache_manager.hpp"
 #include "core/timemory.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "library/components/cpu_freq.hpp"
 #include "library/thread_info.hpp"
 
@@ -95,14 +95,15 @@ get_data_processor()
 void
 metadata_initialize_cpu_freq_category()
 {
-    sample_cache::get_cache_metadata().add_string(trait::name<category::cpu_freq>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::cpu_freq>::value);
 }
 
 void
 metadata_initialize_cpu_freq_tracks()
 {
     do_for_enabled_cpus([&](size_t cpu_id) {
-        sample_cache::get_cache_metadata().add_track(
+        trace_cache::get_metadata_registry().add_track(
             { get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), std::nullopt,
               "{}" });
     });
@@ -111,19 +112,19 @@ metadata_initialize_cpu_freq_tracks()
 void
 metadata_initialize_cpu_usage_tracks()
 {
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_page>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_virt>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_peak>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_context_switch>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_page_fault>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_user_mode_time>::value, std::nullopt, "{}" });
-    sample_cache::get_cache_metadata().add_track(
+    trace_cache::get_metadata_registry().add_track(
         { trait::name<category::process_kernel_mode_time>::value, std::nullopt, "{}" });
 }
 
@@ -147,7 +148,7 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
         agent_mngr.get_agent_by_type_index(dev_id, agent_type::CPU).handle;
 
     do_for_enabled_cpus([&](size_t cpu_id) {
-        sample_cache::get_cache_metadata().add_pmc_info(
+        trace_cache::get_metadata_registry().add_pmc_info(
             { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
               get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), "Frequency",
               trait::name<category::cpu_freq>::description, LONG_DESCRIPTION, COMPONENT,
@@ -155,43 +156,43 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
               0 });
     });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_page>::value, "Memory Usage",
           trait::name<category::process_page>::description, LONG_DESCRIPTION, COMPONENT,
           MEMORY, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_virt>::value, "Virtual Memory Usage",
           trait::name<category::process_virt>::description, LONG_DESCRIPTION, COMPONENT,
           MEMORY, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_peak>::value, "Peak Memory",
           trait::name<category::process_peak>::description, LONG_DESCRIPTION, COMPONENT,
           MEMORY, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_context_switch>::value, "Context Switches",
           trait::name<category::process_context_switch>::description, LONG_DESCRIPTION,
           COMPONENT, "", "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_page_fault>::value, "Page Faults",
           trait::name<category::process_page_fault>::description, LONG_DESCRIPTION,
           COMPONENT, "", "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_user_mode_time>::value, "User Time",
           trait::name<category::process_user_mode_time>::description, LONG_DESCRIPTION,
           COMPONENT, TIME, "ABS", BLOCK, EXPRESSION, 0, 0 });
 
-    sample_cache::get_cache_metadata().add_pmc_info(
+    trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::process_kernel_mode_time>::value, "Kernel Time",
           trait::name<category::process_kernel_mode_time>::description, LONG_DESCRIPTION,

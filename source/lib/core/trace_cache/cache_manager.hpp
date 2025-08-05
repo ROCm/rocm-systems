@@ -21,40 +21,47 @@
 // SOFTWARE.
 
 #pragma once
-#include "core/node_info.hpp"
-#include "core/sample_cache/cache_storage_parser.hpp"
-#include "core/sample_cache/metadata_storage.hpp"
+
+#include "buffer_storage.hpp"
+#include "core/trace_cache/rocpd_post_processing.hpp"
+#include "metadata_registry.hpp"
+#include "storage_parser.hpp"
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
-class rocpd_post_processing
+class cache_manager
 {
 public:
-    rocpd_post_processing(metadata& metadata);
-
-    void register_parser_callback(storage_parser& parser);
-    void post_process_metadata();
+    static cache_manager& get_instance();
+    buffer_storage&       get_buffer_storage() { return m_storage; }
+    metadata_registry&    get_metadata_regsitry() { return m_metadata; }
+    void                  shutdown();
+    void                  post_process();
 
 private:
-    using primary_key = size_t;
+    void post_process_metadata();
+    cache_manager();
 
-    inline void rocpd_insert_thread_id(info::thread& t_info, const node_info& n_info,
-                                       const info::process& process_info) const;
-
-    postprocessing_callback get_kernel_dispatch_callback() const;
-    postprocessing_callback get_memory_copy_callback() const;
-#if(ROCPROFILER_VERSION >= 600)
-    postprocessing_callback get_memory_allocate_callback() const;
-#endif
-    postprocessing_callback get_region_callback() const;
-    postprocessing_callback get_in_time_sample_callback() const;
-    postprocessing_callback get_pmc_event_with_sample_callback() const;
-
-    metadata& m_metadata;
+    buffer_storage        m_storage;
+    metadata_registry     m_metadata;
+    storage_parser        m_parser;
+    rocpd_post_processing m_postprocessing;
 };
 
-}  // namespace sample_cache
+inline metadata_registry&
+get_metadata_registry()
+{
+    return cache_manager::get_instance().get_metadata_regsitry();
+}
+
+inline buffer_storage&
+get_buffer_storage()
+{
+    return cache_manager::get_instance().get_buffer_storage();
+}
+
+}  // namespace trace_cache
 }  // namespace rocprofsys

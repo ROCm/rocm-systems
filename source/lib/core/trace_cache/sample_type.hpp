@@ -32,7 +32,7 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 
 struct storage_parsed_type_base
@@ -194,5 +194,5 @@ enum class entry_type : uint32_t
 #endif
     fragmented_space = 0xFFFF
 };
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys

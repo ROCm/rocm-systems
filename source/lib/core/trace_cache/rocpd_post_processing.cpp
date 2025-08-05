@@ -20,16 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "sample_cache/rocpd_post_processing.hpp"
+#include "trace_cache/rocpd_post_processing.hpp"
 #include "agent_manager.hpp"
 #include "common.hpp"
 #include "config.hpp"
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
-#include "sample_cache/cache_storage_parser.hpp"
-#include "sample_cache/metadata_storage.hpp"
-#include "sample_cache/sample_type.hpp"
+#include "trace_cache/metadata_registry.hpp"
+#include "trace_cache/sample_type.hpp"
+#include "trace_cache/storage_parser.hpp"
 #include <cstdint>
 #include <limits>
 #include <stdexcept>
@@ -43,7 +43,7 @@
 
 namespace rocprofsys
 {
-namespace sample_cache
+namespace trace_cache
 {
 namespace
 {
@@ -374,7 +374,7 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
     };
 }
 
-rocpd_post_processing::rocpd_post_processing(metadata& md)
+rocpd_post_processing::rocpd_post_processing(metadata_registry& md)
 : m_metadata(md)
 {}
 
@@ -566,5 +566,5 @@ rocpd_post_processing::rocpd_insert_thread_id(info::thread&        t_info,
                                             ss.str().c_str(), t_info.start, t_info.end);
 }
 
-}  // namespace sample_cache
+}  // namespace trace_cache
 }  // namespace rocprofsys
