@@ -8,7 +8,7 @@ on:
     - cron: 0 5 * * *
   push:
     paths:
-      - '.github/workflows/rocprofiler-systems-containers.yml'
+      - 'projects/rocprofiler-systems/.github/workflows/containers.yml'
       - 'projects/rocprofiler-systems/docker/**'
 
 concurrency:
