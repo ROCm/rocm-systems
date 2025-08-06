@@ -1,0 +1,26 @@
+jobs:
+  - echo: True
+    runtime_trace: True
+    hip_trace: True
+    hsa_trace: True
+    summary: True
+    log_level: "info"
+    output_directory: "@CMAKE_CURRENT_BINARY_DIR@"
+    output_file: "out"
+    marker_trace: False
+    kernel_trace: False
+    memory_copy_trace: False
+    memory_allocation_trace: False
+    scratch_memory_trace: False
+    rccl_trace: False
+    kokkos_trace: False
+    rocdecode_trace: False
+    rocjpeg_trace: False
+    hip_runtime_trace: False
+    hip_compiler_trace: False
+    hsa_core_trace: False
+    hsa_amd_trace: False
+    hsa_image_trace: False
+    hsa_finalizer_trace: False
+    advanced_thread_trace: False
+    kernel_rename: False

@@ -1,0 +1,18 @@
+# - Config file for the rocm-core package
+# It defines the following variables
+#  ROCM_CORE_INCLUDE_DIR - include directories for rocm-core
+#  ROCM_CORE_LIB_DIR     - libraries to link against
+#  ROCM_PATH     - Install Base Location for ROCM.
+
+@PACKAGE_INIT@
+
+# Compute paths
+set_and_check(rocm_core_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(ROCM_CORE_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(rocm_core_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCM_CORE_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+set_and_check(ROCM_PATH "${PACKAGE_PREFIX_DIR}")
+
+get_filename_component(ROCM_CORE_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+include("${ROCM_CORE_CMAKE_DIR}/rocmCoreTargets.cmake")
+

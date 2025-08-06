@@ -1,0 +1,6 @@
+* @dayatsin-amd @shwetagkhatri
+# Documentation files
+docs/* @ROCm/rocm-documentation @dayatsin-amd @shwetagkhatri
+*.md @ROCm/rocm-documentation @dayatsin-amd @shwetagkhatri
+*.rst @ROCm/rocm-documentation @dayatsin-amd @shwetagkhatri
+.readthedocs.yaml @ROCm/rocm-documentation @dayatsin-amd @shwetagkhatri

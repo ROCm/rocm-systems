@@ -1,0 +1,274 @@
++ ROCP_CTRL_RATE=10:100000:1000000 ./test/MatrixTranspose
+ROCTracer (pid=1983):
+ROCTracer: trace control: delay(10us), length(100000us), rate(1000000us)
+3802699747119708
+    HIP-trace()
+Device name Device 687f
+## Iteration (99) #################
+PASSED!
+## Iteration (98) #################
+PASSED!
+## Iteration (97) #################
+PASSED!
+## Iteration (96) #################
+PASSED!
+## Iteration (95) #################
+PASSED!
+## Iteration (94) #################
+PASSED!
+## Iteration (93) #################
+PASSED!
+## Iteration (92) #################
+PASSED!
+## Iteration (91) #################
+PASSED!
+## Iteration (90) #################
+PASSED!
+## Iteration (89) #################
+PASSED!
+## Iteration (88) #################
+PASSED!
+## Iteration (87) #################
+PASSED!
+## Iteration (86) #################
+PASSED!
+## Iteration (85) #################
+PASSED!
+## Iteration (84) #################
+PASSED!
+## Iteration (83) #################
+PASSED!
+## Iteration (82) #################
+PASSED!
+## Iteration (81) #################
+PASSED!
+## Iteration (80) #################
+PASSED!
+## Iteration (79) #################
+PASSED!
+## Iteration (78) #################
+PASSED!
+## Iteration (77) #################
+PASSED!
+## Iteration (76) #################
+PASSED!
+## Iteration (75) #################
+PASSED!
+## Iteration (74) #################
+PASSED!
+## Iteration (73) #################
+PASSED!
+## Iteration (72) #################
+PASSED!
+## Iteration (71) #################
+PASSED!
+## Iteration (70) #################
+PASSED!
+## Iteration (69) #################
+PASSED!
+## Iteration (68) #################
+PASSED!
+## Iteration (67) #################
+PASSED!
+## Iteration (66) #################
+PASSED!
+## Iteration (65) #################
+PASSED!
+## Iteration (64) #################
+PASSED!
+## Iteration (63) #################
+PASSED!
+## Iteration (62) #################
+PASSED!
+## Iteration (61) #################
+PASSED!
+## Iteration (60) #################
+PASSED!
+## Iteration (59) #################
+PASSED!
+## Iteration (58) #################
+PASSED!
+## Iteration (57) #################
+PASSED!
+## Iteration (56) #################
+PASSED!
+## Iteration (55) #################
+PASSED!
+## Iteration (54) #################
+PASSED!
+## Iteration (53) #################
+PASSED!
+## Iteration (52) #################
+PASSED!
+## Iteration (51) #################
+PASSED!
+## Iteration (50) #################
+PASSED!
+## Iteration (49) #################
+PASSED!
+## Iteration (48) #################
+PASSED!
+## Iteration (47) #################
+PASSED!
+## Iteration (46) #################
+PASSED!
+## Iteration (45) #################
+PASSED!
+## Iteration (44) #################
+PASSED!
+## Iteration (43) #################
+PASSED!
+## Iteration (42) #################
+PASSED!
+## Iteration (41) #################
+PASSED!
+## Iteration (40) #################
+PASSED!
+## Iteration (39) #################
+PASSED!
+## Iteration (38) #################
+PASSED!
+## Iteration (37) #################
+PASSED!
+## Iteration (36) #################
+PASSED!
+## Iteration (35) #################
+PASSED!
+## Iteration (34) #################
+PASSED!
+## Iteration (33) #################
+PASSED!
+## Iteration (32) #################
+PASSED!
+## Iteration (31) #################
+PASSED!
+## Iteration (30) #################
+PASSED!
+## Iteration (29) #################
+PASSED!
+## Iteration (28) #################
+PASSED!
+## Iteration (27) #################
+PASSED!
+## Iteration (26) #################
+PASSED!
+## Iteration (25) #################
+PASSED!
+## Iteration (24) #################
+PASSED!
+## Iteration (23) #################
+PASSED!
+## Iteration (22) #################
+PASSED!
+## Iteration (21) #################
+PASSED!
+## Iteration (20) #################
+PASSED!
+## Iteration (19) #################
+PASSED!
+## Iteration (18) #################
+PASSED!
+## Iteration (17) #################
+PASSED!
+## Iteration (16) #################
+PASSED!
+## Iteration (15) #################
+PASSED!
+## Iteration (14) #################
+PASSED!
+## Iteration (13) #################
+PASSED!
+## Iteration (12) #################
+PASSED!
+## Iteration (11) #################
+PASSED!
+## Iteration (10) #################
+PASSED!
+## Iteration (9) #################
+PASSED!
+## Iteration (8) #################
+PASSED!
+## Iteration (7) #################
+PASSED!
+## Iteration (6) #################
+PASSED!
+## Iteration (5) #################
+PASSED!
+## Iteration (4) #################
+PASSED!
+## Iteration (3) #################
+PASSED!
+## Iteration (2) #################
+PASSED!
+## Iteration (1) #################
+PASSED!
+## Iteration (0) #################
+PASSED!
+3802699751533941:3802699751541991 1983:1983 hipGetDevicePropertiesR0600(props=, device=0)
+3802699752571489:3802699752686289 1983:1983 hipMalloc(ptr=0x7f6c121ff010, size=4194304)
+3802699752688639:3802699752749390 1983:1983 hipMalloc(ptr=0x7fffefcadf28, size=4194304)
+3802699752763840:3802700027958750 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700932447414:3802700934135107 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700934143817:3802700934144527 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700934146607:3802700934147267 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e03f3099)
+3802700934158787:3802700934164967 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700934192847:3802700936775947 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700943795998:3802700945501111 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700945517031:3802700945517901 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700945519841:3802700945520521 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e0ecbb86)
+3802700945522671:3802700945530171 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700945534701:3802700948131020 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700955136442:3802700956839355 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700956847725:3802700956848495 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700956850235:3802700956850825 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e1999f61)
+3802700956860545:3802700956868795 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700956872065:3802700959479235 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700966505397:3802700968203670 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700968219030:3802700968219770 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700968221700:3802700968222280 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e247222e)
+3802700968225090:3802700968233560 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700968241120:3802700970853059 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700977859821:3802700979559833 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700979567803:3802700979568553 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700979570433:3802700979571073 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e2f44d18)
+3802700979581243:3802700979589274 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700979592044:3802700982222943 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700989239045:3802700990944838 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802700990960008:3802700990960828 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802700990963068:3802700990963638 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e3a221d9)
+3802700990966328:3802700990975628 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802700990978718:3802700993694078 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802701000919212:3802701002625515 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802701002633405:3802701002634215 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802701002635935:3802701002636515 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e45440c4)
+3802701002649885:3802701002657855 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802701002660835:3802701005267024 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802701012322026:3802701014008789 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802701014023469:3802701014024239 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802701014028089:3802701014028669 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e5020cc5)
+3802701014031569:3802701014039849 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802701014042919:3802701016640288 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802701023688501:3802701025398903 1983:1983 hipMemcpy(dst=0x7f6c11400000, src=0x7f6c121ff010, sizeBytes=4194304, kind=1)
+3802701025407454:3802701025408214 1983:1983 __hipPushCallConfiguration(gridDim=, blockDim=, sharedMem=0, stream=0)
+3802701025410224:3802701025411104 1983:1983 __hipPopCallConfiguration(gridDim=, blockDim=, sharedMem=140106682958042, stream=0xd8282e5afc125)
+3802701025412944:3802701025420534 1983:1983 hipLaunchKernel(function_address=0x401030, numBlocks=, dimBlocks=, args=0x3b9aca00, sharedMemBytes=0, stream=0) kernel=matrixTranspose(float*, float*, int)
+3802701025431374:3802701028050563 1983:1983 hipMemcpy(dst=0x7f6c11dfe010, src=0x7f6c10e00000, sizeBytes=4194304, kind=2)
+3802700025923715:3802700027953920 0:0 CopyHostToDevice:4:1983
+3802700932468645:3802700934131397 0:0 CopyHostToDevice:159:1983
+3802700934202858:3802700936764597 0:0 CopyDeviceToHost:165:1983
+3802700943841248:3802700945497221 0:0 CopyHostToDevice:166:1983
+3802700945569841:3802700948120440 0:0 CopyDeviceToHost:172:1983
+3802700955175473:3802700956835555 0:0 CopyHostToDevice:173:1983
+3802700956907066:3802700959467615 0:0 CopyDeviceToHost:179:1983
+3802700966543517:3802700968200020 0:0 CopyHostToDevice:180:1983
+3802700968270720:3802700970841439 0:0 CopyDeviceToHost:186:1983
+3802700977897221:3802700979556403 0:0 CopyHostToDevice:187:1983
+3802700979628944:3802700982210583 0:0 CopyDeviceToHost:193:1983
+3802700989276246:3802700990941188 0:0 CopyHostToDevice:194:1983
+3802700991012848:3802700993682128 0:0 CopyDeviceToHost:200:1983
+3802701000959152:3802701002622075 0:0 CopyHostToDevice:201:1983
+3802701002693645:3802701005254464 0:0 CopyDeviceToHost:207:1983
+3802701012346926:3802701014005359 0:0 CopyHostToDevice:208:1983
+3802701014077439:3802701016629358 0:0 CopyDeviceToHost:214:1983
+3802701023726221:3802701025394963 0:0 CopyHostToDevice:215:1983
+3802701025467214:3802701028039843 0:0 CopyDeviceToHost:221:1983

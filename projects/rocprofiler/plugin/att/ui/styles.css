@@ -1,0 +1,137 @@
+h2,h3,h4 {
+	text-align: center;
+	font-family: Calibri, Candara, Optima, Arial, 'Trebuchet MS', sans-serif;
+}
+
+ul, ol {
+	list-style-type: none;
+	padding: 0;
+	margin: 20px 5px;
+	/*font-family: Calibri, Candara, Segoe, "Segoe UI", Optima, Arial, sans-serif; font-size: 15px; font-style: normal; font-variant: normal; */
+	font-family: 'Courier New', monospace; font-size: 15px; font-style: normal;
+}
+
+a {
+	color: royalblue;
+	cursor: pointer;
+}
+
+div#flexbox {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+div#flexbox > div {
+  flex: 50%;
+}
+
+div#minimap {
+	position: absolute; 
+	width: 350px;
+	top: 340px;
+	display: flex;
+	justify-content: right;
+	right: 5px;
+}
+
+div#wave, div#cu_wave {
+	overflow:scroll;
+	overflow-y:hidden;
+}
+
+div#ma_code {
+	height: calc(100vh - 180px);
+	overflow: auto;
+	overflow-x: hidden;
+	display: block;
+	margin: 20px;
+}
+
+nav {
+	padding-right: 8px;
+	position: absolute;
+	top: 1rem;
+	right: 1rem;
+	background: #FFFDE3;
+    z-index: 5;
+	margin-left: 10px;
+	width:330px;
+}
+
+.highlight {
+	background-color: lightgray;
+	font-weight: bold;
+}
+
+.clickable {
+	cursor: pointer;
+	font-weight: 180;
+}
+
+ul li {
+	border-bottom: 1px dotted black;
+}
+
+.tooltip {
+	display: none;
+	position: relative;
+	left: 10px;
+	z-index: 100;
+	background: #333;
+	border: 1px solid #c0c0c0;
+	opacity: 0.8;
+	color: white;
+}
+li:hover .tooltip {
+	display: inline-block; /*block;*/
+}
+.loop {
+	margin-left: 30px;
+	background: lightseagreen;
+}
+
+.btn {
+	border: 1px solid black;
+	background-color: #D7D7D7;
+	color: black;
+	padding: 3px 4px;
+	font-size: 14px;
+	cursor: pointer;
+	border-style: ridge;
+	border-radius: 6px;
+}
+
+.btn:hover {
+	color: blue;
+}
+
+.dropbtn {
+	border: 2px solid black;
+	background-color: #D7D7D7;
+	color: black;
+	padding: 3px 4px;
+	font-size: 15px;
+	cursor: pointer;
+	border-style: ridge;
+	border-radius: 4px;
+}
+
+.dropbtn:hover, .dropbtn:focus {
+	color: blue;
+}
+
+.dropdown {
+	position: relative;
+}
+
+.dropdown-content {
+	display: none;
+	position: absolute;
+	background-color: #e0e0f0;
+	min-width: 10px;
+	box-shadow: 0px 8px 16px 0px rgba(0,0,0.1,0.1);
+	z-index: 1;
+}
+
+.dropdown-content a:hover {background-color: #ddd;}
+.show {display:inline-flex;}

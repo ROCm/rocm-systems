@@ -1,0 +1,178 @@
+name: Continuous Integration
+
+on:
+  push:
+    branches: [ amd-mainline, amd-staging ]
+    paths-ignore:
+      - '*.md'
+  pull_request:
+    branches: [ amd-mainline, amd-staging ]
+    paths-ignore:
+      - '*.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['clang-14', 'clang-15', 'gcc-11', 'gcc-12']
+        ci-args: ['']
+        ci-tag: ['']
+        include:
+          - compiler: 'gcc-12'
+            ci-args: '--coverage'
+            ci-tag: '-codecov'
+          - compiler: 'clang-15'
+            ci-args: '--linter clang-tidy'
+            ci-tag: '-clang-tidy'
+          - compiler: 'clang-13'
+            ci-args: ''
+            ci-tag: ''
+          - compiler: 'gcc-12'
+            ci-args: '--memcheck ThreadSanitizer'
+            ci-tag: '-thread-sanitizer'
+          - compiler: 'gcc-12'
+            ci-args: '--memcheck AddressSanitizer'
+            ci-tag: '-address-sanitizer'
+          - compiler: 'gcc-12'
+            ci-args: '--memcheck LeakSanitizer'
+            ci-tag: '-leak-sanitizer'
+        #   - compiler: 'gcc-12'
+        #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
+        #     ci-tag: '-undefined-behavior-sanitizer'
+
+    runs-on: rocprof-azure-emu-runner-set
+
+    env:
+        BUILD_TYPE: RelWithDebInfo
+        INSTALL_PREFIX: /opt/rocprofiler-register
+        PACKAGING_INSTALL_PREFIX: /opt/rocm
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Install Packages
+      timeout-minutes: 25
+      run: |
+        CC=${{ matrix.compiler }} &&
+        CXX=$(echo ${{ matrix.compiler }} | sed 's/clang-/clang++-/1' | sed 's/gcc-/g++-/1') &&
+        apt-get update &&
+        apt-get install -y build-essential python3 environment-modules ${{ matrix.compiler }} ${CXX} &&
+        update-alternatives --install /usr/bin/cc cc /usr/bin/${CC} 100 &&
+        update-alternatives --install /usr/bin/c++ c++ /usr/bin/${CXX} 100 &&
+        python3 -m pip install --upgrade pip &&
+        python3 -m pip install 'cmake==3.22.0' &&
+        python3 -m pip install -r requirements.txt
+
+    - name: Setup GCov
+      timeout-minutes: 25
+      if: ${{ matrix.compiler == 'gcc-12' }}
+      run: |
+        update-alternatives --install /usr/bin/gcov gcov /usr/bin/gcov-12 100
+
+    - name: Setup Clang-Tidy
+      timeout-minutes: 25
+      if: ${{ matrix.compiler == 'clang-15' }}
+      run: |
+        apt-get install -y clang-tidy-15
+        update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 100
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        cmake --version &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
+          --build-jobs 2
+          --site GitHub
+          ${{ matrix.ci-args }}
+          --disable-cdash
+          --
+          -DCMAKE_C_COMPILER=/usr/bin/cc
+          -DCMAKE_CXX_COMPILER=/usr/bin/c++
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=${{ env.INSTALL_PREFIX }}
+          -DROCPROFILER_REGISTER_BUILD_TESTS=ON
+          -DROCPROFILER_REGISTER_BUILD_SAMPLES=ON
+          --
+          -VV
+
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: CPack and Install
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p ${{ env.PACKAGING_INSTALL_PREFIX }}
+        ./rocprofiler-register-*-Linux.sh --prefix=${{ env.PACKAGING_INSTALL_PREFIX }} --exclude-subdir --skip-license
+
+    - name: Test Installed Packages
+      if: ${{ contains(matrix.compiler, 'clang-15') }}
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
+        cmake --build build-tests-deb --target all --parallel 16
+        ctest --test-dir build-tests-deb --output-on-failure
+        
+    - name: Test Install Modulefile
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use ${{ env.INSTALL_PREFIX }}/share/modulefiles
+        module avail
+        module load rocprofiler-register
+        pushd tests
+        BUILD_DIR=${PWD}/build-rocp-reg-modulefile
+        cmake -B ${BUILD_DIR} .
+        cmake --build ${BUILD_DIR} --target all
+        rm -rf ${BUILD_DIR}
+
+    - name: Test Install Setup Env
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source ${{ env.INSTALL_PREFIX }}/share/rocprofiler-register/setup-env.sh
+        pushd samples/library-implementation
+        BUILD_DIR=${PWD}/build-rocp-reg-setup-env
+        cmake -B ${BUILD_DIR} .
+        cmake --build ${BUILD_DIR} --target all
+        rm -rf ${BUILD_DIR}
+
+    - name: Test Install CPack Modulefile
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use ${{ env.PACKAGING_INSTALL_PREFIX }}/share/modulefiles
+        module avail
+        module load rocprofiler-register
+        pushd tests
+        BUILD_DIR=${PWD}/build-rocp-reg-modulefile-cpack
+        cmake -B ${BUILD_DIR} .
+        cmake --build ${BUILD_DIR} --target all
+        rm -rf ${BUILD_DIR}
+
+    - name: Test Install CPack Setup Env
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source ${{ env.PACKAGING_INSTALL_PREFIX }}/share/rocprofiler-register/setup-env.sh
+        pushd samples/library-implementation
+        BUILD_DIR=${PWD}/build-rocp-reg-setup-env-cpack
+        cmake -B ${BUILD_DIR} .
+        cmake --build ${BUILD_DIR} --target all
+        rm -rf ${BUILD_DIR}
