@@ -6,7 +6,7 @@ for the ROCm Libraries. If you haven't read the above doc, please start there.
 
 ## Becoming a member
 
-Gardeners will need to be members of the [Compute Library Gardeners team](https://github.com/orgs/ROCm/teams/systems-gardeners).
+Gardeners will need to be members of the [Compute Library Gardeners team](https://github.com/orgs/ROCm/teams/compute-library-gardeners).
 Please contact an owner to become a gardener.
 
 ## Communications channel
@@ -21,7 +21,7 @@ For anyone who wants to reach a gardener please email:
 
 Your primary job is to keep the mono-repo shippable. In order to facilitate this we've made
 status badges for all relevant CI available here:
-https://github.com/ROCm/rocm-systems?tab=readme-ov-file#monorepo-status-and-ci-health.
+https://github.com/ROCm/rocm-systems?tab=readme-ov-file#super-repo-status-and-ci-health.
 Effectively your job is to ensure all status badges are green. All of these status
 badges are clickable which will allow you to deep-dive on any failures quickly. If any
 CI is missing, please file an issue leveraging the "gardener" tag, ping on the teams chat,
@@ -46,11 +46,47 @@ as a group and likely admins should be approving the majority of those.
 
 As an example to include an admin: *we have a critical feature but develop is broken and it is unrelated to our changes*
 
-## Rotation
+## Scope of Gardeners and Developers
+
+In scope:
+- Gardeners are responsible for ensuring develop (post-submit) checks remain green.
+- If a post-submit check is red, the gardeners should review the failing CI system and triage the issue.
+- No matter the issue, gardeners should notify the larger gardening team at least once per day about any post-submit failures.
+- If the issue is related to a failure in the CI system (not a code change), the gardener should note the issue,
+  verify whether existing PRs are facing the same problem, and notify the appropriate CI team, escalating the issue if required.
+- If the issue is related to a code change, the gardener should isolate the error message, and notify the
+  appropriate component owners with a link to the log (reference the [CODEOWNERS](../.github/CODEOWNERS) file).
+
+Not in scope:
+- Gardeners are not responsible for fixing code changes that break post-submit checks.
+- Gardeners are not responsible for monitoring the health of every open PR.
+
+Developer responsibilities:
+- If developers find CI system failures in their PR (pre-submit) checks they should notify the gardener on rotation and the appropriate CI team.
+
+### Beyond the Responsibilities
+
+Gardeners should generally aim to be efficient at operating the CI/CD systems and doing first pass triage and routing.
+Especially for people new to the role, this will involve more reaching out for help and coordinating resolution, but as experience increases,
+it is natural to take a more active role in helping to route and do first pass triage oneself.
+While going the extra mile on this is not a requirement of the role, efficient gardeners should aim to develop a proficiency with the
+tools and their colleagues such that their judgment reduces the overall toil to the team. Often people who develop these skills find it
+more effective to look a little bit more deeply at failures and route for resolution properly in one step.
+
+This kind of investment is deeply valued for the overall health of the team and is encouraged.
+
+### CI Teams
+
+CI | Main primary contact | Team
+---- | ------- | ---------
+Profilers CI | TBD | TBD
+External (Azure) CI | jayhawk-commits | [ROCm/external-ci](https://github.com/orgs/ROCm/teams/external-ci)
+TheRock CI | geomin12 | [ROCm/therockinfra](https://github.com/orgs/ROCm/teams/therockinfra)
+
+## Gardener Rotation
 
 Week | North America | Europe / India / APAC
 ---- | ------- | ---------
-
 
 It is the responsibility of the current gardeners to update the table when the gardeners rotate.
 
@@ -65,3 +101,4 @@ You can see current list of [gardener known bugs](https://github.com/ROCm/rocm-s
 
 Date | Library | Issue overview | Link to details | Resolved?
 ---- | ------- | -------------- | --------------- | ---------
+6/30 | | | | ✅

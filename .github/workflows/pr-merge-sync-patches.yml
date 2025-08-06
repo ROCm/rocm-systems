@@ -1,24 +1,24 @@
 # Apply Patch to Subrepos After Merge
 # -----------------------------------
 # This GitHub Actions workflow runs on push commits. If it detects the push is from
-# a pull request merged into the monorepo, then it continues to run the workflow.
+# a pull request merged into the super-repo, then it continues to run the workflow.
 # It identifies which subtrees (defined in .github/repos-config.json) were affected,
 # generates a patch from the merge commit, and applies that patch to the corresponding
 # sub-repositories by cloning them and committing the patch directly.
 #
 # Key Steps:
 # 1. Generate a GitHub App token for authentication.
-# 2. Checkout the monorepo at the merge commit.
+# 2. Checkout the super-repo at the merge commit.
 # 3. Use a Python script to detect which subtrees were modified.
 # 4. For each changed subtree:
 #    - Generate a patch from the merge commit for that subtree.
 #    - Determine the appropriate author (based on PR metadata or fallback).
 #    - Clone the target sub-repo and apply the patch.
-#    - Amend the commit message to include links to the monorepo PR and commit.
+#    - Amend the commit message to include links to the super-repo PR and commit.
 #    - Push the commit directly to the sub-repo.
 #
 # This ensures downstream sub-repositories are updated to reflect changes
-# made in the monorepo immediately after merge.
+# made in the super-repo immediately after merge.
 
 name: Merged PR to Patch Subrepos
 

@@ -351,6 +351,92 @@ public:
   /// @return HSA_STATUS_SUCCESS if the driver successfully makes the memory
   virtual hsa_status_t MakeMemoryUnresident(const void* mem) const = 0;
 
+  /// @brief Shares memory with another process.
+  /// @param[in] mem Pointer to the memory to be shared.
+  /// @param[in] size Size of the memory to be shared.
+  /// @param[out] share_mem Pointer to the shared memory handle.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully shared, or an error code.
+  virtual hsa_status_t ShareMemory(void* mem, size_t size, HsaSharedMemoryHandle* share_mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Registers a shared memory handle.
+  /// @param[in] share_mem Pointer to the shared memory handle.
+  /// @param[out] mem Pointer to the memory.
+  /// @param[out] size Size of the memory.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully registered, or an error code.
+  virtual hsa_status_t RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
+                                            uint64_t* size) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Replaces the ASAN header page with a valid one.
+  /// @param[in] mem Pointer to the memory to be replaced.
+  /// @return HSA_STATUS_SUCCESS if the ASAN header page was successfully replaced, or an error
+  /// code.
+  virtual hsa_status_t ReplaceAsanHeaderPage(void* mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Returns the ASAN header page to its original state.
+  /// @param[in] mem Pointer to the memory to be returned.
+  /// @return HSA_STATUS_SUCCESS if the ASAN header page was successfully returned, or an error
+  /// code.
+  virtual hsa_status_t ReturnAsanHeaderPage(void* mem) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Queries the PC sampling capabilities.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] sample_info Pointer to the sample information
+  /// @param[in] sample_info_sz Size of the sample information
+  /// @param[out] sz_needed Size of the sample information needed
+  /// @return HSA_STATUS_SUCCESS if the PC sampling capabilities were successfully queried, or an
+  /// error code.
+  virtual hsa_status_t PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
+                                                   uint32_t sample_info_sz,
+                                                   uint32_t* sz_needed) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Creates a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] sample_info Pointer to the sample information
+  /// @param[out] trace_id Pointer to the trace ID
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully created, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                        uint32_t* trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Destroys a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully destroyed, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingDestroy(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Starts a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully started, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingStart(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  /// @brief Stops a PC sampling session.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] trace_id Trace ID of the PC sampling session
+  /// @return HSA_STATUS_SUCCESS if the PC sampling session was successfully stopped, or an error
+  /// code.
+  virtual hsa_status_t PcSamplingStop(uint32_t node_id, uint32_t trace_id) const {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 

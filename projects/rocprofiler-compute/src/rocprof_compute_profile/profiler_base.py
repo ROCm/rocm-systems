@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,26 +10,28 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import csv
 import glob
-import logging
 import os
 import re
+import shlex
 import shutil
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd
@@ -347,6 +349,10 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
+
+        if self.get_args().set_selected:
+            console_log("Set Selection: " + str(self.__args.set_selected))
+
         if self.get_args().filter_blocks is None:
             console_log("Report Sections: All")
         else:
@@ -462,7 +468,9 @@ class RocProfCompute_Base:
                 method=self.get_args().pc_sampling_method,
                 interval=self.get_args().pc_sampling_interval,
                 workload_dir=self.get_args().path,
-                appcmd=self.get_args().remaining,
+                appcmd=shlex.split(
+                    self.get_args().remaining
+                ),  # FIXME: the right solution is applying it when argparsing once!
                 rocprofiler_sdk_library_path=self.get_args().rocprofiler_sdk_library_path,
             )
             end_run_prof = time.time()

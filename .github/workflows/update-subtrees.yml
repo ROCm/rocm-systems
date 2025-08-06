@@ -6,8 +6,8 @@ on:
     - cron: '0 * * * *'
 
 env:
-  MONOREPO_URL: github.com/ROCm/rocm-systems.git
-  MONOREPO_BRANCH: develop
+  SUPER_REPO_URL: github.com/ROCm/rocm-systems.git
+  SUPER_REPO_BRANCH: develop
 
 concurrency:
   group: pr-update-subtrees-develop
@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   synchronize-subtrees:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-24.04
     steps:
       - name: Generate a token
@@ -25,7 +26,7 @@ jobs:
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      - name: Checkout the Monorepo
+      - name: Checkout the Super-repo
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0 # needed for git subtree pull/push
@@ -36,11 +37,11 @@ jobs:
           git config user.name "systems-assistant[bot]"
           git config user.email "systems-assistant[bot]@users.noreply.github.com"
 
-      - name: Switch to the Monorepo branch
+      - name: Switch to the Super-repo branch
         run: |
-          git checkout -B "${{ env.MONOREPO_BRANCH }}" "origin/${{ env.MONOREPO_BRANCH }}"
+          git checkout -B "${{ env.SUPER_REPO_BRANCH }}" "origin/${{ env.SUPER_REPO_BRANCH }}"
 
-      - name: Update Repositories in the Monorepo
+      - name: Update Repositories in the Super-repo
         run: |
           has_errors=false
           for repo in $(cat .github/repos-config.json | jq -r '.repositories[].name'); do
@@ -69,6 +70,6 @@ jobs:
             echo "One or more errors occurred during the repository update."
             exit 1
           else
-            git push https://${{ env.MONOREPO_URL }} ${{ env.MONOREPO_BRANCH }}
+            git push https://${{ env.SUPER_REPO_URL }} ${{ env.SUPER_REPO_BRANCH }}
             echo "All repositories updated successfully!"
           fi

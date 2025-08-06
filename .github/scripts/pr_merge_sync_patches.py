@@ -4,15 +4,14 @@
 Sync Patches to Subrepositories
 -------------------------------
 
-This script is part of the monorepo synchronization system. It runs after a monorepo pull request
+This script is part of the super-repo synchronization system. It runs after a super-repo pull request
 is merged and applies relevant changes to the corresponding sub-repositories using Git patches.
 
-- Uses the merge commit of the monorepo PR to extract subtree changes.
-- Detects file-level changes including adds, deletes, and renames.
-- Applies changes directly using file copy/move/delete as needed.
-- Squashes all commits per subtree into one before pushing.
+- Uses the merge commit of the super-repo PR to extract subtree changes.
+- Generates patch files per changed subtree.
+- Applies each patch to its respective sub-repository, adjusting for subtree prefix.
 - Uses the repos-config.json file to map subtrees to sub-repos.
-- Assumes this script is run from the root of the monorepo.
+- Assumes this script is run from the root of the super-repo.
 
 Arguments:
     --repo      : Full repository name (e.g., org/repo)
@@ -23,17 +22,16 @@ Arguments:
     --debug     : If set, enables detailed debug logging.
 
 Example Usage:
-    python pr_merge_sync_patches.py --repo ROCm/rocm-systems --pr 123 --subtrees "$(printf 'projects/rocBLAS\nprojects/hipBLASLt\nshared/rocSPARSE')" --dry-run --debug
+    python pr_merge_sync_patches.py --repo ROCm/rocm-systems --pr 123 --subtrees "$(printf 'projects/rocprofiler-sdk\nprojects/rocprofiler-register\projects/rocm-smi-lib')" --dry-run --debug
 """
 
 import argparse
 import logging
 import os
 import re
-import shutil
 import subprocess
 import tempfile
-from typing import Optional, List, Tuple
+from typing import Optional, List
 from pathlib import Path
 from github_cli_client import GitHubCLIClient
 from config_loader import load_repo_config
@@ -96,29 +94,56 @@ def _configure_git_user(repo_path: Path) -> None:
     _run_git(["config", "user.name", "systems-assistant[bot]"], cwd=repo_path)
     _run_git(["config", "user.email", "systems-assistant[bot]@users.noreply.github.com"], cwd=repo_path)
 
-def _apply_patch(repo_path: Path, patch_path: Path, rel_file_path: Path, monorepo_path: Path, prefix: str) -> None:
-    """Try to apply a patch; if it fails, fallback to full file replacement."""
-    try:
-        _run_git(["am", str(patch_path)], cwd=repo_path)
-        logger.info(f"Applied patch {patch_path.name} successfully")
-    except RuntimeError as e:
-        logger.warning(f"Patch {patch_path.name} failed to apply; falling back to full file copy")
+def _apply_patch(repo_path: Path, patch_path: Path) -> None:
+    """Apply a patch file to the working tree."""
+    _run_git(["apply", str(patch_path)], cwd=repo_path)
+    logger.info(f"Applied patch to working tree at {repo_path}")
 
-        # Construct source and destination
-        monorepo_file = monorepo_path / prefix / rel_file_path
-        subrepo_file = repo_path / rel_file_path
-        subrepo_file.parent.mkdir(parents=True, exist_ok=True)
+def _stage_changes(repo_path: Path) -> None:
+    """Stage all changes in the repository."""
+    _run_git(["add", "."], cwd=repo_path)
+    logger.debug(f"Staged all changes in {repo_path}")
 
-        if not monorepo_file.exists():
-            raise RuntimeError(f"Fallback failed: {monorepo_file} does not exist")
+def _extract_commit_message_from_patch(patch_path: Path) -> str:
+    """Extract and clean the original commit message from the patch file,
+    removing '[PATCH]' and trailing PR references like (#NN) from the title."""
+    with open(patch_path, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    commit_msg_lines = []
+    in_msg = False
+    for line in lines:
+        if line.startswith("Subject: "):
+            subject = line[len("Subject: "):].strip()
+            # Remove leading "[PATCH]" if present
+            if subject.startswith("[PATCH]"):
+                subject = subject[len("[PATCH]"):].strip()
+            # Remove trailing PR refs like (#NN)
+            subject = re.sub(r"\s*\(#\d+\)$", "", subject)
+            commit_msg_lines.append(subject + "\n")
+            in_msg = True
+        elif in_msg:
+            if line.startswith("---"):
+                break
+            commit_msg_lines.append(line)
+    return "".join(commit_msg_lines).strip()
 
-        shutil.copyfile(monorepo_file, subrepo_file)
-        _run_git(["add", str(rel_file_path)], cwd=repo_path)
-        logger.info(f"Copied {monorepo_file} -> {subrepo_file}")
+def _format_commit_message(super_repo_url: str, pr_number: int, merge_sha: str, original_msg: str) -> str:
+    """Append a sync annotation to the original commit message."""
+    annotation = f"\n[rocm-systems] {super_repo_url}#{pr_number} (commit {merge_sha[:7]})\n"
+    return original_msg + annotation
+
+def _commit_changes(repo_path: Path, message: str, author_name: str, author_email: str) -> None:
+    """Commit staged changes with the specified author and message."""
+    _run_git([
+        "commit",
+        "--author", f"{author_name} <{author_email}>",
+        "-m", message
+    ], cwd=repo_path)
+    logger.debug(f"Committed changes with author {author_name} <{author_email}>")
 
 def _set_authenticated_remote(repo_path: Path, repo_url: str) -> None:
     """Set the push URL to use the GitHub App token from GH_TOKEN env."""
-    token = os.environ.get("GH_TOKEN")
+    token = os.environ["GH_TOKEN"]
     if not token:
         raise RuntimeError("GH_TOKEN environment variable is not set")
     remote_url = f"https://x-access-token:{token}@github.com/{repo_url}.git"
@@ -129,47 +154,15 @@ def _push_changes(repo_path: Path, branch: str) -> None:
     _run_git(["push", "origin", branch], cwd=repo_path)
     logger.debug(f"Pushed changes from {repo_path} to origin")
 
-def generate_file_level_patches(prefix: str, merge_sha: str, output_dir: Path) -> tuple[list[str], list[str], list[tuple[str, str]], list[str], list[Path]]:
-    """Generate one patch per modified file, and collect adds, deletes, and renames."""
-    diff_output = _run_git([
-        "diff", "--name-status", "-M", f"{merge_sha}^!", "--", prefix
-    ])
-
-    added_files = []
-    deleted_files = []
-    renamed_files = []
-    modified_files = []
-    patch_files = []
-
-    for line in diff_output.splitlines():
-        parts = line.split('\t')
-        status = parts[0]
-        if status == 'A':
-            added_files.append(parts[1])
-        elif status == 'M':
-            file_path = parts[1]
-            patch_path = output_dir / (file_path.replace("/", "_") + ".patch")
-            _run_git([
-                "format-patch",
-                "-1", merge_sha,
-                f"--relative={prefix}",
-                "--output", str(patch_path),
-                "--", file_path
-            ])
-            patch_files.append(patch_path)
-            modified_files.append(file_path)
-        elif status == 'D':
-            deleted_files.append(parts[1])
-        elif status.startswith('R'):
-            renamed_files.append((parts[1], parts[2]))
-
-    logger.debug(f"Generated {len(patch_files)} modified file patches, "
-                 f"{len(added_files)} added, {len(deleted_files)} deleted, "
-                 f"{len(renamed_files)} renamed under {prefix}")
-    return added_files, deleted_files, renamed_files, modified_files, patch_files
+def generate_patch(prefix: str, merge_sha: str, patch_path: Path) -> None:
+    """Generate a patch file for a given subtree prefix from a merge commit."""
+    args = ["format-patch", "-1", merge_sha, f"--relative={prefix}", "--output", str(patch_path)]
+    _run_git(args)
+    logger.debug(f"Generated patch for prefix '{prefix}' at {patch_path}")
 
 def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[str, str]:
-    """Determine the appropriate author for the patch"""
+    """Determine the appropriate author for the patch
+    Returns: (author_name, author_email)"""
     pr_data = client.get_pr_by_number(repo, pr)
     body = pr_data.get("body", "") or ""
     match = re.search(r"Originally authored by @([A-Za-z0-9_-]+)", body)
@@ -182,87 +175,25 @@ def resolve_patch_author(client: GitHubCLIClient, repo: str, pr: int) -> tuple[s
     name, email = client.get_user(username)
     return name or username, email
 
-def apply_patches_and_squash(entry: RepoEntry, monorepo_url: str, monorepo_pr: int,
-                             added_files: list[str], deleted_files: list[str], renamed_files: list[tuple[str, str]],
-                             modified_files: list[str], modified_patch_paths: list[Path],
-                             author_name: str, author_email: str, merge_sha: str, dry_run: bool = False) -> None:
-    """
-    Clone the subrepo, apply file-level patches each as a commit,
-    delete files with git rm, copy added files, rename files,
-    then squash all new commits into one before pushing.
-    """
+def apply_patch_to_subrepo(entry: RepoEntry, super_repo_url: str, super_repo_pr: int,
+                            patch_path: Path, author_name: str, author_email: str,
+                            merge_sha: str, dry_run: bool = False) -> None:
+    """Clone the subrepo, apply the patch, and attribute to the original author with commit message annotations."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        prefix = f"{entry.category}/{entry.name}"
-        if dry_run:
-            logger.info(f"[Dry-run] Sync for {entry.name}:")
-            prefix_path = Path(prefix)
-
-            if added_files:
-                logger.info("  Added files:")
-                for f in added_files:
-                    short_path = Path(f).relative_to(prefix_path)
-                    logger.info(f"    {short_path}")
-            if deleted_files:
-                logger.info("  Deleted files:")
-                for f in deleted_files:
-                    short_path = Path(f).relative_to(prefix_path)
-                    logger.info(f"    {short_path}")
-            if renamed_files:
-                logger.info("  Renamed files:")
-                for old, new in renamed_files:
-                    old_rel = Path(old).relative_to(prefix_path)
-                    new_rel = Path(new).relative_to(prefix_path)
-                    logger.info(f"    {old_rel} -> {new_rel}")
-            if modified_files:
-                logger.info("  Modified files (via patch):")
-                for f in modified_files:
-                    short_path = Path(f).relative_to(prefix_path)
-                    logger.info(f"    {short_path}")
-            if not (added_files or deleted_files or renamed_files or modified_files or modified_patch_paths):
-                logger.info("  No changes detected.")
-            return
-
         subrepo_path = Path(tmpdir) / entry.name
         _clone_subrepo(entry.url, entry.branch, subrepo_path)
-
+        if dry_run:
+            logger.info(f"[Dry-run] Would apply patch to {entry.url} as {author_name} <{author_email}>")
+            return
         _configure_git_user(subrepo_path)
-
-        # Get current HEAD commit (before applying patches)
-        base_commit = _run_git(["rev-parse", "HEAD"], cwd=subrepo_path)
-
-        # Handle deletes
-        for file_path in deleted_files:
-            rel_path = file_path[len(prefix)+1:] if file_path.startswith(prefix + "/") else file_path
-            _run_git(["rm", rel_path], cwd=subrepo_path)
-
-        # Handle renames
-        for old, new in renamed_files:
-            old_rel = old[len(prefix)+1:] if old.startswith(prefix + "/") else old
-            new_rel = new[len(prefix)+1:] if new.startswith(prefix + "/") else new
-            _run_git(["mv", old_rel, new_rel], cwd=subrepo_path)
-
-        # Handle adds
-        for file_path in added_files:
-            rel_path = file_path[len(prefix)+1:] if file_path.startswith(prefix + "/") else file_path
-            src = Path(prefix) / rel_path
-            dst = subrepo_path / rel_path
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, dst)
-
-        # Handle modified files (apply patches one by one)
-        for patch_path, full_file_path in zip(modified_patch_paths, modified_files):
-            rel_path = full_file_path[len(prefix)+1:] if full_file_path.startswith(prefix + "/") else full_file_path
-            logger.debug(f"Applying patch {patch_path.name} to {entry.name} at {rel_path}")
-            _apply_patch(subrepo_path, patch_path, Path(rel_path), Path.cwd(), prefix)
-
-        # Final squash
-        commit_msg = f"[rocm-systems] {monorepo_url}#{monorepo_pr} (commit {merge_sha[:7]})\n\n" + \
-                     _run_git(["log", "-1", "--pretty=%B", merge_sha])
-        _run_git(["reset", "--soft", base_commit], cwd=subrepo_path)
-        _run_git(["commit", "-m", commit_msg, "--author", f"{author_name} <{author_email}>"], cwd=subrepo_path)
-
+        _apply_patch(subrepo_path, patch_path)
+        _stage_changes(subrepo_path)
+        original_commit_msg = _extract_commit_message_from_patch(patch_path)
+        commit_msg = _format_commit_message(super_repo_url, super_repo_pr, merge_sha, original_commit_msg)
+        _commit_changes(subrepo_path, commit_msg, author_name, author_email)
         _set_authenticated_remote(subrepo_path, entry.url)
         _push_changes(subrepo_path, entry.branch)
+        logger.info(f"Patch applied, committed, and pushed to {entry.url} as {author_name} <{author_email}>")
 
 def main(argv: Optional[List[str]] = None) -> None:
     """Main function to apply patches to sub-repositories."""
@@ -276,23 +207,16 @@ def main(argv: Optional[List[str]] = None) -> None:
     relevant_subtrees = get_subtree_info(config, subtrees)
     merge_sha = client.get_squash_merge_commit(args.repo, args.pr)
     logger.debug(f"Merge commit for PR #{args.pr} in {args.repo}: {merge_sha}")
-    _run_git(["checkout", merge_sha])
-    logger.info(f"Checked out merge commit {merge_sha} for patch operations")
     for entry in relevant_subtrees:
         prefix = f"{entry.category}/{entry.name}"
         logger.debug(f"Processing subtree {prefix}")
         with tempfile.TemporaryDirectory() as tmpdir:
-            patch_dir = Path(tmpdir)
-            # Generate patches and lists of adds/deletes/renames
-            added_files, deleted_files, renamed_files, modified_files, modified_patch_paths,  = generate_file_level_patches(prefix, merge_sha, patch_dir)
-            if not (added_files or deleted_files or renamed_files or modified_files or modified_patch_paths):
-                logger.info(f"No changes to apply for {prefix}")
-                continue
+            patch_file = Path(tmpdir) / f"{entry.name}.patch"
+            generate_patch(prefix, merge_sha, patch_file)
             author_name, author_email = resolve_patch_author(client, args.repo, args.pr)
-            apply_patches_and_squash(entry, args.repo, args.pr,
-                                     added_files, deleted_files, renamed_files, modified_files, modified_patch_paths,
-                                     author_name, author_email, merge_sha,
-                                     args.dry_run)
+            apply_patch_to_subrepo(entry, args.repo, args.pr,
+                                   patch_file, author_name, author_email,
+                                   merge_sha, args.dry_run)
 
 if __name__ == "__main__":
     main()

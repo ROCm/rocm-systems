@@ -2553,20 +2553,16 @@ hsa_status_t GpuAgent::PcSamplingIterateConfig(hsa_ven_amd_pcs_iterate_configura
     return HSA_STATUS_ERROR;
 
   // First query to get size of list needed
-  HSAKMT_STATUS ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), NULL, 0, &size));
-  if (ret != HSAKMT_STATUS_SUCCESS || size == 0) return HSA_STATUS_ERROR;
+  hsa_status_t ret = driver().PcSamplingQueryCapabilities(node_id(), NULL, 0, &size);
+  if (ret != HSA_STATUS_SUCCESS || size == 0) return ret;
 
   std::vector<HsaPcSamplingInfo> sampleInfoList(size);
-  ret = HSAKMT_CALL(hsaKmtPcSamplingQueryCapabilities(node_id(), sampleInfoList.data(), sampleInfoList.size(),
-                                          &size));
+  ret = driver().PcSamplingQueryCapabilities(node_id(), sampleInfoList.data(),
+                                             sampleInfoList.size(), &size);
 
-  if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+  if (ret != HSA_STATUS_SUCCESS) return ret;
 
   for (uint32_t i = 0; i < size; i++) {
-    if ((isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) &&
-        sampleInfoList[i].method == HSA_PC_SAMPLING_METHOD_KIND_STOCHASTIC_V1) {
-      continue;
-    }
     hsa_ven_amd_pcs_configuration_t hsaPcSampling;
     if (ConvertHsaKmtPcSamplingInfoToHsa(&sampleInfoList[i], &hsaPcSampling) == HSA_STATUS_SUCCESS
         && cb(&hsaPcSampling, cb_data) == HSA_STATUS_INFO_BREAK)
@@ -2590,10 +2586,9 @@ hsa_status_t GpuAgent::PcSamplingCreate(pcs::PcsRuntime::PcSamplingSession& sess
 
   // Pass the sampling information to the kernel driver to create PC
   // sampling session.
-  HSAKMT_STATUS retkmt = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id(), &sampleInfo, &thunkId));
-  if (retkmt != HSAKMT_STATUS_SUCCESS) {
-    return (retkmt == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) ? (hsa_status_t)HSA_STATUS_ERROR_RESOURCE_BUSY
-            : HSA_STATUS_ERROR;
+  ret = driver().PcSamplingCreate(node_id(), &sampleInfo, &thunkId);
+  if (ret != HSA_STATUS_SUCCESS) {
+    return ret;
   }
 
   debug_print("Created PC sampling session with thunkId:%d\n", thunkId);
@@ -2613,10 +2608,6 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
   if (sampling_method == HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1) {
     pcs_data = &pcs_hosttrap_data_;
   } else if (sampling_method == HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1) {
-    if (isa_->GetMajorVersion() == 12 && (isa_->GetMinorVersion() == 0)) {
-      return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
     pcs_data = &pcs_stochastic_data_;
   } else {
     // Unsupported sampling method
@@ -2803,7 +2794,7 @@ hsa_status_t GpuAgent::PcSamplingCreateFromId(HsaPcSamplingTraceId ioctlId,
 hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& session) {
   if (PcSamplingStop(session) != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR;
 
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id(), session.ThunkId()));
+  hsa_status_t ret = driver().PcSamplingDestroy(node_id(), session.ThunkId());
   hsa_ven_amd_pcs_method_kind_t sampling_method = session.method();
 
   pcs_data_t* pcs_data = nullptr;
@@ -2835,7 +2826,7 @@ hsa_status_t GpuAgent::PcSamplingDestroy(pcs::PcsRuntime::PcSamplingSession& ses
   // Update the trap handler to clear any associated device data
   UpdateTrapHandlerWithPCS(nullptr, nullptr);
 
-  return (retKmt == HSAKMT_STATUS_SUCCESS) ? HSA_STATUS_SUCCESS : HSA_STATUS_ERROR;
+  return ret;
 }
 
 hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& session) {
@@ -2902,8 +2893,9 @@ hsa_status_t GpuAgent::PcSamplingStart(pcs::PcsRuntime::PcSamplingSession& sessi
   }
 
   // Start the sampling session in the kernel driver
-  if (HSAKMT_CALL(hsaKmtPcSamplingStart(node_id(), session.ThunkId())) == HSAKMT_STATUS_SUCCESS)
+  if (driver().PcSamplingStart(node_id(), session.ThunkId()) == HSA_STATUS_SUCCESS) {
     return HSA_STATUS_SUCCESS;
+  }
 
   debug_print("Failed to start PC sampling session with thunkId:%d\n", session.ThunkId());
   // Clean up if starting the session failed
@@ -2923,8 +2915,8 @@ hsa_status_t GpuAgent::PcSamplingStop(pcs::PcsRuntime::PcSamplingSession& sessio
   session.stop();
 
   // Stop PC sampling in the kernel driver
-  HSAKMT_STATUS retKmt = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id(), session.ThunkId()));
-  if (retKmt != HSAKMT_STATUS_SUCCESS)
+  hsa_status_t ret = driver().PcSamplingStop(node_id(), session.ThunkId());
+  if (ret != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(HSA_STATUS_ERROR, "Failed to stop PC Sampling session.");
 
   // Determine the sampling method and corresponding data

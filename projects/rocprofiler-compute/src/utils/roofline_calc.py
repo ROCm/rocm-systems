@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,17 +10,19 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import csv
 from dataclasses import dataclass
@@ -259,25 +261,11 @@ def calc_ai(mspec, sort_type, ret_df):
     df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
-    total_flops = (
-        valu_flops
-    ) = (
-        mfma_flops_f6f4
-    ) = (
-        mfma_flops_f8
-    ) = (
-        mfma_flops_bf16
-    ) = (
+    total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = mfma_flops_bf16 = (
         mfma_flops_f16
-    ) = (
-        mfma_iops_i8
-    ) = (
-        mfma_flops_f32
-    ) = (
-        mfma_flops_f64
-    ) = (
-        lds_data
-    ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+    ) = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = lds_data = L1cache_data = (
+        L2cache_data
+    ) = hbm_data = calls = totalDuration = avgDuration = 0.0
 
     kernelName = ""
 
@@ -498,27 +486,13 @@ def calc_ai(mspec, sort_type, ret_df):
                     kernelName, idx, calls
                 )
             )
-            total_flops = (
-                valu_flops
-            ) = (
-                mfma_flops_f6f4
-            ) = (
-                mfma_flops_f8
-            ) = (
+            total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
-            ) = (
-                mfma_flops_f16
-            ) = (
-                mfma_iops_i8
-            ) = (
-                mfma_flops_f32
-            ) = (
-                mfma_flops_f64
-            ) = (
+            ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
                 lds_data
-            ) = (
-                L1cache_data
-            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+            ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = (
+                avgDuration
+            ) = 0.0
 
         if sort_type == "dispatches":
             myList.append(
@@ -542,27 +516,13 @@ def calc_ai(mspec, sort_type, ret_df):
                     avgDuration,
                 )
             )
-            total_flops = (
-                valu_flops
-            ) = (
-                mfma_flops_f6f4
-            ) = (
-                mfma_flops_f8
-            ) = (
+            total_flops = valu_flops = mfma_flops_f6f4 = mfma_flops_f8 = (
                 mfma_flops_bf16
-            ) = (
-                mfma_flops_f16
-            ) = (
-                mfma_iops_i8
-            ) = (
-                mfma_flops_f32
-            ) = (
-                mfma_flops_f64
-            ) = (
+            ) = mfma_flops_f16 = mfma_iops_i8 = mfma_flops_f32 = mfma_flops_f64 = (
                 lds_data
-            ) = (
-                L1cache_data
-            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+            ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = (
+                avgDuration
+            ) = 0.0
 
     myList.sort(key=lambda x: x.totalDuration, reverse=True)
 

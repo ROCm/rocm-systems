@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,27 +10,28 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import argparse
 import os
 import re
-import shutil
 from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
-    ret_str = "\t\tList all available metrics for analysis on specified arch:"
+    ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t\t   {}".format(arch)
     return ret_str
@@ -205,6 +206,19 @@ Examples:
         choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
+
+    profile_group.add_argument(
+        "--list-sets",
+        action="store_true",
+        help="\t\t\tDisplay available metric sets and their descriptions",
+    )
+    profile_group.add_argument(
+        "--set",
+        default=None,
+        dest="set_selected",
+        help="\t\t\tProfile a set of metrics of topic of interest by collecting counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+    )
+
     profile_group.add_argument(
         "--config-dir",
         dest="config_dir",

@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,22 +10,23 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 import argparse
 import importlib
 import os
-import shutil
 import socket
 import sys
 import time
@@ -53,6 +54,7 @@ from utils.utils import (
     get_submodules,
     get_version,
     get_version_display,
+    parse_sets_yaml,
     set_locale_encoding,
 )
 
@@ -242,12 +244,61 @@ class RocProfCompute:
             console_error("Unsupported arch")
 
     @demarcate
+    def list_sets(self):
+        sets_info = parse_sets_yaml(self.__mspec.gpu_arch)
+
+        if not sets_info:
+            console_error("No sets configuration found.")
+
+        print("\nAvailable Sets:")
+        print("=" * 115)
+
+        # Print header
+        print(
+            f"{'Set Option':<35} {'Set Title':<35} {'Metric Name':<30} {'Metric ID':<10}"
+        )
+        print("-" * 115)
+
+        # Print data grouped by set
+        for set_option, set_data in sets_info.items():
+            title = set_data.get("title", set_option)
+            metrics = set_data.get("metric", [])
+
+            first_row = True
+            for metric in metrics:
+                if isinstance(metric, dict) and metric:
+                    metric_id = next(iter(metric.keys()))
+                    metric_name = next(iter(metric.values()))
+
+                    # Only show set info on first row of each set
+                    set_display = set_option if first_row else ""
+                    title_display = title if first_row else ""
+
+                    print(
+                        f"{set_display:<35} {title_display:<35} {metric_name:<30} {metric_id:<10}"
+                    )
+                    first_row = False
+            # Empty line between sets
+            print()
+
+        print("Usage Examples:")
+        if sets_info:
+            first_set = next(iter(sets_info.keys()))
+            print(f"  rocprof-compute profile --set {first_set}  # Profile this set")
+        print(f"  rocprof-compute profile --list-sets        # Show this help")
+        print()
+
+        sys.exit(0)
+
+    @demarcate
     def run_profiler(self):
         self.print_graphic()
         self.load_soc_specs()
 
         if self.__args.list_metrics is not None:
             self.list_metrics()
+        elif self.__args.list_sets:
+            self.list_sets()
         elif self.__args.name is None:
             sys.exit("Either --list-name or --name is required")
 

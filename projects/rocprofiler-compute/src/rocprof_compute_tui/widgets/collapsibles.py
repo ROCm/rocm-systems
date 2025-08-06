@@ -1,4 +1,4 @@
-##############################################################################bl
+##############################################################################
 # MIT License
 #
 # Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
@@ -10,23 +10,24 @@
 # copies of the Software, and to permit persons to whom the Software is
 # furnished to do so, subject to the following conditions:
 #
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
 #
 # THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 # IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 # AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 # LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-##############################################################################el
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+##############################################################################
+
 
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import yaml
-from textual.containers import VerticalScroll
 from textual.widgets import Collapsible, DataTable, Label
 
 from rocprof_compute_tui.widgets.charts import (
@@ -41,12 +42,9 @@ from rocprof_compute_tui.widgets.charts import (
 def create_table(df: pd.DataFrame) -> DataTable:
     table = DataTable(zebra_stripes=True)
 
-    # Clean the DataFrame - remove NaN and empty cells
     df = df.reset_index()
-    df = df.dropna(how="any")
     df = df[~df.apply(lambda row: row.astype(str).str.strip().eq("").any(), axis=1)]
 
-    # Add columns and rows
     str_columns = [str(col) for col in df.columns]
     table.add_columns(*str_columns)
     table.add_rows([tuple(str(x) for x in row) for row in df.itertuples(index=False)])
@@ -59,7 +57,9 @@ def load_config(config_path) -> Dict[str, Any]:
         with open(config_path, "r") as file:
             return yaml.safe_load(file)
     except FileNotFoundError:
-        raise FileNotFoundError(f"Configuration file {config_path} not found")
+        raise FileNotFoundError(
+            f"Configuration file {config_path} not found, \nplease populate the analysis_config.yaml file."
+        )
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML configuration: {e}")
 
@@ -167,7 +167,7 @@ def build_subsection(
     return collapsible
 
 
-def build_dynamic_kernel_sections(
+def build_kernel_sections(
     dfs: Dict[str, Any], skip_sections: List[str]
 ) -> List[Collapsible]:
     children = []
@@ -198,9 +198,10 @@ def build_dynamic_kernel_sections(
             return None
 
         try:
-            df = data["df"]
+            if data["df"] is None or data["df"].empty:
+                return None
             tui_style = data.get("tui_style")
-            widget = create_widget_from_data(df, tui_style)
+            widget = create_widget_from_data(data["df"], tui_style)
 
             if widget is None:
                 add_warning(f"Widget creation returned None for '{subsection_name}'")
@@ -277,7 +278,7 @@ def build_section_from_config(
     # Handle dynamic sections (like kernel sections)
     elif section_config.get("dynamic_sections", False):
         skip_sections = section_config.get("skip_sections", [])
-        children = build_dynamic_kernel_sections(dfs, skip_sections)
+        children = build_kernel_sections(dfs, skip_sections)
 
     # Handle regular sections with subsections
     elif "subsections" in section_config:
@@ -290,7 +291,6 @@ def build_section_from_config(
             except Exception as e:
                 error_msg = f"{subsection_config.get('title', 'Unknown')} error: {str(e)}"
                 children.append(Label(error_msg, classes="warning"))
-
     else:
         children = [Label("No configuration provided for this section")]
 

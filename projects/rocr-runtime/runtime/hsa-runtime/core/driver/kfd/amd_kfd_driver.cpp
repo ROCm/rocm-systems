@@ -692,5 +692,102 @@ hsa_status_t KfdDriver::GetWallclockFrequency(uint32_t node_id, uint64_t* freque
   return HSA_STATUS_SUCCESS;
 }
 
+hsa_status_t KfdDriver::ShareMemory(void* mem, size_t size,
+                                    HsaSharedMemoryHandle* share_mem) const {
+  assert(share_mem);
+
+  if (HSAKMT_CALL(hsaKmtShareMemory(mem, size, share_mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::RegisterSharedHandle(const HsaSharedMemoryHandle* share_mem, void** mem,
+                                             uint64_t* size) const {
+  assert(share_mem);
+  assert(mem);
+  assert(size);
+
+  if (HSAKMT_CALL(hsaKmtRegisterSharedHandle(share_mem, mem, size)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReplaceAsanHeaderPage(void* mem) const {
+  if (HSAKMT_CALL(hsaKmtReplaceAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::ReturnAsanHeaderPage(void* mem) const {
+  if (HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(mem)) != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingQueryCapabilities(uint32_t node_id, void* sample_info,
+                                                    uint32_t sample_info_sz,
+                                                    uint32_t* sz_needed) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(
+      hsaKmtPcSamplingQueryCapabilities(node_id, sample_info, sample_info_sz, sz_needed));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
+  }
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingCreate(uint32_t node_id, HsaPcSamplingInfo* sample_info,
+                                         uint32_t* trace_id) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingCreate(node_id, sample_info, trace_id));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
+  }
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingDestroy(uint32_t node_id, uint32_t trace_id) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingDestroy(node_id, trace_id));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
+  }
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingStart(uint32_t node_id, uint32_t trace_id) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingStart(node_id, trace_id));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
+  }
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t KfdDriver::PcSamplingStop(uint32_t node_id, uint32_t trace_id) const {
+  HSAKMT_STATUS status = HSAKMT_CALL(hsaKmtPcSamplingStop(node_id, trace_id));
+  if (status == HSAKMT_STATUS_KERNEL_ALREADY_OPENED) {
+    return static_cast<hsa_status_t>(HSA_STATUS_ERROR_RESOURCE_BUSY);
+  }
+  if (status != HSAKMT_STATUS_SUCCESS) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
+}
+
 } // namespace AMD
 } // namespace rocr

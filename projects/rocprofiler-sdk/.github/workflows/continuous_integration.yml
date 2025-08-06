@@ -209,6 +209,7 @@ jobs:
           dnf groupinstall -y "Development Tools"
           dnf remove -y gcc-c++
           dnf install -y gcc-toolset-11-gcc-c++ llvm14-devel
+          source scl_source enable gcc-toolset-11
         fi
         python3 -m pip install --upgrade pip
         python3 -m pip install -U --user -r requirements.txt
@@ -217,6 +218,9 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        if [ "${OS_TYPE}" == "rhel-8" ]; then
+          source scl_source enable gcc-toolset-11;      
+        fi;
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -234,7 +238,9 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        if [ "${OS_TYPE}" == "rhel" ]; then source scl_source enable gcc-toolset-11; fi;
+        if [ "${OS_TYPE}" == "rhel-8" ]; then
+          source scl_source enable gcc-toolset-11;      
+        fi;
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
