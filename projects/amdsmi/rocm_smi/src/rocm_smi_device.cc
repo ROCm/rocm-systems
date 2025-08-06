@@ -1104,7 +1104,7 @@ namespace {
   // Keep 1 cache map, with an entry for each gpu
   std::unordered_map<std::string, GpuMetricsCache> g_gpu_metrics_cache_map;
   static const std::chrono::milliseconds kGpuMetricsCacheDuration(
-    read_env_ms("AMDSMI_GPU_METRICS_CACHE_MS", 100)
+    read_env_ms("AMDSMI_GPU_METRICS_CACHE_MS", 1)
   );
 }
 
@@ -1112,6 +1112,12 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
                                 void *p_binary_data) {
   auto sysfs_path = path_;
   std::ostringstream ss;
+
+  ss << __PRETTY_FUNCTION__
+     << " | AMDSMI_GPU_METRICS_CACHE_MS = "
+     << kGpuMetricsCacheDuration.count()
+     << " ms";
+  LOG_DEBUG(ss);
 
   // Size will either be 4, or 3872+. When 4, it's only reading from the header.
   // If this header read is inconsequential, we could only cache full read.

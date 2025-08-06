@@ -26,6 +26,9 @@ import logging
 import signal
 import sys
 
+# Metrics cache set to 1 by default, uncomment to change
+# os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "1"
+
 try:
     from amdsmi import *
 except ImportError as e:

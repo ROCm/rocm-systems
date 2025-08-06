@@ -75,6 +75,20 @@ usage information. See [Commands](#cmds).
 For more detailed version information, use `amd-smi version`.
 ```
 
+Environment variables:
+
+You can set one or more variables in front of any `amd-smi` invocation. For example:
+
+```shell-session
+AMDSMI_GPU_METRICS_CACHE_MS=200 amd-smi metric
+```
+
+Current Variables:
+
+```{note}
+AMDSMI_GPU_METRICS_CACHE_MS - Controls the internal GPU metrics cache duration (ms). Default 100, set to 0 to disable.
+```
+
 (cmds)=
 ## Commands
 
