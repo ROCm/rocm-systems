@@ -1941,9 +1941,27 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             ROCP_FATAL << "ATT Perf requires setting both perfcounter_ctrl and perfcounter list!";
         }
 
+        auto gpu_idx_set = std::set<uint64_t>{};
+
+        for(const auto& entry :
+            rocprofiler::sdk::parse::tokenize(tool::get_config().att_gpu_index, ","))
+        {
+            try
+            {
+                gpu_idx_set.insert(std::stoi(entry));
+            } catch(std::exception& e)
+            {
+                ROCP_FATAL << "Invalid GPU Id string: " << entry << " - " << e.what();
+            }
+        }
+
+        const auto selecting_by_gpuid = !gpu_idx_set.empty();
+
         for(auto& [id, agent] : tool_metadata->agents_map)
         {
             if(agent.type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+            if(selecting_by_gpuid && gpu_idx_set.erase(agent.gpu_index) == 0) continue;
 
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
@@ -1959,6 +1977,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                                     tool_data),
                 "thread trace service configure");
         }
+
+        // Any agent not removed by above loop was not in the agents_map list
+        for(const auto& entry : gpu_idx_set)
+            ROCP_ERROR << "Invalid GPU Device Index: " << entry;
     }
 
     if(tool::get_config().counter_collection)

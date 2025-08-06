@@ -472,11 +472,11 @@ generate_csv(const output_config&                                               
                                      {"Kind",
                                       "Operation",
                                       "Agent_Id",
+                                      "Allocation_Size",
                                       "Address",
                                       "Correlation_Id",
                                       "Start_Timestamp",
-                                      "End_Timestamp",
-                                      "Allocation_Size"}};
+                                      "End_Timestamp"}};
     for(auto ditr : data)
     {
         for(auto record : data.get(ditr))
@@ -498,11 +498,11 @@ generate_csv(const output_config&                                               
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
                 agent_info,
+                record.allocation_size,
                 rocprofiler::sdk::utility::as_hex(record.address.handle, 16),
                 record.correlation_id.internal,
                 record.start_timestamp,
-                record.end_timestamp,
-                record.allocation_size);
+                record.end_timestamp);
 
             ofs << row_ss.str();
         }

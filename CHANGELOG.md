@@ -164,61 +164,62 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Added
 
-- Added support for rocJPEG API Tracing
-- Added MI350X/MI355X support
-- Added rocprofiler_create_counter to allow for adding custom derived counters at runtime.
-- Added support for iteration based counter multiplexing to rocprofv3 (see documentation)
-- Added perfetto support for counter collection.
-- Added support for negating rocprofv3 tracing options when using aggregate options, e.g. `--sys-trace --hsa-trace=no`
-- Added `--agent-index` option in rocprofv3 to specify the agent naming convention in the output
+- Support for [rocJPEG](https://rocm.docs.amd.com/projects/rocJPEG/en/latest/index.html) API Tracing.
+- Support for AMD Instinct MI350X and MI355X accelerators.
+- `rocprofiler_create_counter` to facilitate adding custom derived counters at runtime.
+- Support in `rocprofv3` for iteration based counter multiplexing.
+- Perfetto support for counter collection.
+- Support for negating `rocprofv3` tracing options when using aggregate options such as `--sys-trace --hsa-trace=no`.
+- `--agent-index` option in `rocprofv3` to specify the agent naming convention in the output:
   - absolute == node_id
   - relative == logical_node_id
   - type-relative == logical_node_type_id
-- Added MI300/MI350 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and ROCProfV3
-- Python bindings for rocprofiler-sdk-roctx
-- SQLite3 output support for rocprofv3 (`--output-format rocpd`)
-- Added `rocprofiler-sdk-rocpd` package
-  - public API in `include/rocprofiler-sdk-rocpd/rocpd.h`
-  - library implementation in `librocprofiler-sdk-rocpd.so`
-  - support for `find_package(rocprofiler-sdk-rocpd)`
-  - `rocprofiler-sdk-rocpd` DEB and RPM packages
-- Support `--version` option for `rocprofv3`
-- Added `rocpd` Python package
-- Added thread trace as experimental API
-- Added ROCprof Trace Decoder as experimental API
-  - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder)
-- Added thread trace option to the rocprofv3 tool under the --att parameters
+- MI300 and MI350 stochastic (hardware-based) PC sampling support in ROCProfiler-SDK and `rocprofv3`.
+- Python bindings for `rocprofiler-sdk-roctx`
+- SQLite3 output support for `rocprofv3` using `--output-format rocpd`.
+- `rocprofiler-sdk-rocpd` package:
+  - Public API in `include/rocprofiler-sdk-rocpd/rocpd.h`.
+  - Library implementation in `librocprofiler-sdk-rocpd.so`.
+  - Support for `find_package(rocprofiler-sdk-rocpd)`.
+  - `rocprofiler-sdk-rocpd` DEB and RPM packages.
+- `--version` option in `rocprofv3`.
+- `rocpd` Python package.
+- Thread trace as experimental API.
+- ROCprof Trace Decoder as experimental API:
+  - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder).
+- Thread trace option in the `rocprofv3` tool under the `--att` parameters:
   - See [using thread trace with rocprofv3](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/amd-mainline/how-to/using-thread-trace.html)
-  - Requires the ROCprof Trace Decoder plugin installed (see above).
-- Added `rocpd` output format documentation
-  - Requires the ROCprof Trace Decoder plugin installed (see above)
-- Added perfetto support for scratch memory.
-- Added documentation for rocprofv3 advanced options
+  - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder).
+- `rocpd` output format documentation:
+  - Requires [ROCprof Trace Decoder plugin](https://github.com/rocm/rocprof-trace-decoder).
+- Perfetto support for scratch memory.
+- Support in the `rocprofv3` avail tool for command-line arguments.
+- Documentation for `rocprofv3` advanced options.
 
 ### Changed
 
-- SDK no longer creates a background thread when every tool returns a nullptr from `rocprofiler_configure`.
-- Updated disassembly.hpp's vaddr-to-file-offset mapping to use the dedicated comgr API.
-- rocprofiler_uuid_t ABI is changed to hold 128 bit value.
-- rocprofv3 shorthand argument for `--collection-period` is now `-P` (upper-case) as `-p` (lower-case) is reserved for later use
-- default output format for rocprofv3 is now `rocpd` (SQLite3 database)
-- rocprofv3 avail tool renamed from rocprofv3_avail to rocprofv3-avail tool
-- rocprofv3 avail tool has support for command line arguments.
-- rocprofv3 tool now allows for Thread Trace + PC Sampling on the same agent
-- fixed inconsistency for what is a "null" handle in `rocprofiler_*_id_t` structs.
-  - correct answer is `.handle = 0` but some definitions used `UINT64_MAX`
+- SDK to NOT to create a background thread when every tool returns a nullptr from `rocprofiler_configure`.
+- `vaddr-to-file-offset` mapping in `disassembly.hpp` to use the dedicated comgr API.
+- `rocprofiler_uuid_t` ABI to hold 128 bit value.
+- `rocprofv3` shorthand argument for `--collection-period` to `-P` (upper-case) while `-p` (lower-case) is reserved for later use.
+- Default output format for `rocprofv3` to `rocpd` (SQLite3 database).
+- `rocprofv3` avail tool to be renamed from `rocprofv3_avail` to `rocprofv3-avail` tool.
+- `rocprofv3` tool to facilitate thread trace and PC sampling on the same agent.
 
 ### Resolved issues
 
-- Fixed missing callbacks around internal thread creation within counter collection service
-- Fixed potential data race in rocprofiler-sdk double buffering scheme
-- Usage of std::regex in core rocprofiler-sdk library which causes segfaults/exceptions when used under dual ABI
-- Fixed perfetto counter collection by introducing per dispatch accumulation.
-- Code object disassembly was missing function inlining information
-- Fixed queue preemption error and HSA_STATUS_ERROR_INVALID_PACKET_FORMAT error for stochastic PC-sampling for MI300X, leading to more stable runs.
-- Fixed the system hang issue for host-trap PC-sampling on MI300X. 
-- Fixed rocpd counter collection issue when counter collection alone is enabled, rocpd_kernel_dispatch table gets populated by counters data instead of kernel_dispatch data.
+- Fixed missing callbacks around internal thread creation within counter collection service.
+- Fixed potential data race in the ROCprofiler-SDK double buffering scheme.
+- Fixed usage of std::regex in the core ROCprofiler-SDK library that caused segfaults or exceptions when used under dual ABI.
+- Fixed Perfetto counter collection by introducing accumulation per dispatch.
+- Fixed code object disassembly for missing function inlining information.
+- Fixed queue preemption error and `HSA_STATUS_ERROR_INVALID_PACKET_FORMAT` error for stochastic PC-sampling in MI300X, leading to stabler runs.
+- Fixed the system hang issue for host-trap PC-sampling on MI300X.
+- Fixed `rocpd` counter collection issue when counter collection alone is enabled. `rocpd_kernel_dispatch` table is updated to be populated by counters data instead of kernel_dispatch data.
+- Fixed `rocprofiler_*_id_t` structs for inconsistency related to a "null" handle:
+  - The correct definition for a null handle is `.handle = 0` while some definitions previously used `UINT64_MAX`.
+- Fixed kernel trace csv output generated by `rocpd`.
 
 ### Removed
 
-- Support of gfx940 and gfx941 targets from compilation
+- Support for compilation of gfx940 and gfx941 targets.

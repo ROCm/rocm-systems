@@ -99,7 +99,7 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
 
   - For low PC-sampling frequencies with intervals < 65k cycles, a lot of error samples might be delivered. We're working on optimizing this to allow lower sampling frequencies.
 
-- gfx10, gfx11 and gfx12 requires a stable power state for counter collection. This includes Radeon 7000 GPUs.
+- gfx11 and gfx12 architectures require a stable power state for counter collection. This includes AMD Radeon RX 7000 series GPUs and newer.
   ```bash
   # For device <N>. Use 'rocm-smi' or 'amd-smi monitor' to see device number.
   sudo amd-smi set -g <N> -l stable_std
@@ -130,4 +130,4 @@ Please report issues on GitHub OR send an email to <dl.ROCm-Profiler.support@amd
 
 
 > [!WARNING]
-> The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.
+> To use ROCprofiler-SDK, obtain the latest mainline version of AQLprofile from [here](https://github.com/ROCm/aqlprofile).
