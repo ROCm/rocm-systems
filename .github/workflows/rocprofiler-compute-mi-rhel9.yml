@@ -1,4 +1,4 @@
-name: mi-rhel9
+name: rocprofiler-compute mi-rhel9
 
 on:
   push:

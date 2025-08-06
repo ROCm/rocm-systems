@@ -1,4 +1,4 @@
-name: tarball
+name: rocprofiler-compute tarball
 
 on:
   push:

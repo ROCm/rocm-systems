@@ -1,4 +1,4 @@
-name: RocProfiler-SDK Code Coverage
+name: rocprofiler-sdk Code Coverage
 
 permissions:
   contents: read

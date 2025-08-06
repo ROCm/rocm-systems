@@ -1,6 +1,6 @@
 # This is a basic workflow to help you get started with Actions
 
-name: Ubuntu 22.04
+name: rocprofiler-compute Ubuntu 22.04
 
 on:
   push:

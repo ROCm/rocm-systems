@@ -1,8 +1,8 @@
-name: RocProfiler-Compute Packaging
+name: rocprofiler-compute Packaging
 
 on:
   push:
-    path:
+    paths:
       - 'projects/rocprofiler-compute/**'
     tags:
       - "v[1-9].[0-9]+.[0-9]+*"

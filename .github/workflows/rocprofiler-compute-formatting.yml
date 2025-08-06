@@ -1,12 +1,12 @@
 
-name: RocProfiler-Compute Formatting
+name: rocprofiler-compute Formatting
 
 on:
   push:
-    path:
+    paths:
       - 'projects/rocprofiler-compute/**'
   pull_request:
-    path:
+    paths:
       - 'projects/rocprofiler-compute/**'
 
 concurrency:
