@@ -43,7 +43,10 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        app_cmd = shlex.split(self.get_args().remaining)
+        app_cmd = (
+            shlex.split(self.get_args().remaining) if not self.get_args().pid else ""
+        )
+
         trace_option = "--kernel-trace"
         if self.get_args().kokkos_trace:
             trace_option = "--kokkos-trace"
@@ -62,6 +65,19 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             "--output-format",
             self.get_args().format_rocprof_output,
         ]
+
+        if self.get_args().pid:
+            args = args + [
+                "--pid",
+                self.get_args().pid,
+            ]
+
+            if self.get_args().attach_duration_msec:
+                args = args + [
+                    "--attach-duration-msec",
+                    self.get_args().attach_duration_msec,
+                ]
+
         # Kernel filtering
         if self.get_args().kernel:
             args.extend(["--kernel-include-regex", "|".join(self.get_args().kernel)])
@@ -79,8 +95,11 @@ class rocprof_v3_profiler(RocProfCompute_Base):
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
             args.extend(["--kernel-iteration-range", f"[{','.join(dispatch)}]"])
-        args.append("--")
-        args.extend(app_cmd)
+
+        if not self.get_args().pid:
+            args.append("--")
+            args.extend(app_cmd)
+
         return args
 
     # -----------------------

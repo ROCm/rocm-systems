@@ -62,6 +62,7 @@ CHIP_IDS = {
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
+config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
@@ -1645,7 +1646,46 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
+        
+        
+@pytest.mark.live_attach_detach
+def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):  
+    assert using_v3() 
+    options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
+    workload_dir = test_utils.get_output_dir()
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
+    
+    # set the time to detach here to 2 mins, which is 120000 msec
+    time_to_detach="120000"
+    
+    attach_detach=dict()
+    attach_detach["pid"] = process_workload.pid
+    attach_detach["attach-duration-msec"] = time_to_detach
+    
+    _ = binary_handler_profile_rocprof_compute(
+        config, workload_dir, options, check_success=True, roof=False, app_name="app_hip_dynamic_shared", attach_detach_para=attach_detach
+    )
 
+    # kill the process of the workload at thsi point if it's still running
+    process_workload.terminate()
+
+    file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
+    validate(
+        inspect.stack()[0][3],
+        workload_dir,
+        file_dict,
+    )
+
+    assert test_utils.check_file_pattern(
+        "- '3.1.1'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- '4.1.1'", f"{workload_dir}/profiling_config.yaml"
+    )
+    assert test_utils.check_file_pattern(
+        "- '5.1.1'", f"{workload_dir}/profiling_config.yaml"
+    )
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 @pytest.mark.sets_func
 class TestSetsIntegration:

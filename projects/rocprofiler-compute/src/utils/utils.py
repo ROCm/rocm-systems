@@ -36,6 +36,7 @@ import selectors
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 from pathlib import Path as path
 from typing import Optional
@@ -290,6 +291,7 @@ def capture_subprocess_output(
         subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -298,6 +300,7 @@ def capture_subprocess_output(
         else subprocess.Popen(
             subprocess_args,
             bufsize=1,
+            stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
@@ -305,14 +308,13 @@ def capture_subprocess_output(
         )
     )
 
-    # Create callback function for process output
     buf = io.StringIO()
 
     def handle_output(stream, mask):
         try:
-            # Because the process' output is line buffered, there's only ever one
-            # line to read when this function is called
             line = stream.readline()
+            if not line:
+                return
             buf.write(line)
             if enable_logging:
                 if profileMode:
@@ -320,28 +322,40 @@ def capture_subprocess_output(
                 else:
                     console_log(line.strip())
         except UnicodeDecodeError:
-            # Skip this line
             pass
 
-    # Register callback for an "available for read" event from subprocess' stdout stream
     selector = selectors.DefaultSelector()
     selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
-    # Loop until subprocess is terminated
+    def forward_input():
+        try:
+            for line in sys.stdin:
+                if process.poll() is not None:
+                    break
+                process.stdin.write(line)
+                process.stdin.flush()
+        except Exception:
+            pass
+        finally:
+            try:
+                process.stdin.close()
+            except Exception:
+                pass
+
+    input_thread = threading.Thread(target=forward_input, daemon=True)
+    input_thread.start()
+
     while process.poll() is None:
-        # Wait for events and handle them with their registered callbacks
-        events = selector.select()
+        events = selector.select(timeout=1)
         for key, mask in events:
             callback = key.data
             callback(key.fileobj, mask)
 
-    # Get process return code
+    input_thread.join(timeout=1)
     return_code = process.wait()
     selector.close()
 
     success = return_code == 0
-
-    # Store buffered output
     output = buf.getvalue()
     buf.close()
 
@@ -719,6 +733,8 @@ def run_prof(
 
     console_debug("pmc file: %s" % path(fname).name)
 
+    is_mode_live_attach = "--pid" in profiler_options
+
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
         options = profiler_options
@@ -730,9 +746,16 @@ def run_prof(
 
     if using_v3():
         if rocprof_cmd == "rocprofiler-sdk":
+            if is_mode_live_attach:
+                console_error(
+                    "The live attach/detach does not currently support direct call of rocprofiler-sdk"
+                )
             options["ROCPROF_AGENT_INDEX"] = "absolute"
         else:
             options = ["-A", "absolute"] + options
+    else:
+        if is_mode_live_attach:
+            console_error("The live attach/detach only supports rocprofv3")
 
     new_env = os.environ.copy()
 
