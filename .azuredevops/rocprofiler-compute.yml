@@ -1,0 +1,47 @@
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+parameters:
+- name: pipelinesRepoRef
+  type: string
+  default: refs/heads/develop
+- name: triggerDownstreamJobs
+  type: boolean
+  default: true
+
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+    ref: ${{ parameters.pipelinesRepoRef }}
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/rocprofiler-compute
+    exclude:
+    - projects/rocprofiler-compute/.github
+    - projects/rocprofiler-compute/docs
+    - projects/rocprofiler-compute/.*.y*ml
+    - projects/rocprofiler-compute/*.md
+    - projects/rocprofiler-compute/AUTHORS
+    - projects/rocprofiler-compute/LICENSE
+    - projects/rocprofiler-compute/VERSION
+
+pr: none
+
+stages:
+- stage: rocprofiler_compute
+  jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-compute.yml@pipelines_repo
+    parameters:
+      sparseCheckoutDir: projects/rocprofiler-compute
+      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml
