@@ -3721,6 +3721,9 @@ def amdsmi_reset_gpu(processor_handle: processor_handle):
 
     _check_res(amdsmi_wrapper.amdsmi_reset_gpu(processor_handle))
 
+def amdsmi_gpu_driver_reload():
+    _check_res(amdsmi_wrapper.amdsmi_gpu_driver_reload())
+
 
 def amdsmi_set_gpu_fan_speed(
     processor_handle: processor_handle, sensor_idx: int, fan_speed: int

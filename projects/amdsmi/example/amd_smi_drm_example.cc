@@ -588,6 +588,8 @@ int main() {
                 // Since memory partition effects entire GPU hive (and modifies current
                 // compute/accelerator partition), we'll default to only changing the
                 // first device for the first socket (GPU #0)
+                // Note: Any device can be requested to change memory partition,
+                //       but for simplicity, we will only change GPU #0.
                 if (gpu_number == 0) {
                     std::cout << "    **Changing memory partition for GPU #"
                               << gpu_number << "...**\n";
@@ -612,6 +614,20 @@ int main() {
                         std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                                   << memoryPartitionString(updatePartition) << "): "
                                   << err_str << "\n\n";
+
+                        // Reload only if the memory partition was set successfully
+                        if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                            std::cout << "\t**Reloading GPU driver to apply memory "
+                            << "partition change, this may take some time... **\n";
+                            amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
+                            amdsmi_status_code_to_string(reload_status, &err_str);
+                            if (reload_status == AMDSMI_STATUS_SUCCESS) {
+                                PRINT_AMDSMI_RET(reload_status)
+                                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                            } else {
+                                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                            }
+                        }
 
                         // Get the current memory partition
                         char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
@@ -678,6 +694,17 @@ int main() {
                 std::cout << "\t**Device Index: " << device_index << std::endl;
                 std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
                 std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+                // Since memory partition effects entire GPU hive (and modifies current
+                // compute/accelerator partition), we'll default to only changing the
+                // first device for the first socket (GPU #0)
+                // Note: Any device can be requested to change memory partition,
+                //       but for simplicity, we will only change GPU #0.
+                if (gpu_number != 0) {
+                    std::cout << "    **Skipping memory partition reset for GPU #"
+                              << gpu_number << "...**\n";
+                    gpu_number++;
+                    continue;
+                }
 
                 // Reset to original memory partition settings
                 amdsmi_memory_partition_type_t orig_partition =
@@ -693,6 +720,19 @@ int main() {
                 std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                           << memoryPartitionString(orig_partition) << "): "
                           << err_str << "\n\n";
+                // Reload only if the memory partition was set successfully
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    std::cout << "\t**Reloading GPU driver to apply memory "
+                    << "partition change, this may take some time... **\n";
+                    amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
+                    amdsmi_status_code_to_string(reload_status, &err_str);
+                    if (reload_status == AMDSMI_STATUS_SUCCESS) {
+                        PRINT_AMDSMI_RET(reload_status)
+                        std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                    } else {
+                        std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                    }
+                }
                 // Get the current memory partition
                 char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
                 ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],

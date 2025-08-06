@@ -3731,6 +3731,52 @@ rsmi_dev_gpu_reset(uint32_t dv_ind) {
   CATCH
 }
 
+rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  // TODO(amdsmi_team): technically, we should block for all devices
+  // As this is a global operation, we can use a mutex to ensure
+  // that only one thread is trying to restart the driver at a time.
+  uint32_t dv_ind = 0;  // Default to first device
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
+
+  // Attempting to speed up processing time
+  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
+  if (restartRet != RSMI_STATUS_SUCCESS) {
+    if (is_logger_enabled) {
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail - restart AMD GPU detected"
+         << " | Device #: " << dv_ind
+         << " | Type: AMDGPU Driver Reload"
+         << " | Cause: AMDGPU Driver Reload failed "
+         << " | Returning = "
+         << getRSMIStatusString(restartRet, false);
+      LOG_ERROR(ss);
+    }
+    return restartRet;
+  }
+
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Success - if restart completed successfully"
+       << " | Device #: " << dv_ind
+       << " | Type: AMDGPU Driver Reload"
+       << " | Returning = "
+       << getRSMIStatusString(restartRet, false);
+    LOG_INFO(ss);
+  }
+  return restartRet;
+
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_od_volt_curve_regions_get(uint32_t dv_ind,
                      uint32_t *num_regions, rsmi_freq_volt_region_t *buffer) {
   TRY
@@ -6490,16 +6536,10 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-  const int k1000_MS_WAIT = 1000;
 
   const uint32_t kMaxMemoryCapabilitiesSize = 30;
   char available_memory_capabilities[kMaxMemoryCapabilitiesSize];
   available_memory_capabilities[0] = '\0';
-
-  const uint32_t kMaxCurrentMemoryMode = 5;
-  char current_memory_mode[kMaxCurrentMemoryMode];
-  current_memory_mode[0] = '\0';
-
 
   // Is the current mode already what user requested?
   switch (memory_partition) {
@@ -6605,11 +6645,11 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   GET_DEV_FROM_INDX
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition,
                               newMemoryPartition);
+  rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
-  if (amd::smi::ErrnoToRsmiStatus(ret) != RSMI_STATUS_SUCCESS) {
-    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(ret);
-    if (ret == EACCES) {
-      err = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+  if (status != RSMI_STATUS_SUCCESS) {
+    if (status == EACCES) {
+      status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
     }
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
@@ -6619,93 +6659,22 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: issue writing reqested setting of " + newMemoryPartition
        << " | Returning = "
-       << getRSMIStatusString(err, false);
+       << getRSMIStatusString(status, false);
     LOG_ERROR(ss);
-    return err;
+    return status;
   }
 
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
   ss << __PRETTY_FUNCTION__
      << " | ======= end ======= "
-     << " | Success - if restart completed successfully"
+     << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
      << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
-     << getRSMIStatusString(restartRet, false);
-  LOG_TRACE(ss);
-
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail - restart AMD GPU detected"
-       << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
-       << " | Returning = "
-       << getRSMIStatusString(restartRet, false);
-    LOG_ERROR(ss);
-    return restartRet;
-  }
-
-  std::string current_memory_mode_str = "unknown";
-  rsmi_status_t can_read_sysfs_again = RSMI_STATUS_AMDGPU_RESTART_ERR;
-  int maxWaitSeconds = 10;
-  // wait until we can read SYSFS again
-  if (restartRet == RSMI_STATUS_SUCCESS) {
-    while ((current_memory_mode_str != user_requested_memory_partition)
-          && maxWaitSeconds > 0) {
-      maxWaitSeconds -= 1;
-      can_read_sysfs_again =
-        rsmi_dev_memory_partition_get(dv_ind, current_memory_mode, kMaxCurrentMemoryMode);
-      if (can_read_sysfs_again == RSMI_STATUS_SUCCESS) {
-        current_memory_mode_str.clear();
-        current_memory_mode_str = current_memory_mode;
-        ss << __PRETTY_FUNCTION__
-           << " | ======= rsmi_dev_memory_partition_get ======= "
-           << " | Success - can read SYSFS"
-           << " | Device #: " << dv_ind
-           << " | Type: "
-           << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-           << " | Data (user requested mode): " << user_requested_memory_partition
-           << " | Current Memory Partition Mode: " << current_memory_mode_str
-           << " | Available Memory Partition Modes: " << memory_capabilities_str
-           << " | maxWaitSeconds: " << maxWaitSeconds
-           << " | total wait time (sec): " << (10 - maxWaitSeconds)
-           << " | Returning = "
-           << getRSMIStatusString(can_read_sysfs_again, false);
-        LOG_TRACE(ss);
-        if (!current_memory_mode_str.empty()
-            && (current_memory_mode_str == user_requested_memory_partition)) {
-          break;
-        }
-      }
-      amd::smi::system_wait(k1000_MS_WAIT);
-    }
-  }
-
-  if (current_memory_mode_str == user_requested_memory_partition) {
-    restartRet = RSMI_STATUS_SUCCESS;
-  } else {
-    restartRet = RSMI_STATUS_AMDGPU_RESTART_ERR;
-  }
-
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - completed driver restart and all SYSFS are active"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-     << " | Data: " << user_requested_memory_partition
-     << " | Current Memory Partition Mode: " << current_memory_mode_str
-     << " | Available Memory Partition Modes: " << memory_capabilities_str
-     << " | Returning = "
-     << getRSMIStatusString(restartRet, false);
-  LOG_TRACE(ss);
-
-  return restartRet;
+     << getRSMIStatusString(status, false);
+  LOG_INFO(ss);
+  return status;
   CATCH
 }
 

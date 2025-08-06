@@ -4620,12 +4620,14 @@ class AMDSMICommands():
                     return
 
             if args.memory_partition:
-                lock = multiprocessing.Lock()
-                lock.acquire()
                 ####################################################################
                 # Get current and available memory partition modes                 #
                 # Info used if AMDSMI_STATUS_INVAL is caught & to set progress bar #
                 ####################################################################
+                self.helpers.increment_set_count()
+                set_count = self.helpers.get_set_count()
+                if set_count == 1: # only show reload warning on 1st set
+                    self.helpers.confirm_changing_memory_partition_gpu_reload_warning()
                 try:
                     memory_dict = {'caps': "N/A", 'current': "N/A"}
                     memory_partition_config = amdsmi_interface.amdsmi_get_gpu_memory_partition_config(args.gpu)
@@ -4633,104 +4635,34 @@ class AMDSMICommands():
                     memory_dict['current'] = memory_partition_config['mp_mode']
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get current memory partition for GPU %s | %s", gpu_id, e.get_error_info())
-
-                ###############################################################
-                # memory partition set starts here                            #
-                ###############################################################
-                showProgressBar = False
-                if ((str(memory_dict['current']) != "N/A") and (str(args.memory_partition) in memory_dict['caps'])
-                   and ((str(memory_dict['current']) != str(args.memory_partition)))):
-                    showProgressBar = True  # Only show progress bar if
-                                            # 1) Device can set memory partition modes
-                                            # 2) Requested mode is a valid mode to set
-                                            # 3) Current is not already the requested mode
-                                            # otherwise function will return fast
-                else:
-                    showProgressBar = False
-
-                threads = []
-                k140secs = 140
-                string_out = f"Updating memory partition for GPU: {gpu_id}"
-                timesToRetryRestartErr = 1
-
-                self.helpers.increment_set_count()
-                set_count = self.helpers.get_set_count()
-                if set_count == 1: # only show reload warning on 1st set
-                    self.helpers.confirm_changing_memory_partition_gpu_reload_warning()
-
-                while timesToRetryRestartErr >= 0:
-                    timesToRetryRestartErr -= 1
-                    try:
-                        if showProgressBar:  # we want to overwrite the previous progress bar
-                            t1 = multiprocessing.Process(target=self.helpers.showProgressbar,
-                                                         args=(string_out, k140secs, True,))
-                            threads.append(t1)
-                            t1.start()
-                        memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
-                        amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
-                        for thread in threads:
-                            thread.terminate()
-                            print("")
-                        break # successful case
-
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        f = open(os.devnull, 'w', encoding='utf-8') #redirect to /dev/null (crossplatform)
-                        print("\n\n", end='\r', flush=True, file=f)
-                        for thread in threads:
-                            thread.terminate()
-
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                            raise PermissionError('Command requires elevation') from e
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
-                            out = f"[AMDSMI_STATUS_INVAL] Unable to set memory partition to {args.memory_partition}"
-                            print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
-                            self.logger.store_output(args.gpu, 'memory_partition', out)
-                            self.logger.print_output()
-                            self.logger.clear_multiple_devices_output()
-                            lock.release()
-                            return
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED:
-                            out = f"[AMDSMI_STATUS_NOT_SUPPORTED] Unable to set memory partition to {args.memory_partition}"
-                            self.logger.store_output(args.gpu, 'memory_partition', out)
-                            self.logger.print_output()
-                            self.logger.clear_multiple_devices_output()
-                            lock.release()
-                            return
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_AMDGPU_RESTART_ERR:
-                            # Try again on a failure -> work around for not being able to close libdrm
-                            string_out = f"Trying again - Updating memory partition for GPU: {gpu_id}         "
-                            for thread in threads:
-                                thread.terminate()
-                                thread.join()
-                            if timesToRetryRestartErr < 0:
-                                out = f"[AMDSMI_STATUS_AMDGPU_RESTART_ERR] Could not successfully restart driver after applying {args.memory_partition}"
-                                self.logger.store_output(args.gpu, 'memory_partition', out)
-                                self.logger.print_output()
-                                self.logger.clear_multiple_devices_output()
-                                return
-                            continue
-
-                        f = open(os.devnull, 'w', encoding='utf-8') #redirect to /dev/null (crossplatform)
-                        print("\n\n", end='\r', flush=True, file=f)
-                        out = f"Unable to set memory partition to {args.memory_partition} on {gpu_string}"
-                        print(out)
-                        self.logger.store_output(args.gpu, 'memorypartition', out)
+                try:
+                    memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
+                    amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
+                    out = f"Successfully set memory partition to {args.memory_partition}, reload driver when ready"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    out = f"[{e.get_error_info(detailed=False)}] Unable to set memory partition to {args.memory_partition}"
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        out = f"[AMDSMI_STATUS_NO_PERM] Command requires elevation"
+                        self.logger.store_output(args.gpu, 'memory_partition', out)
                         self.logger.print_output()
                         self.logger.clear_multiple_devices_output()
-                        lock.release()
+                        raise PermissionError('Command requires elevation') from e
+                    elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                        print(f"Valid Memory partition Modes: {memory_dict['caps']}\n")
+                        self.logger.store_output(args.gpu, 'memory_partition', out)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
                         return
-                    except Exception as e:
-                        for thread in threads:
-                            thread.terminate()
-                        out = f"Generic error found | Unable to set memory partition to {args.memory_partition} on {gpu_string}"
-                        print(out)
-                        lock.release()
-                        raise ValueError(f"Generic error found | Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
-                self.logger.store_output(args.gpu, 'memory_partition', f"Successfully set memory partition to {args.memory_partition}")
+                    else:
+                        self.logger.store_output(args.gpu, 'memory_partition', out)
+                        self.logger.print_output()
+                        self.logger.clear_multiple_devices_output()
+                        return
+                self.logger.store_output(args.gpu, 'memory_partition', out)
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
-                lock.release()
                 return
+
             if isinstance(args.power_cap, int):
                 try:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
@@ -5173,7 +5105,7 @@ class AMDSMICommands():
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                power_cap=None, clean_local_data=None):
+                power_cap=None, reload_driver=None, clean_local_data=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -5213,6 +5145,8 @@ class AMDSMICommands():
             args.perf_determinism = perf_determinism
         if power_cap:
             args.power_cap = power_cap
+        if reload_driver:
+            args.reload_driver = reload_driver
         if clean_local_data:
             args.clean_local_data = clean_local_data
 
@@ -5237,14 +5171,18 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, \
-                        args.power_cap, args.clean_local_data]):
+                        args.perf_determinism, args.power_cap, args.reload_driver, \
+                        args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.clean_local_data]):
+            if not any([args.clean_local_data, args.reload_driver]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
+
+        #######################
+        # BM commands - START #
+        #######################
 
         if self.helpers.is_baremetal():
             if args.gpureset:
@@ -5414,6 +5352,10 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
 
+        #######################
+        # BM commands - END   #
+        #######################    
+
         if args.clean_local_data:
             try:
                 amdsmi_interface.amdsmi_clean_gpu_local_data(args.gpu)
@@ -5427,6 +5369,94 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_output()
                 return
             self.logger.store_output(args.gpu, 'clean_local_data', result)
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
+
+        # Adding to VMs since, they should also support same reload as baremetal
+        if args.reload_driver:
+            # Check permissions BEFORE starting any processes
+            # Required to avoid permission errors when starting the progress bar
+            try:
+                if os.geteuid() != 0:
+                    result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
+                    self.logger.store_output(args.gpu, 'reload_driver', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    raise PermissionError('Command requires elevation')
+            except AttributeError:
+                pass # os.geteuid() not available on Windows
+            lock = multiprocessing.Lock()
+            lock.acquire()
+            is_lock_released = False
+            progress_process = None
+            try:
+                self.helpers.increment_set_count()
+                set_count = self.helpers.get_set_count()
+                if set_count == 1:
+                    self.helpers.confirm_gpu_driver_reload_warning()
+                    # Start progress bar in separate process
+                    string_out = f"Reloading driver for all AMD GPUs:"
+                    progress_process = multiprocessing.Process(
+                        target=self.helpers.showProgressbar,
+                        args=(string_out, 140, True)
+                    )
+                    progress_process.start()
+                    # Perform the actual driver reload (this is where permission error occurs)
+                    amdsmi_interface.amdsmi_gpu_driver_reload()
+                    # If we get here, operation was successful
+                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS)
+                    result = "Successfully reloaded driver"
+                else:
+                    if self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_SUCCESS:
+                        result = "Successfully reloaded driver"
+                    elif self.helpers.get_previous_set_success_check() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        result = "[AMDSMI_STATUS_NO_PERM] Command requires elevation"
+                        raise PermissionError('Command requires elevation')
+                    else:
+                        previous_check = self.helpers.get_previous_set_success_check()
+                        temp_exception = amdsmi_exception.AmdSmiLibraryException(previous_check)
+                        str_out = temp_exception.get_error_info(detailed=False)
+                        result = f"[{str_out}] Unable to successfully restart driver"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                # Handle permission error FIRST, before any cleanup
+                self.helpers.assign_previous_set_success_check(e.get_error_code())
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    self.helpers.assign_previous_set_success_check(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM)
+                    result = f"[{e.get_error_info(detailed=False)}] Command requires elevation"
+                    # Clean termination of progress bar
+                    if progress_process and progress_process.is_alive():
+                        progress_process.terminate()
+                        progress_process.join(timeout=0.1)  # Wait max 0.1 second
+                        if progress_process.is_alive():
+                            progress_process.kill()  # Force kill if needed
+                        print("\n")  # Clean up progress bar line
+                    # Store result and exit early
+                    self.logger.store_output(args.gpu, 'reload_driver', result)
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    if not is_lock_released:
+                        lock.release()
+                        is_lock_released = True
+                    raise PermissionError('Command requires elevation') from e
+                else:
+                    # Handle other errors
+                    self.helpers.assign_previous_set_success_check(e.get_error_code())
+                    result = f"[{e.get_error_info(detailed=False)}] Unable to successfully restart driver"
+            finally:
+                # Always clean up progress bar process
+                if progress_process and progress_process.is_alive():
+                    progress_process.terminate()
+                    progress_process.join(timeout=0.1)
+                    if progress_process.is_alive():
+                        progress_process.kill()
+                    print("\n")  # Clean up progress bar line
+                # Always release lock
+                if not is_lock_released:
+                    lock.release()
+                    is_lock_released = True
+            # Store and print result
+            self.logger.store_output(args.gpu, 'reload_driver', result)
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return

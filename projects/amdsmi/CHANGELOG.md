@@ -31,6 +31,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
+- **Added restarting (reloading) AMD GPU driver to both CLI and API calls**  
+  - Refer to [<i><b>Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)</b></i>](#separate-driver-reload-anchor) section for more details.
+
 - **Added the Default command**.  
   - A default view has been added. The default view provides a snapshot of commonly requested information such as bdf, current partition mode, version information, and more. Users can access that information by simply typing `amd-smi` with no additional commands or arguments. Users may also obtain this information through laternate output formats such as json or csv by using the default command with the respective output format: `amd-smi default --json` or `amd-smi default --csv`.
 
@@ -110,6 +113,16 @@ $ amd-smi
   - The value is representative of the socket's power agnostic of the the GPU version.
 
 ### Changed
+
+<a name="separate-driver-reload-anchor"></a>
+- **Separated driver reload from `amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()` and CLI (`sudo amd-smi set -M <NPS mode>`)**  
+  - Providing new API (`amdsmi_gpu_driver_reload()`) and CLI (`sudo amd-smi reset -r` or `sudo amd-smi reset --reload-driver`) once user is ready to reload driver. We understand
+  the automatic reload could be at an inconvienient time. This is why we now provide this
+  functionality in separate API/CLI commands to use when the time is right.
+  - It is important to understand, the memory (NPS) partition change requires:
+  1) Memory partition change request (`amdsmi_set_gpu_memory_partition()` / `amdsmi_set_gpu_memory_partition_mode()`) or CLI (`sudo amd-smi set -M <NPS mode>`)
+  2) Driver reload (`amdsmi_gpu_driver_reload()` / `sudo amd-smi reset -r` or `sudo amd-smi reset --reload-driver`) \[\*\]  
+  \[\*\] <i>Driver reload requires all GPU activity on all devices to be stopped.</i>
 
 - **Modified `amd-smi` CLI `monitor` and `metric` for violations**.  
   - Disabled `amd-smi monitor --violation` on guests.  

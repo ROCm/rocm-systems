@@ -2346,7 +2346,8 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
     ss << __PRETTY_FUNCTION__
     << " | After attepting to set memory partition to " << req_user_partition << "\n"
     << " | Current memory partition is " << current_partition_str << "\n"
-    << " | Returning: " << smi_amdgpu_get_status_string(ret, false);
+    << " | Returning: " << smi_amdgpu_get_status_string(ret, false)
+    << " | User will need to reload driver in order to see a NPS mode change";
     LOG_INFO(ss);
     return ret;
 }
@@ -2983,6 +2984,8 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
         }
     } else {
         profile->profile_type = AMDSMI_ACCELERATOR_PARTITION_INVALID;
+        current_partition_str.clear();
+        current_partition_str = "N/A";
     }
 
     amdsmi_gpu_metrics_t metric_info = {};
@@ -3654,6 +3657,26 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
        << " | Returning: " << smi_amdgpu_get_status_string(ret, false);
     LOG_INFO(ss);
     return ret;
+}
+
+amdsmi_status_t amdsmi_gpu_driver_reload(void) {
+    std::ostringstream ss;
+    AMDSMI_CHECK_INIT();
+
+    // Attempting to speed up processing time
+    bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
+    if (is_logger_enabled) {
+        ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+        LOG_INFO(ss);
+    }
+    rsmi_status_t ret = rsmi_dev_amdgpu_driver_reload();
+    amdsmi_status_t amdsmi_status = amd::smi::rsmi_to_amdsmi_status(ret);
+    if (is_logger_enabled) {
+        ss << __PRETTY_FUNCTION__
+           << " | Returning: " << smi_amdgpu_get_status_string(amdsmi_status, false);
+        LOG_INFO(ss);
+    }
+    return amdsmi_status;
 }
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,

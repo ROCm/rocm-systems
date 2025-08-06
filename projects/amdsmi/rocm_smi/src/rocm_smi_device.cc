@@ -1678,34 +1678,44 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   bool isAMDGPUModuleLive = false;
   bool restartGDM = false;
   std::string captureRestartErr;
+  // 1 sec = 1000 ms = 1000000 us
   const int kTimeToWaitForDriverMSec = 1000;
+  // Attempting to speed up processing time
+  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
 
   // sudo systemctl is-active gdm
   // we do not care about the success of checking if gdm is active
-  std::tie(success, out) = executeCommand("systemctl is-active gdm", true);
+  std::tie(success, out) = executeCommand("systemctl is-active gdm 2>/dev/null", true);
   (out == "active") ? (restartGDM = true) : (restartGDM = false);
-  ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = "
-     << out << "; success = " << (success ? "True" : "False");
-  LOG_INFO(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = "
+       << out << "; success = " << (success ? "True" : "False")
+       << "; restartGDM = " << (restartGDM ? "True" : "False");
+    LOG_INFO(ss);
+  }
 
   // if gdm is active -> sudo systemctl stop gdm
   // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
   // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
   if (success && (out == "active") && (restartGDM)) {
     wasGdmServiceActive = true;
-    std::tie(success, out) = executeCommand("systemctl stop gdm&", true);
-    ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = "
-    << out << "; success = " << (success ? "True" : "False");
-    LOG_INFO(ss);
+    std::tie(success, out) = executeCommand("systemctl stop gdm& 2>/dev/null", true);
+    if (is_logger_enabled) {
+      ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = "
+         << out << "; success = " << (success ? "True" : "False");
+      LOG_INFO(ss);
+    }
   } else {
     success = true;  // ignore failures to restart gdm
   }
 
-  ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = "
-     << out << "; success = " << (success ? "True" : "False")
-     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-     << "; captureRestartErr = " << captureRestartErr;
-  LOG_INFO(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = "
+       << out << "; success = " << (success ? "True" : "False")
+       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+       << "; captureRestartErr = " << captureRestartErr;
+    LOG_INFO(ss);
+  }
 
   // sudo modprobe -r amdgpu
   // sudo modprobe amdgpu
@@ -1713,26 +1723,32 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
     "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
   restartSuccessful &= success;
   captureRestartErr = out;
-  ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = "
-     << out << "; success = " << (success ? "True" : "False")
-     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-     << "; captureRestartErr = " << captureRestartErr;
-  LOG_INFO(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = "
+       << out << "; success = " << (success ? "True" : "False")
+       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+       << "; captureRestartErr = " << captureRestartErr;
+    LOG_INFO(ss);
+  }
 
   // if gdm was active -> sudo systemctl start gdm
   // We don't care if successful or not, just try to restart as a courtesy
   if (wasGdmServiceActive && restartGDM) {
-    std::tie(success, out) = executeCommand("systemctl start gdm&", true);
-    ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = "
-    << out << "; success = " << (success ? "True" : "False");
-    LOG_INFO(ss);
+    std::tie(success, out) = executeCommand("systemctl start gdm& 2>/dev/null", true);
+    if (is_logger_enabled) {
+      ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = "
+         << out << "; success = " << (success ? "True" : "False");
+      LOG_INFO(ss);
+    }
   }
 
   // Return early if there was an issue restarting amdgpu
   if (!restartSuccessful) {
-    ss << __PRETTY_FUNCTION__ << " | [WARNING] Issue found during amdgpu restart: "
-    << captureRestartErr << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
-    LOG_INFO(ss);
+    if (is_logger_enabled) {
+      ss << __PRETTY_FUNCTION__ << " | [ERROR] Issue found during amdgpu restart: "
+         << captureRestartErr << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
+      LOG_ERROR(ss);
+    }
     return RSMI_STATUS_AMDGPU_RESTART_ERR;
   }
 
@@ -1764,13 +1780,17 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove
   bool isSystemAMDGPUModuleLive = false;  // Assume AMD GPU module is not live,
                                           //  we intend to disprove
+  // Attempting to speed up processing time
+  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
 
   // wait for amdgpu module to come back up
   std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
-  ss << __PRETTY_FUNCTION__
-     << " | success = " << (success ? "True" : "False")
-     << " | out = " << out;
-  LOG_DEBUG(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__
+       << " | success = " << (success ? "True" : "False")
+       << " | out = " << out;
+    LOG_DEBUG(ss);
+  }
   if ((success == true) && (!out.empty())) {
     isSystemAMDGPUModuleLive = containsString(out, "live");
   }
@@ -1779,11 +1799,13 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   }
   *isRestartInProgress = deviceRestartInProgress;
   *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
-  ss << __PRETTY_FUNCTION__
-     << " | *isRestartInProgress = " << (*isRestartInProgress ? "True":"False")
-     << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True":"False")
-     << " | out = " << out;
-  LOG_DEBUG(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__
+       << " | *isRestartInProgress = " << (*isRestartInProgress ? "True":"False")
+       << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True":"False")
+       << " | out = " << out;
+    LOG_DEBUG(ss);
+  }
 
   return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS :
           RSMI_STATUS_AMDGPU_RESTART_ERR);

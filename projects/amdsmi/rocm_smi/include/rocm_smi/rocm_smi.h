@@ -5498,6 +5498,56 @@ rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
 /** @} */  // end of DevMetricsHeaderInfoGet
 
+/*****************************************************************************/
+/** @defgroup DriverControl Driver control mechanisms
+ *  These functions provide control over the driver. Users should use with
+ *  caution as they may cause the driver to become unstable.
+ *  @{
+ */
+/**
+ *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
+ *  system.
+ *
+ *  @details This function will reload the AMD GPU driver as described in
+ *  the Linux kernel documentation -
+ *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
+ *  with no extra parameters as specified in
+ *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
+ * 
+ *  Use this function with caution, as it will unload and reload the AMD GPU
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
+ *  
+ *  Any process or workload using the AMD GPU driver is REQUIRED to be
+ *  stopped before calling this function. Otherwise, function will return
+ *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver.
+ * 
+ *  User is REQUIRED to have root/admin privileges to call this function.
+ *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
+ * 
+ *  This API will take time to complete, as we are checking the driver's
+ *  loading status to confirm it reloaded properly. If
+ *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
+ *  did not reload properly and the user should check dmesg logs.
+ * 
+ *  This function has been created in order to conviently reload the
+ *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
+ *  successfully has been changed on Baremetal systems.
+ *  Now users can control the reload once all GPU processes/workloads
+ *  have been stopped on the AMD GPU driver. A (AMD GPU) driver reload
+ *  is REQUIRED to complete changing to the new memory partition
+ *  configuration (`rsmi_dev_memory_partition_set()`) operation MUST
+ *  be successful. This function WILL EFFECT all GPUs in the hive to
+ *  be reconfigured with the specified memory partition configuration.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *            the amdgpu driver.
+ */
+rsmi_status_t rsmi_dev_amdgpu_driver_reload(void);
+/** @} */  // end of DriverControl
+
 #ifdef __cplusplus
 }
 #endif  // __cplusplus

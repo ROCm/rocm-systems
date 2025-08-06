@@ -61,6 +61,7 @@ class AMDSMIHelpers():
         # Counts and Tracking variables
         self._count_of_sets_called = 0
         self._count_of_cper_files = 0
+        self._previous_set_success_check = amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_UNKNOWN_ERROR
 
 
         # Check if the system is a virtual OS
@@ -109,6 +110,17 @@ class AMDSMIHelpers():
     def get_set_count(self):
         return self._count_of_sets_called
 
+    def assign_previous_set_success_check(self, status):
+        """Assigns the previous set success check to the status provided.
+        This is used to determine if the last set was successful or not.
+        """
+        self._previous_set_success_check = status
+    
+    def get_previous_set_success_check(self):
+        """Returns the previous set success check.
+        This is used to determine if the last set was successful or not.
+        """
+        return self._previous_set_success_check
 
     def increment_cper_count(self):
         self._count_of_cper_files += 1
@@ -898,12 +910,57 @@ class AMDSMIHelpers():
 
         :param autoRespond: Response to automatically provide for all prompts
         """
+
+        print('''
+            ******WARNING******\n
+            After changing memory (NPS) partition modes, users MUST restart
+            (reload) the AMD GPU driver. This command NO LONGER AUTOMATICALLY
+            reloads the driver, see `amd-smi reset -h` and
+            `sudo amd-smi reset -r` for more information.
+
+            This change is intended to allow users the ability to control when is
+            the best time to restart the AMD GPU driver, as it may not be desired
+            to restart the AMD GPU driver immediately after changing the
+            memory (NPS) partition mode.
+
+            Please use `sudo amd-smi reset -r` AFTER successfully
+            changing the memory (NPS) partition mode. A successful driver reload 
+            is REQUIRED in order to complete updating ALL GPUs in the hive to
+            the requested partition mode.
+
+            ******REMINDER******
+            In order to reload the AMD GPU driver, users MUST quit all GPU
+            workloads across all devices.
+            ''')
+
+        if not auto_respond:
+            user_input = input('Do you accept these terms? [Y/N] ')
+        else:
+            user_input = auto_respond
+        if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
+            print('')
+            return
+        else:
+            print('Confirmation not given. Exiting without setting value')
+            sys.exit(1)
+
+    def confirm_gpu_driver_reload_warning(self, auto_respond=False):
+        """ Print the warning for running outside of specification and prompt user to accept the terms.
+
+        :param autoRespond: Response to automatically provide for all prompts
+        """
         print('''
           ****** WARNING ******\n
-          Setting Dynamic Memory (NPS) partition modes require users to quit all GPU workloads.
-          AMD SMI will then attempt to change memory (NPS) partition mode.
-          Upon a successful set, AMD SMI will then initiate an action to restart AMD GPU driver.
-          This action will change all GPU's in the hive to the requested memory (NPS) partition mode.
+          AMD SMI is about to initiate an AMD GPU driver restart (module reload).
+
+          Reloading the AMD GPU driver REQUIRES users to quit all GPU activity across all
+          devices.
+
+          If user is initiating a driver reload AFTER changing memory (NPS) partition
+          modes (`sudo amd-smi set -M <NPS_MODE>`), a AMD GPU driver reload is REQUIRED
+          to complete updating the partition mode. This change will effect ALL GPUs in
+          the hive. Advise using `amd-smi list -e` and `amd-smi partition -c -m`
+          afterwards to ensure changes were applied as expected.
 
           Please use this utility with caution.
           ''')
@@ -917,7 +974,6 @@ class AMDSMIHelpers():
         else:
             print('Confirmation not given. Exiting without setting value')
             sys.exit(1)
-
 
     def is_valid_profile(self, profile):
         profile_presets = amdsmi_interface.amdsmi_wrapper.amdsmi_power_profile_preset_masks_t__enumvalues

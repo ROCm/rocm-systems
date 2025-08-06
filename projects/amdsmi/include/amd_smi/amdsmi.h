@@ -5752,6 +5752,9 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
  *  device's memory partition setting. This function does not allow any concurrent operations.
  *  Device must be idle and have no workloads when performing set partition operations.
  *
+ *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
+ *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -5762,8 +5765,6 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
  *  @return ::amdsmi_status_t
  *
  */
@@ -5795,6 +5796,14 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
  *  @ingroup tagMemoryPartition
  *
  *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Given a processor handle @p processor_handle and a type of memory partition
+ *  @p mode, this function will attempt to update the selected
+ *  device's memory partition setting. This function does not allow any concurrent operations.
+ *  Device must be idle and have no workloads when performing set partition operations.
+ *
+ *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
+ *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -6394,6 +6403,61 @@ amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
 
 /** @} End tagProcessInfo */
+
+/*****************************************************************************/
+/** @defgroup tagDriverControl Driver control mechanisms
+ *  These functions provide control over the driver. Users should use with
+ *  caution as they may cause the driver to become unstable.
+ *  @{
+ */
+/**
+ *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
+ *  system.
+ *
+ *  @ingroup tagDriverControl
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
+ *
+ *  @details This function will reload the AMD GPU driver as described in
+ *  the Linux kernel documentation -
+ *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
+ *  with no extra parameters as specified in
+ *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
+ * 
+ *  Use this function with caution, as it will unload and reload the AMD GPU
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
+ *  
+ *  Any process or workload using the AMD GPU driver is REQUIRED to be
+ *  stopped before calling this function. Otherwise, function will return
+ *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver.
+ * 
+ *  User is REQUIRED to have root/admin privileges to call this function.
+ *  Otherwise, this function will return ::AMDSMI_STATUS_NO_PERM.
+ * 
+ *  This API will take time to complete, as we are checking the driver's
+ *  loading status to confirm it reloaded properly. If
+ *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
+ *  did not reload properly and the user should check dmesg logs.
+ * 
+ *  This function has been created in order to conviently reload the
+ *  AMD GPU driver once `amdsmi_set_gpu_memory_partition()` or
+ *  `amdsmi_set_gpu_memory_partition_mode()` successfully has been changed
+ *  on Baremetal systems. Now users can control the reload once all GPU
+ *  processes/workloads have been stopped on the AMD GPU driver.
+ *  A (AMD GPU) driver reload is REQUIRED to complete changing
+ *  to the new memory partition configuration
+ *  (`amdsmi_set_gpu_memory_partition()`/`amdsmi_set_gpu_memory_partition_mode()`)
+ *  operation MUST be successful. This function WILL EFFECT all GPUs in the
+ *  hive to be reconfigured with the specified memory partition configuration.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success
+ *  @return                   | ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @return                   | ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *                                the amdgpu driver.
+ */
+amdsmi_status_t amdsmi_gpu_driver_reload(void);
+/** @} End tagDriverControl */
 
 #ifdef ENABLE_ESMI_LIB
 
