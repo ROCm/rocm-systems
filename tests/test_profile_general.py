@@ -1653,7 +1653,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     assert using_v3() 
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
-    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"], shell=True)
+    process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
     
     # set the time to detach here to 2 mins, which is 120000 msec
     time_to_detach="120000"
