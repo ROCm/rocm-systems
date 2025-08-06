@@ -1,0 +1,99 @@
+name: OpenSUSE Packaging (Release, ROCm)
+run-name: opensuse-packaging
+
+on:
+  push:
+    branches: [amd-staging, amd-mainline, release/**]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+  pull_request:
+    branches: [amd-staging, amd-mainline, release/**]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+
+env:
+  BUILD_DIR: './release'
+  SOURCE_DIR: './source'
+  INSTALL_DIR: '/opt/rocprofiler-systems'
+
+jobs:
+  opensuse-packaging:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        release: [ '15.6' ]
+        rocm-version: [ '6.4' ]
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-opensuse-${{ matrix.release }}
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Configure Env
+      shell: bash
+      run:
+        echo "/opt/rocm/bin" >> $GITHUB_PATH  &&
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
+        env
+
+    - name: Install ROCm
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        zypper install -y perl-File-BaseDir
+        zypper --non-interactive --no-gpg-checks install https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/sle/${{ matrix.release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
+        zypper --non-interactive --no-gpg-checks install rocm-dev rocdecode-devel python3-devel
+
+    - name: Build rocprofiler-systems
+      timeout-minutes: 35
+      shell: bash
+      run: |
+        set -v
+        git config --global --add safe.directory ${PWD} &&
+        cmake --preset release -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR
+        cmake --build $BUILD_DIR --target all
+
+    - name: Build and Install the Package
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        set -v
+        cd $BUILD_DIR
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
+        cpack -G RPM ${CPACK_ARGUMENTS}
+        zypper install --non-interactive *.rpm
+
+    - name: Verify Installation
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        echo "TO BE ADDED LATER"
