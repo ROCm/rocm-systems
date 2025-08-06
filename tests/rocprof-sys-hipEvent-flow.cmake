@@ -26,35 +26,47 @@
 #
 # -------------------------------------------------------------------------------------- #
 
-rocprofiler_systems_add_test(
-    SKIP_BASELINE SKIP_RUNTIME
-    NAME transpose-hipEvent-flow
-    TARGET transpose
-    LABELS "hipEvent"
-    MPI ${TRANSPOSE_USE_MPI}
-    GPU ON
-    NUM_PROCS ${NUM_PROCS}
-    REWRITE_ARGS -e -v 2 -E uniform_int_distribution
-    ENVIRONMENT
-        "${_base_environment};ROCPROFSYS_ROCM_EVENTS=${ROCPROFSYS_ROCM_EVENTS_TEST}"
-    REWRITE_RUN_PASS_REGEX "${_ROCP_PASS_REGEX}"
-    SAMPLING_PASS_REGEX "${_ROCP_PASS_REGEX}"
+set(_hipEvent_environment
+    "${_base_environment}"
+    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_USE_SAMPLING=ON"
+    "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
+    "ROCPROFSYS_SAMPLING_FREQ=10"
+    "ROCPROFSYS_TIME_OUTPUT=OFF"
+    "ROCPROFSYS_FILE_OUTPUT=ON"
+    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats"
+    "ROCPROFSYS_USE_PID=OFF"
+    "ROCPROFSYS_SAMPLING_DELAY=0.05"
+)
+
+# Run the hipEvent test
+add_test(
+    NAME streams-hipEvent-flow
+    COMMAND
+        $<TARGET_FILE:rocprofiler-systems-sample> -- ${PROJECT_BINARY_DIR}/streams 2
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+)
+
+set_tests_properties(
+    streams-hipEvent-flow
+    PROPERTIES ENVIRONMENT "${_hipEvent_environment}" TIMEOUT 120 LABEL "hipEvent"
 )
 
 if(_VALID_GPU)
     # Validate the generated perfetto file.
     add_test(
-        NAME validate-transpose-hipEvent-flow-perfetto
+        NAME validate-streams-hipEvent-flow-perfetto
         COMMAND
             ${ROCPROFSYS_VALIDATION_PYTHON}
             ${CMAKE_CURRENT_LIST_DIR}/validate-perfetto-proto.py -i
-            ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/transpose-hipEvent-flow-sampling/perfetto-trace.proto
+            ${PROJECT_BINARY_DIR}/rocprofsys-streams-output/perfetto-trace.proto
             --flow-events hipEventRecord -t /opt/trace_processor/bin/trace_processor_shell
             -p
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
 else()
     rocprofiler_systems_message(
-        STATUS "validate-transpose-hipEvent-flow-perfetto requires a GPU and no valid GPUs were found"
+        STATUS "validate-streams-hipEvent-flow-perfetto requires a GPU and no valid GPUs were found"
     )
 endif()
