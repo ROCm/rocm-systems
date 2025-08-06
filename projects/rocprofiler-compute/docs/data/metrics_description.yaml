@@ -397,13 +397,13 @@ LDS Speed-of-Light:
       over the number of LDS cycles that would have been  required to move the same
       amount of data in an uncontended access. [#lds-bank-conflict]_
     unit: Percent
-  Theoretical Bandwidth:
+  Theoretical Bandwidth Utilization:
     rst: Indicates the maximum amount of bytes that could have been loaded from,  stored
-      to, or atomically updated in the LDS per  :ref:`normalization unit <normalization-units>`.
+      to, or atomically updated in the LDS divided as percentage of theoretical peak.
       Does *not* take into  account the execution mask of the wavefront when the instruction
       was  executed. See the  :ref:`LDS bandwidth example <lds-bandwidth>` for more
       detail.
-    unit: Bytes per normalization unit
+    unit: Percent
   Utilization:
     rst: Indicates what percent of the kernel's duration the :ref:`LDS <desc-lds>`  was
       actively executing instructions (including, but not limited to, load,  store,
@@ -450,17 +450,16 @@ LDS Statistics:
     unit: Accesses per normalization unit
   Theoretical Bandwidth:
     rst: Indicates the maximum amount of bytes that could have been loaded from,  stored
-      to, or atomically updated in the LDS per  :ref:`normalization unit <normalization-units>`.
-      Does *not* take into  account the execution mask of the wavefront when the instruction
-      was  executed. See the  :ref:`LDS bandwidth example <lds-bandwidth>` for more
-      detail.
-    unit: Bytes per normalization unit
+      to, or atomically updated in the LDS divided by total duration. Does *not* take
+      into  account the execution mask of the wavefront when the instruction was  executed.
+      See the  :ref:`LDS bandwidth example <lds-bandwidth>` for more detail.
+    unit: Gbps
   Unaligned Stall:
     rst: The total number of cycles spent in the :ref:`LDS scheduler <desc-lds>`  due
       to stalls from non-dword aligned addresses per  :ref:`normalization unit <normalization-units>`.
     unit: Cycles per normalization unit
 vL1D Speed-of-Light:
-  Bandwidth:
+  Bandwidth Utilization:
     rst: The number of bytes looked up in the vL1D cache as a result of  :ref:`VMEM
       <desc-vmem>` instructions, as a percent of the peak  theoretical bandwidth achievable
       on the specific accelerator. The number  of bytes is calculated as the number
@@ -614,13 +613,13 @@ vL1D cache access metrics:
     rst: The total number of cache line lookups in the vL1D.
     unit: Cache lines
   Cache BW:
-    rst: The number of bytes looked up in the vL1D cache as a result of  :ref:`VMEM
-      <desc-vmem>` instructions per  :ref:`normalization unit <normalization-units>`.  The
-      number of bytes is  calculated as the number of cache lines requested multiplied
-      by the cache  line size.  This value does not consider partial requests, so
-      for  instance, if only a single value is requested in a cache line, the data  movement
-      will still be counted as a full cache line.
-    unit: Bytes per normalization unit
+    rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM
+      <desc-vmem>` instructions divided by total duration. The number of bytes is
+      calculated as the number of cache lines requested multiplied by the cache line
+      size. This value does not consider partial requests, so for  instance, if only
+      a single value is requested in a cache line, the data movement will still be
+      counted as a full cache line.
+    unit: Gbps
   Cache Hit Rate:
     rst: The ratio of the number of vL1D cache line requests that hit in vL1D  cache
       over the total number of cache line requests to the  :ref:`vL1D Cache RAM <desc-tc>`.
@@ -646,12 +645,12 @@ vL1D cache access metrics:
     unit: Requests per normalization unit
   L1-L2 BW:
     rst: The number of bytes transferred across the vL1D-L2 interface as a result  of
-      :ref:`VMEM <desc-vmem>` instructions, per  :ref:`normalization unit <normalization-units>`.
-      The number of bytes is  calculated as the number of cache lines requested multiplied
-      by the cache  line size. This value does not consider partial requests, so for  instance,
+      :ref:`VMEM <desc-vmem>` instructions, divided by total duration. The number
+      of bytes is  calculated as the number of cache lines requested multiplied by
+      the cache  line size. This value does not consider partial requests, so for  instance,
       if only a single value is requested in a cache line, the data  movement will
       still be counted as a full cache line.
-    unit: Bytes per normalization unit
+    unit: Gbps
   L1-L2 Read:
     rst: The number of read requests for a vL1D cache line that were not satisfied  by
       the vL1D and must be retrieved from the to the  :doc:`L2 Cache <l2-cache>` per  :ref:`normalization
@@ -761,20 +760,20 @@ L2 Speed-of-Light:
     unit: Percent
 L2 cache accesses:
   Atomic Bandwidth:
-    rst: Total number of bytes looked up in the L2 cache for atomic requests, per
-      :ref:`normalization unit <normalization-units>`.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes looked up in the L2 cache for atomic requests, divided
+      by total duration.
+    unit: Gbps
   Atomic Req:
     rst: The total number of atomic requests (with and without return) to the L2 from
       all clients.
     unit: Requests per normalization unit
   Bandwidth:
-    rst: The number of bytes looked up in the L2 cache, per  :ref:`normalization unit
-      <normalization-units>`.  The number of bytes is  calculated as the number of
-      cache lines requested multiplied by the cache  line size. This value does not
-      consider partial requests, so for example,  if only a single value is requested
-      in a cache line, the data movement  will still be counted as a full cache line.
-    unit: Bytes per normalization unit
+    rst: The number of bytes looked up in the L2 cache, divided by total duration.
+      The number of bytes is  calculated as the number of cache lines requested multiplied
+      by the cache line size. This value does not consider partial requests, so for
+      example, if only a single value is requested in a cache line, the data movement  will
+      still be counted as a full cache line.
+    unit: Gbps
   CC Req:
     rst: The total number of requests to the L2 that go to Coherently Cacheable (CC)  memory
       allocations. See the :ref:`memory-type` for more information.
@@ -818,9 +817,9 @@ L2 cache accesses:
       allocations. See the :ref:`memory-type` for more information.
     unit: Requests per normalization unit
   Read Bandwidth:
-    rst: Total number of bytes looked up in the L2 cache for read requests, per :ref:`normalization
-      unit <normalization-units>`.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes looked up in the L2 cache for read requests, divided
+      by total duration.
+    unit: Gbps
   Read Req:
     rst: 'The total number of read requests to the L2 from all clients.  '
     unit: Requests per normalization unit
@@ -841,9 +840,9 @@ L2 cache accesses:
       See the :ref:`memory-type` for more information.
     unit: Requests per normalization unit
   Write Bandwidth:
-    rst: Total number of bytes looked up in the L2 cache for write requests, per :ref:`normalization
-      unit <normalization-units>`.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes looked up in the L2 cache for write requests, divided
+      by total duration.
+    unit: Gbps
   Write Req:
     rst: The total number of write requests to the L2 from all clients.
     unit: Requests per normalization unit
@@ -896,9 +895,9 @@ L2-Fabric interface metrics:
       memory <memory-type>` allocations.
     unit: Percent
   Read BW:
-    rst: The total number of bytes read by the L2 cache from Infinity Fabric per  :ref:`normalization
-      unit <normalization-units>`.
-    unit: Bytes per normalization unit
+    rst: The total number of bytes read by the L2 cache from Infinity Fabric divided
+      by total duration.
+    unit: Gbps
   Read Latency:
     rst: The time-averaged number of cycles read requests spent in Infinity Fabric  before
       data was returned to the L2.
@@ -954,12 +953,12 @@ L2-Fabric interface metrics:
     unit: Percent
   Write and Atomic BW:
     rst: The total number of bytes written by the L2 over Infinity Fabric by write  and
-      atomic operations per  :ref:`normalization unit <normalization-units>`. Note
-      that on current  CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`, requests
-      are  only considered *atomic* by Infinity Fabric if they are targeted at  non-write-cacheable
-      memory, for example,  :ref:`fine-grained memory <memory-type>` allocations or  :ref:`uncached
+      atomic operations divided by total duration. Note that on current  CDNA accelerators,
+      such as the :ref:`MI2XX <mixxx-note>`, requests are  only considered *atomic*
+      by Infinity Fabric if they are targeted at  non-write-cacheable memory, for
+      example,  :ref:`fine-grained memory <memory-type>` allocations or  :ref:`uncached
       memory <memory-type>` allocations on the  MI2XX.
-    unit: Bytes per normalization unit
+    unit: Gbps
   Write and Atomic Latency:
     rst: The time-averaged number of cycles write requests spent in Infinity Fabric
       before a completion acknowledgement was returned to the L2.
@@ -975,17 +974,17 @@ L2 - Fabric interface detailed metrics:
       memory <memory-type>` allocations on the MI2XX.
     unit: Requests per normalization unit
   Atomic Bandwidth - HBM:
-    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, per normalization
-      unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided
+      by total duration.
+    unit: Gbps
   "Atomic Bandwidth - Infinity Fabric\u2122":
     rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic,
-      per normalization unit.
-    unit: Bytes per normalization unit
+      divided by total duration.
+    unit: Gbps
   Atomic Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, per
-      normalization unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided
+      by total duration.
+    unit: Gbps
   HBM Read:
     rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of  data
       from the accelerator's local HBM, per  :ref:`normalization unit <normalization-units>`.
@@ -1013,17 +1012,17 @@ L2 - Fabric interface detailed metrics:
       uncached data requests. See  :ref:`l2-request-flow` for more detail.
     unit: Requests per normalization unit
   Read Bandwidth - HBM:
-    rst: Total number of bytes due to L2 read requests due to HBM traffic, per normalization
-      unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 read requests due to HBM traffic, divided
+      by total duration.
+    unit: Gbps
   "Read Bandwidth - Infinity Fabric\u2122":
     rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic,
-      per normalization unit.
-    unit: Bytes per normalization unit
+      divided by total duration.
+    unit: Gbps
   Read Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 read requests due to PCIe traffic, per normalization
-      unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided
+      by total duration.
+    unit: Gbps
   Remote Read:
     rst: The total number of L2 requests to Infinity Fabric to read 32B or 64B of  data
       from any source other than the accelerator's local HBM, per  :ref:`normalization
@@ -1036,17 +1035,17 @@ L2 - Fabric interface detailed metrics:
       for more detail.
     unit: Requests per normalization unit
   Write Bandwidth - HBM:
-    rst: Total number of bytes due to L2 write requests due to HBM traffic, per normalization
-      unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 write requests due to HBM traffic, divided
+      by total duration.
+    unit: Gbps
   "Write Bandwidth - Infinity Fabric\u2122":
     rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic,
-      per normalization unit.
-    unit: Bytes per normalization unit
+      divided by total duration.
+    unit: Gbps
   Write Bandwidth - PCIe:
-    rst: Total number of bytes due to L2 write requests due to PCIe traffic, per normalization
-      unit.
-    unit: Bytes per normalization unit
+    rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided
+      by total duration.
+    unit: Gbps
   Write and Atomic (32B):
     rst: The total number of L2 requests to Infinity Fabric to write or atomically  update
       32B of data to any memory location, per  :ref:`normalization unit <normalization-units>`.
@@ -1098,7 +1097,7 @@ L2 - Fabric Interface stalls:
       of the :ref:`total active L2 cycles <total-active-l2-cycles>`.
     unit: Percent
 Scalar L1D Speed-of-Light:
-  Bandwidth:
+  Bandwidth Utilization:
     rst: The number of bytes looked up in the sL1D cache, as a percent of the peak  theoretical
       bandwidth. Calculated as the ratio of sL1D requests over the  :ref:`total sL1D
       cycles <total-sl1d-cycles>`.
@@ -1108,13 +1107,11 @@ Scalar L1D Speed-of-Light:
       the cache. The ratio of the number of sL1D requests that hit  [#sl1d-cache]_
       over the number of all sL1D requests.
     unit: Percent
-  sL1D-L2 BW:
-    rst: "The total number of bytes read from, written to, or atomically updated \
-      \ across the sL1D\u2194:doc:`L2 <l2-cache>` interface, per  :ref:`normalization\
-      \ unit <normalization-units>`. Note that sL1D writes  and atomics are typically\
-      \ unused on current CDNA accelerators, so in the  majority of cases this can\
-      \ be interpreted as an sL1D\u2192L2 read bandwidth."
-    unit: Bytes per normalization unit
+  sL1D-L2 BW Utilization:
+    rst: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.\
+      \ Caclulated as total number of bytes read from, written to, or atomically updated\
+      \ across the sL1D - L2 interface.
+    unit: Percent
 Scalar L1D cache accesses:
   Atomic Req:
     rst: The total number of atomic requests from sL1D to the  :doc:`L2 <l2-cache>`,
@@ -1189,13 +1186,13 @@ Scalar L1D Cache - L2 Interface:
     unit: Requests per normalization unit
   sL1D-L2 BW:
     rst: "The total number of bytes read from, written to, or atomically updated \
-      \ across the sL1D\u2194:doc:`L2 <l2-cache>` interface, per  :ref:`normalization\
-      \ unit <normalization-units>`. Note that sL1D writes  and atomics are typically\
-      \ unused on current CDNA accelerators, so in the  majority of cases this can\
-      \ be interpreted as an sL1D\u2192L2 read bandwidth."
-    unit: Bytes per normalization unit
+      \ across the sL1D\u2194:doc:`L2 <l2-cache>` interface, divided by total duration.\
+      \ Note that sL1D writes and atomics are typically unused on current CDNA accelerators,\
+      \ so in the  majority of cases this can be interpreted as an sL1D\u2192L2 read\
+      \ bandwidth."
+    unit: Gbps
 L1I Speed-of-Light:
-  Bandwidth:
+  Bandwidth Utilization:
     rst: The number of bytes looked up in the L1I cache, as a percent of the peak  theoretical
       bandwidth. Calculated as the ratio of L1I requests over the  :ref:`total L1I
       cycles <total-l1i-cycles>`.
@@ -1205,7 +1202,7 @@ L1I Speed-of-Light:
       the cache. Calculated as the ratio of the number of L1I requests  that hit over
       the number of all L1I requests.
     unit: Percent
-  L1I-L2 Bandwidth:
+  L1I-L2 Bandwidth Utilization:
     rst: "The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth\
       \  achieved. Calculated as the ratio of the total number of requests from  the\
       \ L1I to the L2 cache over the  :ref:`total L1I-L2 interface cycles <total-l1i-cycles>`."
@@ -1238,10 +1235,9 @@ L1I cache accesses:
     unit: Requests per normalization unit
 L1I <-> L2 interface:
   L1I-L2 Bandwidth:
-    rst: "The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth\
-      \  achieved. Calculated as the ratio of the total number of requests from  the\
-      \ L1I to the L2 cache over the  :ref:`total L1I-L2 interface cycles <total-l1i-cycles>`."
-    unit: Percent
+    rst: Total number of bytes transferred across L1I - L2 interface divided by total
+      duration.
+    unit: Gbps
 Workgroup manager utilizations:
   Accelerator Utilization:
     rst: The percent of cycles in the kernel where the accelerator was actively doing

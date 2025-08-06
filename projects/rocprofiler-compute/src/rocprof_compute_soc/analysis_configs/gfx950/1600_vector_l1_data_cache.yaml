@@ -5,12 +5,12 @@ Panel Config:
   metrics_description:
     Hit rate: The ratio of the number of vL1D cache line requests that hit in vL1D
       cache over the total number of cache line requests to the vL1D Cache RAM.
-    Bandwidth: The number of bytes looked up in the vL1D cache as a result of VMEM
-      instructions, as a percent of the peak theoretical bandwidth achievable on the
-      specific accelerator. The number of bytes is calculated as the number of cache
-      lines requested multiplied by the cache line size. This value does not consider
-      partial requests, so for instance, if only a single value is requested in a
-      cache line, the data movement will still be counted as a full cache line.
+    Bandwidth Utilization: The number of bytes looked up in the vL1D cache as a result
+      of VMEM instructions, as a percent of the peak theoretical bandwidth achievable
+      on the specific accelerator. The number of bytes is calculated as the number
+      of cache lines requested multiplied by the cache line size. This value does
+      not consider partial requests, so for instance, if only a single value is requested
+      in a cache line, the data movement will still be counted as a full cache line.
     Utilization: Indicates how busy the vL1D Cache RAM was during the kernel execution.
       The number of cycles where the vL1D Cache RAM is actively processing any request
       divided by the number of cycles where the vL1D is active.
@@ -42,11 +42,11 @@ Panel Config:
     Atomic Req: The total number of incoming atomic requests from the address processing
       unit after coalescing per normalization unit.
     Cache BW: The number of bytes looked up in the vL1D cache as a result of VMEM
-      instructions per normalization unit. The number of bytes is calculated as the
-      number of cache lines requested multiplied by the cache line size.  This value
-      does not consider partial requests, so for instance, if only a single value
-      is requested in a cache line, the data movement will still be counted as a full
-      cache line.
+      instructions divided by total duration. The number of bytes is calculated as
+      the number of cache lines requested multiplied by the cache line size.  This
+      value does not consider partial requests, so for instance, if only a single
+      value is requested in a cache line, the data movement will still be counted
+      as a full cache line.
     Cache Hit Rate: The ratio of the number of vL1D cache line requests that hit in
       vL1D cache over the total number of cache line requests to the vL1D Cache RAM.
     Cache Accesses: The total number of cache line lookups in the vL1D.
@@ -57,7 +57,7 @@ Panel Config:
       command during the kernel's execution per normalization unit. This may be triggered
       by, for instance, the buffer_wbinvl1 instruction.
     L1-L2 BW: The number of bytes transferred across the vL1D-L2 interface as a result
-      of VMEM instructions, per normalization unit. The number of bytes is calculated
+      of VMEM instructions, divided by total duration. The number of bytes is calculated
       as the number of cache lines requested multiplied by the cache line size. This
       value does not consider partial requests, so for instance, if only a single
       value is requested in a cache line, the data movement will still be counted
@@ -128,7 +128,7 @@ Panel Config:
             / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0)
             else None))
           unit: Pct of Peak
-        Bandwidth:
+        Bandwidth Utilization:
           value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
             - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
           unit: Pct of Peak
@@ -216,10 +216,10 @@ Panel Config:
             / $denom))
           unit: (Req  + $normUnit)
         Cache BW:
-          avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-          min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-          max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-          unit: (Bytes + $normUnit)
+          avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+          min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+          max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps
         Cache Hit Rate:
           avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
             + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -257,12 +257,12 @@ Panel Config:
           unit: (Req + $normUnit)
         L1-L2 BW:
           avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
-            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
           min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
-            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum
-            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-          unit: (Bytes + $normUnit)
+            + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps
         Tag RAM 0 Req:
           avg: AVG((TCP_TAGRAM0_REQ_sum / $denom))
           min: MIN((TCP_TAGRAM0_REQ_sum / $denom))
