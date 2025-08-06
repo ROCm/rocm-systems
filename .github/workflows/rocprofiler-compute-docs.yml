@@ -1,4 +1,4 @@
-name: Documentation
+name: rocprofiler-compute Documentation
 
 on:
   push:

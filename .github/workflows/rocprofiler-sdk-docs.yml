@@ -1,4 +1,4 @@
-name: RocProfiler-SDK Documentation
+name: rocprofiler-sdk Documentation
 
 on:
   workflow_dispatch:

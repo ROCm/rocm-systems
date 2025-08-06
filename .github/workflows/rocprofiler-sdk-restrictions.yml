@@ -1,5 +1,5 @@
 
-name: RocProfiler-SDK Code Restrictions
+name: rocprofiler-sdk Code Restrictions
 permissions:
     contents: read
 

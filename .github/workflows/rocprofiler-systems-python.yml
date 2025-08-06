@@ -1,4 +1,4 @@
-name: RocProfiler-Systems Python Linting
+name: rocprofiler-systems Python Linting
 run-name: Python
 
 on:

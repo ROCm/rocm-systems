@@ -1,4 +1,4 @@
-name: "RocProfiler-SDK CodeQL Advanced Analysis"
+name: rocprofiler-sdk Advanced Analysis
 
 on:
   workflow_dispatch:

@@ -1,4 +1,4 @@
-name: RocProfiler-SDK ROCm Release Compatibility
+name: rocprofiler-sdk ROCm Release Compatibility
 
 permissions:
     contents: read

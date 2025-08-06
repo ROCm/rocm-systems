@@ -1,4 +1,4 @@
-name: RocProfiler-SDK Continuous Integration
+name: rocprofiler-sdk Continuous Integration
 
 on:
   workflow_dispatch:
