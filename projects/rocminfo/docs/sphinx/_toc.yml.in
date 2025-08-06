@@ -1,0 +1,19 @@
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/build.rst
+    title: ROCmInfo installation 
+
+- caption: How to
+  entries:
+  - file: how-to/use-rocminfo.rst
+    title: Use ROCmInfo
+  - file: how-to/use-rocm-agent-enumerator.rst
+    title: Use ROCm agent enumerator 
+
+- caption: About
+  entries:
+  - file: license.md

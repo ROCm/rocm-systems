@@ -1,0 +1,5 @@
+pmc:  TA_FLAT_WRITE_WAVEFRONTS_sum TA_FLAT_ATOMIC_WAVEFRONTS_sum
+
+gpu:
+range:
+kernel:

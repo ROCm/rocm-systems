@@ -1,0 +1,4 @@
+ROCProfilerV2: Collecting the following counters:
+- GRBM_COUNT
+Enabling Counter Collection
+Dispatch_ID(1), GPU_ID(4), Queue_ID(1), Process_ID(2186189), Thread_ID(2186189), Grid_Size(10), Workgroup_Size(10), LDS(0), Scratch_Size(0), Arch_VGPR(8), Accumulative_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("helloworld"), Begin_Timestamp(140284033765472), End_Timestamp(140288419293408), Correlation_ID(0), GRBM_COUNT(13839.000000)

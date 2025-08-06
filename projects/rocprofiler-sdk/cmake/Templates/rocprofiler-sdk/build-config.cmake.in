@@ -1,0 +1,25 @@
+# Config file for @PROJECT_NAME@ and its component libraries in the build tree
+#
+
+if(@PACKAGE_NAME@_FIND_COMPONENTS)
+    foreach(COMP ${@PACKAGE_NAME@_FIND_COMPONENTS})
+        set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${COMP})
+        if(TARGET ${TARG})
+            set(@PACKAGE_NAME@_${COMP}_FOUND 1)
+            list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+            target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+        else()
+            set(@PACKAGE_NAME@_${COMP}_FOUND 0)
+        endif()
+    endforeach()
+else()
+    set(@PACKAGE_NAME@_LIBRARIES @PACKAGE_NAME@::@PACKAGE_NAME@)
+endif()
+
+foreach(COMP @PROJECT_BUILD_TREE_TARGETS@)
+    set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${COMP})
+    if(TARGET ${TARG})
+        list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+        target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+    endif()
+endforeach()
