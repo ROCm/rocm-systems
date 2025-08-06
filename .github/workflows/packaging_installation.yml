@@ -103,7 +103,7 @@ jobs:
         if [ "${DISTRO}" = "ubuntu" ]; then PACKAGE_MANAGER=dpkg; fi
         if [ "${DISTRO}" = "rhel" ]; then PACKAGE_MANAGER=dnf; fi
         if [ "${DISTRO}" = "opensuse" ]; then PACKAGE_MANAGER=zypper; fi
-        cpack -G ${PACKAGE}
+        cpack -G ${PACKAGE^^}
         ${PACKAGE_MANAGER} ${{ matrix.system.os == 'ubuntu' && '-i' || 'install --skip-broken'}} *.${PACKAGE}
 
     - name: Verify Installation
