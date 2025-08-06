@@ -23,7 +23,7 @@ jobs:
           {os: 'rhel', os-release: '8.10', rocm-version: '6.4'},
           {os: 'rhel', os-release: '9.4', rocm-version: '6.4'},
           {os: 'rhel', os-release: '9.5', rocm-version: '6.4'},
-          #{os: 'opensuse', os-release: '15.6', rocm-version: '6.4'}
+          {os: 'opensuse', os-release: '15.6', rocm-version: '6.4'}
         ]
     container:
       image: dgaliffiamd/rocprofiler-systems:ci-base-${{ matrix.system.os }}-${{ matrix.system.os-release }}
@@ -37,7 +37,8 @@ jobs:
         echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
         echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
-        echo "ROCM_VERSION=${{ matrix.system.rocm-version }}" >> $GITHUB_ENV &&
+        echo "ROCM_MAJOR=$(echo ${{ matrix.system.rocm-version }} | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        echo "ROCM_MINOR=$(echo ${{ matrix.system.rocm-version }} | sed 's/\./ /g' | awk '{print $2}')" >> $GITHUB_ENV &&
         env
 
     - name: Setup ROCm (ubuntu)
@@ -46,8 +47,6 @@ jobs:
       shell: bash
       run: |
         set -v
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/${{ matrix.system.os }}/${{ contains(matrix.system.os-release, '22') && 'jammy' || 'noble' }}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
@@ -61,8 +60,6 @@ jobs:
       run: |
         set -v
         RPM_TAG=".el${OS_VERSION_MAJOR}"
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
@@ -76,8 +73,6 @@ jobs:
       shell: bash
       run: |
         set -v
-        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
-        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         zypper install -y perl-File-BaseDir
         zypper --non-interactive --no-gpg-checks install https://repo.radeon.com/amdgpu-install/${{ matrix.system.rocm-version }}/sle/${{ matrix.system.os-release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
