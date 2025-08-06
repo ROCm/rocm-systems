@@ -32,7 +32,7 @@ def test_perfetto_data(pftrace_data, json_data):
     rocprofv3.test_perfetto_data(
         pftrace_data,
         json_data,
-        ("scratch_memory"),
+        ("scratch_memory",),
     )
 
 if __name__ == "__main__":
