@@ -1,0 +1,182 @@
+name: rocprofiler-systems OpenSUSE 15 (GCC, Python)
+run-name: opensuse-15
+
+on:
+  push:
+    paths:
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!.github/workflows/rocprofiler-systems-cpack.yml'
+      - '!.github/workflows/rocprofiler-systems-containers.yml'
+      - '!.github/workflows/rocprofiler-systems-formatting.yml'
+      - '!.github/workflows/rocprofiler-systems-weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!.github/workflows/rocprofiler-systems-cpack.yml'
+      - '!.github/workflows/rocprofiler-systems-containers.yml'
+      - '!.github/workflows/rocprofiler-systems-formatting.yml'
+      - '!.github/workflows/rocprofiler-systems-weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  opensuse:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-opensuse-${{ matrix.os-release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        os-release: [ '15.5', '15.6' ]
+        build-type: ['Release']
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          if [ "${{ matrix.os-release }}" == "15.5" ]; then
+            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+            chmod +x /opt/trace_processor/bin/trace_processor_shell
+          fi
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+
+    - name: Configure Env
+      working-directory: projects/rocprofiler-systems/
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "/opt/rocprofiler-systems/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/rocprofiler-systems/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
+          -DROCPROFSYS_USE_MPI_HEADERS=ON
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;videodecode;jpegdecode"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network|mpi"
+
+    - name: Install
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test Install
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        export ROCPROFSYS_DEBUG=ON
+        which rocprof-sys-avail
+        ldd $(which rocprof-sys-avail)
+        rocprof-sys-avail --help
+        rocprof-sys-avail -a
+        which rocprof-sys-instrument
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-instrument -e -v 1 -o ls.inst --simulate -- ls
+        for i in $(find rocprofsys-ls.inst-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        rocprof-sys-instrument -e -v 1 -o ls.inst -- ls
+        rocprof-sys-run -- ./ls.inst
+        rocprof-sys-instrument -e -v 1 --simulate -- ls
+        for i in $(find rocprofsys-ls-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        rocprof-sys-instrument -e -v 1 -- ls
+
+    - name: Test User API
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          projects/rocprofiler-systems/build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
