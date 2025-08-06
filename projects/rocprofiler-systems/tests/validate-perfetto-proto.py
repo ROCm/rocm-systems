@@ -170,6 +170,14 @@ if __name__ == "__main__":
         nargs="*",
     )
 
+    parser.add_argument(
+        "--flow-events",
+        type=str,
+        help="Require flow from specified events",
+        default=[],
+        nargs="*",
+    )
+
     args = parser.parse_args()
 
     # check for mutually exclusive arguments
@@ -269,6 +277,24 @@ if __name__ == "__main__":
 
         if total_value <= 0:
             print(f"Fail: Counter {counter_name} is not found in the traces")
+            ret = 1
+
+    for flow_event in args.flow_events:
+        count_events = tp.query(
+            f"""SELECT COUNT(*) AS count
+                FROM
+                    slice JOIN flow
+                ON
+                    slice.id = flow.slice_out
+                WHERE
+                    slice.name LIKE '%{flow_event}%'
+            """
+        )
+        total_count = 0
+        for row in count_events:
+            total_count += row.count
+        if total_count == 0:
+            print(f"Fail: flows out of {flow_event} not found in the traces")
             ret = 1
 
     if ret == 0:

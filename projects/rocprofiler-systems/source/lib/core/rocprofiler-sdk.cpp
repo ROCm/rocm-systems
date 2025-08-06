@@ -499,6 +499,7 @@ get_buffered_domains()
         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
 #    endif
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API
     };
 
     auto _data = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
