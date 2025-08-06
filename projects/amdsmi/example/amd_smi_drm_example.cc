@@ -1233,8 +1233,8 @@ int main() {
                 uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0;
                 uint64_t gfx = 0, enc = 0;
                 uint32_t cu_occupancy = 0;
-                char bdf_str[20];
-                sprintf(bdf_str, "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+                char bdf_str[64] = {0};
+                snprintf(bdf_str, sizeof(bdf_str), "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
                    static_cast<uint64_t>(bdf.domain_number),
                    static_cast<uint32_t>(bdf.bus_number),
                    static_cast<uint32_t>(bdf.device_number),
@@ -1265,7 +1265,7 @@ int main() {
                     struct passwd *pwd = nullptr;
                     struct stat st;
 
-                    sprintf(command, "/proc/%d", process_info_list[it].pid);
+                    snprintf(command, sizeof(command), "/proc/%d", process_info_list[it].pid);
                     if (stat(command, &st))
                         continue;
                     pwd = getpwuid(st.st_uid);

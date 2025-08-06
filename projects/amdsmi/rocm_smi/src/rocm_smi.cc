@@ -7360,9 +7360,14 @@ rsmi_event_notification_get(int timeout_ms,
          * Both event are expressed in hex.
          * information is a string
          */
-        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE] = {0};
         // parse the line here for event_number and rest of message_information
-        sscanf(event_in, "%x %[^\n]\n", &event, message);
+        // sscanf(event_in, "%x %[^\n]\n", &event, message); // This is unsafe code and flagged by codeql. Replace with iss below:
+        std::istringstream iss(event_in);
+        iss >> std::hex >> event;
+        std::string message_str;
+        std::getline(iss >> std::ws, message_str);
+        snprintf(message, sizeof(message), "%s", message_str.c_str());
 
         // parse message based on event received
         switch (event){

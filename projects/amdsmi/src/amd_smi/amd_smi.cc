@@ -414,7 +414,7 @@ amdsmi_status_t amdsmi_get_socket_info(
 amdsmi_status_t amdsmi_get_processor_info(
                 amdsmi_processor_handle processor_handle,
                 size_t len, char *name) {
-    char proc_id[10];
+    char proc_id[16] = {0};
     AMDSMI_CHECK_INIT();
 
     if (processor_handle == nullptr || name == nullptr) {
@@ -426,7 +426,7 @@ amdsmi_status_t amdsmi_get_processor_info(
                     .handle_to_processor(processor_handle, &processor);
     if (r != AMDSMI_STATUS_SUCCESS) return r;
 
-    sprintf(proc_id, "%d", processor->get_processor_index());
+    snprintf(proc_id, sizeof(proc_id), "%d", processor->get_processor_index());
     strncpy(name, proc_id, len);
 
     return AMDSMI_STATUS_SUCCESS;
