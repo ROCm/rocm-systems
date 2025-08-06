@@ -38,6 +38,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 $ amd-smi
 +------------------------------------------------------------------------------+
 | AMD-SMI 26.0.0+eaa54ecc      amdgpu version: 6.12.12  ROCm version: 7.0.0    |
+| Platform: Linux Baremetal                                                    |
 |-------------------------------------+----------------------------------------|
 | BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |
 | GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |

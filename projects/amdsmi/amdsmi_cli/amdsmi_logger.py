@@ -1011,6 +1011,7 @@ class AMDSMILogger():
         # print GPU info
         print(default_line_1)
         print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
+        print("| Platform: {0:20.20s} {1:46s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")
