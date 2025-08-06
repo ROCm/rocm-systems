@@ -112,6 +112,7 @@ buffer_storage::shutdown()
     std::unique_lock _exit_lock{ _exit_mutex };
     m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
     m_flushing_thread->join();
+    m_flushing_thread.reset();
 }
 
 void
