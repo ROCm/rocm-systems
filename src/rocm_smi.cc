@@ -1392,6 +1392,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  // fill out rsmi_od_volt_freq_data_t p with default max values to indicate no valid data
+  p->curr_sclk_range.lower_bound = UINT64_MAX;
+  p->curr_sclk_range.upper_bound = UINT64_MAX;
+  p->curr_mclk_range.lower_bound = UINT64_MAX;
+  p->curr_mclk_range.upper_bound = UINT64_MAX;
+
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -1419,13 +1425,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
     .structure_content();
 
-  //
-  // Note:  We must have minimum of 'GFXCLK:' && 'MCLK:' OR:
-  //        'OD_SCLK:' && 'OD_MCLK:' tags.
-  if (txt_power_dev_od_voltage.get_title_size() < kMIN_VALID_LINES)  {
-      return rsmi_status_t::RSMI_STATUS_NO_DATA;
-  }
-
   // Note:  For debug builds/purposes only.
   assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
          txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK));
@@ -1446,47 +1445,59 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
       return std::vector<std::string>{upper_bound_data};
   };
 
-  // Validates 'OD_SCLK' is in the structure
-  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
+    // track the number of keys found, if this goes down to 0 then that means that there is no valid data
+    uint8_t structured_key_counter = 6;
+    // Validates 'OD_SCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
                                                        KTAG_FIRST_FREQ_IDX)) {
       p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
       p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
-
+    }
+    else
+        structured_key_counter--;
       // Validates 'OD_MCLK' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
-                                                           KTAG_FIRST_FREQ_IDX)) {
-          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-      }
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
+                                                        KTAG_FIRST_FREQ_IDX)) {
+        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
 
-      // Validates 'OD_RANGE' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                           KTAG_SCLK)) {
-          od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
-                                     &p->sclk_freq_limits);
-      }
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                           KTAG_MCLK)) {
-          od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
-                                     &p->mclk_freq_limits);
-      }
-  }
-  // Validates 'GFXCLK' is in the structure
-  else if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
-                                                            KTAG_FIRST_FREQ_IDX)) {
-      p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
-      p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
-
-      // Validates 'MCLK' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
-                                                           KTAG_FIRST_FREQ_IDX)) {
-          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
-          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
-      }
-  }
-  else {
+    // Validates 'OD_RANGE' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                        KTAG_SCLK)) {
+        od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+                                    &p->sclk_freq_limits);
+    }
+    else
+        structured_key_counter--;
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                        KTAG_MCLK)) {
+        od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+                                    &p->mclk_freq_limits);
+    }
+    else
+        structured_key_counter--;
+    // Validates 'GFXCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
+                                                                KTAG_FIRST_FREQ_IDX)) {
+        p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+        p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
+    // Validates 'MCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
+                                                        KTAG_FIRST_FREQ_IDX)) {
+        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
+  if (structured_key_counter <= 0) {
       return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
