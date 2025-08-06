@@ -23,7 +23,6 @@ trigger:
   branches:
     include:
     - develop
-    - release-staging/rocm-rel-7.*
   paths:
     include:
     - projects/rocprofiler
