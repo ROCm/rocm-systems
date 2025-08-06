@@ -848,9 +848,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
                             tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            if (_stream_id != 0)
+                            if(_stream_id != 0)
                                 tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                                _stream_id);
+                                                                 _stream_id);
 
                             tracing::add_perfetto_annotation(ctx, "queue",
                                                              _queue_id.handle);
@@ -961,9 +961,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                             tracing::add_perfetto_annotation(ctx, "begin_ns", _beg_ns);
                             tracing::add_perfetto_annotation(ctx, "end_ns", _end_ns);
                             tracing::add_perfetto_annotation(ctx, "corr_id", _corr_id);
-                            if (_stream_id != 0)
+                            if(_stream_id != 0)
                                 tracing::add_perfetto_annotation(ctx, "stream_id",
-                                                                _stream_id);
+                                                                 _stream_id);
                             tracing::add_perfetto_annotation(ctx, "dst_agent",
                                                              _dst_agent->logical_node_id);
                             tracing::add_perfetto_annotation(ctx, "src_agent",

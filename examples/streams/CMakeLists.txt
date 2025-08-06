@@ -110,10 +110,6 @@ if("${CMAKE_BUILD_TYPE}" MATCHES "Release")
     target_compile_options(streams PRIVATE -g1)
 endif()
 
-# aleks:
-message(STATUS "aleks: in streams CMAKE_CXX_COMPILER_IS_HIPCC is ${CMAKE_CXX_COMPILER_IS_HIPCC}")
-message(STATUS "aleks: in streams HIPCC_EXECUTABLE is ${HIPCC_EXECUTABLE}")
-
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     # defined in MacroUtilities.cmake
     rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET streams)
