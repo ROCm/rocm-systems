@@ -4562,14 +4562,28 @@ def amdsmi_get_gpu_od_volt_info(
         )
     )
 
+    sclk_lower = freq_data.curr_sclk_range.lower_bound
+    sclk_upper = freq_data.curr_sclk_range.upper_bound
+    mclk_lower = freq_data.curr_mclk_range.lower_bound
+    mclk_upper = freq_data.curr_mclk_range.upper_bound
+
+    if sclk_lower == MaxUIntegerTypes.UINT64_T:
+        sclk_lower = "N/A"
+    if sclk_upper == MaxUIntegerTypes.UINT64_T:
+        sclk_upper = "N/A"
+    if mclk_lower == MaxUIntegerTypes.UINT64_T:
+        mclk_lower = "N/A"
+    if mclk_upper == MaxUIntegerTypes.UINT64_T:
+        mclk_upper = "N/A"
+
     return {
         "curr_sclk_range": {
-            "lower_bound": freq_data.curr_sclk_range.lower_bound,
-            "upper_bound": freq_data.curr_sclk_range.upper_bound,
+            "lower_bound": sclk_lower,
+            "upper_bound": sclk_upper,
         },
         "curr_mclk_range": {
-            "lower_bound": freq_data.curr_mclk_range.lower_bound,
-            "upper_bound": freq_data.curr_mclk_range.upper_bound,
+            "lower_bound": mclk_lower,
+            "upper_bound": mclk_upper,
         },
         "sclk_freq_limits": {
             "lower_bound": freq_data.sclk_freq_limits.lower_bound,
