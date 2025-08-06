@@ -3,15 +3,18 @@ Panel Config:
   id: 1300
   title: Instruction Cache
   metrics_description:
-    Bandwidth: The number of bytes looked up in the L1I cache, as a percent of the
-      peak theoretical bandwidth. Calculated as the ratio of L1I requests over the
-      total L1I cycles.
+    Bandwidth Utilization: The number of bytes looked up in the L1I cache, as a percent
+      of the peak theoretical bandwidth. Calculated as the ratio of L1I requests over
+      the total L1I cycles.
     Cache Hit Rate: The percent of L1I requests that hit [#l1i-cache]_ on a previously
       loaded line the cache. Calculated as the ratio of the number of L1I requests
       that hit over the number of all L1I requests.
-    L1I-L2 Bandwidth: "The percent of the peak theoretical L1I \u2192 L2 cache request\
-      \ bandwidth achieved. Calculated as the ratio of the total number of requests\
-      \ from the L1I to the L2 cache over the total L1I-L2 interface cycles."
+    L1I-L2 Bandwidth Utilization: "The percent of the peak theoretical L1I \u2192\
+      \ L2 cache request bandwidth achieved. Calculated as the ratio of the total\
+      \ number of requests from the L1I to the L2 cache over the total L1I-L2 interface\
+      \ cycles."
+    L1I-L2 Bandwidth: Total number of bytes transferred across L1I - L2 interface
+      divided by total duration.
     Req: The total number of requests made to the L1I per normalization-unit
     Hits: The total number of L1I requests that hit on a previously loaded cache line,
       per normalization-unit.
@@ -30,7 +33,7 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        Bandwidth:
+        Bandwidth Utilization:
           value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) * (End_Timestamp
             - Start_Timestamp))))
           unit: Pct of Peak
@@ -38,7 +41,7 @@ Panel Config:
           value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
             + SQC_ICACHE_MISSES_DUPLICATE)))
           unit: Pct of Peak
-        L1I-L2 Bandwidth:
+        L1I-L2 Bandwidth Utilization:
           value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
             * (End_Timestamp - Start_Timestamp))))
           unit: Pct of Peak
@@ -100,7 +103,7 @@ Panel Config:
         unit: Unit
       metric:
         L1I-L2 Bandwidth:
-          avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-          min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-          max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-          unit: (Bytes + $normUnit)
+          avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+          min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+          max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps

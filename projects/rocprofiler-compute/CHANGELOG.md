@@ -27,6 +27,26 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Change the basic view of TUI from aggregated analysis data to individual kernel analysis data
 
+* Update `Unit` of the following `Bandwidth` related metrics to `Gbps` instead of `Bytes per Normalization Unit`
+  * Theoretical Bandwidth (section 1202)
+  * L1I-L2 Bandwidth (section 1303)
+  * sL1D-L2 BW (section 1403)
+  * Cache BW (section 1603)
+  * L1-L2 BW (section 1603)
+  * Read BW (section 1702)
+  * Write and Atomic BW (section 1702)
+  * Bandwidth (section 1703)
+  * Atomic/Read/Write Bandwidth (section 1703)
+  * Atomic/Read/Write Bandwidth - (HBM/PCIe/Infinity Fabric) (section 1706)
+
+* Add `Utilization` to metric name for the following `Bandwidth` related metrics whose `Unit` is `Percent`
+  * Theoretical Bandwidth Utilization (section 1201)
+  * L1I-L2 Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1301)
+  * Bandwidth Utilization (section 1401)
+  * sL1D-L2 BW Utilization (section 1401)
+  * Bandwidth Utilization (section 1601)
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi
