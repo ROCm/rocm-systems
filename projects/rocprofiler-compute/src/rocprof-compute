@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+
+"""Main entry point for rocprof-compute"""
+
+##############################################################################bl
+# MIT License
+#
+# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+##############################################################################el
+
+import os
+import re
+import sys
+
+# import logging
+from pathlib import Path
+
+try:
+    from importlib import metadata
+
+    from rocprof_compute_base import RocProfCompute
+    from utils.logger import console_error
+except ImportError as e:
+    # In wheel package, softlink is not supported.
+    # rocprof-compute will get installed in bin and libexec/rocprofiler-compute.
+    # When invoked from bin folder, the extra paths are required to import the dependent scripts
+    try:
+        current_path = os.path.dirname(os.path.abspath(__file__))
+        additional_path = f"{current_path}/../libexec/rocprofiler-compute"
+        sys.path.append(os.path.abspath(additional_path))
+
+        from importlib import metadata
+
+        from rocprof_compute_base import RocProfCompute
+        from utils.utils import console_error
+    except ImportError as e:
+        # print("Failed to import required modules: " + str(e))
+        pass
+
+
+def verify_deps_version(localVer, desiredVer, operator):
+    """Check package version strings with simple operators used in companion
+    requirements.txt file"""
+    if operator == "==":
+        return localVer == desiredVer
+    elif operator == ">=":
+        return localVer >= desiredVer
+    elif operator == "<=":
+        return localVer <= desiredVer
+    elif operator == ">":
+        return localVer > desiredVer
+    elif operator == "<":
+        return localVer < desiredVer
+    else:
+        return True
+
+
+def verify_deps():
+    """Utility to read library dependencies from requirements.txt and endeavor
+    to load them within current execution environment.
+    Used in top-level rocprofiler-compute to provide error messages if necessary
+    dependencies are not available."""
+
+    # Check which version of python is being used
+    if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
+        print(
+            "[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
+            f" The current version is {sys.version_info[0]}.{sys.version_info[1]}."
+        )
+        sys.exit(1)
+
+    bindir = str(Path(__file__).resolve().parent)
+    depsLocation = ["requirements.txt", "../requirements.txt"]
+
+    for location in depsLocation:
+        checkFile = str(Path(bindir).joinpath(location))
+        if Path(checkFile).exists():
+            with open(checkFile, "r", encoding="utf-8") as file_in:
+                dependencies = file_in.read().splitlines()
+
+            error = False
+            version_pattern = r"^([^=<>]+)([=<>]+)(.*)$"
+
+            for dependency in dependencies:
+                desiredVersion = None
+                match = re.match(version_pattern, dependency)
+                if match:
+                    package = match.group(1)
+                    operator = match.group(2) or None
+                    desiredVersion = match.group(3) or None
+                else:
+                    package = dependency
+                try:
+                    localVersion = metadata.distribution(package).version
+                except metadata.PackageNotFoundError:
+                    error = True
+                    print(
+                        f"[ERROR] The '{dependency}' package was not found "
+                        "in the current execution environment."
+                    )
+
+                # check version requirement
+                if not error:
+                    if desiredVersion:
+                        if not verify_deps_version(
+                            localVersion, desiredVersion, operator
+                        ):
+                            print(
+                                f"[ERROR] the '{dependency}' distribution does "
+                                "not meet version requirements to use rocprofiler-compute."
+                            )
+                            print("  --> version installed :", localVersion)
+                            error = True
+
+            if error:
+                print("")
+                print(
+                    "Please verify all of the python dependencies called out "
+                    "in the requirements file"
+                )
+                print("are installed locally prior to running rocprofiler-compute.")
+                print("")
+                print(f"See: {checkFile}")
+                sys.exit(1)
+    return
+
+
+def main():
+    """Main function for rocprofiler-compute"""
+
+    # verify required python dependencies
+    verify_deps()
+
+    rocprof_compute = RocProfCompute()
+
+    mode = rocprof_compute.get_mode()
+
+    # major rocprofiler-compute execution modes
+    if mode == "profile":
+        rocprof_compute.run_profiler()
+    elif mode == "database":
+        rocprof_compute.update_db()
+    elif mode == "analyze":
+        rocprof_compute.run_analysis()
+    else:
+        console_error("Unsupported execution mode")
+
+    sys.exit(0)
+
+
+if __name__ == "__main__":
+    main()

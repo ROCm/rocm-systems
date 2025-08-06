@@ -1,0 +1,176 @@
+---
+# Pre-defined sets containing a collection of relevant metrics that can be collected in a single pass.
+# To profile customized set(s), append to this yaml file.
+
+sets:
+- title: Compute Throughput Utilization
+  set_option: compute_thruput_util
+  description: Placeholder
+  metric:
+    gfx908:
+      - 11.2.2
+      - 11.2.3
+    gfx90a:
+      - 11.2.3
+      - 11.2.4
+      - 11.2.5
+      - 11.2.6
+    gfx940:
+      - 11.2.2
+      - 11.2.3
+      - 11.2.4
+      - 11.2.5
+    gfx941:
+      - 11.2.2
+      - 11.2.3
+      - 11.2.4
+      - 11.2.5
+    gfx942:
+      - 11.2.2
+      - 11.2.3
+      - 11.2.4
+      - 11.2.5
+    gfx950:
+      - 11.2.2
+      - 11.2.3
+      - 11.2.5
+      - 11.2.6
+
+- title: Compute Throughput FLOPS
+  set_option: compute_thruput_flops
+  description: Placeholder
+  metric:
+    gfx908:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+    gfx90a:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+    gfx940:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+      - 2.1.7
+    gfx941:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+      - 2.1.7
+    gfx942:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+      - 2.1.7
+    gfx950:
+      - 2.1.2
+      - 2.1.3
+      - 2.1.4
+      - 2.1.5
+      - 2.1.6
+      - 2.1.8
+
+- title: Memory Throughput
+  set_option: mem_thruput
+  description: Placeholder
+  metric:
+    gfx908:
+      - 2.1.16
+      - 2.1.17
+      - 16.1.2
+      - 17.1.0
+    gfx90a:
+      - 2.1.16
+      - 2.1.17
+      - 16.1.2
+      - 17.1.0
+    gfx940:
+      - 2.1.17
+      - 2.1.18
+      - 16.1.2
+      - 17.1.0
+    gfx941:
+      - 2.1.17
+      - 2.1.18
+      - 16.1.2
+      - 17.1.0
+    gfx942:
+      - 2.1.17
+      - 2.1.18
+      - 16.1.2
+      - 17.1.0
+    gfx950:
+      - 2.1.18
+      - 2.1.19
+      - 16.1.2
+      - 17.1.0
+
+- title: Launch Stats
+  set_option: launch_stats
+  description: Placeholder
+  metric:
+    gfx908:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9
+    gfx90a:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9
+    gfx940:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9
+    gfx941:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9
+    gfx942:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9
+    gfx950:
+      - 7.1.0
+      - 7.1.1
+      - 7.1.2
+      - 7.1.5
+      - 7.1.6
+      - 7.1.7
+      - 7.1.8
+      - 7.1.9

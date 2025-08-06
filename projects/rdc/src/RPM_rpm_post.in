@@ -1,0 +1,100 @@
+#!/bin/bash
+
+do_update_alternatives(){
+    # skip update if program doesn't exist
+    command -v update-alternatives >/dev/null || return 0
+    local binaries altscore now
+    now=$(date -u +%s)          # Number of seconds since 1 Jan 1970
+
+    # The reason for this approach rather than using the build number
+    # is to allow for jobs from different builds. In one build job the
+    # job number might be at 1200, whilst in a release job the number
+    # may be only 1. This approach assums that if you install a build
+    # with a different semantic version then the highest is the
+    # desired one, but if you install two with the same semver then
+    # the newest is the desired version.
+
+    # Build up a score. It needs to fit in 32 bits
+    altscore=$((@VERSION_MAJOR@ - 3))
+    altscore=$((altscore * 14 + @VERSION_MINOR@)) # Allow up to 14 minor
+    altscore=$((altscore * 14 + @VERSION_PATCH@)) # Allow up to 14 patch
+
+    # So far if the version is less than 9 we have a number (altscore)
+    # that is less than 1175.  2**31/1175 is about 1.8 million. So
+    # multiply altscore by 1,000,000 and add in a factor of how many
+    # minutes have passed from an arbitary point in time (1,600,000,000
+    # seconds after 1 Jan 1970 or Sep 13 12:26:40 2020) on the
+    # basis that no one is going to be installing a new version more
+    # often than every minute. This does get things wrong if a million
+    # minutes pass and you are downgrading, but the chances of someone
+    # waiting almost 2 years between installing a version and the
+    # previous patch level is small.
+
+    altscore=$((altscore*1000000+(now-1600000000)/60))
+    binaries=(
+        rdcd
+        rdci
+    )
+
+    for i in "${binaries[@]}"
+    do
+        # No obvious recover strategy if things fail
+        # No manual or other slave pages to install
+        if [ -e $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/"$i" ]
+        then
+            update-alternatives --install /usr/bin/"$i" "$i" \
+                                $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/"$i" "$altscore"
+        else
+            echo "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/$i not found, but that is OK" >&2
+        fi
+    done
+    true
+}
+
+# https://fedoraproject.org/wiki/Packaging%3aUsersAndGroups
+do_create_rdc_user() {
+
+    # create rdc group
+    if ! getent group rdc > /dev/null 2>&1 ; then
+        groupadd --system rdc
+    fi
+
+    # create rdc user
+    if ! getent passwd rdc > /dev/null 2>&1 ; then
+        useradd -r -g rdc -s /sbin/nologin rdc
+    fi
+
+    # only add render if it exists
+    if getent group render > /dev/null 2>&1 ; then
+        usermod -a -G render rdc
+    fi
+
+    # add video always
+    usermod -a -G video rdc
+
+    # Make sure this doesn't return non-zero if an id already exists
+    return 0
+}
+
+create_rdc_service() {
+    if [ -d /run/systemd/system ]; then
+        ln -s -f -r $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
+    fi
+}
+
+reload_systemd() {
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
+    return 0
+}
+
+do_update_alternatives
+
+do_create_rdc_user
+
+#Symlink RDC Service
+create_rdc_service
+
+#Request systemctl to reload file since RDC is adding new file/service
+reload_systemd

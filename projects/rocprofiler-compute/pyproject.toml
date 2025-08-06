@@ -1,0 +1,77 @@
+[project]
+name = "rocprof_compute"
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+developer = [
+    "black>=22.6.0",
+    "isort>=5.12.0",
+    "pre-commit",
+]
+
+[tool.black]
+line-length = 90
+include = '\.py$'
+exclude = '''
+(
+  /(
+      \.eggs
+    | \.git
+    | \.github
+    | \.tox
+    | \.venv
+    | \.misc
+    | \.vscode
+    | \.pyc
+    | dist
+    | external
+    | .pytest_cache
+    | build
+    | build-rocprof_compute
+  )/
+)
+'''
+
+[tool.isort]
+profile = "black"
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
+pythonpath = [
+    ".",
+    "src",
+    "src/rocprof_compute_soc",
+    "src/utils",
+    "src/rocprof_compute_analyze/utils",
+    "tests"
+]
+
+markers = [
+    "section",
+    "kernel_execution",
+    "misc",
+    "mem",
+    "sort",
+    "join",
+    "verbosity",
+    "dispatch",
+    "list_metrics",
+    "filter_block",
+    "filter_kernel",
+    "dispatch",
+    "normal_unit",
+    "max_stat",
+    "time_unit",
+    "decimal",
+    "col",
+    "kernel_verbose",
+    "serial",
+    "L1_cache",
+    "num_xcds_spec_class",
+    "num_xcds_cli_output",
+    "sets_func",
+    "sets_perf"
+]
