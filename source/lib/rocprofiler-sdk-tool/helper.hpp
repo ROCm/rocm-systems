@@ -52,6 +52,7 @@
 #include <glog/logging.h>
 
 #include <cxxabi.h>
+#include <semaphore.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -157,3 +158,47 @@ convert_marker_tracing_kind(TracingKindT val)
 {
     return convert_marker_tracing_kind(val, std::make_index_sequence<MARKER_API_LAST>{});
 }
+
+// RAII wrapper for semaphore to cleanup and
+// sync worker processes in finalization process
+struct SemaphoreGuard
+{
+    sem_t*      sem = nullptr;
+    std::string name;
+
+    SemaphoreGuard(const std::string& sem_name)
+    : name(sem_name)
+    {}
+
+    ~SemaphoreGuard()
+    {
+        if(sem != nullptr)
+        {
+            if(sem_close(sem) == -1)
+            {
+                ROCP_WARNING << fmt::format("Failed to close semaphore in");
+            }
+
+            if(sem_unlink(name.c_str()) == -1)
+            {
+                ROCP_WARNING << fmt::format("Failed to unlink semaphore or it is already unlinked");
+            }
+        }
+    }
+
+    bool open_or_create()
+    {
+        // Try to create new semaphore
+        sem = sem_open(name.c_str(), O_CREAT | O_EXCL, 0666, 0);
+        if(sem != SEM_FAILED) return true;
+
+        // If exists, open existing
+        if(errno == EEXIST)
+        {
+            sem = sem_open(name.c_str(), 0);
+            return (sem != SEM_FAILED);
+        }
+
+        return false;
+    }
+};
