@@ -89,8 +89,10 @@ jobs:
       run: |
         set -v
         cd $BUILD_DIR
-        cpack -G RPM
-        dnf install --skip-broken *.rpm
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
+        cpack -G RPM ${CPACK_ARGUMENTS}
+        dnf install *.rpm
 
     - name: Verify Installation
       timeout-minutes: 15
