@@ -907,7 +907,7 @@ bool RTCProgram::findIsa() {
   std::string dll_name = std::string("amdhip64_" + std::to_string(HIP_VERSION_MAJOR) + ".dll");
   libName = dll_name.c_str();
 #else
-  libName = "libamdhip64.so";
+  libName = "libamdhip64.so.7";
 #endif
 
   void* handle = amd::Os::loadLibrary(libName);
