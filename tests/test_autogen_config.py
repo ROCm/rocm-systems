@@ -1,11 +1,9 @@
 import hashlib
 from pathlib import Path
 
-import pytest
 import yaml
 
 
-@pytest.mark.autogen_config
 def test_modification_time():
     # Ensure hash map consistency
     hash_path = Path("utils/autogen_hash.yaml")

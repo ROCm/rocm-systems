@@ -1649,3 +1649,117 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
+
+
+@pytest.mark.sets_func
+class TestSetsIntegration:
+    def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "mem_thruput"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        memory_metrics = ["16.1.2", "17.1.0"]
+        for metric_id in memory_metrics:
+            assert (
+                metric_id in open(Path(workload_dir) / "log.txt", "r").read()
+            ), f"Expected memory metric {metric_id} not found"
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_launch_stats_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "launch_stats"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_util_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_util"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_flops"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "nonexistent_set"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_set_and_block_mutual_exclusion(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_util", "--block", "12"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_list_sets_functionality(self, binary_handler_profile_rocprof_compute):
+        options = ["--list-sets"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+        # workload dir should be empty
+        assert not os.listdir(workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)

@@ -30,7 +30,7 @@ from pathlib import Path
 
 
 def print_avail_arch(avail_arch: list):
-    ret_str = "\t\tList all available metrics for analysis on specified arch:"
+    ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t\t   {}".format(arch)
     return ret_str
@@ -218,6 +218,19 @@ Examples:
         choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
+
+    profile_group.add_argument(
+        "--list-sets",
+        action="store_true",
+        help="\t\t\tDisplay available metric sets and their descriptions",
+    )
+    profile_group.add_argument(
+        "--set",
+        default=None,
+        dest="set_selected",
+        help="\t\t\tProfile a set of metrics of topic of interest by collecting counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+    )
+
     profile_group.add_argument(
         "--config-dir",
         dest="config_dir",

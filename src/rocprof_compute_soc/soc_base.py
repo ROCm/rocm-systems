@@ -52,6 +52,7 @@ from utils.utils import (
     detect_rocprof,
     get_submodules,
     is_tcc_channel_counter,
+    parse_sets_yaml,
     using_v3,
 )
 
@@ -285,10 +286,26 @@ class OmniSoC_Base:
             Path(filename).name.split("_")[0]: filename
             for filename in glob.glob(f"{config_root_dir}/*.yaml")
         }
+
         texts = list()
 
+        set_selected = self.get_args().set_selected
+
+        if set_selected:
+            # NOTE: --blocks and --set are mutually exclusive
+            if self.get_args().filter_blocks:
+                console_error("--block and --set are exclusive options.")
+
+            sets_info = parse_sets_yaml(self.__arch)
+            if set_selected not in set(sets_info.keys()):
+                console_error(
+                    f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
+                )
+            self.__args.filter_blocks = [
+                next(iter(metric.keys())) for metric in sets_info[set_selected]["metric"]
+            ]
+
         if not self.get_args().filter_blocks:
-            # Read all config files if no filter_blocks are specified
             for filename in config_filename_dict.values():
                 with open(filename, "r") as stream:
                     texts.append(stream.read())
