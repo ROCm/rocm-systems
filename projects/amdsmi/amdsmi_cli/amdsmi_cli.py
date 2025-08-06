@@ -75,12 +75,64 @@ def _print_error(e, destination):
         f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
-        print("Error occured. Result written to " + str(destination) + " file")
+        print("Error occurred. Result written to " + str(destination) + " file")
+
+def configure_logging_and_execute(args, amd_smi_commands):
+    """
+    Configures logging based on the provided arguments and executes the subcommand.
+
+    Args:
+        args: Parsed command-line arguments.
+        amd_smi_commands: Instance of AMDSMICommands.
+    """
+    # Remove previous log handlers
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
+    # To enable debug logs in AMD SMI library:
+    #   set RSMI_LOGGING = 1 for logging to files
+    #   set RSMI_LOGGING = 2 for logging to stdout
+    #   set RSMI_LOGGING = 3 for logging to stdout and files
+    #   set RSMI_LOGGING = 0 to disable logging
+    # Files will be located in /var/log/amd_smi_lib/AMD-SMI-lib.log*
+
+    # log string with the following format:
+    # loglevel | YYYY-MM-DD HH:MM:SS.ms | filename:line | message
+    logging_dict = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+
+    time = '%(asctime)s.%(msecs)03d'
+    datefmt = '%Y-%m-%d %H:%M:%S'
+    logging.basicConfig(format='%(levelname)s | ' + time + ' | %(filename)s:%(lineno)d | %(message)s',
+                        level=logging_dict[args.loglevel], datefmt=datefmt)
+
+    # Disable traceback for non-debug log levels
+    if args.loglevel == "DEBUG":
+        sys.tracebacklimit = 10
+    else:
+        sys.tracebacklimit = -1
+
+    logging.debug(args)
+
+    # Execute subcommands
+    try:
+        args.func(args)
+    except amdsmi_cli_exceptions.AmdSmiException as e:
+        _print_error(str(e), amd_smi_commands.logger.destination)
+    except amdsmi_exception.AmdSmiLibraryException as e:
+        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
+        _print_error(str(exc), amd_smi_commands.logger.destination)
 
 
 if __name__ == "__main__":
     # Disable traceback before possible init errors in AMDSMICommands and AMDSMIParser
-    if "DEBUG" in sys.argv:
+    copy_argv = str(sys.argv.copy()).upper()
+    if "DEBUG" in copy_argv:
         sys.tracebacklimit = 10
     else:
         sys.tracebacklimit = -1
@@ -107,57 +159,31 @@ if __name__ == "__main__":
                                     sys_argv=sys.argv,
                                     helpers=amd_smi_helpers)
     try:
-        try:
-            argcomplete.autocomplete(amd_smi_parser)
-        except NameError:
-            logging.debug("argcomplete module not found. Autocomplete will not work.")
+        argcomplete.autocomplete(amd_smi_parser)
+    except NameError:
+        logging.debug("argcomplete module not found. Autocomplete will not work.")
 
-        # Store possible subcommands & aliases for later errors
-        valid_commands = amd_smi_parser.possible_commands
-        valid_commands += ['--help', '-h']
+    # Store possible subcommands & aliases for later errors
+    valid_commands = amd_smi_parser.possible_commands
+    valid_commands += ['--help', '-h']
 
-        sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
-                    else arg for arg in sys.argv]
-        if len(sys.argv) == 1:
-            args = amd_smi_parser.parse_args(args=['default'])
-        elif sys.argv[1] in valid_commands:
-            args = amd_smi_parser.parse_args(args=None)
-        else:
-            raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
+    sys.argv = [arg.lower() if arg.startswith('--') or not arg.startswith('-')
+                else arg for arg in sys.argv]
+    if len(sys.argv) == 1:
+        args = amd_smi_parser.parse_args(args=['default'])
+    elif sys.tracebacklimit == 10 and (sys.argv[1] == '--loglevel'):
+        args = amd_smi_parser.parse_args(args=['default', '--loglevel'] + sys.argv[2:])
+    elif sys.argv[1] in valid_commands:
+        args = amd_smi_parser.parse_args(args=None)
+    else:
+        raise amdsmi_cli_exceptions.AmdSmiInvalidSubcommandException(sys.argv[1],amd_smi_commands.logger.destination)
 
-        # Handle command modifiers before subcommand execution
-            # human readable is the default output format
-        if hasattr(args, 'json') and args.json:
-            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
-        if hasattr(args, 'csv') and args.csv:
-            amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
-        if hasattr(args, 'file') and args.file:
-            amd_smi_commands.logger.destination = args.file
-
-        # Remove previous log handlers
-        for handler in logging.root.handlers[:]:
-            logging.root.removeHandler(handler)
-
-        logging_dict = {'DEBUG' : logging.DEBUG,
-                        'INFO' : logging.INFO,
-                        'WARNING': logging.WARNING,
-                        'ERROR': logging.ERROR,
-                        'CRITICAL': logging.CRITICAL}
-        # To enable debug logs on rocm-smi library set RSMI_LOGGING = 1 in environment
-        logging.basicConfig(format='%(levelname)s: %(message)s', level=logging_dict[args.loglevel])
-
-        # Disable traceback for non-debug log levels
-        if args.loglevel == "DEBUG":
-            sys.tracebacklimit = 10
-        else:
-            sys.tracebacklimit = -1
-
-        logging.debug(args)
-
-        # Execute subcommands
-        args.func(args)
-    except amdsmi_cli_exceptions.AmdSmiException as e:
-        _print_error(str(e), amd_smi_commands.logger.destination)
-    except amdsmi_exception.AmdSmiLibraryException as e:
-        exc = amdsmi_cli_exceptions.AmdSmiLibraryErrorException(amd_smi_commands.logger.format, e.get_error_code())
-        _print_error(str(exc), amd_smi_commands.logger.destination)
+    # Handle command modifiers before subcommand execution
+    # human readable is the default output format
+    if hasattr(args, 'json') and args.json:
+        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.json.value
+    if hasattr(args, 'csv') and args.csv:
+        amd_smi_commands.logger.format = amd_smi_commands.logger.LoggerFormat.csv.value
+    if hasattr(args, 'file') and args.file:
+        amd_smi_commands.logger.destination = args.file
+    configure_logging_and_execute(args, amd_smi_commands)

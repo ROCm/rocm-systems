@@ -1014,13 +1014,28 @@ class AMDSMIHelpers():
         return:
             str or dict : formatted output
         """
-        if value == "N/A":
-            return "N/A"
-        if logger.is_json_format():
-            return {"value": value, "unit": unit}
-        if logger.is_human_readable_format():
-            return f"{value} {unit}".rstrip()
-        return f"{value}"
+        if isinstance(value, list):
+            formatted_values = []
+            for val in value:
+                if isinstance(val, str) and val == "N/A":
+                    formatted_values.append("N/A")
+                else:
+                    formatted_values.append(self.unit_format(logger, val, unit))
+            return formatted_values
+        else:
+            if value == "N/A":
+                return "N/A"
+            if logger.is_json_format():
+                if unit:
+                    return {"value": value, "unit": unit}
+                else:
+                    return value
+            if logger.is_human_readable_format():
+                if unit:
+                    return f"{value} {unit}".rstrip()
+                else:
+                    return f"{value}".rstrip()
+            return f"{value}"
 
     def unit_unformat(self, logger, formatted_value):
         """
@@ -1483,3 +1498,22 @@ class AMDSMIHelpers():
                 ranges[cpu] = f"{start_setbit}-{end_setbit}"
 
         return ranges
+
+    @staticmethod
+    def average_flattened_ints(data, context="data"):
+        """Calculate the average of flattened integers from a list or tuple
+        Args:
+            data (list or tuple): Data to calculate the average from
+            context (str, optional): Context for logging. Defaults to "data".
+        Returns:
+            float or str: Average of integers if available, otherwise "N/A"
+        """
+        # Type validation - ensure data is list or tuple
+        # Note: Data can be nested list of lists and will filter out N/A values
+        if not isinstance(data, (list, tuple)):
+            logging.debug(f"Invalid data type for {context}: expected list/tuple, got {type(data)}")
+            return "N/A"
+    
+        # Flatten nested lists and filter integers
+        flat = [v for value in data for v in (value if isinstance(value, list) else [value]) if isinstance(v, int)]
+        return round(sum(flat) / len(flat)) if flat else "N/A"

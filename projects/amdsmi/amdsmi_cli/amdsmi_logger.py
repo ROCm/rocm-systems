@@ -157,6 +157,9 @@ class AMDSMILogger():
             elif key == 'gpu':
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
+            elif key == 'xcp':
+                stored_gpu = string_value
+                table_values += string_value.rjust(5)
             elif key == 'timestamp':
                 stored_timestamp = string_value
                 table_values += string_value.rjust(10) + '  '
@@ -170,6 +173,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(7)
             elif key in ('gfx_clk'):
                 table_values += string_value.rjust(10)
+            elif key in ('vram_usage'):
+                table_values += string_value.rjust(16)
             elif key in ('mem_clock', 'vram_used'):
                 table_values += string_value.rjust(11)
             elif key in ('vram_total', 'vram_free'):
@@ -217,6 +222,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(11)
             elif key == "gfx_clkviol":
                 table_values += string_value.rjust(13)
+            elif key in ("gfxclk_pviol", "gfxclk_tviol", "gfxclk_totalviol", "low_utilviol"):
+                table_values += string_value.rjust(58)
             elif key == "process_list":
                 #Add an additional padding between the first instance of GPU and NAME
                 table_values += '  '

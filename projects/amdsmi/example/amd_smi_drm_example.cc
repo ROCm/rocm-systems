@@ -872,6 +872,7 @@ int main() {
         // For each device of the socket, get name and temperature.
         for (uint32_t device_index = 0; device_index < device_count; device_index++) {
             std::cout << "Device Index: " << device_index << std::endl;
+            std::cout << "SMI gpu #: " << gpu_number << std::endl;
 
 // Commenting out the code to get CPU socket count and GPU count
 // Doesn't work on system with no supported CPU sockets
@@ -882,6 +883,95 @@ int main() {
             CHK_AMDSMI_RET(ret)
             std::cout << "CPU socket count: " << cpu_sockets << std::endl;
             std::cout << "GPU count: " << gpus << std::endl;
+#endif
+
+// Commenting out since, not verified to work on all ASICs yet.
+#if 0
+            amdsmi_name_value_t *pm_metrics = {};
+            uint32_t num_metrics = 0;
+            ret = amdsmi_get_gpu_pm_metrics_info(processor_handles[device_index],
+                                                 &pm_metrics, &num_metrics);
+            const char* err_str;
+            amdsmi_status_code_to_string(ret, &err_str);
+            std::cout << "    Output of amdsmi_get_gpu_pm_metrics_info:" << err_str << "\n";
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret)
+                std::cout << "\tNumber of PM metrics: " << num_metrics << std::endl;
+                for (uint32_t j = 0; j < num_metrics; j++) {
+                    std::cout << "\tPM Metric Name: " << pm_metrics[j].name
+                              << ", Value: " << pm_metrics[j].value << std::endl;
+                }
+            }
+            free(pm_metrics);
+
+            // typedef enum {
+            //     AMDSMI_REG_XGMI,  //!< XGMI registers
+            //     AMDSMI_REG_WAFL,  //!< WAFL registers
+            //     AMDSMI_REG_PCIE,  //!< PCIe registers
+            //     AMDSMI_REG_USR,   //!< Usr registers
+            //     AMDSMI_REG_USR1   //!< Usr1 registers
+            // } amdsmi_reg_type_t;
+            std::map<amdsmi_reg_type_t, std::string> reg_type_map = {
+                {AMDSMI_REG_XGMI, "XGMI"},
+                {AMDSMI_REG_WAFL, "WAFL"},
+                {AMDSMI_REG_PCIE, "PCIE"},
+                {AMDSMI_REG_USR, "USR"},
+                {AMDSMI_REG_USR1, "USR1"}
+            };
+
+            for (uint32_t j = static_cast<uint32_t>(AMDSMI_REG_XGMI);
+                 j <= static_cast<uint32_t>(AMDSMI_REG_USR1); j++) {
+                amdsmi_name_value_t *reg_metrics = {};
+                amdsmi_reg_type_t reg_type = static_cast<amdsmi_reg_type_t>(j);
+                std::string reg_type_str = "N/A";
+                ret = amdsmi_get_gpu_reg_table_info(processor_handles[device_index],
+                                                    reg_type, &reg_metrics, &num_metrics);
+                if (auto it = reg_type_map.find(reg_type); it != reg_type_map.end()) {
+                    reg_type_str = it->second;
+                }
+                // Skipping these for now due to some ASICS having issues
+                if (reg_type == AMDSMI_REG_USR1 || reg_type == AMDSMI_REG_XGMI ||
+                    reg_type == AMDSMI_REG_USR) {
+                    std::cout << "\tSkipping " << reg_type_str << " registers for now."
+                              << std::endl;
+                    free(reg_metrics);
+                    continue;
+                }
+
+                amdsmi_status_code_to_string(ret, &err_str);
+                std::cout << "    Output of amdsmi_get_gpu_reg_table_info(" << gpu_number << ", "
+                          << reg_type_str << "): " << err_str << "\n";
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret)
+                    std::cout << "\tNumber of Register metrics: " << num_metrics << std::endl;
+                    for (uint32_t k = 0; k < num_metrics; k++) {
+                        if (reg_metrics == nullptr) {
+                            std::cout << "\tRegister Number: " << k
+                                      << ", Type: " << reg_type_str
+                                      << ", Register Metric Name: N/A, Value: N/A" << std::endl;
+                            continue;
+                        }
+                        if (reg_metrics[k].name == nullptr) {
+                            std::cout << "\tRegister Number: " << k
+                                      << ", Type: " << reg_type_str
+                                      << ", Register Metric Name: "
+                                      << (reg_metrics[k].name != nullptr ?
+                                          reg_metrics[k].name : "N/A")
+                                      << ", Value: N/A" << std::endl;
+                            continue;
+                        }
+                        std::cout << "\tRegister Number: " << k
+                                << ", Type: " << reg_type_str
+                                << ", Register Metric Name: "
+                                << (reg_metrics[k].name != nullptr ?
+                                    reg_metrics[k].name : "N/A")
+                                << ", Value: " << reg_metrics[k].value << std::endl;
+                    }
+                }
+                free(reg_metrics);
+                std::cout << std::endl;
+            }
+            std::cout << std::endl;
 #endif
 
             // Get device type. Since the amdsmi is initialized with
@@ -1909,8 +1999,8 @@ int main() {
                     }
                 }
             }
-          gpu_number++;
-      }
+            gpu_number++;
+        }
     }
 
     // Clean up resources allocated at amdsmi_init. It will invalidate sockets

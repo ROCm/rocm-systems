@@ -1014,8 +1014,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-l', '--perf-level', action='store_true', required=False, help=perf_level_help)
                 metric_parser.add_argument('-x', '--xgmi-err', action='store_true', required=False, help=xgmi_err_help)
                 metric_parser.add_argument('-E', '--energy', action='store_true', required=False, help=energy_help)
-                metric_parser.add_argument('-v', '--violation', action='store_true', required=False, help=throttle_help)
-                metric_parser.add_argument('-T', '--throttle', dest='violation', action='store_true', required=False, help=argparse.SUPPRESS)
+                metric_parser.add_argument('-v', '--violation', dest='throttle', action='store_true', required=False, help=throttle_help)
+                metric_parser.add_argument('-T', '--throttle', dest='throttle', action='store_true', required=False, help=argparse.SUPPRESS)
 
             # Options to only display to Hypervisors
             if self.helpers.is_hypervisor():

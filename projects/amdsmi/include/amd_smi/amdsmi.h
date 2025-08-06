@@ -714,17 +714,17 @@ typedef struct {
                                                    Gfx clock below host limit violation; 1 = active 0 = not active; Max uint8 means unsupported.*/
     //GPU metrics 1.8 violations
     uint64_t acc_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit power count; Max uint64 means unsupported
-    uint64_t acc_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit thermal count; Max uint64 means unsupported
+    uint64_t acc_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit thermal count; Max uint64 means unsupported
     uint64_t acc_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];                 //!< New Driver 1.8 fields: Current low utilization count; Max uint64 means unsupported
     uint64_t acc_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Current gfx clock below host limit total count; Max uint64 means unsupported
 
     uint64_t per_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit power violation % (greater than 0% is a violation); Max uint64 means unsupported
-    uint64_t per_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];                 //!< New Driver 1.8 fields: Low utilization violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Any Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
 
     uint8_t active_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit power violation; 1 = active 0 = not active; Max uint8 means unsupported
-    uint8_t active_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];               //!< New Driver 1.8 fields: Low utilization violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];//!< New Driver 1.8 fields: Any Gfx clock host limit violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint64_t reserved[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];   // reserved for new violation info
