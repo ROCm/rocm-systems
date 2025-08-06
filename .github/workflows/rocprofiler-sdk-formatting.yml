@@ -1,5 +1,5 @@
 
-name: RocProfiler-SDK Formatting
+name: rocprofiler-sdk Formatting
 
 on:
   workflow_dispatch:

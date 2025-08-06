@@ -1,4 +1,4 @@
-name: RocProfiler-SDK Python Linting
+name: rocprofiler-sdk Python Linting
 
 on:
   workflow_dispatch:

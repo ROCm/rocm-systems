@@ -1,4 +1,4 @@
-name: RocProfiler-Register Continuous Integration
+name: rocprofiler-register Continuous Integration
 
 on:
   push:
@@ -133,7 +133,7 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-register/tests
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-tests-deb --output-on-failure
-        
+
     - name: Test Install Modulefile
       timeout-minutes: 15
       shell: bash
