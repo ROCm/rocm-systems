@@ -29,7 +29,6 @@ import logging
 logging.trace = lambda *args, **kwargs: None
 
 import builtins
-import glob
 import inspect
 import io
 import json
@@ -38,16 +37,15 @@ import logging
 import os
 import pathlib
 import re
-import selectors
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
 import pytest
+import yaml
 
 import utils.utils as utils
 
@@ -161,6 +159,16 @@ def check_csv_files(output_dir, num_devices, num_kernels):
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
     return file_dict
+
+
+def get_num_pmc_file(output_dir):
+    """
+    Returns:
+        int: number of pmc perf text files in perfmon dir
+    """
+
+    perfmon_path = Path(output_dir) / "perfmon"
+    return len([f for f in perfmon_path.iterdir() if f.is_file() and f.suffix == ".txt"])
 
 
 # =============================================================================
@@ -5975,11 +5983,10 @@ def test_get_submodules_basic_functionality():
     Returns:
         None: Asserts function correctly lists submodules from a real package.
     """
-    from unittest.mock import MagicMock, patch
 
     import utils.utils as utils_mod
 
-    mock_package = MagicMock()
+    mock_package = mock.MagicMock()
     mock_package.__path__ = ["/fake/path"]
 
     mock_submodules = [
@@ -5988,8 +5995,8 @@ def test_get_submodules_basic_functionality():
         (None, "module_error", False),
     ]
 
-    with patch("importlib.import_module", return_value=mock_package):
-        with patch("pkgutil.walk_packages", return_value=mock_submodules):
+    with mock.patch("importlib.import_module", return_value=mock_package):
+        with mock.patch("pkgutil.walk_packages", return_value=mock_submodules):
             result = utils_mod.get_submodules("test_package")
 
     assert isinstance(result, list)
@@ -9490,3 +9497,12 @@ def test_replace_timestamps_no_other_csvs_to_update(
     df_sysinfo_original = pd.read_csv(sysinfo_csv_path_str)
     assert list(df_sysinfo_original["Start_Timestamp"]) == [5]
     assert list(df_sysinfo_original["End_Timestamp"]) == [7]
+
+
+def test_set_parser():
+    from utils.utils import parse_sets_yaml
+
+    result = parse_sets_yaml("gfx90a")
+
+    assert "compute_thruput_util" in result
+    assert result["compute_thruput_util"]["title"] == "Compute Throughput Utilization"
