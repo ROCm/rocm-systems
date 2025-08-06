@@ -3,7 +3,7 @@ run-name: redhat-packaging
 
 on:
   push:
-    branches: [amd-staging, amd-mainline, release/**]
+    branches: [ develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -18,7 +18,7 @@ on:
       - .wordlist.txt
       - CMakePresets.json
   pull_request:
-    branches: [amd-staging, amd-mainline, release/**]
+    branches: [ develop ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
