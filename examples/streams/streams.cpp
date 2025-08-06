@@ -20,7 +20,7 @@
 
 // HIP kernel. Each thread takes care of one element of input
 __global__ void
-cube(double *input, double *output, int offset, int elements_per_stream)
+cube(double* input, double* output, int offset, int elements_per_stream)
 {
     size_t tid     = blockIdx.x * blockDim.x + threadIdx.x;
     size_t gstride = blockDim.x * gridDim.x;
@@ -63,7 +63,6 @@ main(int argc, char* argv[])
     }
     int bytes_per_stream = elements_per_stream * sizeof(double);
     printf("bytes/stream: %f (MB)\n", bytes_per_stream * 1.e-6);
-
 
     // Host input vectors
     double* h_input1;
@@ -174,11 +173,10 @@ main(int argc, char* argv[])
     printf("Finished copying the output vector from the GPU to the CPU\n");
 
     // Compute for CPU.
-    for(i= 0; i < n; i++)
+    for(i = 0; i < n; i++)
     {
         h_verify1[i] = h_input1[i] * h_input1[i] * h_input1[i];
     }
-
 
     // Verify results
     for(i = 0; i < n; i++)
