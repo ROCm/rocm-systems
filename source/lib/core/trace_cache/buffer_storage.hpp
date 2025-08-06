@@ -138,7 +138,7 @@ private:
     bool                            m_exit_finished{ false };
     bool                            m_running{ true };
     std::condition_variable         m_shutdown_condition;
-    std::thread                     m_flushing_thread;
+    std::unique_ptr<std::thread>    m_flushing_thread;
     size_t                          m_head{ 0 };
     size_t                          m_tail{ 0 };
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };

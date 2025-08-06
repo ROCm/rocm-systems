@@ -21,8 +21,9 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
-#include "library/ptl.hpp"
+#include "library/runtime.hpp"
 #include <chrono>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 
@@ -40,7 +41,8 @@ constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 
 buffer_storage::buffer_storage()
 {
-    tasking::general::get_task_group().exec([this]() {
+    ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+    m_flushing_thread = std::make_unique<std::thread>([this]() {
         std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
 
         if(!_ofs)
