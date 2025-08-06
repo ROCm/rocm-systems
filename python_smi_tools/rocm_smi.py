@@ -2827,7 +2827,7 @@ def showRange(deviceList, rangeType):
         return
     printLogSpacer(' Show Valid %s Range ' % (rangeType))
     odvf = rsmi_od_volt_freq_data_t()
-    uint64_max = 2**64 - 1
+    uint64_max = UIntegerTypes.UINT64_T
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
         if rsmi_ret_ok(ret, device, 'get_od_volt', silent=False):
