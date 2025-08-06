@@ -54,6 +54,7 @@ public:
                hsa_agent_t                nearest_cpu,
                const AmdExtTable&         ext_table,
                const CoreApiTable&        api);
+
     ~AgentCache()                     = default;
     AgentCache(const AgentCache&)     = default;
     AgentCache(AgentCache&&) noexcept = default;

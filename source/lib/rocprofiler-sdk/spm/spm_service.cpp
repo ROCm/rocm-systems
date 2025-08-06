@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
@@ -68,7 +69,7 @@ build_pack(spm_parameter_pack&          pack,
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return false;
 
-    const auto* metricset = rocprofiler::counters::getSupportedSPMCounters(agent->name);
+    const auto* metricset = rocprofiler::counters::getSupportedSPMCounters(agent_id);
     const auto& id_map    = rocprofiler::counters::loadMetrics()->id_to_metric;
 
     for(size_t i = 0; i < counters_count; i++)
@@ -81,7 +82,33 @@ build_pack(spm_parameter_pack&          pack,
         pack.metrics.push_back(it->second);
     }
 
-    return pack.valid();
+    if(!pack.valid()) return false;
+
+    auto pool         = std::make_shared<hsa::SPMMemoryPool>();
+    pool->allocate_fn = [](hsa_amd_memory_pool_t, size_t size, uint32_t, void** ptr) {
+        *ptr = malloc(size);
+        return HSA_STATUS_SUCCESS;
+    };
+    pool->allow_access_fn = [](uint32_t, const hsa_agent_t*, const uint32_t*, const void*) {
+        return HSA_STATUS_SUCCESS;
+    };
+    pool->free_fn = [](void* ptr) {
+        free(ptr);
+        return HSA_STATUS_SUCCESS;
+    };
+    pool->fill_fn = [](void* ptr, uint32_t value, size_t size) {
+        memset(ptr, value, size * sizeof(uint32_t));
+        return HSA_STATUS_SUCCESS;
+    };
+    pool->api_copy_fn = [](void* dst, const void* src, size_t size) {
+        memcpy(dst, src, size);
+        return HSA_STATUS_SUCCESS;
+    };
+
+    aql::SPMPacketFactory factory(*agent, pack, pool);
+    auto                  packet = factory.construct();
+
+    return packet != nullptr;
 }
 };  // namespace SPM
 };  // namespace rocprofiler
@@ -178,10 +205,9 @@ rocprofiler_iterate_spm_supported_counters(rocprofiler_agent_id_t              a
 {
     if(!rocprofiler::SPM::is_dlsym_valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
 
-    const auto* agent = rocprofiler::agent::get_agent(agent_id);
-    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+    if(!rocprofiler::agent::get_agent(agent_id)) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
-    const auto* id_set = rocprofiler::counters::getSupportedSPMCounters(agent->name);
+    const auto* id_set = rocprofiler::counters::getSupportedSPMCounters(agent_id);
     if(id_set->empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
 
     std::vector<rocprofiler_counter_id_t> ids{};

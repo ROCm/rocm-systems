@@ -75,7 +75,9 @@ SPMQueue::SPMQueue(spm_parameter_pack _params, const hsa::AgentCache& cache)
 : Queue(cache.get_hsa_agent())
 , params(std::move(_params))
 {
-    aql::SPMPacketFactory factory(cache, params, get_core(), get_ext());
+    auto pool =
+        std::make_shared<hsa::SPMMemoryPool>(cache, get_ext(), get_core().hsa_memory_copy_fn);
+    aql::SPMPacketFactory factory(*CHECK_NOTNULL(cache.get_rocp_agent()), params, pool);
     this->packet = factory.construct();
 }
 
@@ -168,7 +170,9 @@ SPMAgentManager::stop_context()
 SPMDispatchFactory::SPMDispatchFactory(spm_parameter_pack _params, const hsa::AgentCache& cache)
 : params(std::move(_params))
 {
-    aql::SPMPacketFactory factory(cache, params, get_core(), get_ext());
+    auto pool =
+        std::make_shared<hsa::SPMMemoryPool>(cache, get_ext(), get_core().hsa_memory_copy_fn);
+    aql::SPMPacketFactory factory(*CHECK_NOTNULL(cache.get_rocp_agent()), params, pool);
     this->packet = factory.construct();
 }
 

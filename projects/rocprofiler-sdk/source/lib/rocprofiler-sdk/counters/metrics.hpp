@@ -138,7 +138,7 @@ rocprofiler_status_t
 setCustomCounterDefinition(const CustomCounterDefinition& def);
 
 const std::set<uint64_t>*
-getSupportedSPMCounters(const std::string& agent);
+getSupportedSPMCounters(rocprofiler_agent_id_t id);
 }  // namespace counters
 }  // namespace rocprofiler
 

@@ -47,6 +47,7 @@ Dlsym::Dlsym()
     spm_stop_fn       = (StopFn*) dlsym(handle, "aqlprofile_spm_stop");
     spm_decode_fn     = (DecodeFn*) dlsym(handle, "aqlprofile_spm_decode_stream_v1");
     spm_query_fn      = (QueryFn*) dlsym(handle, "aqlprofile_spm_decode_query");
+    is_supported_fn   = (SupportFn*) dlsym(handle, "aqlprofile_spm_is_event_supported");
 }
 
 Dlsym::~Dlsym()

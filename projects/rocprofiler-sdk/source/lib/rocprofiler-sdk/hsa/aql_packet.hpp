@@ -66,6 +66,7 @@ struct AQLMemoryPool
     using copy_fn_t = decltype(hsa_memory_copy);
 
     AQLMemoryPool(const class AgentCache& agent, const class AmdExtTable& ext, copy_fn_t copy_fn);
+    explicit AQLMemoryPool() = default;
     virtual ~AQLMemoryPool() = default;
 
     hsa_agent_t                             gpu_agent{};
@@ -244,18 +245,18 @@ protected:
     std::unordered_map<code_object_id_t, std::shared_ptr<CodeobjMarkerAQLPacket>> loaded_codeobj;
 };
 
+struct SPMMemoryPool : public AQLMemoryPool
+{
+    SPMMemoryPool(const class AgentCache& agent, const class AmdExtTable& ext, copy_fn_t copy_fn)
+    : AQLMemoryPool(agent, ext, copy_fn){};
+
+    explicit SPMMemoryPool() = default;
+    hsa_status_t Alloc(void** ptr, size_t size, desc_t flags) override;
+};
+
 class SPMPacket : public AQLPacket
 {
 public:
-    struct SPMMemoryPool : public AQLMemoryPool
-    {
-        SPMMemoryPool(const class AgentCache&  agent,
-                      const class AmdExtTable& ext,
-                      copy_fn_t                copy_fn)
-        : AQLMemoryPool(agent, ext, copy_fn){};
-        hsa_status_t Alloc(void** ptr, size_t size, desc_t flags) override;
-    };
-
     SPMPacket(std::shared_ptr<SPMMemoryPool>  _pool,
               const aqlprofile_spm_profile_t& profile,
               rocprofiler_agent_id_t          agent_id);
@@ -263,6 +264,7 @@ public:
 
     void kfd_start(rocprofiler_spm_data_callback_t fn, rocprofiler_user_data_t userdata);
     void kfd_stop();
+    bool Valid() const { return is_valid; }
 
     const rocprofiler_agent_id_t agent_id;
     rocprofiler_user_data_t      user_data{};
@@ -281,6 +283,7 @@ private:
     rocprofiler_spm_data_callback_t data_fn{};
 
     std::atomic<bool> running{false};
+    bool              is_valid{false};
 
     const SPM::Dlsym sym;
 };

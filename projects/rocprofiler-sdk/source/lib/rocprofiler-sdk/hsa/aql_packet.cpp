@@ -78,7 +78,7 @@ AQLMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
         return HSA_STATUS_SUCCESS;
     }
     if(!data) return HSA_STATUS_ERROR;
-    return reinterpret_cast<AQLMemoryPool*>(data)->Alloc(ptr, size, flags);
+    return static_cast<AQLMemoryPool*>(data)->Alloc(ptr, size, flags);
 }
 
 hsa_status_t
@@ -124,7 +124,7 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
 }
 
 hsa_status_t
-SPMPacket::SPMMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
+SPMMemoryPool::Alloc(void** ptr, size_t size, desc_t flags)
 {
     if(!allocate_fn || !free_fn || !allow_access_fn) return HSA_STATUS_ERROR;
 
@@ -255,7 +255,7 @@ SPMPacket::SPMPacket(std::shared_ptr<SPMMemoryPool>  _pool,
     this->pool = std::move(_pool);
 
     auto status = sym.create_packets_fn(&handle, &aql_desc, &packets, profile, 0);
-    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to create SPM packet";
+    if(status != HSA_STATUS_SUCCESS) return;
 
     packets.start_packet.header            = VENDOR_BIT | BARRIER_BIT;
     packets.stop_packet.header             = VENDOR_BIT | BARRIER_BIT;
@@ -266,6 +266,8 @@ SPMPacket::SPMPacket(std::shared_ptr<SPMMemoryPool>  _pool,
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM seg_size";
     status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &desc.buffer_num);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
+
+    is_valid = true;
 }
 
 void

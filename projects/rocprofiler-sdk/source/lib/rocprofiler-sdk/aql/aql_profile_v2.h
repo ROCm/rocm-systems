@@ -91,6 +91,14 @@ typedef enum
     AQLPROFILE_ACCUMULATION_LAST,
 } aqlprofile_accumulation_type_t;
 
+typedef enum
+{
+    AQLPROFILE_SPM_DEPTH_NONE,
+    AQLPROFILE_SPM_DEPTH_16_BITS,
+    AQLPROFILE_SPM_DEPTH_32_BITS,
+    AQLPROFILE_SPM_DEPTH_64_BITS
+} aqlprofile_spm_depth_t;
+
 /**
  * @brief Special flags indicating additional properties to a counter. E.g. Accumulation metrics
  */
@@ -101,7 +109,13 @@ typedef union
     {
         uint32_t accum     : 3; /**< One of aqlprofile_accumulation_type_t */
         uint32_t _reserved : 29;
+        uint32_t depth     : 4; /**< One of aqlprofile_spm_depth_t */
     } sq_flags;
+    struct
+    {
+        uint32_t _reserved : 28;
+        uint32_t depth     : 4; /**< One of aqlprofile_spm_depth_t */
+    } spm_flags;
 } aqlprofile_pmc_event_flags_t;
 
 /**
@@ -464,15 +478,22 @@ typedef struct
 typedef enum
 {
     AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE = 0,
-    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL,
     AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,
+    AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
     AQLPROFILE_SPM_PARAMETER_TYPE_LAST,
 } aqlprofile_spm_parameter_type_t;
+
+typedef enum
+{
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK = 0,
+    AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK
+} aqlprofile_spm_parameter_interval_mode_t;
 
 typedef struct
 {
     aqlprofile_spm_parameter_type_t type;
-    size_t                          value;
+    uint64_t                        value;
 } aqlprofile_spm_parameter_t;
 
 /**
@@ -480,7 +501,8 @@ typedef struct
  */
 typedef struct
 {
-    hsa_agent_t                   agent;
+    aqlprofile_agent_handle_t     aql_agent;
+    hsa_agent_t                   hsa_agent;
     const aqlprofile_pmc_event_t* events;
     size_t                        event_count;
     aqlprofile_spm_parameter_t*   parameters;
@@ -570,36 +592,6 @@ aqlprofile_spm_start(aqlprofile_handle_t            handle,
 hsa_status_t
 aqlprofile_spm_stop(aqlprofile_handle_t handle);
 
-/**
- * @brief Data callback for SPM events.
- * @param[in] timestamp    Timestamp
- * @param[in] event_values List of counter values
- * @param[in] event_count  Number of events
- * @param[in] userdata     Returned to user
- */
-typedef void (*aqlprofile_spm_decode_callback_t)(uint64_t  timestamp,
-                                                 uint64_t* event_values,
-                                                 size_t    event_count,
-                                                 void*     userdata);
-
-/**
- * @brief Decodes a raw buffer returned by aqlprofile_spm_data_callback_t.
- * Returns results accumulated per event_id requested.
- * @param[in] desc Descriptor returned in create_packets()
- * @param[in] decode_cb  Callback where decoded SPM data will be returned to
- * @param[in] data       Raw SPM data returned in aqlprofile_spm_data_callback_t
- * @param[in] size       Raw data size
- * @param[in] userdata   Passed back to user
- * @retval HSA_STATUS_SUCCESS if decode successful
- * @retval HSA_STATUS_ERROR   for generic error
- */
-hsa_status_t
-aqlprofile_spm_decode_accumulate_v0(aqlprofile_spm_buffer_desc_t     desc,
-                                    aqlprofile_spm_decode_callback_t decode_cb,
-                                    void*                            data,
-                                    size_t                           size,
-                                    void*                            userdata);
-
 typedef void (*aqlprofile_spm_decode_callback_v1_t)(uint64_t timestamp,
                                                     uint64_t value,
                                                     uint64_t index,
@@ -637,6 +629,9 @@ hsa_status_t
 aqlprofile_spm_decode_query(aqlprofile_spm_buffer_desc_t  desc,
                             aqlprofile_spm_decode_query_t query,
                             uint64_t*                     param_out);
+
+bool
+aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event);
 
 #ifdef __cplusplus
 }
