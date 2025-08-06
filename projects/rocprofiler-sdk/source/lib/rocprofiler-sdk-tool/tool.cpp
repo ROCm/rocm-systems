@@ -100,7 +100,6 @@
 #include <vector>
 
 #include <dlfcn.h>
-#include <semaphore.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -1553,9 +1552,9 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
         return peer_pid;
     };
 
-    auto _peer = get_peer_pid();
+    auto _peers_pid = get_peer_pid();
 
-    if(_peer.size() <= 1)
+    if(_peers_pid.size() <= 1)
     {
         ROCP_INFO << fmt::format(
             "[PPID={}][PID={}] has no peer process and no need to wait ", ppid, pid);
@@ -1568,89 +1567,48 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
                                 "under same parent finished to exit",
                                 ppid,
                                 pid,
-                                _peer.size());
+                                _peers_pid.size());
 
     // Create a POSIX semaphore for synchronization
     // Processes under the same parent share a same semaphore
-    sem_t* _sem = nullptr;
     ROCP_INFO << fmt::format(
         "[PPID={}][PID={}] Creating existing semaphore in {}", ppid, pid, this_func);
 
-    const std::string _sem_pid_group =
-        "/finalization_process_sync_semaphore_pid_" + std::to_string(ppid);
-    _sem = sem_open(_sem_pid_group.c_str(), O_CREAT | O_EXCL, 0666, 0);
-    if(_sem == SEM_FAILED)
-    {
-        if(errno == EEXIST)
-        {
-            ROCP_INFO << fmt::format(
-                "[PPID={}][PID={}] Semaphore already exists in {}, opening existing semaphore",
-                ppid,
-                pid,
-                this_func);
-            _sem = sem_open(_sem_pid_group.c_str(), 0);
-            if(_sem == SEM_FAILED)
-            {
-                ROCP_WARNING << fmt::format(
-                    "[PPID={}][PID={}] failed to open existing semaphore in {}",
-                    ppid,
-                    pid,
-                    this_func);
-            }
-        }
-        else
-        {
-            ROCP_WARNING << fmt::format(
-                "[PPID={}][PID={}] failed to create semaphore in {}", ppid, pid, this_func);
-        }
-    }
+    const std::string _sem_name = "/rocprofv3_sync_pid_" + std::to_string(ppid);
+    auto              guard     = SemaphoreGuard{_sem_name};
 
-    // Post to semephore that this process has finished its work
-    if(sem_post(_sem) == -1)
+    if(!guard.open_or_create())
     {
         ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}] failed to post to semaphore in {}", ppid, pid, this_func);
+            "[PPID={}][PID={}] Failed to initialize semaphore, skipping sync", ppid, pid);
+        return;
     }
 
-    for(size_t i = 0; i < _peer.size(); ++i)
+    // Signal completion and wait for peers
+    if(sem_post(guard.sem) == -1)
     {
-        ROCP_TRACE << fmt::format(
-            "{} waiting on semaphore for peer {}/{} in group: {}",
-            this_func,
-            i + 1,
-            _peer.size(),
-            _sem_pid_group);
-        if(sem_wait(_sem) == -1)
+        ROCP_WARNING << fmt::format("[PPID={}][PID={}] Failed to signal completion", ppid, pid);
+        return;
+    }
+
+    // Wait for all peers to signal completion
+    int _sem_val = 0;
+    do
+    {
+        if(sem_getvalue(guard.sem, &_sem_val) == -1)
         {
             ROCP_WARNING << fmt::format(
                 "[PPID={}][PID={}] failed to wait on semaphore in {}", ppid, pid, this_func);
         }
-        else
-        {
-            ROCP_TRACE << fmt::format(
-                "{} successfully waited on semaphore for peer {}/{} in group: {}",
-                this_func,
-                i + 1,
-                _peer.size(),
-                _sem_pid_group);
-        }
-    }
-
-    // Clean up semaphore
-    if(sem_close(_sem) == -1)
-    {
-        ROCP_INFO << fmt::format(
-            "[PPID={}][PID={}] failed to close semaphore in {}", ppid, pid, this_func);
-    }
-
-    if(sem_unlink(_sem_pid_group.c_str()) == -1)
-    {
-        ROCP_WARNING << fmt::format(
-            "[PPID={}][PID={}] failed to unlink semaphore or it is already unlinked in {}",
-            ppid,
-            pid,
-            this_func);
-    }
+        ROCP_TRACE << fmt::format(
+            "{} shows current sem_pid_group name: {} semaphore value: {}, peer size(): {}",
+            this_func,
+            _sem_name,
+            _sem_val,
+            _peers_pid.size());
+        std::this_thread::yield();
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+    } while(static_cast<unsigned long>(_sem_val) < _peers_pid.size());
 }
 
 void
