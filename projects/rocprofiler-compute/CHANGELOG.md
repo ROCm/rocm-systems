@@ -1,4 +1,4 @@
-# Changelog for ROCm Compute Profiler
+# Changelog for ROCm Compute Profiler - Testing workflow
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
