@@ -7,28 +7,28 @@
 
 /* Macro for checking GPU API return values */
 #define HIP_ASSERT(call)                                                                 \
-    do{                                                                                  \
+    do                                                                                   \
+    {                                                                                    \
         hipError_t gpuErr = call;                                                        \
         if(hipSuccess != gpuErr)                                                         \
         {                                                                                \
             printf("GPU API Error - %s:%d: '%s'\n", __FILE__, __LINE__,                  \
                    hipGetErrorString(gpuErr));                                           \
             exit(1);                                                                     \
-        }                                                                                           \
+        }                                                                                \
     } while(0)
-
 
 // HIP kernel. Each thread takes care of one element of input
 __global__ void
-cube(double *input, double *output,int offset, int elements_per_stream)
+cube(double *input, double *output, int offset, int elements_per_stream)
 {
-    size_t tid     = blockIdx.x*blockDim.x+threadIdx.x;
+    size_t tid     = blockIdx.x * blockDim.x + threadIdx.x;
     size_t gstride = blockDim.x * gridDim.x;
 
     // Span all elements assigned to this stream
     for(size_t id = tid + offset; id < offset + elements_per_stream; id += gstride)
         for(size_t i = 0; i < 1000; ++i)
-            output[id] = input[id]*input[id]*input[id];
+            output[id] = input[id] * input[id] * input[id];
 }
 
 void
@@ -55,8 +55,10 @@ main(int argc, char* argv[])
     int elements_per_stream = (n % num_streams == 0) ? n / num_streams : -1;
     if(elements_per_stream == -1)
     {
-        printf("ERROR: input value of num_streams does not evenly devide the array size \n");
-        printf("Please provide an input value for num_streams that evenly divides %d\n", n);
+        printf(
+            "ERROR: input value of num_streams does not evenly devide the array size \n");
+        printf("Please provide an input value for num_streams that evenly divides %d\n",
+               n);
         exit(1);
     }
     int bytes_per_stream = elements_per_stream * sizeof(double);
@@ -95,9 +97,7 @@ main(int argc, char* argv[])
     HIP_ASSERT(hipHostMalloc(&h_input1, bytes));
     HIP_ASSERT(hipHostMalloc(&h_output1, bytes));
 
-
     h_verify1 = (double*) malloc(bytes);
-
 
     printf("Finished allocating vectors on the CPU\n");
     // Allocate memory for each vector on GPU
@@ -129,7 +129,7 @@ main(int argc, char* argv[])
     {
         int offset = i * elements_per_stream;
         HIP_ASSERT(hipMemcpyAsync(&d_input1[offset], &h_input1[offset], bytes_per_stream,
-                                  hipMemcpyHostToDevice,streams[i]));
+                                  hipMemcpyHostToDevice, streams[i]));
 
         HIP_ASSERT(hipEventRecord(start, streams[i]));
 
@@ -139,7 +139,7 @@ main(int argc, char* argv[])
         HIP_ASSERT(hipEventRecord(stop, streams[i]));
 
         HIP_ASSERT(hipMemcpyAsync(&h_output1[offset], &d_output1[offset],
-                                  bytes_per_stream, hipMemcpyDeviceToHost,streams[i]));
+                                  bytes_per_stream, hipMemcpyDeviceToHost, streams[i]));
     }
 #else
     // split H2D copies and kernel calls into separate loops
@@ -147,7 +147,7 @@ main(int argc, char* argv[])
     {
         int offset = i * elements_per_stream;
         HIP_ASSERT(hipMemcpyAsync(&d_input1[offset], &h_input1[offset], bytes_per_stream,
-                                  hipMemcpyHostToDevice,streams[i]));
+                                  hipMemcpyHostToDevice, streams[i]));
     }
     for(int i = 0; i < num_streams; i++)
     {
@@ -163,7 +163,7 @@ main(int argc, char* argv[])
         HIP_ASSERT(hipMemcpyAsync(&h_output1[offset], &d_output1[offset],
                                   bytes_per_stream, hipMemcpyDeviceToHost, streams[i]));
     }
-#endif //SPLIT_DATACOPY_KERNEL_CALLS
+#endif // SPLIT_DATACOPY_KERNEL_CALLS
 
     HIP_ASSERT(hipEventRecord(stop));
     HIP_ASSERT(hipEventSynchronize(stop));
@@ -174,14 +174,14 @@ main(int argc, char* argv[])
     printf("Finished copying the output vector from the GPU to the CPU\n");
 
     // Compute for CPU.
-    for(i=0; i < n; i++)
+    for(i= 0; i < n; i++)
     {
         h_verify1[i] = h_input1[i] * h_input1[i] * h_input1[i];
     }
 
 
     // Verify results
-    for(i=0; i < n; i++)
+    for(i = 0; i < n; i++)
     {
         if(abs(h_verify1[i] - h_output1[i]) > 1e-5)
         {
