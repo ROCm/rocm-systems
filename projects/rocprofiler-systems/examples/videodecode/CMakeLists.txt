@@ -54,8 +54,48 @@ function(videodecode_message _MSG_TYPE)
 endfunction()
 
 # Find RocDecode
-find_package(ROCDECODE QUIET)
-if(NOT ROCDECODE_FOUND)
+find_path(
+    rocdecode_ROOT_DIR
+    NAMES include/rocdecode/rocdecode.h
+    HINTS ${ROCmVersion_DIR} ${ROCM_PATH}
+    PATHS ${ROCmVersion_DIR} ${ROCM_PATH}
+)
+
+mark_as_advanced(rocdecode_ROOT_DIR)
+
+find_path(
+    rocdecode_INCLUDE_DIR
+    NAMES rocdecode/rocdecode.h
+    HINTS ${rocdecode_ROOT_DIR}
+    PATHS ${rocdecode_ROOT_DIR}
+    PATH_SUFFIXES include
+)
+
+find_library(
+    rocdecode_LIBRARY
+    NAMES rocdecode
+    HINTS ${rocdecode_ROOT_DIR}
+    PATHS ${rocdecode_ROOT_DIR}
+    PATH_SUFFIXES lib
+)
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    rocdecode
+    FOUND_VAR rocdecode_FOUND
+    REQUIRED_VARS rocdecode_INCLUDE_DIR rocdecode_LIBRARY
+)
+
+if(rocdecode_FOUND)
+    if(NOT TARGET rocdecode::rocdecode)
+        add_library(rocdecode::rocdecode INTERFACE IMPORTED)
+        target_link_libraries(rocdecode::rocdecode INTERFACE ${rocdecode_LIBRARY})
+        target_include_directories(
+            rocdecode::rocdecode
+            INTERFACE ${rocdecode_INCLUDE_DIR}
+        )
+    endif()
+else()
     videodecode_message(AUTHOR_WARNING "${PROJECT_NAME} skipped. Missing RocDecode...")
     return()
 endif()
@@ -102,7 +142,7 @@ set(FFMPEG_INCLUDE_DIRS ${FFMPEG_INCLUDE_DIR})
 
 mark_as_advanced(FFMPEG_INCLUDE_DIR AVCODEC_LIBRARY AVFORMAT_LIBRARY AVUTIL_LIBRARY)
 
-if(FFMPEG_FOUND AND ROCDECODE_FOUND)
+if(FFMPEG_FOUND AND rocdecode_FOUND)
     # HIP
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
 
@@ -116,8 +156,8 @@ if(FFMPEG_FOUND AND ROCDECODE_FOUND)
     endif()
 
     # rocDecode
-    include_directories(${ROCDECODE_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${ROCDECODE_LIBRARY})
+    include_directories(${rocdecode_INCLUDE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocdecode::rocdecode)
 
     # Threads
     set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -155,7 +195,7 @@ else()
     if(NOT FFMPEG_FOUND)
         message(WARNING "-- ERROR!: FFMPEG Not Found! - please install FFMPEG!")
     endif()
-    if(NOT ROCDECODE_FOUND)
+    if(NOT rocdecode_FOUND)
         message(WARNING "-- ERROR!: rocDecode Not Found! - please install rocDecode!")
     endif()
 endif()

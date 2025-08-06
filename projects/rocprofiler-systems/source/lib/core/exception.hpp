@@ -36,6 +36,7 @@ class exception : public Tp
 public:
     explicit exception(const std::string& _msg);
     explicit exception(const char* _msg);
+    explicit exception(const std::string& _msg, bool with_backtrace);
 
     ~exception() override;
 
