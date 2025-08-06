@@ -23,7 +23,8 @@ defaults:
 jobs:
   check-cmake-format:
     name: Check CMake files formatting
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
+    container: catthehacker/ubuntu:act-latest
 
     steps:
     - name: Checkout repository
