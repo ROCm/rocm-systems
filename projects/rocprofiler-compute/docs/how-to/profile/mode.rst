@@ -243,6 +243,10 @@ Filtering options
    Allows for dispatch ID filtering. Usage is equivalent with the current
    ``rocprof`` utility. See :ref:`profiling-dispatch-filtering`.
 
+``--set <metric-set>``
+   Allows for single pass counter collection of sets of metrics with minimized profiling overhead.
+   See :ref:`profiling-metric-sets`.
+
 .. tip::
 
    Be cautious when combining different profiling filters in the same call.
@@ -433,6 +437,79 @@ of the application (note zero-based indexing).
    Collecting Performance Counters
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
    ...
+
+.. _profiling-metric-sets:
+
+Metric Sets
+^^^^^^^^^^^^^^^^^^
+
+A Set contains a subset of metrics that can be collected in a single pass. This filtering option allows minimized profiling overhead by only collecting counters of interest.
+Sets provide a convenient way to group related metrics for common profiling scenarios, eliminating the need to manually specify individual metrics for typical analysis workflows.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --name vcopy --set compute_thruput_util -- ./vcopy -n 1048576 -b 256
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   rocprofiler-compute version: 2.0.0
+   Profiler choice: rocprofv1
+   Path: /home/auser/repos/rocprofiler-compute/sample/workloads/vcopy/MI200
+   Target: MI200
+   Command: ./vcopy -n 1048576 -b 256
+   Kernel Selection: None
+   Dispatch Selection: ['0']
+   Set Selection: compute_thruput_util
+   Report Sections: ['11.2.3', '11.2.4', '11.2.6', '11.2.7', '11.2.9']
+
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   Collecting Performance Counters
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+   ...
+
+
+To see a list of available sets, use the ``--list-sets`` option.
+
+.. code-block:: shell-session
+
+   $ rocprof-compute profile --list-sets
+
+                                    __                                       _
+    _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+   Available Sets:
+   ===================================================================================================================
+   Set Option                          Set Title                           Metric Name                    Metric ID
+   -------------------------------------------------------------------------------------------------------------------
+   compute_thruput_util                Compute Throughput Utilization      SALU Utilization               11.2.3
+                                                                           VALU Utilization               11.2.4
+                                                                           VMEM Utilization               11.2.6
+                                                                           Branch Utilization             11.2.7
+
+   ...
+
+   launch_stats                        Launch Stats                        Grid Size                      7.1.0
+                                                                           Workgroup Size                 7.1.1
+                                                                           Total Wavefronts               7.1.2
+                                                                           VGPRs                          7.1.5
+                                                                           AGPRs                          7.1.6
+                                                                           SGPRs                          7.1.7
+                                                                           LDS Allocation                 7.1.8
+                                                                           Scratch Allocation             7.1.9
+
+   Usage Examples:
+   rocprof-compute profile --set compute_thruput_util  # Profile this set
+   rocprof-compute profile --list-sets        # Show this help
+
 
 .. _standalone-roofline:
 
