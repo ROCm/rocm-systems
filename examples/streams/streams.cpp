@@ -162,7 +162,7 @@ main(int argc, char* argv[])
         HIP_ASSERT(hipMemcpyAsync(&h_output1[offset], &d_output1[offset],
                                   bytes_per_stream, hipMemcpyDeviceToHost, streams[i]));
     }
-#endif // SPLIT_DATACOPY_KERNEL_CALLS
+#endif  // SPLIT_DATACOPY_KERNEL_CALLS
 
     HIP_ASSERT(hipEventRecord(stop));
     HIP_ASSERT(hipEventSynchronize(stop));
