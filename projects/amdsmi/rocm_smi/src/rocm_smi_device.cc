@@ -118,6 +118,9 @@ static const char *kDevNumaNodeFName = "numa_node";
 static const char *kDevGpuMetricsFName = "gpu_metrics";
 static const char *kDevPmMetricsFName = "pm_metrics";   // PM log
 static const char *kDevRegMetricsFName = "reg_state";   // register table
+static const char *kDevBaseBoardTempMetricsFName = "board/baseboard_temp";
+static const char *kDevGpuBoardTempMetricsFName = "board/gpuboard_temp";
+
 static const char *kDevAvailableComputePartitionFName =
                   "available_compute_partition";
 static const char *kDevComputePartitionFName = "current_compute_partition";
@@ -325,6 +328,8 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevProcessIsolation, kDevProcessIsolationFName},
     {kDevShaderClean, kDevShaderCleanFName},
     {kDevRegMetrics, kDevRegMetricsFName},
+    {kDevBaseBoardTempMetrics, kDevBaseBoardTempMetricsFName},
+    {kDevGpuBoardTempMetrics, kDevGpuBoardTempMetricsFName},
     {kDevGpuReset, kDevGpuResetFName},
     {kDevAvailableComputePartition, kDevAvailableComputePartitionFName},
     {kDevComputePartition, kDevComputePartitionFName},
@@ -495,6 +500,8 @@ Device::devInfoTypesStrings = {
   {kDevGpuMetrics, "kDevGpuMetrics"},
   {kDevPmMetrics, "kDevPmMetrics"},
   {kDevRegMetrics, "kDevRegMetrics"},
+  {kDevBaseBoardTempMetrics, "kDevBaseBoardTempMetrics"},
+  {kDevGpuBoardTempMetrics, "kDevGpuBoardTempMetrics"},
   {kDevGpuReset, "kDevGpuReset"},
   {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
   {kDevComputePartition, "kDevComputePartition"},

@@ -59,6 +59,7 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_board_temp.h"
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
@@ -3293,6 +3294,63 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
+  GET_DEV_FROM_INDX
+
+  // handle gpu board temp
+  if (sensor_type >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST &&
+      sensor_type <= RSMI_TEMP_TYPE_GPUBOARD_LAST ) {
+        if (metric != RSMI_TEMP_CURRENT) {
+          LOG_ERROR("GPUBoard temperature only support RSMI_TEMP_CURRENT");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        
+        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
+        if (file_path == "") {
+          LOG_ERROR("Failed to get GPU board temperature metrics file path");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
+        ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
+        if (ret != RSMI_STATUS_SUCCESS) {
+          std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+          LOG_ERROR(err_msg);
+          return ret;
+        }
+
+        ret = get_gpuboard_temp_value(gpuboard_metric, 
+                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+        return ret;
+  }
+
+  // handle base board temp
+  if (sensor_type >= RSMI_TEMP_TYPE_BASEBOARD_FIRST &&
+      sensor_type <= RSMI_TEMP_TYPE_BASEBOARD_LAST ) {
+        if (metric != RSMI_TEMP_CURRENT) {
+          LOG_ERROR("Baseboard temperature only supports RSMI_TEMP_CURRENT");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+
+        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevBaseBoardTempMetrics);
+        if (file_path.empty()) {
+          LOG_ERROR("Failed to get baseboard temperature metrics file path");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
+        ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
+        if (ret != RSMI_STATUS_SUCCESS) {
+          std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+          LOG_ERROR(err_msg);
+          return ret;
+        }
+
+        ret = get_baseboard_temp_value(baseboard_metric,
+                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+        return ret;
+  }
 
   static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes>
     kMetricTypeMap = {
@@ -3409,8 +3467,6 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }  // end HBM temperature
 
   DEVICE_MUTEX
-
-  GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
     ss << __PRETTY_FUNCTION__
