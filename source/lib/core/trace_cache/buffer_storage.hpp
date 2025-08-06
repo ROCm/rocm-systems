@@ -30,6 +30,7 @@
 #include <cstring>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <stdint.h>
 #include <string.h>
 #include <thread>
@@ -50,6 +51,13 @@ public:
     template <typename... T>
     void store(entry_type type, T&&... values)
     {
+        if(!is_running())
+        {
+            throw std::runtime_error(
+                "Trying to use buffered storage while it is not running");
+            return;
+        }
+
         constexpr bool is_supported_type = (supported_types::is_supported<T> && ...);
         static_assert(is_supported_type, "Supported types are const char*, char*, "
                                          "unsigned long, unsigned int, and int.");
