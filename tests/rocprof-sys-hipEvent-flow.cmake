@@ -26,33 +26,33 @@
 #
 # -------------------------------------------------------------------------------------- #
 
-set(_hipEvent_environment
-    "${_base_environment}"
-    "ROCPROFSYS_TRACE=ON"
-    "ROCPROFSYS_PROFILE=ON"
-    "ROCPROFSYS_USE_SAMPLING=ON"
-    "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
-    "ROCPROFSYS_SAMPLING_FREQ=10"
-    "ROCPROFSYS_TIME_OUTPUT=OFF"
-    "ROCPROFSYS_FILE_OUTPUT=ON"
-    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats"
-    "ROCPROFSYS_USE_PID=OFF"
-    "ROCPROFSYS_SAMPLING_DELAY=0.05"
-)
-
-# Run the hipEvent test
-add_test(
-    NAME streams-hipEvent-flow
-    COMMAND $<TARGET_FILE:rocprofiler-systems-sample> -- ${PROJECT_BINARY_DIR}/streams 2
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
-)
-
-set_tests_properties(
-    streams-hipEvent-flow
-    PROPERTIES ENVIRONMENT "${_hipEvent_environment}" TIMEOUT 120 LABEL "hipEvent"
-)
-
 if(_VALID_GPU)
+    set(_hipEvent_environment
+        "${_base_environment}"
+        "ROCPROFSYS_TRACE=ON"
+        "ROCPROFSYS_PROFILE=ON"
+        "ROCPROFSYS_USE_SAMPLING=ON"
+        "ROCPROFSYS_USE_PROCESS_SAMPLING=OFF"
+        "ROCPROFSYS_SAMPLING_FREQ=10"
+        "ROCPROFSYS_TIME_OUTPUT=OFF"
+        "ROCPROFSYS_FILE_OUTPUT=ON"
+        "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock papi_array network_stats"
+        "ROCPROFSYS_USE_PID=OFF"
+        "ROCPROFSYS_SAMPLING_DELAY=0.05"
+    )
+
+    # Run the hipEvent test
+    add_test(
+        NAME streams-hipEvent-flow
+        COMMAND $<TARGET_FILE:rocprofiler-systems-sample> -- ${PROJECT_BINARY_DIR}/streams 2
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+    )
+
+    set_tests_properties(
+        streams-hipEvent-flow
+        PROPERTIES ENVIRONMENT "${_hipEvent_environment}" TIMEOUT 120 LABEL "hipEvent"
+    )
+
     # Validate the generated perfetto file.
     add_test(
         NAME validate-streams-hipEvent-flow-perfetto
@@ -66,6 +66,6 @@ if(_VALID_GPU)
     )
 else()
     rocprofiler_systems_message(
-        STATUS "validate-streams-hipEvent-flow-perfetto requires a GPU and no valid GPUs were found"
+        STATUS "streams-hipEvent-flow and validate-streams-hipEvent-flow-perfetto require a GPU and no valid GPUs were found"
     )
 endif()
