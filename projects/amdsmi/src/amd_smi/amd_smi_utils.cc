@@ -422,7 +422,6 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
             char lastChar = line.back();
             if (lastChar == '*'){
                 current_freq = freq;
-                continue;
             }
 
             // not * was detected so check for the min max if not s or mclk, which are user defined

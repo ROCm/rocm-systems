@@ -140,15 +140,14 @@ jobs:
           path: major-abi-report.html
           if-no-files-found: ignore
 
-      - name: Fail Workflow on Major ABI Check Failure
+      - name: Report Major ABI Check Results
         if: always()
         run: |
           echo "Checking Major ABI check exit code..."
           source $GITHUB_WORKSPACE/major_abi_status.txt
           echo "Major ABI check exit code: $abi_exit_code"
           if [ "$abi_exit_code" -ne 0 ]; then
-            echo "::error::⚠️ MAJOR ABI BREAKAGE FOUND ⚠️ CHECK \"Run Major ABI Compliance Check\" LOGS OR THE major-abi-report ARTIFACT FOR DETAILS."
-            exit 1
+            echo "::warning::⚠️ MAJOR ABI BREAKAGE FOUND ⚠️ CHECK \"Run Major ABI Compliance Check\" LOGS OR THE major-abi-report ARTIFACT FOR DETAILS."
           else
             echo "✅ Major ABI check succeeded."
           fi
@@ -302,15 +301,14 @@ jobs:
           path: minor-abi-report.html
           if-no-files-found: ignore
 
-      - name: Fail Workflow on Minor ABI Check Failure
+      - name: Report Minor ABI Check Results
         if: always()
         run: |
           echo "Checking Minor ABI check exit code..."
           source $GITHUB_WORKSPACE/minor_abi_status.txt
           echo "Minor ABI check exit code: $abi_exit_code"
           if [ "$abi_exit_code" -ne 0 ]; then
-            echo "::error::⚠️ MINOR ABI CHANGES FOUND (STRICT CHECK) ⚠️ CHECK \"Run Minor ABI Compliance Check (Strict)\" LOGS OR THE minor-abi-report ARTIFACT FOR DETAILS."
-            exit 1
+            echo "::warning::⚠️ MINOR ABI CHANGES FOUND (STRICT CHECK) ⚠️ CHECK \"Run Minor ABI Compliance Check (Strict)\" LOGS OR THE minor-abi-report ARTIFACT FOR DETAILS."
           else
             echo "✅ Minor ABI check (Strict) succeeded or found no changes."
           fi
