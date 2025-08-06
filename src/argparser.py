@@ -291,11 +291,10 @@ Examples:
         default=1048576,
         help=(
             "\t\t\tSet the interval of pc sampling.\n"
-            "\t\t\t   For stochastic sampling, the interval is in cycles.\n"(
-                "\t\t\t   For host_trap sampling, the interval is in microsecond "
-                "(DEFAULT: 1048576)."
-            )
-        ),
+            "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
+            "\t\t\t  For host_trap sampling, the interval is in microsecond "
+            "(DEFAULT: 1048576)."
+        )
     )
 
     profile_group.add_argument(

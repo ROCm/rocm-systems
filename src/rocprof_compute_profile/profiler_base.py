@@ -396,7 +396,7 @@ class RocProfCompute_Base:
                 )
 
             # Kernel filtering (in-place replacement)
-            if not self.__args.kernel is not None:
+            if not self.__args.kernel == None:
                 success, output = capture_subprocess_output([
                     "sed",
                     "-i",
@@ -414,7 +414,7 @@ class RocProfCompute_Base:
                     console_debug(output)
 
             # Dispatch filtering (inplace replacement)
-            if not self.__args.dispatch is not None:
+            if not self.__args.dispatch == None:
                 success, output = capture_subprocess_output([
                     "sed",
                     "-i",

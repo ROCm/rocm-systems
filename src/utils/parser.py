@@ -82,16 +82,13 @@ build_in_vars = {
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
     "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs":
-        "TO_INT(MIN((("
-        "ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), 0) / "
-        "$max_waves_per_cu) * 8) + "
-        "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), 0), "
-        "$max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles":
-        "ROUND(AVG(((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk), 0)",
-    "hbmBandwidth":
-        "($max_mclk / 1000 * 32 * $num_hbm_channels)",
+    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
+        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
+        1000) * $max_sclk)), 0)",
+    "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
 }
 
 supported_call = {
