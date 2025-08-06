@@ -44,7 +44,8 @@ if(_VALID_GPU)
     # Run the hipEvent test
     add_test(
         NAME streams-hipEvent-flow
-        COMMAND $<TARGET_FILE:rocprofiler-systems-sample> -- ${PROJECT_BINARY_DIR}/streams 2
+        COMMAND
+            $<TARGET_FILE:rocprofiler-systems-sample> -- ${PROJECT_BINARY_DIR}/streams 2
         WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
     )
 
