@@ -73,6 +73,6 @@ markers = [
     "num_xcds_spec_class",
     "num_xcds_cli_output",
     "sets_func",
-    "sets_perf"
-    "live_attach_detach"
+    "sets_perf",
+    "live_attach_detach",
 ]
