@@ -89,7 +89,7 @@ jobs:
         ROCM_VERSION=${{ matrix.rocm-version }}
         if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
         cpack -G RPM ${CPACK_ARGUMENTS}
-        zypper install *.rpm
+        zypper install --non-interactive *.rpm
 
     - name: Verify Installation
       timeout-minutes: 15
