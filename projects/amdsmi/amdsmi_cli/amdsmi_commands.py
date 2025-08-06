@@ -4215,10 +4215,24 @@ class AMDSMICommands():
             static_dict["set_core_boost_limit"] = {}
             try:
                 amdsmi_interface.amdsmi_set_cpu_core_boostlimit(args.core, args.core_boost_limit[0][0])
-                static_dict["set_core_boost_limit"]["Response"] = "Set Operation successful"
+                #Verify the core boost limit is set
+                boost_limit = amdsmi_interface.amdsmi_get_cpu_core_boostlimit(args.core)
+                # Extract numeric value from response (remove units if present)
+                if isinstance(boost_limit, str):
+                    # Extract just the number part (assumes format like "5000 MHz" or "5000")
+                    boost_limit = int(boost_limit.split()[0])
+                else:
+                    boost_limit = int(boost_limit)
+                
+                if boost_limit < args.core_boost_limit[0][0]:
+                    static_dict["set_core_boost_limit"]["Response"] = f"Max allowed boostlimit is {boost_limit} MHz"
+                elif boost_limit > args.core_boost_limit[0][0]:
+                    static_dict["set_core_boost_limit"]["Response"] = f"Min allowed boostlimit is {boost_limit} MHz"
+                else:
+                    static_dict["set_core_boost_limit"]["Response"] = f"{boost_limit} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_core_boost_limit"]["Response"] = f"Error occured for Core {core_id} - {e.get_error_info()}"
-                logging.debug("Failed to set core boost limit for cpu %s | %s", core_id, e.get_error_info())
+                logging.debug("Failed to set core boost limit for core %s | %s", core_id, e.get_error_info())
 
         multiple_devices_csv_override = False
         self.logger.store_core_output(args.core, 'values', static_dict)
@@ -4307,8 +4321,14 @@ class AMDSMICommands():
         if args.cpu_pwr_limit:
             static_dict["set_pwr_limit"] = {}
             try:
+                soc_max_pwr_limit = amdsmi_interface.amdsmi_get_cpu_socket_power_cap_max(args.cpu)
+                extract_numeric = soc_max_pwr_limit.split()[0]
+                max_power = int(extract_numeric)
+
                 amdsmi_interface.amdsmi_set_cpu_socket_power_cap(args.cpu, args.cpu_pwr_limit[0][0])
-                static_dict["set_pwr_limit"]["Response"] = "Set Operation successful"
+                if args.cpu_pwr_limit[0][0] > max_power:
+                    args.cpu_pwr_limit[0][0] = max_power
+                static_dict["set_pwr_limit"]["Response"] = f"{args.cpu_pwr_limit[0][0] / 1000:.3f} mW"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_pwr_limit"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set power limit for cpu %s | %s", cpu_id, e.get_error_info())
@@ -4318,7 +4338,7 @@ class AMDSMICommands():
             try:
                 amdsmi_interface.amdsmi_set_cpu_xgmi_width(args.cpu, args.cpu_xgmi_link_width[0][0],
                                                            args.cpu_xgmi_link_width[0][1])
-                static_dict["set_xgmi_link_width"]["Response"] = "Set Operation successful"
+                static_dict["set_xgmi_link_width"]["Response"] = f"{args.cpu_xgmi_link_width[0][0]} - {args.cpu_xgmi_link_width[0][1]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_xgmi_link_width"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set xgmi link width for cpu %s | %s", cpu_id, e.get_error_info())
@@ -4329,7 +4349,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_set_cpu_socket_lclk_dpm_level(args.cpu, args.cpu_lclk_dpm_level[0][0],
                                                                       args.cpu_lclk_dpm_level[0][1],
                                                                       args.cpu_lclk_dpm_level[0][2])
-                static_dict["set_lclk_dpm_level"]["Response"] = "Set Operation successful"
+                static_dict["set_lclk_dpm_level"]["Response"] = f"NBIO[{args.cpu_lclk_dpm_level[0][0]}]"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_lclk_dpm_level"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set lclk dpm level for cpu %s | %s", cpu_id, e.get_error_info())
@@ -4338,7 +4358,7 @@ class AMDSMICommands():
             static_dict["set_pwr_eff_mode"] = {}
             try:
                 amdsmi_interface.amdsmi_set_cpu_pwr_efficiency_mode(args.cpu, args.cpu_pwr_eff_mode[0][0])
-                static_dict["set_pwr_eff_mode"]["Response"] = "Set Operation successful"
+                static_dict["set_pwr_eff_mode"]["Response"] = f"{args.cpu_pwr_eff_mode[0][0]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_pwr_eff_mode"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set power efficiency mode for cpu %s | %s", cpu_id, e.get_error_info())
@@ -4348,7 +4368,7 @@ class AMDSMICommands():
             try:
                 amdsmi_interface.amdsmi_set_cpu_gmi3_link_width_range(args.cpu, args.cpu_gmi3_link_width[0][0],
                 args.cpu_gmi3_link_width[0][1])
-                static_dict["set_gmi3_link_width"]["response"] = "Set Operation successful"
+                static_dict["set_gmi3_link_width"]["response"] = f"{args.cpu_gmi3_link_width[0][0]} - {args.cpu_gmi3_link_width[0][1]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict["set_gmi3_link_width"]["response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set gmi3 link width for cpu %s | %s", cpu_id, e.get_error_info())
@@ -4378,7 +4398,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_cpu_apb_enable(args.cpu)
                 static_dict["apbenable"]["state"] = "Enabled DF - Pstate performance boost algorithm"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["apbenable"]["state"] = "N/A"
+                static_dict["apbenable"]["state"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_disable_apb:
@@ -4387,7 +4407,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_cpu_apb_disable(args.cpu, args.cpu_disable_apb[0][0])
                 static_dict["apbdisable"]["state"] = "Disabled DF - Pstate performance boost algorithm"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["apbdisable"]["state"] = "N/A"
+                static_dict["apbdisable"]["state"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.soc_boost_limit:
@@ -5029,20 +5049,51 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
-            if not any([args.gpu is not None,
-                        args.fan is not None,
-                        args.perf_level is not None,
-                        args.profile is not None,
-                        args.perf_determinism is not None,
-                        args.compute_partition is not None,
-                        args.memory_partition is not None,
-                        args.power_cap is not None,
-                        args.soc_pstate is not None,
-                        args.xgmi_plpd is not None,
-                        args.clk_limit is not None,
-                        args.clk_level is not None,
-                        args.process_isolation is not None
-            ]):
+            try:
+                is_gpu_set = any([
+                            args.gpu is not None,
+                            args.fan is not None,
+                            args.perf_level is not None,
+                            args.profile is not None,
+                            args.perf_determinism is not None,
+                            args.compute_partition is not None,
+                            args.memory_partition is not None,
+                            args.power_cap is not None,
+                            args.soc_pstate is not None,
+                            args.xgmi_plpd is not None,
+                            args.clk_limit is not None,
+                            args.clk_level is not None,
+                            args.process_isolation is not None
+                            ])
+            except AttributeError:
+                # If attribute error for gpu, then we could be another subcommand
+                is_gpu_set = False
+
+            try:
+                is_cpu_set = any([
+                            args.cpu is not None,
+                            args.cpu_pwr_limit is not None,
+                            args.cpu_xgmi_link_width is not None,
+                            args.cpu_lclk_dpm_level is not None,
+                            args.cpu_pwr_eff_mode is not None,
+                            args.cpu_gmi3_link_width is not None,
+                            args.cpu_pcie_link_rate is not None,
+                            args.cpu_df_pstate_range is not None,
+                            args.cpu_enable_apb,
+                            args.cpu_disable_apb is not None,
+                            args.soc_boost_limit is not None
+                            ])
+            except AttributeError:
+                # If attribute error for cpu, then we could be another subcommand
+                is_cpu_set = False
+            
+            if args.core_boost_limit:
+                is_core_set = True
+            else:
+                is_core_set = False
+
+            if not (is_gpu_set or is_cpu_set or is_core_set):
+                # if neither GPU / CPU / or Core args are provided, then raise error message
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
@@ -5057,6 +5108,19 @@ class AMDSMICommands():
             raise ValueError('Cannot set GPU, CPU, and CORE arguments at the same time')
         elif not (gpu_args_enabled ^ cpu_args_enabled ^ core_args_enabled):
             raise ValueError('Cannot set GPU, CPU, or CORE arguments at the same time')
+
+        if self.helpers.is_amdgpu_initialized() and gpu_args_enabled:
+            if args.gpu == None:
+                args.gpu = self.device_handles
+
+        if self.helpers.is_amd_hsmp_initialized() and cpu_args_enabled:
+            if args.cpu == None:
+                args.cpu = self.cpu_handles
+        
+        if self.helpers.is_amd_hsmp_initialized() and core_args_enabled:
+            if args.core == None:
+                args.core = self.core_handles
+
 
         # Handle CPU and GPU intialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
