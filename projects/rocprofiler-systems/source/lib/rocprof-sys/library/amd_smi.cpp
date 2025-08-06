@@ -500,7 +500,9 @@ data::post_process(uint32_t _dev_id)
         double _umcbusy = itr.m_busy_perc.umc_activity;
         double _mmbusy  = itr.m_busy_perc.mm_activity;
         double _temp    = itr.m_temp;
-        double _power   = itr.m_power.current_socket_power;
+        double _power   = gpu::is_current_power_supported(_dev_id)
+                              ? itr.m_power.current_socket_power
+                              : itr.m_power.average_socket_power;
         double _usage   = itr.m_mem_usage / static_cast<double>(units::megabyte);
 
         auto setup_perfetto_counter_tracks = [&]() {
