@@ -42,6 +42,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -54,6 +55,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -66,6 +68,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -78,6 +81,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -90,6 +94,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -102,6 +107,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -114,6 +120,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -126,6 +133,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -138,6 +146,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -150,6 +159,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -162,6 +172,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -310,6 +321,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -322,6 +334,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -334,6 +347,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -346,6 +360,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -358,6 +373,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -370,6 +386,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -382,6 +399,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1186,6 +1204,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1198,6 +1217,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1215,6 +1235,7 @@ rocprofiler-sdk:
       - gfx1031
       - gfx1032
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1232,6 +1253,7 @@ rocprofiler-sdk:
       - gfx1031
       - gfx1032
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1301,6 +1323,7 @@ rocprofiler-sdk:
       - gfx1031
       - gfx1032
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1318,6 +1341,7 @@ rocprofiler-sdk:
       - gfx1031
       - gfx1032
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1330,6 +1354,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1342,6 +1367,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1811,6 +1837,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1824,6 +1851,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1837,6 +1865,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1851,6 +1880,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1863,6 +1893,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1875,6 +1906,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1887,6 +1919,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1899,6 +1932,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1911,6 +1945,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1923,6 +1958,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1935,6 +1971,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1947,6 +1984,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1959,6 +1997,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1971,6 +2010,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1983,6 +2023,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -1995,6 +2036,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2009,6 +2051,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2035,6 +2078,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2551,6 +2595,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2574,6 +2619,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2586,6 +2632,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2598,6 +2645,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2610,6 +2658,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2622,6 +2671,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2634,6 +2684,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2646,6 +2697,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2658,6 +2710,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2670,6 +2723,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2682,6 +2736,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2705,6 +2760,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2734,6 +2790,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2746,6 +2803,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2758,6 +2816,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2827,6 +2886,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2839,6 +2899,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2851,6 +2912,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2863,6 +2925,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2875,6 +2938,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2887,6 +2951,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2913,6 +2978,7 @@ rocprofiler-sdk:
       - gfx1200
       - gfx1201
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -2929,6 +2995,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 185
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 158
     - architectures:
       - gfx940
       - gfx941
@@ -2949,6 +3019,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 96
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 69
     - architectures:
       - gfx940
       - gfx941
@@ -2972,6 +3046,10 @@ rocprofiler-sdk:
       block: SQ
       event: 101
     - architectures:
+      - gfx908
+      block: SQ
+      event: 74
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -2992,6 +3070,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 103
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 76
     - architectures:
       - gfx940
       - gfx941
@@ -3014,6 +3096,10 @@ rocprofiler-sdk:
       block: SQ
       event: 98
     - architectures:
+      - gfx908
+      block: SQ
+      event: 71
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -3034,6 +3120,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 102
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 75
     - architectures:
       - gfx940
       - gfx941
@@ -3056,6 +3146,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 100
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 73
     - architectures:
       - gfx940
       - gfx941
@@ -3109,6 +3203,10 @@ rocprofiler-sdk:
       block: SQ
       event: 97
     - architectures:
+      - gfx908
+      block: SQ
+      event: 70
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -3125,6 +3223,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -3151,6 +3250,7 @@ rocprofiler-sdk:
       - gfx1200
       - gfx1201
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -3163,6 +3263,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -3177,6 +3278,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 115
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 88
     - architectures:
       - gfx940
       - gfx941
@@ -3197,6 +3302,10 @@ rocprofiler-sdk:
       block: SQ
       event: 116
     - architectures:
+      - gfx908
+      block: SQ
+      event: 89
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -3214,6 +3323,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -3230,6 +3340,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 64
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 39
     - architectures:
       - gfx940
       - gfx941
@@ -3250,6 +3364,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 63
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 38
     - architectures:
       - gfx940
       - gfx941
@@ -3434,6 +3552,10 @@ rocprofiler-sdk:
       block: SQ
       event: 52
     - architectures:
+      - gfx908
+      block: SQ
+      event: 27
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -3499,6 +3621,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 65
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 40
     - architectures:
       - gfx940
       - gfx941
@@ -3567,6 +3693,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 188
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 161
     - architectures:
       - gfx940
       - gfx941
@@ -4094,6 +4224,10 @@ rocprofiler-sdk:
       block: SQ
       event: 55
     - architectures:
+      - gfx908
+      block: SQ
+      event: 30
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4172,6 +4306,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 66
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 41
     - architectures:
       - gfx940
       - gfx941
@@ -4298,6 +4436,10 @@ rocprofiler-sdk:
       block: SQ
       event: 111
     - architectures:
+      - gfx908
+      block: SQ
+      event: 84
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4344,6 +4486,10 @@ rocprofiler-sdk:
       block: SQ
       event: 105
     - architectures:
+      - gfx908
+      block: SQ
+      event: 78
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4362,6 +4508,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 104
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 77
     - architectures:
       - gfx940
       - gfx941
@@ -4413,6 +4563,10 @@ rocprofiler-sdk:
       block: SQ
       event: 69
     - architectures:
+      - gfx908
+      block: SQ
+      event: 44
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4447,6 +4601,10 @@ rocprofiler-sdk:
       block: SQ
       event: 68
     - architectures:
+      - gfx908
+      block: SQ
+      event: 43
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4466,6 +4624,10 @@ rocprofiler-sdk:
       block: SQ
       event: 67
     - architectures:
+      - gfx908
+      block: SQ
+      event: 42
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4482,6 +4644,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4497,6 +4660,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 122
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 95
     - architectures:
       - gfx940
       - gfx941
@@ -4516,6 +4683,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 125
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 98
     - architectures:
       - gfx940
       - gfx941
@@ -4565,6 +4736,10 @@ rocprofiler-sdk:
       block: SQ
       event: 126
     - architectures:
+      - gfx908
+      block: SQ
+      event: 99
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4584,6 +4759,10 @@ rocprofiler-sdk:
       block: SQ
       event: 124
     - architectures:
+      - gfx908
+      block: SQ
+      event: 97
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4602,6 +4781,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 123
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 96
     - architectures:
       - gfx940
       - gfx941
@@ -4627,6 +4810,7 @@ rocprofiler-sdk:
       event: 7
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4698,6 +4882,10 @@ rocprofiler-sdk:
       block: SQ
       event: 85
     - architectures:
+      - gfx908
+      block: SQ
+      event: 58
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -4736,6 +4924,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 88
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 61
     - architectures:
       - gfx940
       - gfx941
@@ -4892,6 +5084,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4909,6 +5102,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4926,6 +5120,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4943,6 +5138,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4960,6 +5156,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -4978,6 +5175,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 186
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 159
     - architectures:
       - gfx940
       - gfx941
@@ -5000,6 +5201,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 187
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 160
     - architectures:
       - gfx940
       - gfx941
@@ -5058,6 +5263,10 @@ rocprofiler-sdk:
       - gfx90a
       block: SQ
       event: 74
+    - architectures:
+      - gfx908
+      block: SQ
+      event: 47
     - architectures:
       - gfx940
       - gfx941
@@ -5310,6 +5519,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 54
     - architectures:
@@ -5325,6 +5535,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5336,6 +5547,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 55
     - architectures:
@@ -5351,6 +5563,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5362,6 +5575,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 47
     - architectures:
@@ -5377,6 +5591,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5388,6 +5603,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 52
     - architectures:
@@ -5403,6 +5619,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5414,6 +5631,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 53
     - architectures:
@@ -5429,6 +5647,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5467,6 +5686,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 45
     - architectures:
@@ -5482,6 +5702,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5520,6 +5741,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 49
     - architectures:
@@ -5535,6 +5757,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5546,6 +5769,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 44
     - architectures:
@@ -5561,6 +5785,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5572,6 +5797,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 46
     - architectures:
@@ -5587,6 +5813,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5679,6 +5906,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 56
     - architectures:
@@ -5694,6 +5922,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5705,6 +5934,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 103
     - architectures:
@@ -5720,6 +5950,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5811,6 +6042,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 100
     - architectures:
@@ -5826,6 +6058,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5902,6 +6135,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -5913,6 +6147,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TA
       event: 32
     - architectures:
@@ -5928,6 +6163,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6010,6 +6246,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6033,6 +6270,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6056,6 +6294,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6071,6 +6310,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6082,6 +6322,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6097,6 +6338,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6108,6 +6350,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6123,6 +6366,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6134,6 +6378,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6146,6 +6391,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6157,6 +6403,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6168,6 +6415,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6183,6 +6431,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6194,6 +6443,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6206,6 +6456,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6216,6 +6467,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6231,6 +6483,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6246,6 +6499,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6257,6 +6511,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6305,6 +6560,10 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
+      block: TCC
+      event: 43
+    - architectures:
       - gfx940
       - gfx941
       - gfx942
@@ -6320,6 +6579,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6335,6 +6595,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6345,6 +6606,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6356,6 +6618,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6371,6 +6634,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6382,6 +6646,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6397,6 +6662,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6408,6 +6674,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6423,6 +6690,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6443,6 +6711,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6458,6 +6727,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6508,6 +6778,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6522,6 +6793,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6537,6 +6809,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6547,6 +6820,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6557,6 +6831,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6572,6 +6847,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6582,6 +6858,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6597,6 +6874,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6608,6 +6886,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6623,6 +6902,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6647,6 +6927,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6661,6 +6942,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6684,6 +6966,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -6700,6 +6983,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7226,6 +7510,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       - gfx940
       - gfx941
@@ -7242,6 +7527,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7253,6 +7539,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7268,6 +7555,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7278,6 +7566,7 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx908
       - gfx90a
       - gfx940
       - gfx941
@@ -7294,6 +7583,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7305,6 +7595,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7320,6 +7611,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7335,6 +7627,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7360,6 +7653,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7371,6 +7665,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7387,6 +7682,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7399,6 +7695,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7416,6 +7713,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7427,6 +7725,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7442,6 +7741,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7453,6 +7753,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7468,6 +7769,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7481,6 +7783,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7496,6 +7799,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7508,6 +7812,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7524,6 +7829,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7535,6 +7841,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7550,6 +7857,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7561,6 +7869,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7577,6 +7886,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7593,6 +7903,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7604,6 +7915,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7837,6 +8149,70 @@ rocprofiler-sdk:
       - gfx950
       block: TCC
       event: 116
+  - name: TCC_CLIENT184_REQ
+    description: 'Number of cycles client184 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 312
+  - name: TCC_CLIENT185_REQ
+    description: 'Number of cycles client185 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 313
+  - name: TCC_CLIENT186_REQ
+    description: 'Number of cycles client186 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 314
+  - name: TCC_CLIENT187_REQ
+    description: 'Number of cycles client187 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 315
+  - name: TCC_CLIENT188_REQ
+    description: 'Number of cycles client188 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 316
+  - name: TCC_CLIENT189_REQ
+    description: 'Number of cycles client189 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 317
+  - name: TCC_CLIENT190_REQ
+    description: 'Number of cycles client190 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 318
+  - name: TCC_CLIENT191_REQ
+    description: 'Number of cycles client191 sent a request to this TCC.'
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      block: TCC
+      event: 319
   - name: TCC_EA0_RDREQ_64B_sum
     description: Number of 64-byte TCC/EA read requests. Sum over TCP instances.
     properties: []
@@ -8008,6 +8384,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 13
     - architectures:
@@ -8023,6 +8400,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8034,6 +8412,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8046,6 +8425,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8057,6 +8437,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8069,6 +8450,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8080,6 +8462,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 22
     - architectures:
@@ -8095,6 +8478,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8106,6 +8490,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 11
     - architectures:
@@ -8121,6 +8506,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8132,6 +8518,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 27
     - architectures:
@@ -8147,6 +8534,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8158,6 +8546,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 72
     - architectures:
@@ -8176,6 +8565,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8187,6 +8577,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 71
     - architectures:
@@ -8205,6 +8596,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8216,6 +8608,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 83
     - architectures:
@@ -8234,6 +8627,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8245,6 +8639,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 81
     - architectures:
@@ -8263,6 +8658,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8274,6 +8670,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 82
     - architectures:
@@ -8292,6 +8689,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8303,6 +8701,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 77
     - architectures:
@@ -8321,6 +8720,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8332,6 +8732,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 75
     - architectures:
@@ -8350,6 +8751,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8361,6 +8763,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 76
     - architectures:
@@ -8379,6 +8782,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8390,6 +8794,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 69
     - architectures:
@@ -8408,6 +8813,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 66
     - architectures:
@@ -8420,6 +8826,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx950
       expression: reduce(TCP_TCC_READ_REQ_LATENCY,sum)
   - name: TCP_TCC_READ_REQ_sum
@@ -8428,6 +8835,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8439,6 +8847,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 87
     - architectures:
@@ -8457,6 +8866,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8468,6 +8878,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 85
     - architectures:
@@ -8486,6 +8897,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8497,6 +8909,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 86
     - architectures:
@@ -8515,6 +8928,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8526,6 +8940,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 80
     - architectures:
@@ -8544,6 +8959,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8555,6 +8971,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 78
     - architectures:
@@ -8573,6 +8990,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8584,6 +9002,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 79
     - architectures:
@@ -8602,6 +9021,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8613,6 +9033,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 70
     - architectures:
@@ -8631,6 +9052,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 67
     - architectures:
@@ -8643,6 +9065,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx950
       expression: reduce(TCP_TCC_WRITE_REQ_LATENCY,sum)
   - name: TCP_TCC_WRITE_REQ_sum
@@ -8651,6 +9074,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8663,6 +9087,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 65
     - architectures:
@@ -8676,6 +9101,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx950
       expression: reduce(TCP_TCP_LATENCY,sum)
   - name: TCP_TCP_TA_DATA_STALL_CYCLES
@@ -8730,6 +9156,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8742,6 +9169,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8753,6 +9181,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8765,6 +9194,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8776,6 +9206,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 29
     - architectures:
@@ -8792,6 +9223,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8803,6 +9235,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 39
     - architectures:
@@ -8818,6 +9251,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8829,6 +9263,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 38
     - architectures:
@@ -8844,6 +9279,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8855,6 +9291,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8870,6 +9307,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8882,6 +9320,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 30
     - architectures:
@@ -8898,6 +9337,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8909,6 +9349,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 32
     - architectures:
@@ -8925,6 +9366,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 45
     - architectures:
@@ -8944,6 +9386,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8956,6 +9399,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8967,6 +9411,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 50
     - architectures:
@@ -8985,6 +9430,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -8996,6 +9442,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 47
     - architectures:
@@ -9014,6 +9461,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9025,6 +9473,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 49
     - architectures:
@@ -9043,6 +9492,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9054,6 +9504,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 48
     - architectures:
@@ -9072,6 +9523,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9083,6 +9535,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 28
     - architectures:
@@ -9098,6 +9551,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9109,6 +9563,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TCP
       event: 12
     - architectures:
@@ -9124,6 +9579,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9450,6 +9906,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TD
       event: 26
     - architectures:
@@ -9465,6 +9922,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9476,6 +9934,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TD
       event: 32
     - architectures:
@@ -9491,6 +9950,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9502,6 +9962,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TD
       event: 25
     - architectures:
@@ -9517,6 +9978,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9554,6 +10016,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TD
       event: 27
     - architectures:
@@ -9569,6 +10032,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9580,6 +10044,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       block: TD
       event: 15
     - architectures:
@@ -9595,6 +10060,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9606,6 +10072,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -9618,6 +10085,7 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942

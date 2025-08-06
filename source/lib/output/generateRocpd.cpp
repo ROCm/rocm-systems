@@ -1021,8 +1021,7 @@ write_rocpd(
             dispatch_evt_ids.at(dispatch_id) = evt_id;
 
             auto region_name =
-                (corr_id.external.value > 0 &&
-                 (enable_duplicate_check || kernel_id > 0))
+                (corr_id.external.value > 0 && (enable_duplicate_check || kernel_id > 0))
                     ? tool_metadata.get_kernel_name(kernel_id, corr_id.external.value)
                     : std::string_view{};
 
@@ -1088,7 +1087,7 @@ write_rocpd(
                                      dispatch_data.end_timestamp,      // end_timestamp
                                      info.grid_size,                   // grid
                                      info.workgroup_size,              // workgroup
-                                     false  // enable_duplicate_check
+                                     false                             // enable_duplicate_check
                     );
                 }
             }
