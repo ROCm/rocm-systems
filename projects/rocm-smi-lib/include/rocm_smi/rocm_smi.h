@@ -2976,7 +2976,9 @@ rsmi_status_t rsmi_dev_gpu_reset(uint32_t dv_ind);
  *  If this parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
- *  provided arguments.
+ *  provided arguments. In the event where there are some values are missing from
+ *  or not available on the device, the respective values will be set to
+ *  UINT64_MAX.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not

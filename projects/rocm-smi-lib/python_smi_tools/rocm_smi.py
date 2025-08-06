@@ -2827,13 +2827,20 @@ def showRange(deviceList, rangeType):
         return
     printLogSpacer(' Show Valid %s Range ' % (rangeType))
     odvf = rsmi_od_volt_freq_data_t()
+    uint64_max = 2**64 - 1
     for device in deviceList:
         ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
         if rsmi_ret_ok(ret, device, 'get_od_volt', silent=False):
             if rangeType == 'sclk':
+                if odvf.curr_sclk_range.lower_bound == uint64_max or odvf.curr_sclk_range.upper_bound == uint64_max:
+                    printLog(device, 'Unable to display %s range' % (rangeType), None)
+                    continue
                 printLog(device, 'Valid sclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_sclk_range.lower_bound / 1000000), int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
             if rangeType == 'mclk':
+                if odvf.curr_mclk_range.lower_bound == uint64_max or odvf.curr_mclk_range.upper_bound == uint64_max:
+                    printLog(device, 'Unable to display %s range' % (rangeType), None)
+                    continue
                 printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
