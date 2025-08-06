@@ -217,6 +217,22 @@ The following example:
 
    ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
+ROCPROFSYS_USE_RCCLP
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Use the setting ``ROCPROFSYS_USE_RCCLP = ON`` to enable profiling and tracing of
+ROCm Communication Collectives Library (RCCL, also pronounced as 'Rickle'). When this setting is enabled,
+ROCm Systems Profiler will trace the RCCL API calls and collect performance metrics related to collective operations.
+
+The image below shows an example of a Perfetto trace with RCCL communication data and API tracing enabled:
+
+.. image:: ../data/rccl-comm-recv.png
+   :alt: Perfetto tracks with RCCL Communication Data and API tracing
+
+.. note::
+   There is a known issue which causes the application to exit with an error. However, the trace data can still be found in the output directory.
+   This issue is being tracked internally.
+
 Exploring GPU Metrics
 ---------------------
 
