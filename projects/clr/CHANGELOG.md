@@ -25,6 +25,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       asynchronously
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
     - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipSetValidDevices`  sets a default list of devices that can be used by HIP
+    - `hipStreamGetId`  queries the id of a stream
 * Changed HIP APIs
     - `hipMemCreate`  now can take hipDeviceMallocUncached as a flag to allocate uncached memory
 
