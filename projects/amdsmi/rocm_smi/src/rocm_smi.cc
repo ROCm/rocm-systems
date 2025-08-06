@@ -1635,6 +1635,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   };
 
     // track the number of keys found, if this goes down to 0 then that means that there is no valid data
+    const uint8_t kNumStructuredKeysToCheck = 6;
     uint8_t structured_key_counter = kNumStructuredKeysToCheck;
     // Validates 'OD_SCLK' is in the structure
     if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
