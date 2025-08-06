@@ -812,8 +812,6 @@ rocprofsys_finalize_hidden(void)
         }
     }
 
-    set_state(State::Finalized);
-
     push_enable_sampling_on_child_threads(false);
     set_sampling_on_all_future_threads(false);
 
@@ -974,6 +972,8 @@ rocprofsys_finalize_hidden(void)
             }
         }
     }
+
+    set_state(State::Finalized);
 
     ROCPROFSYS_VERBOSE_F(0, "\n");
 

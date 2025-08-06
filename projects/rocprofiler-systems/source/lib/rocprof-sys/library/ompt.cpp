@@ -81,7 +81,6 @@ struct ompt : comp::base<ompt, void>
     void start(const context_info_t& _ctx_info, Args&&...) const
     {
         category_region<category::ompt>::start<tim::quirk::timemory>(m_prefix);
-
         auto     _ts = tracing::now();
         uint64_t _cid =
             (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
@@ -97,14 +96,13 @@ struct ompt : comp::base<ompt, void>
         if(_cid > 0)
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                ::perfetto::Flow::ProcessScoped(_cid), std::move(_annotate));
+                _ctx_info.label, _ts, ::perfetto::Flow::ProcessScoped(_cid),
+                std::move(_annotate));
         }
         else
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
+                _ctx_info.label, _ts, std::move(_annotate));
         }
     }
 
@@ -112,7 +110,6 @@ struct ompt : comp::base<ompt, void>
     void stop(const context_info_t& _ctx_info, Args&&...) const
     {
         category_region<category::ompt>::stop<tim::quirk::timemory>(m_prefix);
-
         auto     _ts = tracing::now();
         uint64_t _cid =
             (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
@@ -128,14 +125,13 @@ struct ompt : comp::base<ompt, void>
         if(_cid > 0)
         {
             category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
+                _ctx_info.label, _ts, ::perfetto::Flow::ProcessScoped(_cid),
                 std::move(_annotate));
         }
         else
         {
             category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
+                _ctx_info.label, _ts, std::move(_annotate));
         }
     }
 
@@ -227,6 +223,16 @@ shutdown()
     static bool _protect = false;
     if(_protect) return;
     _protect = true;
+    pthread_gotcha::shutdown();
+    // call the OMPT finalize callback
+    if(f_finalize)
+    {
+        (*f_finalize)();
+        for(const auto& itr : tim::openmp::get_ompt_device_functions<api_t>())
+            if(itr.second.stop_trace) itr.second.stop_trace(itr.second.device);
+        f_finalize = nullptr;
+    }
+
     if(f_bundle)
     {
         if(tim::manager::instance()) tim::manager::instance()->cleanup("rocprofsys-ompt");
@@ -234,15 +240,6 @@ shutdown()
         ompt_context_t::cleanup();
         trait::runtime_enabled<ompt_toolset_t>::set(false);
         trait::runtime_enabled<ompt_context_t>::set(false);
-        pthread_gotcha::shutdown();
-        // call the OMPT finalize callback
-        if(f_finalize)
-        {
-            for(const auto& itr : tim::openmp::get_ompt_device_functions<api_t>())
-                if(itr.second.stop_trace) itr.second.stop_trace(itr.second.device);
-            (*f_finalize)();
-            f_finalize = nullptr;
-        }
     }
     f_bundle.reset();
     _protect = false;
