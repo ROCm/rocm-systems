@@ -26,13 +26,12 @@
 
 import csv
 import glob
-import logging
 import os
 import re
 import shlex
 import shutil
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from pathlib import Path
 
 import pandas as pd
@@ -351,6 +350,10 @@ class RocProfCompute_Base:
         console_log("Command: " + str(self.__args.remaining))
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
+
+        if self.get_args().set_selected:
+            console_log("Set Selection: " + str(self.__args.set_selected))
+
         if self.get_args().filter_blocks is None:
             console_log("Report Sections: All")
         else:

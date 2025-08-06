@@ -35,12 +35,9 @@ import re
 import selectors
 import shutil
 import subprocess
-import sys
 import tempfile
 import threading
 import time
-from collections import OrderedDict
-from itertools import product
 from pathlib import Path as path
 from typing import Optional
 
@@ -1639,3 +1636,25 @@ def format_time(seconds):
     if secs > 0 or not parts:
         parts.append(f"{secs} second{'s' if secs != 1 else ''}")
     return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
+
+
+def parse_sets_yaml(arch):
+    filename = (
+        config.rocprof_compute_home
+        / "rocprof_compute_soc"
+        / "profile_configs"
+        / "sets"
+        / f"{arch}_sets.yaml"
+    )
+    with open(filename, "r") as file:
+        content = file.read()
+    data = yaml.safe_load(content)
+
+    sets_data = data.get("sets", [])
+
+    sets_info = {}
+    for set_item in sets_data:
+        set_option = set_item.get("set_option", "")
+        if set_option:
+            sets_info[set_option] = set_item
+    return sets_info
