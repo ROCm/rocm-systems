@@ -81,6 +81,8 @@ This generates two files, ``agent_info.csv`` and ``pc_sampling_host_trap.csv``. 
 
 Here are the contents of ``pc_sampling_host_trap.csv`` file generated for MatrixTranspose sample application:
 
+.. _pc_sampling_host_trap:
+
 .. csv-table:: PC sampling host trap
    :file: /data/pc_sampling_host_trap.csv
    :widths: 20,10,10,10,10,20
@@ -201,8 +203,8 @@ The preceding command generates a JSON file with the comprehensive output. Here 
 
 For description of the fields in the JSON output, see :ref:`output-file-fields`.
 
-Host-trap PC sampling
-======================
+Host-trap PC sampling and arbitrary sampling skid
+==================================================
 
 Host-trap PC sampling is a software-based technique that utilizes a background kernel thread
 to periodically interrupt running waves to capture the program counter (PC).
@@ -231,7 +233,7 @@ Hardware-based (stochastic) PC sampling method
 
 The ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method has been introduced for gfx942 architecture.
 It employs a specific hardware for probing waves actively running on the GPU.
-Beside the information already provided with ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` useful for determining hotspots within the kernel, this method delivers additional information, which helps to determine whether a sampled wave issued an instruction representing the specified PC.
+Beside the information already provided with ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` useful for determining hotspots within the kernel, this method delivers additional information, which helps to determine whether a sampled wave issued an instruction represented with the specified PC.
 If not, this method provides the reason for not issuing the instruction (stall reason).
 Such information is particularly useful for understanding stalls during kernel execution.
 
@@ -266,13 +268,18 @@ To profile an application with ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` PC 
 
 The preceding command serializes samples in both CSV and JSON output formats in the ``pc_sampling_stochastic.csv`` and ``out_results.json`` files, respectively.
 
-On comparing the ``pc_sampling_stochastic.csv`` to ``pc_sampling_host_trap`` from the previous section, you can notice that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method
+On comparing the :ref:`pc_sampling_stochastic.csv <pc_sampling_stochastic>` to :ref:`pc_sampling_host_trap.csv <pc_sampling_host_trap>`, you can notice that the ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method
 generates the following additional fields:
 
-- ``Wave_Issued_Instruction``: Indicates whether the wave issued an instruction representing the specified PC. Value = 1 for yes and 0 for no.
+- ``Wave_Issued_Instruction``: Indicates whether the wave issued an instruction represented with the specified PC. Value = 1 for yes and 0 for no.
+
 - ``Instruction_Type``: If the value of ``Wave_Issued_Instruction`` is 1, this field indicates the type of the issued instruction. Otherwise, this field remains irrelevant.
+
 - ``Stall_Reason``: If the value of ``Wave_Issued_Instruction`` is 0, this field indicates the reason for not issuing the instruction (stall reason). Otherwise, this field remains irrelevant.
+
 - ``Wave_Count``: Total number of waves actively running on a compute unit when the sample is generated.
+
+.. _pc_sampling_stochastic:
 
 .. csv-table:: PC sampling stochastic with debug symbols
    :file: /data/pc_sampling_stochastic_debug.csv
