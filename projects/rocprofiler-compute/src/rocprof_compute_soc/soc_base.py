@@ -24,6 +24,7 @@
 
 import ctypes
 import glob
+import json
 import math
 import os
 import re
@@ -166,13 +167,21 @@ class OmniSoC_Base:
             )
         )
 
-        # we get the max mclk from rocm-smi --showmclkrange
-        # Regular expression to extract the max memory clock (third frequency level in MEM)
-        memory_clock_pattern = (
-            r"MEM:\s*[^:]*FREQUENCY_LEVELS:\s*(?:\d+: \d+ MHz\s*){2}(\d+)\s*MHz"
-        )
-        amd_smi_mclk = run(["amd-smi", "static"], exit_on_error=True)
-        self._mspec.max_mclk = search(memory_clock_pattern, amd_smi_mclk)
+        # Parse json from amd-smi static --clock
+        amd_smi_mclk = run(["amd-smi", "static", "--clock", "--json"], exit_on_error=True)
+        amd_smi_mclk = json.loads(amd_smi_mclk)
+
+        if isinstance(amd_smi_mclk, dict):
+            # The output of `amd-smi static --clock --json` is a dict with amd-smi>=26.0.0.
+            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"]["frequency_levels"]
+        else:
+            # For backward compatibility: the output of `amd-smi static --clock --json` used to be a list for amd-smi<26.0.0.
+            amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
+
+        # Choose the highest level of memory clock frequency
+        amd_smi_mclk = amd_smi_mclk[sorted(amd_smi_mclk.keys())[-1]]
+        # 100 Mhz -> 100
+        self._mspec.max_mclk = amd_smi_mclk.split(" ")[0]
 
         console_debug("max mem clock is {}".format(self._mspec.max_mclk))
 
@@ -440,6 +449,16 @@ class OmniSoC_Base:
 
     def get_rocprof_supported_counters(self):
         rocprof_cmd = detect_rocprof(self.get_args())
+
+        if rocprof_cmd != "rocprofiler-sdk":
+            console_warning(
+                "rocprof v1 / v2 / v3 interfaces will be removed in favor of "
+                "rocprofiler-sdk interface in a future release. To use rocprofiler-sdk "
+                "interface, please set the environment variable ROCPROF to 'rocprofiler-sdk' "
+                "and optionally provide the path to librocprofiler-sdk.so library via the "
+                "--rocprofiler-sdk-library-path option."
+            )
+
         rocprof_counters = set()
 
         if str(rocprof_cmd).endswith("rocprof"):
@@ -489,7 +508,7 @@ class OmniSoC_Base:
                     f"Failed to list rocprof supported counters using command: {command}"
                 )
             for line in output.splitlines():
-                if "Name:" in line:
+                if "counter_name" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
                     rocprof_counters.update(counters)
             # Custom counter support for mi100 for rocprofv3

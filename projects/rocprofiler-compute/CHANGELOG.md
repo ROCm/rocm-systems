@@ -2,7 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
+## ROCm Compute Profiler 3.2.2 for ROCm 7.0.0
 
 ### Added
 
@@ -102,6 +102,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed kernel name and kernel dispatch filtering when using ``rocprofv3``.
 * Fixed an issue of TCC channel counters collection in ``rocprofv3``.
 * Fixed peak FLOPS of F8, I8, F16, and BF16 on AMD Instinct MI 300.
+* Fixed not detecting memory clock issue when using amd-smi
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on MI350
 
 ### Known issues
 
