@@ -43,15 +43,19 @@ endif()
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 
-if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
-                                   "Install rocprofiler-systems examples" OFF
-    )
+if(NOT ROCPROFSYS_CTEST_ONLY)
+    if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
+        set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+        set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+        set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
+        rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
+                                    "Install rocprofiler-systems examples" OFF
+        )
+    else()
+        option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
+    endif()
 else()
-    option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
+    option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" OFF)
 endif()
 
 if(ROCPROFSYS_INSTALL_EXAMPLES)

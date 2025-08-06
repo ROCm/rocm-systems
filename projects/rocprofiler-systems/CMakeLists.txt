@@ -44,6 +44,8 @@ set(PROJECT_NAME_UNDERSCORED "rocprofiler_systems")
 
 set(BINARY_NAME_PREFIX "rocprof-sys")
 
+set(ROCPROFSYS_CTEST_ONLY FALSE CACHE BOOL "CTest only build")
+
 find_package(Git)
 
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
