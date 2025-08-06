@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import os
 from dataclasses import dataclass
 from typing import Any, Dict
@@ -48,7 +47,6 @@ MI_CONSTANS = {
     MI350: "mi350",
 }
 
-
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
 # ----------------------------
@@ -64,9 +62,9 @@ class MIGPUSpecs:
     _chip_id_dict = {}  # key: chip_id (int)
     _perfmon_config = {}  # key: gpu_arch
 
-    _gpu_arch_to_compute_partition_dict = (
-        {}
-    )  # key: gpu_arch, used for gpu archs containing only one gpu model and thus one compute partition
+    _gpu_arch_to_compute_partition_dict = {}  # key: gpu_arch, used for gpu archs
+    # containing only one gpu model and
+    # thus one compute partition
 
     _initialized = False
 
@@ -109,7 +107,8 @@ class MIGPUSpecs:
             console_error(f"Error parsing YAML file '{file_path}': {exc}")
         except Exception as e:
             console_error(
-                f"An unexpected error occurred while loading YAML file '{file_path}': {e}"
+                f"An unexpected error occurred while loading YAML "
+                f"file '{file_path}': {e}"
             )
 
     @classmethod
@@ -152,9 +151,13 @@ class MIGPUSpecs:
                         .get("num_xcds", {})
                     )
                     if "chip_ids" in models and "physical" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["physical"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["physical"]] = (
+                            curr_gpu_model
+                        )
                     if "chip_ids" in models and "virtual" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = curr_gpu_model
+                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                            curr_gpu_model
+                        )
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -171,10 +174,12 @@ class MIGPUSpecs:
                 compute_partition = cls._num_xcds_dict.get(single_model)
 
                 if compute_partition is not None:
-                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = compute_partition
+                    cls._gpu_arch_to_compute_partition_dict[gpu_arch] = (
+                        compute_partition
+                    )
                     console_debug(
-                        "[populate_single_arch_partition_dict] Single model arch found: "
-                        "%s -> %s (partition: %s)"
+                        "[populate_single_arch_partition_dict] Single model "
+                        "arch found: %s -> %s (partition: %s)"
                         % (gpu_arch, single_model, compute_partition)
                     )
 
@@ -254,14 +259,16 @@ class MIGPUSpecs:
     @classmethod
     def set_default_gpu_settings(self, gpu_arch, gpu_model, compute_partition):
         """
-        Set default GPU settings when model is unknown or cannot be determined.
-        NOTE: This is a fallback to gfx942 settings - consider making this architecture-specific.
+        Set default GPU settings when model is unknown or cannot be
+        determined. NOTE: This is a fallback to gfx942 settings -
+        consider making this architecture-specific.
         """
         DEFAULT_COMPUTE_PARTITION = "SPX"
         DEFAULT_NUM_XCD = 8
         console_warning(
-            f"Unable to determine xcd count from:\n\t"
-            f"GPU arch: '{gpu_arch}', model: '{gpu_model}', partition: '{compute_partition}'"
+            "Unable to determine xcd count from:\n\t"
+            f"GPU arch: '{gpu_arch}', model: '{gpu_model}',\n\t"
+            f"partition: '{compute_partition}'"
         )
         console_warning(
             f"Applying default gfx942 settings:\n"
@@ -276,7 +283,8 @@ class MIGPUSpecs:
         cls, gpu_arch: str = None, gpu_model: str = None, compute_partition: str = None
     ):
         """
-        Retrieve the number of XCDs based on GPU architecture, model, and compute partition.
+        Retrieve the number of XCDs based on GPU architecture, model,
+        and compute partition.
 
         Priority order:
         1. Legacy GPU check (returns 1 XCD for older architectures/models)
@@ -307,7 +315,8 @@ class MIGPUSpecs:
                     return num_xcds
                 else:
                     console_warning(
-                        f"No compute partition data found for architecture '{gpu_arch.upper()}'"
+                        f"No compute partition data found for "
+                        f"architecture '{gpu_arch.upper()}'"
                     )
 
         # 3. Fall back to model + partition-based lookup
@@ -315,7 +324,8 @@ class MIGPUSpecs:
             # Validate XCD dictionary is populated
             if not hasattr(cls, "_num_xcds_dict") or not cls._num_xcds_dict:
                 console_error(
-                    "mi300_num_xcds_dict not populated. Did you run parse_mi_gpu_spec()?"
+                    "mi300_num_xcds_dict not populated. "
+                    "Did you run parse_mi_gpu_spec()?"
                 )
             elif gpu_model_norm not in cls._num_xcds_dict:
                 console_warning(
@@ -330,7 +340,9 @@ class MIGPUSpecs:
                     )
                 elif partition_norm not in model_dict:
                     console_warning(
-                        f"Unknown compute partition '{compute_partition}' for model '{gpu_model}'"
+                        f"Unknown compute partition "
+                        f"'{compute_partition}' for model "
+                        f"'{gpu_model}'"
                     )
                 else:
                     num_xcds = model_dict[partition_norm]
@@ -338,8 +350,10 @@ class MIGPUSpecs:
                         return num_xcds
                     else:
                         console_warning(
-                            f"Unknown compute partition found for {compute_partition} / {gpu_model}"
+                            "Unknown compute partition found "
+                            f"for {compute_partition} / {gpu_model}"
                         )
+
         else:
             console_warning("No gpu model provided for num xcds lookup.")
 

@@ -23,12 +23,12 @@
 
 ##############################################################################
 
-
 import logging
 from unittest.mock import MagicMock, Mock, patch
 
 import pandas as pd
 import pytest
+from db_connector import DatabaseConnector
 
 logging.TRACE = logging.DEBUG - 5
 logging.addLevelName(logging.TRACE, "TRACE")
@@ -39,8 +39,6 @@ def trace_logger(message, *args, **kwargs):
 
 
 setattr(logging, "trace", trace_logger)
-
-from db_connector import DatabaseConnector
 
 """
 Tests for the DatabaseConnector class that tests almost methods with initialization,
@@ -109,9 +107,10 @@ class TestDatabaseConnector:
         mock_path.return_value.joinpath.return_value = "/fake/path/sysinfo.csv"
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100 "], "workload_name": [" test_workload"]}
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100 "],
+            "workload_name": [" test_workload"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(mock_args_import)
@@ -236,9 +235,9 @@ class TestDatabaseConnector:
         connector.db_remove()
 
         mock_client.drop_database.assert_called_once_with(mock_db_to_remove)
-        mock_names_col.delete_many.assert_called_once_with(
-            {"name": "rocprofiler-compute_test_team_workload_mi100"}
-        )
+        mock_names_col.delete_many.assert_called_once_with({
+            "name": "rocprofiler-compute_test_team_workload_mi100"
+        })
 
     def test_pre_processing_no_action_specified(self, mock_args_import):
         """Test pre_processing when neither upload nor remove is specified"""
@@ -398,9 +397,10 @@ class TestDatabaseConnectorIntegration:
         )
         mock_path.return_value.is_file.return_value = True
 
-        mock_sysinfo = pd.DataFrame(
-            {"gpu_model": ["MI100"], "workload_name": ["device_filter"]}
-        )
+        mock_sysinfo = pd.DataFrame({
+            "gpu_model": ["MI100"],
+            "workload_name": ["device_filter"],
+        })
         mock_read_csv.return_value = mock_sysinfo
 
         connector = DatabaseConnector(args)
