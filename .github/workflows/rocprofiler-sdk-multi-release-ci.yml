@@ -94,6 +94,7 @@ jobs:
           -DCPACK_GENERATOR='TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DPython3_EXECUTABLE=$(which python3)
+          -DOPENMP_GPU_TARGETS="gfx942"
 
     - name: Build Packaging
       timeout-minutes: 10
