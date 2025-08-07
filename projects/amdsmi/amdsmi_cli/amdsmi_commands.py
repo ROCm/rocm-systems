@@ -5001,6 +5001,9 @@ class AMDSMICommands():
 
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
+            is_gpu_set = False
+            is_cpu_set = False
+            is_core_set = False
             try:
                 is_gpu_set = any([
                             args.gpu is not None,
@@ -5019,7 +5022,7 @@ class AMDSMICommands():
                             ])
             except AttributeError:
                 # If attribute error for gpu, then we could be another subcommand
-                is_gpu_set = False
+                pass
 
             try:
                 is_cpu_set = any([
@@ -5037,12 +5040,13 @@ class AMDSMICommands():
                             ])
             except AttributeError:
                 # If attribute error for cpu, then we could be another subcommand
-                is_cpu_set = False
-            
-            if args.core_boost_limit:
-                is_core_set = True
-            else:
-                is_core_set = False
+                pass
+            try:
+                if args.core_boost_limit:
+                    is_core_set = True
+            except AttributeError:
+                # If attribute error for core, then we could be another subcommand
+                pass
 
             if not (is_gpu_set or is_cpu_set or is_core_set):
                 # if neither GPU / CPU / or Core args are provided, then raise error message

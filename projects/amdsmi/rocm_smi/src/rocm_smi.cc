@@ -6661,7 +6661,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
   if (status != RSMI_STATUS_SUCCESS) {
-    if (status == EACCES) {
+    if (status == RSMI_STATUS_PERMISSION) {
       status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
     }
     ss << __PRETTY_FUNCTION__
