@@ -1,0 +1,37 @@
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+
+  - entries:
+    - file: what-is-aqlprofile.rst
+
+  - caption: Install
+    entries:
+    - file: install/aqlprofile-install.rst
+      title: Install AQLprofile 
+
+  - caption: Examples
+    entries:
+    - file: examples/pmc-workflow.rst
+      title: Performance Monitor Control workflow
+    - file: examples/sqtt-workflow.rst
+      title: SQ Thread Trace workflow
+
+  - caption: Reference
+    entries:
+    - file: reference/glossary.rst
+      title: Glossary  
+    - file: reference/supported-architectures.rst
+      title: Supported architectures and counter blocks  
+    - file: reference/api-list.rst
+      title: APIs
+  
+  - caption: About
+    entries:
+    - file: license.rst
+      title: License
+
+
+

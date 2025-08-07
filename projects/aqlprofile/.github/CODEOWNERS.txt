@@ -1,0 +1,6 @@
+* @gbaraldi_amdeng @bingma12_amdeng @chunyang_amdeng @sauverma_amdeng @bewelton_amdeng
+# Documentation files
+docs/ @ROCm/rocm-documentation
+*.md @ROCm/rocm-documentation
+*.rst @ROCm/rocm-documentation
+.readthedocs.yaml @ROCm/rocm-documentation

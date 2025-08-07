@@ -55,7 +55,7 @@ if ( "${CMAKE_BUILD_TYPE}" STREQUAL release )
 endif ()
 
 # Enable/disable test
-option(AQLPROFILE_BUILD_TESTS "Build tests for AQLProfile" OFF)
+option(AQLPROFILE_BUILD_TESTS "Build tests for AQLprofile" OFF)
 
 ## Build tests
 if(AQLPROFILE_BUILD_TESTS)
@@ -197,18 +197,18 @@ include ( CPack )
 cpack_add_component(
     runtime
     DISPLAY_NAME "Runtime"
-    DESCRIPTION "Dynamic libraries for the AQLProfile")
+    DESCRIPTION "Dynamic libraries for the AQLprofile")
 
 cpack_add_component(
     asan
     DISPLAY_NAME "ASAN"
-    DESCRIPTION "ASAN libraries for the AQLProfile"
+    DESCRIPTION "ASAN libraries for the AQLprofile"
     DEPENDS asan)
 
 if(AQLPROFILE_BUILD_TESTS)
 cpack_add_component(
     tests
     DISPLAY_NAME "Tests"
-    DESCRIPTION "Tests for the AQLProfile"
+    DESCRIPTION "Tests for the AQLprofile"
     DEPENDS runtime)
 endif()

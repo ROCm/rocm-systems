@@ -8,7 +8,7 @@ ROCM_PATH="${ROCM_PATH:=/opt/rocm}"
 LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,$ROCM_PATH/lib:$ROCM_PATH/lib64"
 
 usage() {
-  echo -e "AQLProfile Build Script Usage:"
+  echo -e "AQLprofile Build Script Usage:"
   echo -e "\nTo run ./build.sh PARAMs, PARAMs can be the following:"
   echo -e "-h   | --help               For showing this message"
   echo -e "-b   | --build              For compiling"
