@@ -24,6 +24,7 @@
 #include "lib/common/filesystem.hpp"
 
 #include <dlfcn.h>
+#include <link.h>
 #include <cassert>
 #include <cstdlib>
 
@@ -33,10 +34,22 @@ namespace thread_trace
 {
 DL::DL(const char* libpath)
 {
-    if(libpath == nullptr) return;
+    auto path = common::filesystem::path();
 
-    auto path = common::filesystem::path(libpath) / "librocprof-trace-decoder.so";
+    if(libpath != nullptr)
+    {
+        path = common::filesystem::path(libpath);
+    }
+    else if(auto* aqlprofile_handle = dlopen("libhsa-amd-aqlprofile64.so", RTLD_NOLOAD | RTLD_LAZY))
+    {
+        link_map* linkmap{nullptr};
+        if(dlinfo(aqlprofile_handle, RTLD_DI_LINKMAP, &linkmap) == 0 && linkmap != nullptr)
+            path = common::filesystem::path(linkmap->l_name).parent_path();
 
+        dlclose(aqlprofile_handle);
+    }
+
+    path   = path / "librocprof-trace-decoder.so";
     handle = dlopen(path.c_str(), RTLD_LAZY | RTLD_LOCAL);
     if(!handle) return;
 
