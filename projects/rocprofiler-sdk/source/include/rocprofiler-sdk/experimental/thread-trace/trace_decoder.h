@@ -44,7 +44,8 @@ typedef struct rocprofiler_thread_trace_decoder_id_t
 /**
  * @brief Initializes Trace Decoder library with a library search path
  * @param[out] handle Handle to created decoder instance.
- * @param[in] path Path to trace decoder library location (e.g. /opt/rocm/lib).
+ * @param[in] path Path to trace decoder library location (e.g. /opt/rocm/lib). Empty string "",
+ * searches LD_LIBRARY_PATH. If null, searches the aqlprofile install location.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE Library not found
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Library found but version not supported
@@ -52,7 +53,7 @@ typedef struct rocprofiler_thread_trace_decoder_id_t
  */
 rocprofiler_status_t
 rocprofiler_thread_trace_decoder_create(rocprofiler_thread_trace_decoder_id_t* handle,
-                                        const char* path) ROCPROFILER_API ROCPROFILER_NONNULL(1, 2);
+                                        const char* path) ROCPROFILER_API ROCPROFILER_NONNULL(1);
 
 /**
  * @brief Deletes handle created by ::rocprofiler_thread_trace_decoder_create

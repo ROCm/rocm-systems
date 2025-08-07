@@ -95,8 +95,8 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
 void
 init()
 {
-    // const char* decoder_lib = std::getenv("ROCPROF_TRACE_DECODER_PATH");
-    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, "/opt/rocm/lib"));
+    const char* decoder_lib = std::getenv("ROCPROFILER_TRACE_DECODER_LIB_PATH");
+    DECODER_CALL(rocprofiler_thread_trace_decoder_create(&decoder, decoder_lib));
 }
 
 void
