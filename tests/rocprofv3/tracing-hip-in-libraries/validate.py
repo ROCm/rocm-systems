@@ -102,15 +102,15 @@ def test_api_trace(
         hip_correlation_ids.append(cid)
 
     for row in marker_input_data:
-        assert row["Domain"] in [
-            "MARKER_CORE_API",
-        ]
+        assert row["Domain"] in ["MARKER_CORE_API", "MARKER_CORE_RANGE_API"]
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
             row["Process_Id"]
         )
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+        functions.append(row["Function"])
         cid = int(row["Correlation_Id"])
+        # Correlation ID will be identical for MARKER_CORE_API and MARKER_CORE_RANGE_API
         marker_correlation_ids.append(cid)
 
     def get_sorted_unique(inp):
@@ -218,6 +218,7 @@ def test_api_trace_json(json_data):
 
     valid_marker_domain = [
         "MARKER_CORE_API",
+        "MARKER_CORE_RANGE_API",
     ]
 
     def get_operation_name(kind_id, op_id):
@@ -253,6 +254,7 @@ def test_api_trace_json(json_data):
         assert metadata["pid"] > 0
         assert api["thread_id"] == 0 or api["thread_id"] >= metadata["pid"]
         assert api["end_timestamp"] >= api["start_timestamp"]
+        functions.append(get_operation_name(api["kind"], api["operation"]))
         correlation_ids.append(api["correlation_id"]["internal"])
 
     correlation_ids = sorted(list(set(correlation_ids)))

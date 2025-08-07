@@ -17,7 +17,9 @@ concurrency:
 
 jobs:
   cmake:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -50,7 +52,10 @@ jobs:
         fi
 
   source:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
+    container: rocm/dev-ubuntu-22.04:latest
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -84,7 +89,9 @@ jobs:
         fi
 
   python:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
     strategy:
       matrix:
         python-version: ['3.10']
@@ -123,7 +130,9 @@ jobs:
         fi
 
   missing-new-line:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
 
     steps:
     - uses: actions/checkout@v4

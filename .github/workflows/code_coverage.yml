@@ -52,7 +52,8 @@ env:
 
 jobs:
   code-coverage:
-    if: ${{ contains(github.event_name, 'pull_request') }}
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(github.event_name, 'pull_request') && (contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref)) }}
     strategy:
       # fail-fast: false
       matrix:
