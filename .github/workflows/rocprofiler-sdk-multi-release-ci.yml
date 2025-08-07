@@ -106,7 +106,7 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: rocprofiler-sdk-packages
-        path: ${{github.workspace}}/build/*.tar.gz
+        path: ${{github.workspace}}/projects/rocprofiler-sdk/build/*.tar.gz
 
   test:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
