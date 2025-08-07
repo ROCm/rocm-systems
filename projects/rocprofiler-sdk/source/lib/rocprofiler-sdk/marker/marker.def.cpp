@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/marker/defines.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 

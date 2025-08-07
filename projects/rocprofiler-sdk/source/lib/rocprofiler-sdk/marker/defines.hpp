@@ -32,6 +32,7 @@
     template <>                                                                                    \
     struct roctx_api_info<MARKER_TABLE, MARKER_API_ID> : roctx_domain_info<MARKER_TABLE>           \
     {                                                                                              \
+        static constexpr auto is_range      = false;                                               \
         static constexpr auto table_idx     = MARKER_TABLE;                                        \
         static constexpr auto operation_idx = MARKER_API_ID;                                       \
         static constexpr auto name          = #MARKER_FUNC;                                        \
@@ -111,6 +112,7 @@
     template <>                                                                                    \
     struct roctx_api_info<MARKER_TABLE, MARKER_API_ID> : roctx_domain_info<MARKER_TABLE>           \
     {                                                                                              \
+        static constexpr auto is_range      = false;                                               \
         static constexpr auto table_idx     = MARKER_TABLE;                                        \
         static constexpr auto operation_idx = MARKER_API_ID;                                       \
         static constexpr auto name          = #MARKER_FUNC;                                        \
@@ -188,6 +190,199 @@
     }                                                                                              \
     }
 
+#define MARKER_EVENT_API_INFO_DEFINITION_V(                                                        \
+    MARKER_TABLE, MARKER_API_ID, MARKER_NAME, MARKER_FUNC_PTR, ...)                                \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace marker                                                                               \
+    {                                                                                              \
+    template <>                                                                                    \
+    struct roctx_api_info<MARKER_TABLE, MARKER_API_ID> : roctx_domain_info<MARKER_TABLE>           \
+    {                                                                                              \
+        static constexpr auto is_range      = false;                                               \
+        static constexpr auto table_idx     = MARKER_TABLE;                                        \
+        static constexpr auto operation_idx = MARKER_API_ID;                                       \
+        static constexpr auto name          = #MARKER_NAME;                                        \
+                                                                                                   \
+        using domain_type = roctx_domain_info<table_idx>;                                          \
+        using this_type   = roctx_api_info<table_idx, operation_idx>;                              \
+        using base_type   = roctx_api_impl<table_idx, operation_idx>;                              \
+                                                                                                   \
+        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;              \
+        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;              \
+                                                                                                   \
+        using domain_type::args_type;                                                              \
+        using domain_type::retval_type;                                                            \
+        using domain_type::callback_data_type;                                                     \
+                                                                                                   \
+        static constexpr auto offset()                                                             \
+        {                                                                                          \
+            return offsetof(roctx_table_lookup<table_idx>::type, MARKER_FUNC_PTR);                 \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_table() { return roctx_table_lookup<table_idx>{}(); }                     \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table(TableT& _v)                                                         \
+        {                                                                                          \
+            return roctx_table_lookup<table_idx>{}(_v);                                            \
+        }                                                                                          \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table_func(TableT& _table)                                                \
+        {                                                                                          \
+            if constexpr(std::is_pointer<TableT>::value)                                           \
+            {                                                                                      \
+                assert(_table != nullptr && "nullptr to MARKER table for " #MARKER_NAME            \
+                                            " function");                                          \
+                return _table->MARKER_FUNC_PTR;                                                    \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                return _table.MARKER_FUNC_PTR;                                                     \
+            }                                                                                      \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+                                                                                                   \
+        template <typename DataT>                                                                  \
+        static auto& get_api_data_args(DataT& _data)                                               \
+        {                                                                                          \
+            return _data.MARKER_NAME;                                                              \
+        }                                                                                          \
+                                                                                                   \
+        template <typename RetT, typename... Args>                                                 \
+        static auto get_functor(RetT (*)(Args...))                                                 \
+        {                                                                                          \
+            return &base_type::functor<RetT, Args...>;                                             \
+        }                                                                                          \
+                                                                                                   \
+        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        {                                                                                          \
+            return std::vector<void*>{                                                             \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+        }                                                                                          \
+                                                                                                   \
+        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
+        {                                                                                          \
+            return utils::stringize(                                                               \
+                max_deref,                                                                         \
+                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
+        }                                                                                          \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
+#define MARKER_RANGE_API_INFO_DEFINITION_V(                                                        \
+    MARKER_TABLE, MARKER_API_ID, MARKER_NAME, MARKER_PUSH_FUNC_PTR, MARKER_POP_FUNC_PTR, ...)      \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace marker                                                                               \
+    {                                                                                              \
+    template <>                                                                                    \
+    struct roctx_api_info<MARKER_TABLE, MARKER_API_ID> : roctx_domain_info<MARKER_TABLE>           \
+    {                                                                                              \
+        static constexpr auto is_range      = true;                                                \
+        static constexpr auto table_idx     = MARKER_TABLE;                                        \
+        static constexpr auto operation_idx = MARKER_API_ID;                                       \
+        static constexpr auto name          = #MARKER_NAME;                                        \
+                                                                                                   \
+        using domain_type = roctx_domain_info<table_idx>;                                          \
+        using this_type   = roctx_api_info<table_idx, operation_idx>;                              \
+        using base_type   = roctx_api_impl<table_idx, operation_idx>;                              \
+                                                                                                   \
+        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;              \
+        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;              \
+                                                                                                   \
+        using domain_type::args_type;                                                              \
+        using domain_type::retval_type;                                                            \
+        using domain_type::callback_data_type;                                                     \
+                                                                                                   \
+        static constexpr auto push_offset()                                                        \
+        {                                                                                          \
+            return offsetof(roctx_table_lookup<table_idx>::type, MARKER_PUSH_FUNC_PTR);            \
+        }                                                                                          \
+                                                                                                   \
+        static constexpr auto pop_offset()                                                         \
+        {                                                                                          \
+            return offsetof(roctx_table_lookup<table_idx>::type, MARKER_POP_FUNC_PTR);             \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_table() { return roctx_table_lookup<table_idx>{}(); }                     \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_table(TableT& _v)                                                         \
+        {                                                                                          \
+            return roctx_table_lookup<table_idx>{}(_v);                                            \
+        }                                                                                          \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_push_table_func(TableT& _table)                                           \
+        {                                                                                          \
+            if constexpr(std::is_pointer<TableT>::value)                                           \
+            {                                                                                      \
+                assert(_table != nullptr && "nullptr to MARKER table for " #MARKER_NAME            \
+                                            " function");                                          \
+                return _table->MARKER_PUSH_FUNC_PTR;                                               \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                return _table.MARKER_PUSH_FUNC_PTR;                                                \
+            }                                                                                      \
+        }                                                                                          \
+                                                                                                   \
+        template <typename TableT>                                                                 \
+        static auto& get_pop_table_func(TableT& _table)                                            \
+        {                                                                                          \
+            if constexpr(std::is_pointer<TableT>::value)                                           \
+            {                                                                                      \
+                assert(_table != nullptr && "nullptr to MARKER table for " #MARKER_NAME            \
+                                            " function");                                          \
+                return _table->MARKER_POP_FUNC_PTR;                                                \
+            }                                                                                      \
+            else                                                                                   \
+            {                                                                                      \
+                return _table.MARKER_POP_FUNC_PTR;                                                 \
+            }                                                                                      \
+        }                                                                                          \
+                                                                                                   \
+        static auto& get_push_table_func() { return get_push_table_func(get_table()); }            \
+        static auto& get_pop_table_func() { return get_pop_table_func(get_table()); }              \
+                                                                                                   \
+        template <typename DataT>                                                                  \
+        static auto& get_api_data_args(DataT& _data)                                               \
+        {                                                                                          \
+            return _data.MARKER_NAME;                                                              \
+        }                                                                                          \
+                                                                                                   \
+        template <typename RetT, typename... Args>                                                 \
+        static auto get_push_functor(RetT (*)(Args...))                                            \
+        {                                                                                          \
+            return &base_type::push_functor<RetT, Args...>;                                        \
+        }                                                                                          \
+                                                                                                   \
+        template <typename RetT, typename... Args>                                                 \
+        static auto get_pop_functor(RetT (*)(Args...))                                             \
+        {                                                                                          \
+            return &base_type::pop_functor<RetT, Args...>;                                         \
+        }                                                                                          \
+                                                                                                   \
+        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
+        {                                                                                          \
+            return std::vector<void*>{                                                             \
+                GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
+        }                                                                                          \
+                                                                                                   \
+        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
+        {                                                                                          \
+            return utils::stringize(                                                               \
+                max_deref,                                                                         \
+                GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
+        }                                                                                          \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
 #define MARKER_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, TYPE)                                         \
     namespace rocprofiler                                                                          \
     {                                                                                              \
@@ -215,6 +410,31 @@
     struct roctx_table_id_lookup<TYPE>                                                             \
     {                                                                                              \
         static constexpr auto value = TABLE_ID;                                                    \
+    };                                                                                             \
+    }                                                                                              \
+    }
+
+#define MARKER_API_TABLE_LOOKUP_DEFINITION_ALT(TABLE_ID, TYPE)                                     \
+    namespace rocprofiler                                                                          \
+    {                                                                                              \
+    namespace marker                                                                               \
+    {                                                                                              \
+    namespace                                                                                      \
+    {                                                                                              \
+    template <>                                                                                    \
+    auto* get_table<TABLE_ID>()                                                                    \
+    {                                                                                              \
+        return get_table_impl<TYPE>();                                                             \
+    }                                                                                              \
+    }                                                                                              \
+                                                                                                   \
+    template <>                                                                                    \
+    struct roctx_table_lookup<TABLE_ID>                                                            \
+    {                                                                                              \
+        using type = TYPE;                                                                         \
+        auto& operator()(type& _v) const { return _v; }                                            \
+        auto& operator()(type* _v) const { return *_v; }                                           \
+        auto& operator()() const { return (*this)(get_table<TABLE_ID>()); }                        \
     };                                                                                             \
     }                                                                                              \
     }

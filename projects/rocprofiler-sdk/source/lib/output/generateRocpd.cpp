@@ -1286,10 +1286,10 @@ write_rocpd(
                 auto name     = tool_metadata.buffer_names.at(itr.kind, itr.operation);
 
                 auto msg = std::string{"{}"};
-                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API)
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
                 {
                     if(static_cast<rocprofiler_tracing_operation_t>(itr.operation) !=
-                       ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId)
+                       ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
                     {
                         // check generatePerfetto.cpp and generateOTF2.cpp, and the marker name in
                         // the view

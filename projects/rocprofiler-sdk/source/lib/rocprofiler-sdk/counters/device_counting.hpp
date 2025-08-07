@@ -45,7 +45,7 @@ struct agent_callback_data
 {
     uint64_t                               context_idx = 0;
     hsa_queue_t*                           queue       = nullptr;
-    std::unique_ptr<hsa::CounterAQLPacket> packet      = {};
+    std::shared_ptr<hsa::CounterAQLPacket> packet      = {};
 
     // Tri-state signal used to know what the current state of processing
     // a sample is. The states are:
