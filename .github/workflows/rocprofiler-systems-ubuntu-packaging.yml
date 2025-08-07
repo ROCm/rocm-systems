@@ -65,7 +65,7 @@ jobs:
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
         echo "BUILD_DIR=./release" >> $GITHUB_ENV &&
         echo "INSTALL_DIR=/opt/rocprofiler-systems" >> $GITHUB_ENV &&
-        echo "RELEASE=${{ matrix.release }}" >> $GITHUB_ENV &&
+        echo "VERSION_CODENAME=$(grep "VERSION_CODENAME=" /etc/os-release | awk -F'=' '{print $2}')" >> $GITHUB_ENV &&
         env
 
     - name: Install ROCm
@@ -77,7 +77,6 @@ jobs:
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
-        source /etc/os-release
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/${VERSION_CODENAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
