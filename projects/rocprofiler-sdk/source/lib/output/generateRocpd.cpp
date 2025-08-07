@@ -42,6 +42,9 @@
 #include "lib/output/sql/common.hpp"
 #include "lib/output/sql/deferred_transaction.hpp"
 
+#include "re2/re2.h"
+#include "re2/stringpiece.h"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
@@ -67,7 +70,6 @@
 #include <initializer_list>
 #include <limits>
 #include <map>
-#include <regex>
 #include <thread>
 #include <type_traits>
 #include <unordered_map>
@@ -201,9 +203,22 @@ auto
 replace_uuid(std::string_view inp)
 {
     const auto& _repl = get_uuid();
-    return std::regex_replace(std::string{inp},
-                              std::regex{"\\{\\{uuid\\}\\}"},
-                              (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl));
+    std::string result;
+    std::string replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
+    std::string input_str(inp);
+    size_t last_pos = 0;
+    const std::string pattern = "{{uuid}}";
+    while (true) {
+        size_t pos = input_str.find(pattern, last_pos);
+        if (pos == std::string::npos) {
+            result.append(input_str.substr(last_pos));
+            break;
+        }
+        result.append(input_str.substr(last_pos, pos - last_pos));
+        result.append(replacement);
+        last_pos = pos + pattern.length();
+    }
+    return result;
 }
 
 auto

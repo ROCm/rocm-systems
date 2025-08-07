@@ -24,7 +24,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-dw
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
-            rocprofiler-sdk::rocprofiler-sdk-att-parser)
+            rocprofiler-sdk::rocprofiler-sdk-att-parser
+            rocprofiler-sdk::rocprofiler-sdk-re2)
 
 set_target_properties(
     rocprofiler-sdk-tool

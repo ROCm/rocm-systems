@@ -43,7 +43,6 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -56,15 +55,6 @@ namespace tool
 {
 namespace
 {
-const auto env_regexes =
-    new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                  std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
-// env regex examples:
-//  - %env{USER}%       Consistent with other output key formats (start+end with %)
-//  - $ENV{USER}        Similar to CMake
-//  - %q{USER}          Compatibility with NVIDIA
-//
 
 inline bool
 not_is_space(int ch)
@@ -344,8 +334,9 @@ format_name(std::string_view _name, const config& _cfg)
     if(!_cfg.demangle && !_cfg.truncate) return std::string{_name};
 
     // truncating requires demangling first so always demangle
-    auto _demangled_name =
-        common::cxx_demangle(std::regex_replace(_name.data(), std::regex{"(\\.kd)$"}, ""));
+    if(auto kpos = _name.rfind(".kd"); kpos < _name.length() && kpos + 3 == _name.length())
+        _name = _name.substr(0, kpos);
+    auto _demangled_name = common::cxx_demangle(_name);
 
     if(_cfg.truncate) return common::truncate_name(_demangled_name);
 

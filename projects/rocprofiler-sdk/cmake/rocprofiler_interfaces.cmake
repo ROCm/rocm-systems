@@ -28,6 +28,8 @@ rocprofiler_add_interface_library(rocprofiler-sdk-pybind11 "Enables PyBind11 sup
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-gotcha "Enables GOTCHA support"
                                   INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-re2 "Enables Google RE2 support"
+                                  INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-compile-definitions
                                   "Compile definitions" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-sdk-static-libgcc

@@ -40,3 +40,9 @@
 [submodule "external/gotcha"]
 	path = external/gotcha
 	url = https://jrmadsen@github.com/jrmadsen/GOTCHA
+[submodule "abseil-cpp"]
+	path = external/abseil-cpp
+	url = https://github.com/abseil/abseil-cpp.git
+[submodule "re2"]
+	path = external/re2
+	url = https://github.com/google/re2.git

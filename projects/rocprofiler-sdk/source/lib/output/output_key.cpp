@@ -31,7 +31,6 @@
 #include <linux/limits.h>
 #include <array>
 #include <fstream>
-#include <regex>
 
 namespace rocprofiler
 {
