@@ -6,7 +6,8 @@ from collections import defaultdict
 
 if __name__ == "__main__":
     test_case_pattern = re.compile(r'TEST_CASE\("([^"]+)"\)')
-    test_cases = []
+    template_test_case_pattern = re.compile(r'TEMPLATE_TEST_CASE\("([^"]+)",\s*((?:[^;]*?))\) ', re.DOTALL)
+    test_cases = set()
     disabled_tags = defaultdict(list)
 
     for root, _, files in os.walk(os.getcwd()):
@@ -14,10 +15,24 @@ if __name__ == "__main__":
             if file.endswith('.cpp') or file.endswith('.h') or file.endswith('.hh') or file.endswith('.cc'):
                 file_path = os.path.join(root, file)
                 with open(file_path, 'r', encoding='windows-1251') as f:
-                    for line in f:
-                        match = test_case_pattern.search(line)
-                        if match:
-                            test_cases.append(match.group(1))
+                    content = f.read()
+                    for match in test_case_pattern.finditer(content):
+                        test_cases.add(match.group(1))
+                    for match in template_test_case_pattern.finditer(content):
+                        name = match.group(1)
+                        arguments = match.group(2).replace('\n', ' ').strip()
+                        if "TestParams<" in arguments:
+                            for argument in arguments.split("TestParams<")[1:]:
+                                # __import__('pdb').set_trace()
+                                argument = argument.split(">)")[0].replace('"', '').strip()
+                                if argument != "":
+                                    test_cases.add(f"{name} - TestParams<{argument}>")
+                        else:
+                            for argument in arguments.split(",")[1:]:
+                                argument = argument.strip()
+                                if argument != "":
+                                    test_cases.add(f"{name} - {argument}")
+
 
     print(f"Test cases found: {len(test_cases)}")
 
@@ -41,16 +56,14 @@ if __name__ == "__main__":
                     else:
                         current_tag = base_tag + " || " + " || ".join(arr)
                     continue
-                if line.replace(',', '').replace('"', '').strip() in test_cases:
-                    ind = test_cases.index(line.replace('"', '').replace(',', '').strip())
-                    test_name = test_cases[ind]
+                if test_name := line.replace(',', '').replace('"', '').strip() in test_cases:
                     disabled_tags[current_tag].append(test_name)
                     disabled_tags[base_tag].append(test_name)
 
 
     headers = ["Test name"]
     headers.extend(disabled_tags.keys())
-    with open("result.csv", "w", newline='', encoding='windows-1251') as csvfile:
+    with open("result.csv", "w", newline='') as csvfile:
         writer = csv.DictWriter(csvfile, fieldnames=headers)
         writer.writeheader()
         rows = []
