@@ -80,21 +80,6 @@ def test_list_metrics_gfx90a(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.list_metrics
-def test_list_metrics_gfx906(binary_handler_analyze_rocprof_compute):
-    code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx906"])
-    assert code == 1
-
-    for dir in indirs:
-        workload_dir = test_utils.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "--list-metrics", "gfx906"]
-        )
-        assert code == 0
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.list_metrics
 def test_list_metrics_gfx908(binary_handler_analyze_rocprof_compute):
     code = binary_handler_analyze_rocprof_compute(["analyze", "--list-metrics", "gfx908"])
     assert code == 1

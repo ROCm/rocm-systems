@@ -2,7 +2,7 @@
 
 Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
+## ROCm Compute Profiler 3.2.2 for ROCm 7.0.0
 
 ### Added
 
@@ -69,16 +69,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * ``-b`` option in profile mode also accepts hardware IP block for filtering; however, this filter support will be deprecated soon.
   * ``--list-metrics`` option added in profile mode to list possible metric id(s), similar to analyze mode.
 
-* Interface to ROCprofiler-SDK.
-  * Setting the environment variable ``ROCPROF=rocprofiler-sdk`` will use ROCprofiler-SDK C++ library instead of ``rocprofv3`` python script.
-  * Add --rocprofiler-sdk-library-path runtime option to choose the path to rocprofiler-sdk library to be used
-  * Using rocprof v1 / v2 / v3 interfaces will trigger a deprecation warning to use rocprofiler-sdk interface
-
 * Support MEM chart on CLI (single run)
-
-* Deprecation warning for MongoDB database update mode.
-
-* Deprecation warning for ``rocm-smi``
 
 * ``--specs-correction`` option to provide missing system specifications for analysis.
 
@@ -102,6 +93,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Fixed kernel name and kernel dispatch filtering when using ``rocprofv3``.
 * Fixed an issue of TCC channel counters collection in ``rocprofv3``.
 * Fixed peak FLOPS of F8, I8, F16, and BF16 on AMD Instinct MI 300.
+* Fixed not detecting memory clock issue when using amd-smi
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on MI350
 
 ### Known issues
 
@@ -127,12 +121,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
-* ``rocprof v1/v2/v3`` interfaces will be removed in favor of the ROCprofiler-SDK interface, which directly accesses ``rocprofv3`` C++ tool.
-  * To use ROCprofiler-SDK interface, set environment variable `ROCPROF=rocprofiler-sdk` and optionally provide profile mode option ``--rocprofiler-sdk-library-path /path/to/librocprofiler-sdk.so``
+* ``rocprof v1/v2/v3`` interfaces will be removed in favor of the ROCprofiler-SDK interface, which directly accesses ``rocprofv3`` C++ tool. Using ``rocprof v1/v2/v3`` interfaces will trigger a deprecation warning.
+  * To use ROCprofiler-SDK interface, set environment variable `ROCPROF=rocprofiler-sdk` and optionally provide profile mode option ``--rocprofiler-sdk-library-path /path/to/librocprofiler-sdk.so``. Add ``--rocprofiler-sdk-library-path`` runtime option to choose the path to ROCprofiler-SDK library to be used.
 * Hardware IP block based filtering using ``-b`` option in profile mode will be removed in favor of analysis report block based filtering using ``-b`` option in profile mode.
-* Using rocprof v1 / v2 / v3 interfaces will trigger a deprecation warning to use rocprofiler-sdk interface
-* MongoDB database support will be removed.
-* Usage of ``rocm-smi`` will be removed in favor of ``amd-smi``.
+* MongoDB database support will be removed, and a deprecation warning has been added to the application interface.
+* Usage of ``rocm-smi`` is deprecated in favor of ``amd-smi``, and a deprecation warning has been added to the application interface.
 
 ## ROCm Compute Profiler 3.1.1 for ROCm 6.4.2
 
