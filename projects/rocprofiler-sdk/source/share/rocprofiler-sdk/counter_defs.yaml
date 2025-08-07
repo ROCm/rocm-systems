@@ -627,6 +627,9 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: FETCH_SIZE
   - name: FlatLDSInsts
     description: The average number of FLAT instructions that read or write to LDS executed per work item (affected by flow
@@ -1037,6 +1040,12 @@ rocprofiler-sdk:
       - gfx1102
       block: GL2C
       event: 88
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      block: GL2C
+      event: 122
   - name: GL2C_MC_WRREQ_sum
     description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface. Sum over GL2C
       instances.
@@ -1107,6 +1116,9 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(GL2C_MC_WRREQ_STALL,max)
   - name: GPUBusy
     description: The percentage of time GPU was busy.
@@ -1127,6 +1139,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   - name: GPU_UTIL
     description: Percentage of the time that GUI is active
@@ -1498,7 +1513,16 @@ rocprofiler-sdk:
     definitions:
     - architectures:
       - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
       expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      expression: 100*reduce(SQC_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   - name: MAX_WAVE_SIZE
     description: Max wave size constant
     properties: []
@@ -1549,6 +1573,9 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
     - architectures:
       - gfx10
@@ -1576,6 +1603,9 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: 100*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
     - architectures:
       - gfx90a
@@ -1604,6 +1634,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: 100*reduce(TA_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   - name: MemUnitStalled
     description: 'The percentage of GPUTime the memory unit is stalled. Try reducing the number or size of fetches and writes
@@ -1742,6 +1775,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_INSTS_SALU,sum)/reduce(SQ_WAVES,sum)
   - name: SE_NUM
     description: SE_NUM
@@ -1766,6 +1802,9 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: array_count/simd_arrays_per_engine
   - name: SFetchInsts
     description: The average number of scalar fetch instructions from the video memory executed per work-item (affected by
@@ -1786,6 +1825,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_INSTS_SMEM,sum)/reduce(SQ_WAVES,sum)
   - name: SPI_CSN_BUSY
     description: Number of clocks with outstanding waves (SPI or SH). Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source,
@@ -2725,6 +2767,12 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 271
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      block: SQ
+      event: 302
   - name: SQC_ICACHE_INPUT_VALID_READYB
     description: ' Input stalled by SQC (per-SQ, nondeterministic, unwindowed)'
     properties: []
@@ -2775,6 +2823,12 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 270
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      block: SQ
+      event: 301
   - name: SQC_LDS_BANK_CONFLICT
     description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
     properties: []
@@ -10177,6 +10231,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_INSTS_VALU,sum)/reduce(SQ_WAVES,sum)
   - name: VALUUtilization
     description: 'The percentage of active vector ALU threads in a wave. A lower number can mean either more thread divergence
@@ -10366,6 +10423,11 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
+    - architectures:
+      - gfx12
+      - gfx1200
+      - gfx1201
+      expression: (GL2C_EA_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024
   - name: WaveDepWait
     description: 'Unit: percent'
     properties: []
@@ -10412,6 +10474,9 @@ rocprofiler-sdk:
       - gfx906
       - gfx908
       - gfx90a
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: reduce(SQ_WAVES,sum)
   - name: WriteSize
     description: The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or
@@ -10428,6 +10493,9 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: WRITE_SIZE
   - name: WriteUnitStalled
     description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
@@ -10450,6 +10518,9 @@ rocprofiler-sdk:
       - gfx1100
       - gfx1101
       - gfx1102
+      - gfx12
+      - gfx1200
+      - gfx1201
       expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
   - name: sL1dCacheHitRate
     description: 'Unit: percent'
