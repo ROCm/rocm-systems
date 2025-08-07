@@ -6,6 +6,8 @@ permissions:
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'

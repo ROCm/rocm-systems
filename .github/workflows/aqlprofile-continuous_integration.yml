@@ -3,6 +3,8 @@ name: AqlProfile Continuous Integration
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/aqlprofile/**'
       - '!projects/aqlprofile/*.md'
@@ -43,11 +45,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi300']
+        runner: ['navi4', 'navi3', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
-    runs-on: rocprofiler-${{ matrix.runner == 'mi300' && 'ubuntu-22' || matrix.runner }}
+    runs-on: rocprofiler-${{ matrix.runner }}
     if: github.event.pull_request.head.repo.full_name == 'AMD-ROCm-Internal/aqlprofile'
 
     permissions:

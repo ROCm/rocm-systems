@@ -57,7 +57,7 @@ jobs:
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
-    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
+    runs-on: rocprofiler-${{ matrix.runner }}
 
     # define this for containers
     env:
@@ -282,7 +282,7 @@ jobs:
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: rocprofiler-${{ matrix.runner == 'mi3xx' && 'ubuntu-22' || matrix.runner }}
+    runs-on: rocprofiler-${{ matrix.runner }}
 
     # define this for containers
     env:
