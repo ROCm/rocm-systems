@@ -75,7 +75,7 @@ write_perfetto(
     const generator<tool_counter_record_t>&                                 counter_collection_gen,
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
-    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
+    const generator<rocprofiler_buffer_tracing_rccl_api_ext_record_t>&      rccl_api_ext_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_allocation_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
     const generator<rocprofiler_buffer_tracing_rocjpeg_api_record_t>&       rocjpeg_api_gen)
@@ -175,8 +175,8 @@ write_perfetto(
         for(auto ditr : marker_api_gen)
             for(auto itr : marker_api_gen.get(ditr))
                 tids.emplace(itr.thread_id);
-        for(auto ditr : rccl_api_gen)
-            for(auto itr : rccl_api_gen.get(ditr))
+        for(auto ditr : rccl_api_ext_gen)
+            for(auto itr : rccl_api_ext_gen.get(ditr))
                 tids.emplace(itr.thread_id);
         for(auto ditr : rocdecode_api_gen)
             for(auto itr : rocdecode_api_gen.get(ditr))
@@ -424,11 +424,12 @@ write_perfetto(
                 tracing_session->FlushBlocking();
             }
 
-        for(auto ditr : rccl_api_gen)
-            for(auto itr : rccl_api_gen.get(ditr))
+        for(auto ditr : rccl_api_ext_gen)
+            for(auto itr : rccl_api_ext_gen.get(ditr))
             {
-                auto  name  = buffer_names.at(itr.kind, itr.operation);
-                auto& track = thread_tracks.at(itr.thread_id);
+                auto  name      = buffer_names.at(itr.kind, itr.operation);
+                auto& track     = thread_tracks.at(itr.thread_id);
+                auto  rccl_args = sdk::serialization::get_buffer_tracing_args(itr);
 
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rccl_api>::name,
                                   ::perfetto::StaticString(name.data()),
@@ -450,7 +451,14 @@ write_perfetto(
                                   "corr_id",
                                   itr.correlation_id.internal,
                                   "ancestor_id",
-                                  itr.correlation_id.ancestor);
+                                  itr.correlation_id.ancestor,
+                                  [&](::perfetto::EventContext ctx) {
+                                      for(const auto& rccl_arg : rccl_args)
+                                      {
+                                          sdk::add_perfetto_annotation(
+                                              ctx, rccl_arg.name, rccl_arg.value);
+                                      }
+                                  });
                 TRACE_EVENT_END(sdk::perfetto_category<sdk::category::rccl_api>::name,
                                 track,
                                 itr.end_timestamp);

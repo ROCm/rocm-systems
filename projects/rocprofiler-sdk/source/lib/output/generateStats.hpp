@@ -67,9 +67,9 @@ generate_stats(const output_config&                                             
                const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& data);
 
 stats_entry_t
-generate_stats(const output_config&                                           cfg,
-               const metadata&                                                tool_metadata,
-               const generator<rocprofiler_buffer_tracing_rccl_api_record_t>& data);
+generate_stats(const output_config&                                               cfg,
+               const metadata&                                                    tool_metadata,
+               const generator<rocprofiler_buffer_tracing_rccl_api_ext_record_t>& data);
 
 stats_entry_t
 generate_stats(const output_config&                                                 cfg,
