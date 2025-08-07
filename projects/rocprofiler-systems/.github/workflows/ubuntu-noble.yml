@@ -50,12 +50,19 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        build-type: ['Release', 'Debug']
+        mpi: ['OFF']
+        ompt: ['ON']
+        papi: ['OFF']
+        python: ['ON']
         strip: ['OFF']
-        build-dyninst: ['OFF']
-        rocm-version: ['0.0','6.3','6.4']
-
+        hidden: ['ON', 'OFF']
+        build-type: ['Release']
+        mpi-headers: ['ON', 'OFF']
+        build-dyninst: ['ON']
+        rocm-version: ['0.0', '6.3', '6.4']
     env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
       ROCPROFSYS_CI: 'ON'
 
     steps:
@@ -69,15 +76,13 @@ jobs:
         timeout_minutes: 25
         max_attempts: 5
         command: |
-          apt-get -y update && apt-get upgrade -y &&
-          apt-get install -y \
-            libiberty-dev clang libomp-dev libopenmpi-dev libfabric-dev \
-            openmpi-bin ${{ matrix.compiler }} &&
-          for i in 8 9 10 11 12; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          apt-get update &&
+          apt-get upgrade -y &&
+          apt-get install -y libomp-dev libopenmpi-dev openmpi-bin
 
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
-      timeout-minutes: 30
+      timeout-minutes: 115
       shell: bash
       run: |
         ROCM_VERSION=${{ matrix.rocm-version }}
@@ -90,32 +95,99 @@ jobs:
         apt-get update
         apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
 
-    - name: Configure
-      timeout-minutes: 30
+    - name: Configure, Build and Test
+      timeout-minutes: 115
       shell: bash
       run: |
         git config --global --add safe.directory ${PWD} &&
         cmake --version
+        '${{ matrix.compiler }}' --version
         USE_ROCM=OFF
-        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_ROCM=ON; fi
-        cmake -B build \
+        if [ "${{ matrix.rocm-version }}" != "0.0" ]; then
+          CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=/opt/rocm"
+          USE_ROCM=ON
+        else
+          CMAKE_PREFIX_PATH_ARG=""
+        fi
+        TAG=""
+        python3 ./scripts/run-ci.py -B build \
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-noble-${{ matrix.compiler }}${TAG} \
+          --build-jobs 2 \
+          --site GitHub \
+          -- \
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
-          -DROCPROFSYS_USE_ROCM=${USE_ROCM} \
-          -DRCOPROFSYS_USE_PYTHON=ON \
-          -DROCPROFSYS_BUILD_DYNINST=ON \
-          -DROCPROFSYS_BUILD_BOOST=ON \
-          -DROCPROFSYS_BUILD_TBB=ON \
-          -DROCPROFSYS_BUILD_ELFUTILS=ON \
-          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
-          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
+          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }} \
+          -DROCPROFSYS_USE_ROCM=$USE_ROCM \
+          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }} \
+          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }} \
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
-          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12"
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
+          -DROCPROFSYS_MAX_THREADS=64 \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;lulesh" \
+          -DROCPROFSYS_BUILD_NUMBER=1 \
+          -DUSE_CLANG_OMP=OFF \
+          $CMAKE_PREFIX_PATH_ARG \
+          -- \
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
 
-    - name: Build
-      timeout-minutes: 115
-      run: cmake --build build --parallel 2
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: CPack and Install
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
+
+    - name: Test Install with Modulefile
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/rocprofiler-systems/share/modulefiles
+        module avail
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
