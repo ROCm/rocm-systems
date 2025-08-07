@@ -46,6 +46,25 @@ def test_otf2_data(otf2_data, json_data):
     )
 
 
+def test_csv_data(csv_data, json_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_csv_data(
+        csv_data,
+        json_data,
+        (
+            "agent",
+            "hip",
+            "hsa",
+            "marker",
+            "kernel",
+            "memory_copy",
+            "memory_allocation",
+            "counter_collection",
+        ),
+    )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)
