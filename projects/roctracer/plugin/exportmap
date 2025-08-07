@@ -1,0 +1,7 @@
+{
+global: roctracer_plugin_initialize;
+        roctracer_plugin_finalize;
+        roctracer_plugin_write_callback_record;
+        roctracer_plugin_write_activity_records;
+local:  *;
+};

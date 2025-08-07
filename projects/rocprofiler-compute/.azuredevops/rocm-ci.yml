@@ -1,0 +1,47 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+    - amd-staging
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - AUTHORS
+    - LICENSE
+    - VERSION
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - develop
+    - amd-staging
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - AUTHORS
+    - LICENSE
+    - VERSION
+  drafts: false
+
+# For changes to develop and staging, build & test against both staging and mainline ROCm
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-compute.yml@pipelines_repo

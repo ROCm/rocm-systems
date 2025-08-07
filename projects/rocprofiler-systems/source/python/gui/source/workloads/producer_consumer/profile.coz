@@ -1,0 +1,24 @@
+startup	time=1668112322692628451
+experiment	selected=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:61	speedup=0.45	duration=458583304	selected-samples=50
+throughput-point	name=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	delta=188627
+experiment	selected=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:53	speedup=0.20	duration=451826807	selected-samples=110
+throughput-point	name=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	delta=195079
+experiment	selected=/usr/include/c++/9/bits/stl_deque.h:375	speedup=0.05	duration=490437380	selected-samples=24
+throughput-point	name=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	delta=213386
+experiment	selected=/usr/include/c++/9/bits/stl_deque.h:375	speedup=0.00	duration=500060800	selected-samples=28
+throughput-point	name=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	delta=212555
+experiment	selected=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:36	speedup=0.45	duration=418026736	selected-samples=82
+throughput-point	name=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	delta=167074
+runtime	time=2581062440
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:36	count=484
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:38	count=82
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:42	count=270
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:43	count=158
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:53	count=527
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:61	count=233
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:62	count=162
+samples	location=/home/jose/coz/benchmarks/producer_consumer/producer_consumer.cpp:63	count=258
+samples	location=/usr/include/c++/9/bits/deque.tcc:166	count=1
+samples	location=/usr/include/c++/9/bits/deque.tcc:171	count=1
+samples	location=/usr/include/c++/9/bits/stl_deque.h:375	count=146
+samples	location=/usr/include/c++/9/bits/stl_deque.h:1609	count=1

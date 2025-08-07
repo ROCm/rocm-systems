@@ -1,0 +1,9 @@
+services:
+  doctest: # service name
+    build:
+      context: ../
+      dockerfile: docker/Dockerfile.doctest
+    volumes:
+      - ../:/app
+    tty: true
+    stdin_open: true
