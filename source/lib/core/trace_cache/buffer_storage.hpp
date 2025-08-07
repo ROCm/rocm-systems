@@ -93,7 +93,7 @@ public:
 
 private:
     friend class cache_manager;
-    buffer_storage();
+    buffer_storage(pid_t _pid);
     void     shutdown();
     bool     is_running() const;
     void     fragment_memory();
@@ -150,6 +150,7 @@ private:
     size_t                          m_head{ 0 };
     size_t                          m_tail{ 0 };
     std::unique_ptr<buffer_array_t> m_buffer{ std::make_unique<buffer_array_t>() };
+    pid_t                           m_created_process;
 };
 
 }  // namespace trace_cache

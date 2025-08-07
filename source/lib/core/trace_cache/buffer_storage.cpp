@@ -21,11 +21,13 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
+#include "debug.hpp"
 #include "library/runtime.hpp"
 #include <chrono>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
+#include <unistd.h>
 
 using namespace std::chrono_literals;
 
@@ -39,10 +41,10 @@ namespace
 constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
 }  // namespace
 
-buffer_storage::buffer_storage()
+buffer_storage::buffer_storage(pid_t _pid)
 {
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_flushing_thread = std::make_unique<std::thread>([this]() {
+    m_flushing_thread = std::make_unique<std::thread>([this, _pid]() {
         std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
 
         if(!_ofs)
@@ -86,6 +88,9 @@ buffer_storage::buffer_storage()
             }
         };
 
+        ROCPROFSYS_DEBUG("Starting buffered storage flushing thread for pid %d",
+                         static_cast<int>(_pid));
+        m_created_process = _pid;
         std::mutex _shutdown_condition_mutex;
         while(m_running)
         {
@@ -106,8 +111,17 @@ buffer_storage::buffer_storage()
 void
 buffer_storage::shutdown()
 {
+    ROCPROFSYS_DEBUG("Buffer storage shutting down..");
     m_running = false;
     m_shutdown_condition.notify_all();
+
+    if(m_created_process != getpid())
+    {
+        ROCPROFSYS_DEBUG(
+            "Buffer storage is not created in same process as shutting down..");
+        return;
+    }
+
     std::mutex       _exit_mutex;
     std::unique_lock _exit_lock{ _exit_mutex };
     m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
