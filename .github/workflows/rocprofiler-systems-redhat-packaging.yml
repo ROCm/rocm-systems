@@ -1,0 +1,112 @@
+name: rocprofiler-systems RedHat Packaging (Release, ROCm)
+run-name: redhat-packaging
+
+on:
+  push:
+    paths:
+      - '.github/workflows/rocprofiler-systems-redhat-packaging.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-redhat-packaging.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  redhat-packaging:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        release: [ '8.10', '9.4', '9.5' ]
+        rocm-version: [ '6.4' ]
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.release }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Configure Env
+      shell: bash
+      run:
+        echo "/opt/rocm/bin" >> $GITHUB_PATH  &&
+        echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
+        echo "BUILD_DIR=./release" >> $GITHUB_ENV &&
+        echo "INSTALL_DIR=/opt/rocprofiler-systems" >> $GITHUB_ENV &&
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
+        env
+
+    - name: Install ROCm
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
+        dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
+        dnf install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el${OS_VERSION_MAJOR}.noarch.rpm
+        dnf install -y rocm-dev rocdecode-devel python3-devel
+        if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
+
+    - name: Build rocprofiler-systems
+      timeout-minutes: 35
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        git config --global --add safe.directory '*' &&
+        cmake --preset release -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR
+        cmake --build $BUILD_DIR --target all
+
+    - name: Build and Install the Package
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        set -v
+        cd $BUILD_DIR
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
+        cpack -G RPM ${CPACK_ARGUMENTS}
+        dnf install -y *.rpm
+
+    - name: Verify Installation
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        echo "TO BE ADDED LATER"
