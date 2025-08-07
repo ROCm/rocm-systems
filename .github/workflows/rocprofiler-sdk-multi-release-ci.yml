@@ -129,7 +129,6 @@ jobs:
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
-        submodules: true
         set-safe-directory: true
 
     - name: Install requirements
@@ -164,7 +163,6 @@ jobs:
 
     - name: Install
       timeout-minutes: 10
-      working-directory: projects/rocprofiler-sdk
       run: |
         tar -xvzf ./build-packages/*.tar.gz -C /
         ls -lah /opt/rocprofiler-sdk
