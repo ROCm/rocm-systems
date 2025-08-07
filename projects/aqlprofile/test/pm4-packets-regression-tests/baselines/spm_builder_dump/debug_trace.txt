@@ -1,0 +1,11 @@
+--------------------SPM DEBUG_TRACE for SPM_CPC_dump.txt--------------------
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001808 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001c80 02710000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001c81 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001c82 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001c83 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 0000e982 0000000f
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 00000000
+Segmentation fault (core dumped)
