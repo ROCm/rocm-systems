@@ -179,16 +179,17 @@ if(${ENABLE_TESTS})
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
-ENABLE_TESTING()
+enable_testing()
 include(CTest)
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
     set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing")
-    
+
     set(CTEST_COVERAGE_COMMAND "python3")
-    set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o" "${CMAKE_BINARY_DIR}/coverage.xml")
+    set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o"
+                                   "${CMAKE_BINARY_DIR}/coverage.xml")
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -258,11 +259,8 @@ add_test(
 
 set_tests_properties(
     test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
-    test_profile_sort test_profile_misc
-    PROPERTIES
-        TIMEOUT 1800
-        LABELS "profile"
-        RESOURCE_GROUPS gpus:1)
+    test_profile_sort test_profile_misc PROPERTIES TIMEOUT 1800 LABELS "profile"
+                                                   RESOURCE_GROUPS gpus:1)
 
 # ---------------------------
 # analysis command tests
@@ -276,10 +274,7 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-set_tests_properties(
-    test_analyze_commands
-    PROPERTIES
-        TIMEOUT 1800)
+set_tests_properties(test_analyze_commands PROPERTIES TIMEOUT 1800)
 
 # ---------------------------
 # analyze workloads tests
@@ -293,10 +288,7 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-set_tests_properties(
-    test_analyze_workloads
-    PROPERTIES
-        TIMEOUT 1800)
+set_tests_properties(test_analyze_workloads PROPERTIES TIMEOUT 1800)
 
 # ---------------------------
 # TCP counter tests
@@ -368,13 +360,15 @@ if(${ENABLE_COVERAGE})
     add_test(
         NAME generate_coverage_report
         COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-    )
-    
-    set_tests_properties(generate_coverage_report PROPERTIES 
-        DEPENDS "test_profile_kernel_execution;test_profile_dispatch;test_profile_mem;test_profile_join;test_profile_sort;test_profile_misc;test_profile_section;test_analyze_commands;test_analyze_workloads;test_L1_cache_counters;test_num_xcds_spec_class;test_num_xcds_cli_output;test_db_connector;test_utils;test_autogen_config"
-        LABELS "coverage"
-    )
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+    set_tests_properties(
+        generate_coverage_report
+        PROPERTIES
+            DEPENDS
+            "test_profile_kernel_execution;test_profile_dispatch;test_profile_mem;test_profile_join;test_profile_sort;test_profile_misc;test_profile_section;test_analyze_commands;test_analyze_workloads;test_L1_cache_counters;test_num_xcds_spec_class;test_num_xcds_cli_output;test_db_connector;test_utils;test_autogen_config"
+            LABELS
+            "coverage")
 endif()
 
 # ---------
