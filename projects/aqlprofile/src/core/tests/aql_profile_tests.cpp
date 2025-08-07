@@ -38,8 +38,6 @@ using namespace testing;
 namespace aql_profile {
 bool Pm4Factory::concurrent_create_mode_ = false;
 bool Pm4Factory::spm_kfd_mode_ = false;
-Pm4Factory::mutex_t Pm4Factory::mutex_;
-Pm4Factory::instances_t* Pm4Factory::instances_ = nullptr;
 }
 
 // Mock classes to simulate Pm4Factory and related functionality

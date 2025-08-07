@@ -69,20 +69,13 @@ class Logger {
 
   static const std::string& LastMessage() {
     Logger& logger = Instance();
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(logger.mutex_);
     return logger.message_[GetTid()];
   }
 
   static Logger& Instance() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ == NULL) instance_ = new Logger();
-    return *instance_;
-  }
-
-  static void Destroy() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (instance_ != NULL) delete instance_;
-    instance_ = NULL;
+    static Logger instance;
+    return instance;
   }
 
  private:
@@ -143,8 +136,7 @@ class Logger {
   bool streaming_;
   bool messaging_;
 
-  static mutex_t mutex_;
-  static Logger* instance_;
+  mutex_t mutex_;
   std::map<uint32_t, std::string> message_;
 };
 
