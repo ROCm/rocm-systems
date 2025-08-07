@@ -41,11 +41,14 @@ The output lists if ``rocprofv3`` supports PC sampling on the GPU and the suppor
 
 .. code-block:: bash
 
-  List available PC Sample Configurations for node_id     11
-  Method: ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP
-  Unit:   ROCPROFILER_PC_SAMPLING_UNIT_TIME
-  Minimum_Interval:       1
-  Maximum_Interval:       18446744073709551615
+    GPU:0
+    NAME:gfx90a
+    configs:
+       Method              :host_trap
+       Unit                :time
+       Min_Interval        :1
+       Max_Interval        :18446744073709551615
+       Flags               :none
 
 The preceding output shows that the GPU supports PC sampling with the ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` method and the ``ROCPROFILER_PC_SAMPLING_UNIT_TIME`` unit. The minimum and maximum intervals are also displayed.
 
@@ -220,10 +223,14 @@ Output similar to the following indicates that the ``ROCPROFILER_PC_SAMPLING_MET
 
 .. code-block:: bash
 
-  Method: ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC
-  Unit:   ROCPROFILER_PC_SAMPLING_UNIT_CYCLES
-  Minimum_Interval:       256
-  Maximum_Interval:       2147483648
+    GPU:1
+    NAME:gfx942
+    configs:
+       Method              :stochastic
+       Unit                :cycle
+       Min_Interval        :256
+       Max_Interval        :2147483648
+       Flags               :interval pow2
 
 Please note that on gfx942, `ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC` requires intervals to be specified in cycles, whose values are powers of 2
 

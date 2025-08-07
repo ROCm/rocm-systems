@@ -185,27 +185,39 @@ def get_basic_agent_info(info):
     return basic_info
 
 
+def get_number_columns(max_name_len):
+    total_column_width = 120
+    if sys.stdout.isatty():
+        total_column_width = os.get_terminal_size().columns
+    width = total_column_width / (max_name_len + 1)
+    if width < 1:
+        return 1
+    return int(width)
+
+
 def list_basic_agent(args, list_counters):
-    def print_agent_counter(counters, info):
-        names = ["{:20}".format(counter.name) for counter in counters]
-        print("   PMC:\n")
-        for idx in range(0, len(names), int(len(names) / 20)):
-            print(
-                "              {}".format(
-                    " ".join(names[idx : (idx + int(len(names) / 20))])
-                )
-            )
+    def print_agent_counter(counters):
+        names_len = [len(counter.name) for counter in counters]
+        names = [
+            "{name:{width}}".format(name=counter.name, width=max(names_len))
+            for counter in counters
+        ]
+        columns = get_number_columns(max(names_len))
+        print("{:30}:\n".format("PMC"))
+        for idx in range(0, len(names), columns):
+            print("{}".format(" ".join(names[idx : (idx + columns)])))
+        print("\n")
 
     def print_basic_info(info):
         print("GPU:{}\n".format(info["logical_node_type_id"]))
-        print("\n".join(["   {:20}: {}".format(key, itr) for key, itr in info.items()]))
+        print("\n".join(["{:30}:\t{}".format(key, itr) for key, itr in info.items()]))
         if not list_counters:
             print("\n")
 
     agent_info_map = avail.get_agent_info_map()
     agent_counters = avail.get_counters()
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None
@@ -213,31 +225,41 @@ def list_basic_agent(args, list_counters):
         ):
             print_basic_info(get_basic_agent_info(info))
             if list_counters:
-                print_agent_counter(agent_counters[agent], info)
+                print_agent_counter(agent_counters[agent])
             break
 
         elif info["type"] == 2 and args.device is None:
             print_basic_info(get_basic_agent_info(info))
             if list_counters:
-                print_agent_counter(agent_counters[agent], info)
+                print_agent_counter(agent_counters[agent])
 
 
 def list_pc_sampling(args):
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
     print("Agents supporting PC Sampling\n")
-    for agent in sampling_agents.keys():
+    for agent in dict(sorted(sampling_agents.items())).keys():
         info = agent_info_map[agent]
-        print("GPU:{}\nNAME:{}\n".format(info["logical_node_type_id"], info["name"]))
+        print(
+            "{:8}:\t{}\n{:8}:\t{}".format(
+                "GPU", info["logical_node_type_id"], "Name", info["name"]
+            )
+        )
+        print("\n")
 
 
 def info_pc_sampling(args):
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
-    for agent, configs in sampling_agents.items():
+    for agent, configs in dict(sorted(sampling_agents.items())).items():
         info = agent_info_map[agent]
-        print("GPU:{}\nNAME:{}".format(info["logical_node_type_id"], info["name"]))
-        print("configs:")
+
+        print(
+            "{:8}:\t{}\n{:8}:\t{}".format(
+                "GPU", info["logical_node_type_id"], "Name", info["name"]
+            )
+        )
+        print("{:8}:".format("configs"))
         for config in configs:
             print(config)
             print("\n")
@@ -245,31 +267,42 @@ def info_pc_sampling(args):
 
 
 def listing(args):
-    def print_agent_counter(counters, info):
-        names = ["{:20}".format(counter.name) for counter in counters]
-        print("PMC:\n")
-        for idx in range(0, len(names), int(len(names) / 20)):
-            print(
-                "              {}".format(
-                    " ".join(names[idx : (idx + int(len(names) / 20))])
-                )
-            )
+    def print_agent_counter(counters):
+        names_len = [len(counter.name) for counter in counters]
+        names = [
+            "{name:{width}}".format(name=counter.name, width=max(names_len))
+            for counter in counters
+        ]
+        columns = get_number_columns(max(names_len))
+        print("{:30}:\n".format("PMC"))
+        for idx in range(0, len(names), columns):
+            print("{:30}".format(" ".join(names[idx : (idx + columns)])))
 
     agent_counters = avail.get_counters()
     agent_info_map = avail.get_agent_info_map()
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None
             and info["logical_node_type_id"] == args.device
         ):
-            print("GPU:{}\nNAME:{}".format(info["logical_node_type_id"], info["name"]))
-            print_agent_counter(agent_counters[agent], info)
+            print(
+                "{:30}:\t{}\n{:30}:\t{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_agent_counter(agent_counters[agent])
+            print("\n")
             break
         elif info["type"] == 2 and args.device is None:
-            print("GPU:{}\nNAME:{}".format(info["logical_node_type_id"], info["name"]))
-            print_agent_counter(agent_counters[agent], info)
+            print(
+                "{:30}:\t{}\n{:30}:\t{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
+            print_agent_counter(agent_counters[agent])
+            print("\n")
 
 
 def info_pmc(args):
@@ -285,21 +318,29 @@ def info_pmc(args):
         else:
             for pmc in args.pmc:
                 for counter in pmc_counters:
-                    if pmc == counter.get_as_dict()["counter_name"]:
+                    if pmc == counter.get_as_dict()["Counter_Name"]:
                         print(counter)
                         print("\n")
 
-    for agent, info in agent_info_map.items():
+    for agent, info in dict(sorted(agent_info_map.items())).items():
         if (
             info["type"] == 2
             and args.device is not None
             and info["logical_node_type_id"] == args.device
         ):
-            print("GPU:{}\nNAME:{}".format(info["logical_node_type_id"], info["name"]))
+            print(
+                "{}:{}\n{}:{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
             print_pmc_info(args, agent_counters[agent])
             break
         elif info["type"] == 2 and args.device is None:
-            print("GPU:{}\nNAME:{}".format(info["logical_node_type_id"], info["name"]))
+            print(
+                "{}:{}\n{}:{}".format(
+                    "GPU", info["logical_node_type_id"], "Name", info["name"]
+                )
+            )
             print_pmc_info(args, agent_counters[agent])
 
 
@@ -314,10 +355,12 @@ def process_info(args):
 
 
 def process_list(args):
-    if not args.agent and args.pc_sampling is None:
+    if args.agent is None and args.pc_sampling is None and args.pmc is None:
         listing(args)
     if args.agent:
         list_basic_agent(args, False)
+    if args.pmc:
+        listing(args)
     if args.pc_sampling:
         os.environ["ROCPROFILER_PC_SAMPLING_BETA_ENABLED"] = "on"
         list_pc_sampling(args)
@@ -341,7 +384,7 @@ def process_pmc_check(args):
         agent_counters = avail.get_counters()
         for agent, counters in agent_counters.items():
             for counter in counters:
-                if counter.get_as_dict()["counter_name"] == counter_name:
+                if counter.get_as_dict()["Counter_Name"] == counter_name:
                     return counter.counter_handle
         avail.fatal_error("Invalid counter name")
 
@@ -418,8 +461,9 @@ def main(argv=None):
     ROCPROFV3_AVAIL_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_AVAIL_DIR)
     ROCPROF_LIST_AVAIL_TOOL_LIBRARY = (
-        f"{ROCM_DIR}/libexec/rocprofiler-sdk/librocprofv3-list-avail.so"
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
+    os.environ["ROCPROFILER_METRICS_PATH"] = f"{ROCM_DIR}/share/rocprofiler-sdk"
     avail.loadLibrary.libname = os.environ.get(
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
