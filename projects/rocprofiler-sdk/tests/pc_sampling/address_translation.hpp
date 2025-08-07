@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 
 #include <algorithm>
@@ -305,5 +306,9 @@ init();
 
 void
 fini();
+
+void
+disable_strict_checks_if_needed(rocprofiler_agent_t agent);
+
 }  // namespace address_translation
 }  // namespace client
