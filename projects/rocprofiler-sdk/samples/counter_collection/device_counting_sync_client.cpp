@@ -25,6 +25,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "common/secure_filename.hpp"
+
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
@@ -468,7 +470,7 @@ rocprofiler_configure(uint32_t                 version,
 
     std::ostream* output_stream = nullptr;
     std::string   filename      = "counter_collection.log";
-    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
+    filename = common::secure::get_safe_output_filename(filename);
     if(filename == "stdout")
         output_stream = &std::cout;
     else if(filename == "stderr")
