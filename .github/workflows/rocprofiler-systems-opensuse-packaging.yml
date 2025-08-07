@@ -4,6 +4,7 @@ run-name: opensuse-packaging
 on:
   push:
     paths:
+      - '.github/workflows/rocprofiler-systems-opensuse-packaging.yml`
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
@@ -18,6 +19,7 @@ on:
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-opensuse-packaging.yml`
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
