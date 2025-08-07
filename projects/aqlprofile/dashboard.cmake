@@ -2,7 +2,7 @@ macro(dashboard_submit)
   ctest_submit()
 endmacro()
 
-set(CTEST_PROJECT_NAME "aqlprofile-emu")
+set(CTEST_PROJECT_NAME "aqlprofile")
 set(CTEST_NIGHTLY_START_TIME "01:00:00 UTC")
 set(CTEST_DROP_METHOD "http")
 set(CTEST_DROP_SITE "cdash.rocprofiler.amd.com")
