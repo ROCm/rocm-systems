@@ -7,6 +7,7 @@ pr:
     include:  
       - projects/*
       - shared/*
+      - .azuredevops/rocm_ci_caller.yml
   
 variables:
   - group: internal
@@ -51,11 +52,12 @@ jobs:
               -ghr '$(REPOSITORY_NAME)' \
               -ghsha '$(HEAD_SHA)' \
               -ghprn '$(PR_NUM)' \
+              -s '$(DEV)' \
               -ghpru '$(PR_URL)' \
               -ghprt \"\$TITLE\" \
               -ghpat '$(GH_PAT)' \
               -br   '$(BASE_REF)' \
-              -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+              -et   '$(EVENT_TYPE)'" 
     displayName: Invoke jenkins_api.py in Docker  
     env:  
       svc_acc_org_secret: $(svc_acc_org_secret)
