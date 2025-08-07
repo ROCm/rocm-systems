@@ -151,8 +151,10 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         importer.py
         __init__.py
         __main__.py
+        merge.py
         output_config.py
         otf2.py
+        package.py
         pftrace.py
         query.py
         schema.py
