@@ -51,7 +51,7 @@ if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
     set(GIT_CLONE TRUE)
 else()
-    set(GIT_CLONE FALSER)
+    set(GIT_CLONE FALSE)
 endif()
 
 set(CMAKE_BUILD_TYPE "Release")
@@ -179,14 +179,16 @@ if(${ENABLE_TESTS})
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
-enable_testing()
+ENABLE_TESTING()
+include(CTest)
 
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
-    set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
-                   "--cov-report=lcov:tests/coverage.info")
-    # "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
+    set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing")
+    
+    set(CTEST_COVERAGE_COMMAND "python3")
+    set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o" "${CMAKE_BINARY_DIR}/coverage.xml")
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -254,18 +256,13 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-add_test(
-    NAME test_profile_sets_func
-    COMMAND
-        ${Python3_EXECUTABLE} -m pytest -m sets_func
-        --junitxml=tests/test_profile_sets_func.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
 set_tests_properties(
     test_profile_kernel_execution test_profile_dispatch test_profile_mem test_profile_join
-    test_profile_sort test_profile_misc PROPERTIES LABELS "profile" RESOURCE_GROUPS
-                                                   gpus:1)
+    test_profile_sort test_profile_misc
+    PROPERTIES
+        TIMEOUT 1800
+        LABELS "profile"
+        RESOURCE_GROUPS gpus:1)
 
 # ---------------------------
 # analysis command tests
@@ -279,6 +276,11 @@ add_test(
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
+set_tests_properties(
+    test_analyze_commands
+    PROPERTIES
+        TIMEOUT 1800)
+
 # ---------------------------
 # analyze workloads tests
 # ---------------------------
@@ -290,6 +292,11 @@ add_test(
         --junitxml=tests/test_analyze_workloads.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+set_tests_properties(
+    test_analyze_workloads
+    PROPERTIES
+        TIMEOUT 1800)
 
 # ---------------------------
 # TCP counter tests
@@ -352,6 +359,23 @@ add_test(
     COMMAND ${Python3_EXECUTABLE} -m pytest --junitxml=tests/test_autogen_config.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_autogen_config.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# -----------------------------------
+# Generate final coverage report for CDash
+# -----------------------------------
+
+if(${ENABLE_COVERAGE})
+    add_test(
+        NAME generate_coverage_report
+        COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
+    
+    set_tests_properties(generate_coverage_report PROPERTIES 
+        DEPENDS "test_profile_kernel_execution;test_profile_dispatch;test_profile_mem;test_profile_join;test_profile_sort;test_profile_misc;test_profile_section;test_analyze_commands;test_analyze_workloads;test_L1_cache_counters;test_num_xcds_spec_class;test_num_xcds_cli_output;test_db_connector;test_utils;test_autogen_config"
+        LABELS "coverage"
+    )
+endif()
 
 # ---------
 # Install

@@ -1,0 +1,75 @@
+name: CDash Coverage Upload
+
+on:
+  push:
+    branches: [ amd-mainline, release/** ]
+    paths:
+      - 'coverage/mainline-coverage-latest.xml'
+
+concurrency:
+  group: cdash-upload-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  upload-coverage:
+    runs-on: ubuntu-latest
+    name: Upload Coverage to CDash
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+          
+      - name: Check Coverage File Exists
+        run: |
+          if [ ! -f "coverage/mainline-coverage-latest.xml" ]; then
+            echo "ERROR: Coverage file not found!"
+            echo "Please run manual coverage generation before promotion"
+            echo "Use: ./utils/generate_coverage.sh"
+            exit 1
+          fi
+          
+          if [ $(find coverage/mainline-coverage-latest.xml -mtime -7 | wc -l) -eq 0 ]; then
+            echo "WARNING: Coverage file is older than 7 days"
+            echo "Consider regenerating coverage before promotion"
+          fi
+          
+          COVERAGE_INFO=$(python3 -c "
+          import xml.etree.ElementTree as ET
+          try:
+              tree = ET.parse('coverage/mainline-coverage-latest.xml')
+              root = tree.getroot()
+              line_rate = float(root.get('line-rate', 0)) * 100
+              print(f'{line_rate:.1f}%')
+          except Exception as e:
+              print(f'Error parsing coverage: {e}')
+              exit(1)
+          ")
+          
+          echo "Line Coverage: $COVERAGE_INFO"
+          echo "COVERAGE_INFO=$COVERAGE_INFO" >> $GITHUB_ENV
+          
+      - name: Upload to CDash
+        run: |
+          GIT_SHA_SHORT=$(git rev-parse --short HEAD)
+          BRANCH_NAME=${GITHUB_REF#refs/heads/}
+          
+          python3 utils/run-ci.py \
+            --coverage-file "coverage/mainline-coverage-latest.xml" \
+            --build-name "${BRANCH_NAME}-${GIT_SHA_SHORT}-$(date +%Y%m%d)" \
+            --mode "Nightly" \
+            --site "Promotion-Upload" \
+            --project-name "rocprofiler-compute"
+            
+      - name: Summary
+        run: |
+          echo "## CDash Upload Complete!" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY  
+          echo "- **Line Coverage**: ${{ env.COVERAGE_INFO }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: $(git rev-parse --short HEAD)" >> $GITHUB_STEP_SUMMARY
+          echo "- **CDash Project**: rocprofiler-compute" >> $GITHUB_STEP_SUMMARY
