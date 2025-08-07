@@ -80,6 +80,8 @@ application's profiling data:
    Data types can be stacked- for example, "--roofline-data-type FP32 FP64 I32" would display one PDF with FP32 and FP64 stacked, and one PDF with INT32.
    Default roofline data type plotted is FP32.
 
+   See :ref:`roofline-Analysis-options` for more information about Roofline and its usage in analysis mode.
+
 #. Top Stats (Top Kernel Statistics)
 #. System Info
 #. System Speed-of-Light
