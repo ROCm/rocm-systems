@@ -84,23 +84,23 @@ build_pack(spm_parameter_pack&          pack,
 
     if(!pack.valid()) return false;
 
-    auto pool         = std::make_shared<hsa::SPMMemoryPool>();
-    pool->allocate_fn = [](hsa_amd_memory_pool_t, size_t size, uint32_t, void** ptr) {
+    auto pool        = hsa::SPMMemoryPool{};
+    pool.allocate_fn = [](hsa_amd_memory_pool_t, size_t size, uint32_t, void** ptr) {
         *ptr = malloc(size);
         return HSA_STATUS_SUCCESS;
     };
-    pool->allow_access_fn = [](uint32_t, const hsa_agent_t*, const uint32_t*, const void*) {
+    pool.allow_access_fn = [](uint32_t, const hsa_agent_t*, const uint32_t*, const void*) {
         return HSA_STATUS_SUCCESS;
     };
-    pool->free_fn = [](void* ptr) {
+    pool.free_fn = [](void* ptr) {
         free(ptr);
         return HSA_STATUS_SUCCESS;
     };
-    pool->fill_fn = [](void* ptr, uint32_t value, size_t size) {
+    pool.fill_fn = [](void* ptr, uint32_t value, size_t size) {
         memset(ptr, value, size * sizeof(uint32_t));
         return HSA_STATUS_SUCCESS;
     };
-    pool->api_copy_fn = [](void* dst, const void* src, size_t size) {
+    pool.api_copy_fn = [](void* dst, const void* src, size_t size) {
         memcpy(dst, src, size);
         return HSA_STATUS_SUCCESS;
     };

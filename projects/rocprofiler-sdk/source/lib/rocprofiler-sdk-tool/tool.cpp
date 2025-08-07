@@ -2201,6 +2201,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         for(auto agent : get_gpu_agents())
         {
+            if(agent->gpu_index != 0) continue;
+
             std::vector<rocprofiler_counter_id_t> expected_counters;
 
             for(const auto& citr : gpu_agents_counter_info.at(agent->id))

@@ -27,7 +27,7 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
 #include <unordered_map>

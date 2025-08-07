@@ -24,6 +24,7 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
@@ -46,20 +47,6 @@ class ThreadTraceAQLPacketFactory;
 
 namespace hsa
 {
-#define HSA_AMD_INTERFACE_VERSION                                                                  \
-    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
-
-#if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 7, 0)
-constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
-#else
-constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
-#endif
-
-constexpr hsa_ext_amd_aql_pm4_packet_t null_amd_aql_pm4_packet = {
-    .header            = 0,
-    .pm4_command       = {0},
-    .completion_signal = {.handle = 0}};
-
 struct AQLMemoryPool
 {
     using desc_t    = aqlprofile_buffer_desc_flags_t;
@@ -120,8 +107,8 @@ public:
     aqlprofile_handle_t handle{.handle = 0};
     bool                empty{true};
 
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
-    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
+    common::container::small_vector<rocprofiler_packet, 3> before_krn_pkt = {};
+    common::container::small_vector<rocprofiler_packet, 2> after_krn_pkt  = {};
 
     std::shared_ptr<AQLMemoryPool> pool{};
 };
@@ -199,7 +186,7 @@ public:
     void populate_before() override { before_krn_pkt.push_back(packet); };
     void populate_after() override{};
 
-    hsa_ext_amd_aql_pm4_packet_t packet;
+    hsa::rocprofiler_packet packet{};
 };
 
 class TraceControlAQLPacket : public AQLPacket
@@ -250,43 +237,69 @@ struct SPMMemoryPool : public AQLMemoryPool
     SPMMemoryPool(const class AgentCache& agent, const class AmdExtTable& ext, copy_fn_t copy_fn)
     : AQLMemoryPool(agent, ext, copy_fn){};
 
+    ~SPMMemoryPool() override
+    {
+        if(delete_packets_fn && handle.handle) delete_packets_fn(handle);
+    };
+
     explicit SPMMemoryPool() = default;
     hsa_status_t Alloc(void** ptr, size_t size, desc_t flags) override;
+
+    SPM::Dlsym::DeleteFn* delete_packets_fn{nullptr};
+    aqlprofile_handle_t   handle{};
 };
 
 class SPMPacket : public AQLPacket
 {
 public:
-    SPMPacket(std::shared_ptr<SPMMemoryPool>  _pool,
-              const aqlprofile_spm_profile_t& profile,
-              rocprofiler_agent_id_t          agent_id);
+    SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_id_t agent_id);
     ~SPMPacket() override;
 
-    void kfd_start(rocprofiler_spm_data_callback_t fn, rocprofiler_user_data_t userdata);
+    explicit SPMPacket(const SPMPacket& other)
+    : agent_id(other.agent_id)
+    , sym(other.sym)
+    {
+        packets  = other.packets;
+        data_fn  = other.data_fn;
+        is_valid = other.is_valid;
+        handle   = other.handle;
+        empty    = other.empty;
+        pool     = other.pool;
+        aql_desc = other.aql_desc;
+        desc     = other.desc;
+
+        container_desc_data = other.container_desc_data;
+    }
+
+    void kfd_start();
     void kfd_stop();
     bool Valid() const { return is_valid; }
 
-    const rocprofiler_agent_id_t agent_id;
-    rocprofiler_user_data_t      user_data{};
-    aqlprofile_spm_buffer_desc_t aql_desc{};
-    // build by packet_construt
+    const rocprofiler_agent_id_t    agent_id;
+    rocprofiler_spm_data_callback_t data_fn{};
+    rocprofiler_user_data_t         user_data{};
+    aqlprofile_spm_buffer_desc_t    aql_desc{};
+    // built by packet_construct
     rocprofiler_spm_descriptor_t desc{};
-    std::vector<char>            container_desc_data{};
 
-    void populate_before() override { before_krn_pkt.push_back(packets.start_packet); };
+    std::shared_ptr<std::vector<char>> container_desc_data{};
+
+    void populate_before() override;
     void populate_after() override;
+
+    const SPM::Dlsym sym{};
 
 private:
     static void aql_data_callback(aqlprofile_spm_buffer_handle_t, void*, size_t, int, void*);
 
-    aqlprofile_spm_aql_packets_t    packets{};
-    rocprofiler_spm_data_callback_t data_fn{};
+    aqlprofile_spm_aql_packets_t packets{};
 
     std::atomic<bool> running{false};
     bool              is_valid{false};
-
-    const SPM::Dlsym sym;
 };
 
+using ClientID = int64_t;
+using inst_pkt_t =
+    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, ClientID>, 4>;
 }  // namespace hsa
 }  // namespace rocprofiler

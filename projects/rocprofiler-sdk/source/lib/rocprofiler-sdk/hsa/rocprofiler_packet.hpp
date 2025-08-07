@@ -25,7 +25,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/common/container/small_vector.hpp"
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <hsa/hsa_ven_amd_loader.h>
@@ -34,10 +34,19 @@ namespace rocprofiler
 {
 namespace hsa
 {
-using ClientID = int64_t;
+#define HSA_AMD_INTERFACE_VERSION                                                                  \
+    ROCPROFILER_COMPUTE_VERSION(HSA_AMD_INTERFACE_VERSION_MAJOR, HSA_AMD_INTERFACE_VERSION_MINOR, 0)
 
-using inst_pkt_t =
-    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, ClientID>, 4>;
+#if HSA_AMD_INTERFACE_VERSION >= ROCPROFILER_COMPUTE_VERSION(1, 7, 0)
+constexpr auto hsa_amd_memory_pool_executable_flag = HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG;
+#else
+constexpr auto hsa_amd_memory_pool_executable_flag = (1 << 2);
+#endif
+
+constexpr hsa_ext_amd_aql_pm4_packet_t null_amd_aql_pm4_packet = {
+    .header            = 0,
+    .pm4_command       = {0},
+    .completion_signal = {.handle = 0}};
 
 union rocprofiler_packet
 {

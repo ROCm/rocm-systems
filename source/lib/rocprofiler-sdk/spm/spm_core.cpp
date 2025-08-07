@@ -75,8 +75,7 @@ SPMQueue::SPMQueue(spm_parameter_pack _params, const hsa::AgentCache& cache)
 : Queue(cache.get_hsa_agent())
 , params(std::move(_params))
 {
-    auto pool =
-        std::make_shared<hsa::SPMMemoryPool>(cache, get_ext(), get_core().hsa_memory_copy_fn);
+    auto pool = hsa::SPMMemoryPool{cache, get_ext(), get_core().hsa_memory_copy_fn};
     aql::SPMPacketFactory factory(*CHECK_NOTNULL(cache.get_rocp_agent()), params, pool);
     this->packet = factory.construct();
 }
@@ -89,7 +88,9 @@ SPMQueue::start()
     std::unique_lock<std::mutex> lk(mut);
     ROCP_FATAL_IF(!packet) << "SPM packet not initialized";
 
-    packet->kfd_start(params.data_fn, params.user_data);
+    packet->data_fn   = params.data_fn;
+    packet->user_data = params.user_data;
+    packet->kfd_start();
     return SubmitAndSignalLast(packet->before_krn_pkt);
 }
 
@@ -167,17 +168,6 @@ SPMAgentManager::stop_context()
     }
 }
 
-SPMDispatchFactory::SPMDispatchFactory(spm_parameter_pack _params, const hsa::AgentCache& cache)
-: params(std::move(_params))
-{
-    auto pool =
-        std::make_shared<hsa::SPMMemoryPool>(cache, get_ext(), get_core().hsa_memory_copy_fn);
-    aql::SPMPacketFactory factory(*CHECK_NOTNULL(cache.get_rocp_agent()), params, pool);
-    this->packet = factory.construct();
-}
-
-SPMDispatchFactory::~SPMDispatchFactory() {}
-
 void
 SPMDispatchManager::resource_init()
 {
@@ -191,12 +181,15 @@ SPMDispatchManager::resource_init()
         if(params.find(id) == params.end()) continue;
         auto& pack = params.at(id);
 
-        auto factory = std::make_shared<SPMDispatchFactory>(
-            pack, *CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocp_agent)));
-        factories.push_back({id, factory});
+        auto pool =
+            hsa::SPMMemoryPool{*CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocp_agent)),
+                               get_ext(),
+                               get_core().hsa_memory_copy_fn};
+        aql::SPMPacketFactory factory(*rocp_agent, pack, pool);
+        auto                  packet = factory.construct();
 
-        auto& desc = CHECK_NOTNULL(factory->packet.get())->desc;
-        pack.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC, &desc, pack.user_data);
+        pack.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC, &packet->desc, pack.user_data);
+        packets.push_back({id, std::move(packet)});
     }
 }
 
@@ -204,7 +197,7 @@ void
 SPMDispatchManager::resource_deinit()
 {
     auto lk = std::unique_lock{agent_mut};
-    factories.clear();
+    packets.clear();
 }
 
 void
@@ -248,16 +241,6 @@ SPMDispatchManager::stop_context()
     bActiveCtx.store(false);
     CHECK_NOTNULL(hsa::get_queue_controller())->disable_serialization();
 
-    {
-        constexpr uint64_t timeout_minimum = 1000;
-
-        auto       lk      = std::unique_lock{agent_mut};
-        const auto timeout = std::chrono::milliseconds(std::max(timeout_minimum, this->timeout_ms));
-
-        cv.wait_for(lk, timeout, [this]() { return this->pending_dispatches.load() == 0; });
-        ROCP_ERROR_IF(pending_dispatches.load()) << "SPM timeout reached!";
-    }
-
     client.wlock([&](auto& client_id) {
         if(!client_id) return;
 
@@ -265,6 +248,25 @@ SPMDispatchManager::stop_context()
         CHECK_NOTNULL(hsa::get_queue_controller())->remove_callback(*client_id);
         client_id = std::nullopt;
     });
+}
+
+bool
+AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
+{
+    auto* packet     = CHECK_NOTNULL(static_cast<hsa::SPMPacket*>(data));
+    auto& before_krn = packet->before_krn_pkt;
+
+    if(before_krn.size() < 2)
+    {
+        ROCP_ERROR << "Invalid before_krn packet" << std::endl;
+        return true;
+    }
+
+    packet->kfd_start();
+
+    get_core().hsa_signal_destroy_fn(before_krn.at(0).barrier_and.completion_signal);
+    get_core().hsa_signal_store_screlease_fn(before_krn.at(1).barrier_and.dep_signal[0], 0);
+    return false;
 }
 
 /**
@@ -279,38 +281,46 @@ SPMDispatchManager::pre_kernel_call(const hsa::Queue&         queue,
                                     const context::correlation_id* /* corr_id */)
 {
     auto agent_id = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-    std::shared_ptr<SPMDispatchFactory> factory = nullptr;
-    {
+
+    auto packet = [&]() {
         auto lk = std::shared_lock{agent_mut};
-        for(auto& [id, fact] : factories)
-            if(id == agent_id) factory = fact;
-    }
+        for(auto& [id, pkt] : packets)
+            if(id == agent_id && pkt != nullptr) return std::make_unique<hsa::SPMPacket>(*pkt);
+        return std::unique_ptr<hsa::SPMPacket>{nullptr};
+    }();
 
-    if(!factory || !bActiveCtx) return {nullptr, false};
+    if(!packet || !bActiveCtx) return {nullptr, false};
 
-    auto control_flags = factory->params.dispatch_fn(agent_id,
-                                                     queue.get_id(),
-                                                     kernel_id,
-                                                     dispatch_id,
-                                                     factory->params.config_userdata,
-                                                     user_data);
+    auto& param = params.at(agent_id);
+
+    auto control_flags = param.dispatch_fn(
+        agent_id, queue.get_id(), kernel_id, dispatch_id, param.config_userdata, user_data);
 
     if(control_flags == 0) return {nullptr, true};
-
-    pending_dispatches.fetch_add(1);
-
-    std::unique_lock<std::mutex> lk(factory->mut);
-    if(!factory->packet) factory->cv.wait(lk, [factory]() { return factory->packet != nullptr; });
-
-    auto packet     = std::move(factory->packet);
-    factory->packet = nullptr;
 
     packet->clear();
     packet->populate_before();
     packet->populate_after();
 
-    packet->kfd_start(factory->params.data_fn, *user_data);
-    factory->cv.notify_all();
+    ROCP_FATAL_IF(packet->before_krn_pkt.size() < 3) << "SPM Requires at least 3 packets";
+
+    auto& signal_to_start_kfd    = packet->before_krn_pkt.at(0).barrier_and.completion_signal;
+    auto& signal_kfd_has_started = packet->before_krn_pkt.at(1).barrier_and.dep_signal[0];
+
+    queue.create_signal(0, &signal_to_start_kfd);
+    queue.create_signal(0, &signal_kfd_has_started);
+
+    get_core().hsa_signal_store_screlease_fn(signal_kfd_has_started, -1);
+    get_core().hsa_signal_store_screlease_fn(signal_to_start_kfd, 0);
+
+    auto status = get_ext().hsa_amd_signal_async_handler_fn(
+        signal_to_start_kfd, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, packet.get());
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "Error: hsa_amd_signal_async_handler failed with error code " << status
+        << " :: " << hsa::get_hsa_status_string(status);
+
+    packet->user_data = *user_data;
+    packet->data_fn   = param.data_fn;
     return {std::move(packet), true};
 }
 
@@ -324,22 +334,7 @@ SPMDispatchManager::post_kernel_call(SPMDispatchManager::inst_pkt_t& aql,
         auto* pkt = dynamic_cast<hsa::SPMPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
-        pkt->kfd_stop();
-        pending_dispatches.fetch_sub(1);
-        this->cv.notify_all();
-
-        for(auto& [id, factory] : factories)
-            if(factory && pkt->agent_id == id)
-            {
-                auto        lk = std::unique_lock{factory->mut};
-                const auto& p  = factory->params;
-
-                p.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_DISPATCH_END, nullptr, pkt->user_data);
-
-                aql_pkt.first.release();
-                factory->packet.reset(pkt);
-                factory->cv.notify_all();
-            }
+        get_core().hsa_signal_destroy_fn(pkt->before_krn_pkt.at(1).barrier_and.dep_signal[0]);
     }
 }
 

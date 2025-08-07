@@ -448,14 +448,14 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     spm_options.add_argument(
         "--spm-timeout-ms",
-        help="Timeout for SPM, in ms. Larger values may slow down the application, while smaller values may drop data. Default = 100.",
+        help="Timeout for SPM, in ms. Larger values may slow down the application, while smaller values may drop data. Default = 30.",
         default=None,
         type=int,
     )
 
     spm_options.add_argument(
         "--spm-frequency-sclk",
-        help="SCLK Sample frequency, in Hz. Default: 100 KHz",
+        help="SCLK Sample frequency, in Hz. Default: 500 KHz",
         default=None,
         type=int,
     )

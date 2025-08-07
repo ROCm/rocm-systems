@@ -133,19 +133,18 @@ class SPMPacketFactory
     using parameter_pack = SPM::spm_parameter_pack;
 
 public:
-    SPMPacketFactory(const rocprofiler_agent_t&          agent,
-                     const parameter_pack&               pack,
-                     std::shared_ptr<hsa::SPMMemoryPool> _pool);
+    SPMPacketFactory(const rocprofiler_agent_t& agent,
+                     const parameter_pack&      pack,
+                     const hsa::SPMMemoryPool&  _pool);
 
     std::unique_ptr<hsa::SPMPacket>          construct();
     std::vector<SPM::spm_counter_instance_t> id_map{};
 
 private:
     rocprofiler_agent_id_t                  agent_id{};
-    aqlprofile_spm_profile_t                profile{};
     std::vector<aqlprofile_pmc_event_t>     events{};
     std::vector<aqlprofile_spm_parameter_t> params{};
-    std::shared_ptr<hsa::SPMMemoryPool>     pool{};
+    hsa::SPMMemoryPool                      _pool{};
 };
 
 }  // namespace aql

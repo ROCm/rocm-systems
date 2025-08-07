@@ -99,8 +99,8 @@ public:
     thread_trace_parameter_pack  params;
     const rocprofiler_agent_id_t agent_id;
 
-    [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
-                                                       bool                          bWait) const;
+    [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa::rocprofiler_packet* packet,
+                                                       bool                     bWait) const;
 
     template <typename VecType>
     [[nodiscard]] std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
