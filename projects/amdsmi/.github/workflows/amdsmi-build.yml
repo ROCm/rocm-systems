@@ -23,7 +23,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
-      max-parallel: 10 # This can be in parallel, since no tests are running (see comment about driver reloads)
+      max-parallel: 10
       matrix:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
@@ -137,7 +137,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
-      max-parallel: 1 # Need to tests to run one-at-a-time to avoid conflicts with driver reloads
+      max-parallel: 10
       matrix:
         os: [Ubuntu20, Ubuntu22, Debian10]
     container:
@@ -256,7 +256,7 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
-          
+
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
@@ -359,7 +359,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
-      max-parallel: 10 # This can be in parallel, since no tests are running (see comment about driver reloads)
+      max-parallel: 10
       matrix:
         os:
           - SLES
@@ -561,7 +561,7 @@ jobs:
       - ${{ vars.RUNNER_TYPE }}
     continue-on-error: true
     strategy:
-      max-parallel: 1 # Need to tests to run one-at-a-time to avoid conflicts with driver reloads
+      max-parallel: 10
       matrix:
         os:
           - SLES
@@ -739,7 +739,7 @@ jobs:
           echo 'Running AMDSMI tests'
           cd /opt/rocm/share/amd_smi/tests
           source amdsmitst.exclude
-          
+
           AMDSMI_RETRIES=3
           for attempt in $(seq 1 $AMDSMI_RETRIES); do
             echo "AMDSMI test attempt $attempt for ${{ matrix.os }}..."
