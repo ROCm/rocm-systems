@@ -1,7 +1,31 @@
 cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+
+# Set up ROCm paths before declaring HIP language
+if(NOT DEFINED ROCM_PATH)
+    if(DEFINED ENV{ROCM_PATH})
+        set(ROCM_PATH $ENV{ROCM_PATH})
+    else()
+        set(ROCM_PATH "/opt/rocm")
+    endif()
+endif()
+
+# Set HIP compiler path before project declaration
+if(NOT CMAKE_HIP_COMPILER)
+    find_program(
+        amdclangpp_EXECUTABLE
+        NAMES amdclang++
+        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+        PATH_SUFFIXES bin llvm/bin NO_CACHE)
+    mark_as_advanced(amdclangpp_EXECUTABLE)
+
+    if(amdclangpp_EXECUTABLE)
+        set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
+    endif()
+endif()
+
 project(Aqlprofile_v2_tests LANGUAGES C CXX HIP)
 set(CMAKE_CXX_STANDARD 17)
-
 
 if(NOT DEFINED AQLPROFILE_TARGET)
     find_library(
@@ -33,20 +57,6 @@ find_file(
     NO_DEFAULT_PATH REQUIRED)
 get_filename_component(HSA_RUNTIME_INC_PATH ${HSA_H} DIRECTORY)
 include_directories(${HSA_RUNTIME_INC_PATH})
-
-if(NOT CMAKE_HIP_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
-    mark_as_advanced(amdclangpp_EXECUTABLE)
-
-    if(amdclangpp_EXECUTABLE)
-        set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
-    endif()
-endif()
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
