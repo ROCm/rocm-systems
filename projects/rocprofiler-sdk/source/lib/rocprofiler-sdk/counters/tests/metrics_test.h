@@ -549,7 +549,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "Total read requests with UC mtype from this TCP to all TCCs"},
       {"TCC_EA0_RDREQ_DRAM",
        "TCC",
-       "43",
+       "102",
        "<None>",
        "Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC)."},
       {"TCC_EA0_WRREQ_IO_CREDIT_STALL",
@@ -1464,7 +1464,12 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "TCC",
        "319",
        "<None>",
-       "Number of cycles client191 sent a request to this TCC."}}}};
+       "Number of cycles client191 sent a request to this TCC."},
+      {"TCC_BUBBLE",
+       "TCC",
+       "56",
+       "<None>",
+       "Number of 128-byte read requests sent to EA."}}}};
 
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> derived_gfx908 =
     {{"gfx908",
@@ -2240,4 +2245,9 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "reduce(TCC_NORMAL_WRITEBACK,sum)",
         "Number of writebacks due to requests that are not writeback requests. Sum over TCC "
-        "instances."}}}};
+        "instances."},
+       {"TCC_BUBBLE_sum",
+        "",
+        "",
+        "reduce(TCC_BUBBLE,sum)",
+        "Number of 128-byte read requests sent to EA. Sum over all TCC instances."}}}};

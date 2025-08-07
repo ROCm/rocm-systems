@@ -11,8 +11,12 @@ Panel Config:
       instructions, averaged over the lifetime of the kernel. Calculated as the ratio
       of the total number of cycles spent by the scheduler issuing LDS instructions
       over the total CU cycles.
+    Theoretical Bandwidth Utilization: Indicates the maximum amount of bytes that
+      could have been loaded from, stored to, or atomically updated in the LDS divided
+      as percentage of theoretical peak. Does not take into account the execution
+      mask of the wavefront when the instruction was executed.
     Theoretical Bandwidth: Indicates the maximum amount of bytes that could have been
-      loaded from, stored to, or atomically updated in the LDS per normalization unit.
+      loaded from, stored to, or atomically updated in the LDS divided by total duration.
       Does not take into account the execution mask of the wavefront when the instruction
       was executed.
     Bank Conflict Rate: Indicates the percentage of active LDS cycles that were spent
@@ -58,7 +62,7 @@ Panel Config:
         Access Rate:
           value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: Pct of Peak
-        Theoretical Bandwidth (% of Peak):
+        Theoretical Bandwidth Utilization:
           value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
             / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
           unit: Pct of Peak
@@ -116,12 +120,12 @@ Panel Config:
           units: Gbps
         Theoretical Bandwidth:
           avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / $denom))
+            / (End_Timestamp - Start_Timestamp)))
           min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / $denom))
+            / (End_Timestamp - Start_Timestamp)))
           max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-            / $denom))
-          unit: (Bytes  + $normUnit)
+            / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps
         LDS Latency:
           avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else
             None))

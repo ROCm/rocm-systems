@@ -92,9 +92,9 @@ if(CHECK_PYTHON_DEPS)
         if(${ARGV0} STREQUAL "pyyaml")
             set(PACKAGE "yaml")
         endif()
-        # Skip check for textual-fspicker
-        if(${package} STREQUAL "textual-fspicker")
-            message(STATUS "Skipping check for textual-fspicker")
+        # Skip check for textual_fspicker
+        if(${package} STREQUAL "textual_fspicker")
+            message(STATUS "Skipping check for textual_fspicker")
             return()
         endif()
         execute_process(

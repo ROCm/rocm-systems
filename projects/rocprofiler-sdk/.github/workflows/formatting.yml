@@ -1,16 +1,15 @@
 
-name: rocprofiler-sdk Formatting
+name: Formatting
 
 on:
   workflow_dispatch:
   pull_request:
-    paths:
-      - 'projects/rocprofiler-sdk/**'
-      - '!projects/rocprofiler-sdk/.github/workflows/pull_*.yml'
-      - '!projects/rocprofiler-sdk/.github/workflows/linting.yml'
-      - '!projects/rocprofiler-sdk/.github/workflows/markdown_lint.yml'
-      - '!projects/rocprofiler-sdk/*.md'
-      - '!projects/rocprofiler-sdk/**/README.md'
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
+      - '.github/workflows/linting.yml'
+      - '.github/workflows/markdown_lint.yml'
+      - '*.md'
+      - '**/README.md'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -18,14 +17,12 @@ concurrency:
 
 jobs:
   cmake:
-    runs-on: ubuntu-22.04
+    runs-on: AMD-ROCm-Internal-dev1
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -53,15 +50,13 @@ jobs:
         fi
 
   source:
-    runs-on: ubuntu-latest
+    runs-on: AMD-ROCm-Internal-dev1
     container: rocm/dev-ubuntu-22.04:latest
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Install dependencies
       run: |
@@ -91,7 +86,7 @@ jobs:
         fi
 
   python:
-    runs-on: ubuntu-22.04
+    runs-on: AMD-ROCm-Internal-dev1
     strategy:
       matrix:
         python-version: ['3.10']
@@ -100,8 +95,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Extract branch name
       shell: bash
@@ -121,7 +114,6 @@ jobs:
 
     - name: black format
       run: |
-        cd projects/rocprofiler-sdk
         black .
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Python code not formatted. Run black...\n"
@@ -133,12 +125,10 @@ jobs:
         fi
 
   missing-new-line:
-    runs-on: ubuntu-22.04
+    runs-on: AMD-ROCm-Internal-dev1
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        sparse-checkout: projects/rocprofiler-sdk
 
     - name: Find missing new line
       shell: bash

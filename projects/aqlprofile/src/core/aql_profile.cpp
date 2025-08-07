@@ -787,7 +787,7 @@ PUBLIC_API hsa_status_t hsa_ven_amd_aqlprofile_att_marker(
   pm4_builder::CmdBuffer commands;
 
   // Generate start commands
-  auto status = sqtt_builder->InsertMarker(&commands, data, channel);
+  auto status = sqtt_builder->InsertCodeobjMarker(&commands, data, channel);
   if (status != HSA_STATUS_SUCCESS) return status;
   aql_profile::descriptor_t& cmdbuffer = profile->command_buffer;
 

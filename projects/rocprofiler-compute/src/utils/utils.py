@@ -1229,19 +1229,13 @@ def detect_roofline(mspec):
             console_error("roofline", msg)
 
     # Must be a valid RHEL machine
-    elif rocm_ver == 6 and (
+    elif (
         rhel_distro == "platform:el8"
         or rhel_distro == "platform:al8"
         or rhel_distro == "platform:el9"
         or rhel_distro == "platform:el10"
     ):
-        # RHEL8 supported up to ROCm6
         distro = "platform:el8"
-    elif rocm_ver == 7 and (
-        rhel_distro == "platform:el9" or rhel_distro == "platform:el10"
-    ):
-        # ROCm7 supports RHEL9 and above
-        distro = "platform:el9"
 
     # Must be a valid SLES machine
     elif (
@@ -1270,7 +1264,6 @@ def mibench(args, mspec):
 
     distro_map = {
         "platform:el8": "rhel8",
-        "platform:el9": "rhel9",
         "15.6": "sles15sp6",
         "22.04": "ubuntu22_04",
     }
