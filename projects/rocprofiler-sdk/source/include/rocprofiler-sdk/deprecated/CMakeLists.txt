@@ -23,7 +23,7 @@
 #
 # headers containing deprecated functions, types, etc.
 #
-set(ROCPROFILER_DEPRECATED_HEADER_FILES counters.h profile_config.h)
+set(ROCPROFILER_DEPRECATED_HEADER_FILES counters.h profile_config.h counting_services.h)
 
 install(
     FILES ${ROCPROFILER_DEPRECATED_HEADER_FILES}
