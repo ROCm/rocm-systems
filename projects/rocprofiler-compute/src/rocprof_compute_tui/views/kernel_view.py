@@ -55,8 +55,8 @@ class KernelView(Container):
 
     def __init__(self, config_path: Optional[str] = None):
         super().__init__(id="kernel-view")
-        self.dfs = {}
-        self.top_kernels = {}
+        self.kernel_to_df_dict = {}
+        self.top_kernel_to_df_list = []
         self.current_selection = None
 
         self.config_path = config_path or (
@@ -82,27 +82,27 @@ class KernelView(Container):
             # empty on init
             pass
 
-    def update_results(self, per_kernel_dfs, top_kernels) -> None:
-        self.dfs = per_kernel_dfs
-        self.top_kernels = top_kernels
+    def update_results(self, kernel_to_df_dict, top_kernel_to_df_list) -> None:
+        self.kernel_to_df_dict = kernel_to_df_dict
+        self.top_kernel_to_df_list = top_kernel_to_df_list
 
         top_container = self.query_one("#top-container", VerticalScroll)
         top_container.remove_children()
 
-        if not self.top_kernels:
+        if not self.top_kernel_to_df_list:
             top_container.mount(Label("No kernels available", classes="placeholder"))
             return
 
         # Build and mount components
         self.new_perf_metric()
         # build header section
-        keys = self.top_kernels[0].keys()
+        keys = self.top_kernel_to_df_list[0].keys()
         header_text = " | ".join(f"{key:25}" for key in keys)
         top_container.mount(Label(header_text, classes="kernel-table-header"))
 
         # build selector section
         radio_buttons = []
-        for i, kernel in enumerate(self.top_kernels):
+        for i, kernel in enumerate(self.top_kernel_to_df_list):
             row_text = " | ".join(
                 f"{str(kernel.get(key, 'N/A'))[:18]:25}" for key in keys
             )
@@ -112,7 +112,7 @@ class KernelView(Container):
         top_container.mount(RadioSet(*radio_buttons))
 
         # build analysis section
-        self.current_selection = self.top_kernels[0]["Kernel_Name"]
+        self.current_selection = self.top_kernel_to_df_list[0]["Kernel_Name"]
         self.update_bottom_content()
 
     def update_view(self, message: str, log_level: str) -> None:
@@ -126,14 +126,14 @@ class KernelView(Container):
     def new_perf_metric(self):
         new_metrics = ["VGPRs", "Grid Size", "Workgroup Size"]
         for new_metric in new_metrics:
-            for i, kernel in enumerate(self.top_kernels):
-                df_path = self.dfs[kernel["Kernel_Name"]]["7. Wavefront"][
+            for i, kernel in enumerate(self.top_kernel_to_df_list):
+                df_path = self.kernel_to_df_dict[kernel["Kernel_Name"]]["7. Wavefront"][
                     "7.1 Wavefront Launch Stats"
                 ]["df"]
                 metric_avg = (
                     df_path[df_path["Metric"] == new_metric]["Avg"].iloc[0].item()
                 )
-                self.top_kernels[i][new_metric] = metric_avg
+                self.top_kernel_to_df_list[i][new_metric] = metric_avg
 
         """
         header_order = [
@@ -168,7 +168,9 @@ class KernelView(Container):
             Label("Toggle kernel selection to view detailed analysis.")
         )
 
-        if not (self.current_selection and self.current_selection in self.dfs):
+        if not (
+            self.current_selection and self.current_selection in self.kernel_to_df_dict
+        ):
             bottom_container.mount(
                 Label(
                     f"No data available for kernel: {self.current_selection}",
@@ -183,7 +185,7 @@ class KernelView(Container):
 
         try:
             sections = build_all_sections(
-                self.dfs[self.current_selection], self.config_path
+                self.kernel_to_df_dict[self.current_selection], self.config_path
             )
             for section in sections:
                 bottom_container.mount(section)

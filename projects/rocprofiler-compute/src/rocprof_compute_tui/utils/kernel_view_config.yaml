@@ -19,8 +19,7 @@ sections:
     collapsed: true
     class: "block-section"
     subsections:
-      - title: "Block Analysis Sections"
-        auto_generate_from_data: true
+      - arch_config_data: true
         exclude_keys:
           - "0. Top Stats"
           - "1. System Info"

@@ -52,8 +52,8 @@ class MainView(Horizontal):
     """Main view layout for the application."""
 
     selected_path = reactive(None)
-    per_kernel_dfs = reactive({})
-    top_kernels = reactive([])
+    kernel_to_df_dict = reactive({})
+    top_kernel_to_df_list = reactive([])
 
     def __init__(self):
         super().__init__(id="main-container")
@@ -104,8 +104,8 @@ class MainView(Horizontal):
 
     @work(thread=True)
     def run_analysis(self) -> None:
-        self.per_kernel_dfs = {}
-        self.top_kernels = []
+        self.kernel_to_df_dict = {}
+        self.top_kernel_to_df_list = []
 
         if not self.selected_path:
             try:
@@ -146,10 +146,10 @@ class MainView(Horizontal):
             self.app.load_soc_specs(sys_info)
             analyzer.set_soc(self.app.soc)
             analyzer.pre_processing()
-            self.per_kernel_dfs = analyzer.run_kernel_analysis()
-            self.top_kernels = analyzer.run_top_kernel()
+            self.kernel_to_df_dict = analyzer.run_kernel_analysis()
+            self.top_kernel_to_df_list = analyzer.run_top_kernel()
 
-            if not self.per_kernel_dfs or not self.top_kernels:
+            if not self.kernel_to_df_dict or not self.top_kernel_to_df_list:
                 try:
                     self.app.call_from_thread(
                         lambda: self.query_one("#kernel-view").update_view(
@@ -162,6 +162,7 @@ class MainView(Horizontal):
             else:
                 self.app.call_from_thread(self.refresh_results)
                 self.logger.info("Kernel Analysis completed successfully")
+                # self.logger.info(f"{self.kernel_to_df_dict}")
 
         except Exception as e:
             import traceback
@@ -180,8 +181,10 @@ class MainView(Horizontal):
     def refresh_results(self) -> None:
         try:
             kernel_view = self.query_one("#kernel-view")
-            if kernel_view and self.per_kernel_dfs and self.top_kernels:
-                kernel_view.update_results(self.per_kernel_dfs, self.top_kernels)
+            if kernel_view and self.kernel_to_df_dict and self.top_kernel_to_df_list:
+                kernel_view.update_results(
+                    self.kernel_to_df_dict, self.top_kernel_to_df_list
+                )
                 self.logger.success("Results displayed successfully.")
             else:
                 self.logger.error("Kernel view not found or no data available")
@@ -189,7 +192,7 @@ class MainView(Horizontal):
             self.logger.error(f"Error refreshing results: {str(e)}")
 
     def refresh_view(self) -> None:
-        if self.top_kernels:
+        if self.top_kernel_to_df_list:
             self.refresh_results()
         else:
             self.logger.warning("No data available for refresh")

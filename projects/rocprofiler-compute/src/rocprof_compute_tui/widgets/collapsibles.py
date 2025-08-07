@@ -49,11 +49,16 @@ def create_table(df: pd.DataFrame) -> DataTable:
     return table
 
 
-def create_widget_from_data(df: pd.DataFrame, tui_style: str = None):
+def create_widget_from_data(df: pd.DataFrame, tui_style: str = None, context: str = ""):
     if df is None or df.empty:
-        return Label(f"Data not available for display in {tui_style}.")
+        return Label(
+            f"Data not available{f' for {context}' if context else ''}", classes="warning"
+        )
 
     match tui_style:
+        # TODO: implement tui_style == "roofline"
+        # case "roofline":
+        #     return Roofline(df)
         case None:
             return create_table(df)
         case "mem_chart":
@@ -81,35 +86,24 @@ def load_config(config_path) -> Dict[str, Any]:
 
 
 def build_section_from_config(
-    section_config: Dict[str, Any], dfs: Dict[str, Any]
+    dfs: Dict[str, Any], section_config: Dict[str, Any]
 ) -> Collapsible:
     title = section_config["title"]
     collapsed = section_config.get("collapsed", True)
 
-    if "subsections" in section_config:
-        children = []
-        for subsection_config in section_config["subsections"]:
-            subsection_title = subsection_config["title"]
-            subsection_collapsed = subsection_config.get("collapsed", True)
-            tui_style = subsection_config.get("tui_style")
-
-            # Handle auto-generated sections from data
-            if subsection_config.get("auto_generate_from_data", False):
+    children = []
+    for subsection_config in section_config["subsections"]:
+        # Handle arch_config_data
+        if subsection_config.get("arch_config_data", False):
+            if isinstance(dfs, dict):
                 exclude_keys = subsection_config.get("exclude_keys", [])
-                subsection_children = []
-
-                if isinstance(dfs, dict):
-                    for section_name, subsections in dfs.items():
-                        if section_name in exclude_keys or not isinstance(
-                            subsections, dict
-                        ):
-                            continue
-
+                for section_name, subsections in dfs.items():
+                    if section_name not in exclude_keys and isinstance(subsections, dict):
                         kernel_children = []
                         for subsection_name, data in subsections.items():
                             if isinstance(data, dict) and "df" in data:
                                 widget = create_widget_from_data(
-                                    data["df"], data.get("tui_style")
+                                    data["df"], data.get("tui_style"), subsection_name
                                 )
                                 kernel_children.append(
                                     Collapsible(
@@ -118,85 +112,34 @@ def build_section_from_config(
                                 )
 
                         if kernel_children:
-                            subsection_children.append(
+                            children.append(
                                 Collapsible(
                                     *kernel_children, title=section_name, collapsed=True
                                 )
                             )
+        else:
+            # Handle data_path
+            subsection_title = subsection_config.get("title", "Untitled")
+            subsection_collapsed = subsection_config.get("collapsed", True)
+            tui_style = subsection_config.get("tui_style")
+            data_path = subsection_config["data_path"]
 
-                subsection = Collapsible(
-                    *subsection_children,
-                    title=subsection_title,
-                    collapsed=subsection_collapsed,
+            df = dfs.get(data_path[0], {}).get(data_path[1], {})
+            df = df.get("df") if isinstance(df, dict) else None
+            if df is not None and tui_style is None:
+                tui_style = df.get("tui_style")
+
+            widgets = [
+                create_widget_from_data(df, tui_style, f"path {' -> '.join(data_path)}")
+            ]
+
+            children.append(
+                Collapsible(
+                    *widgets, title=subsection_title, collapsed=subsection_collapsed
                 )
+            )
 
-            # Handle data-driven widgets
-            elif "data_path" in subsection_config:
-                data_path = subsection_config["data_path"]
-
-                # Get data from path
-                current = dfs
-                df = None
-                for key in data_path:
-                    if isinstance(current, dict) and key in current:
-                        current = current[key]
-                    else:
-                        break
-                else:
-                    if isinstance(current, dict) and "df" in current:
-                        df = current["df"]
-                        if tui_style is None:
-                            tui_style = current.get("tui_style")
-
-                if df is None:
-                    subsection = Collapsible(
-                        Label(
-                            f"{subsection_title} data not available: Path {' -> '.join(data_path)} not found",
-                            classes="warning",
-                        ),
-                        title=subsection_title,
-                        collapsed=subsection_collapsed,
-                    )
-                else:
-                    widget = create_widget_from_data(df, tui_style)
-
-                    widgets = []
-                    if "header_label" in subsection_config:
-                        header_class = subsection_config.get("header_class", "")
-                        widgets.append(
-                            Label(subsection_config["header_label"], classes=header_class)
-                        )
-                    widgets.append(widget)
-
-                    subsection = Collapsible(
-                        *widgets, title=subsection_title, collapsed=subsection_collapsed
-                    )
-
-            elif tui_style == "roofline":
-                if dfs.get("4. Roofline"):
-                    subsection = Collapsible(
-                        RooflinePlot(dfs),
-                        title=subsection_title,
-                        collapsed=subsection_collapsed,
-                    )
-                else:
-                    continue
-            else:
-                subsection = Collapsible(
-                    Label(f"No data or style configuration for {subsection_title}"),
-                    title=subsection_title,
-                    collapsed=subsection_collapsed,
-                )
-
-            children.append(subsection)
-
-    else:
-        children = [Label("No configuration provided for this section")]
-
-    # Create the main collapsible
-    collapsible = Collapsible(*children, title=title, collapsed=collapsed)
-
-    return collapsible
+    return Collapsible(*children, title=title, collapsed=collapsed)
 
 
 def build_all_sections(dfs: Dict[str, Any], config_path) -> List[Collapsible]:
@@ -204,7 +147,7 @@ def build_all_sections(dfs: Dict[str, Any], config_path) -> List[Collapsible]:
     sections = []
 
     for section_config in config["sections"]:
-        section = build_section_from_config(section_config, dfs)
+        section = build_section_from_config(dfs, section_config)
         sections.append(section)
 
     return sections
