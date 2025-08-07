@@ -1,0 +1,45 @@
+#!/bin/bash
+do_update_alternatives(){
+    # skip update if program doesn't exist
+    command -v update-alternatives >/dev/null || return 0
+    binaries=(
+        rdcd
+        rdci
+    )
+
+    for i in "${binaries[@]}"
+    do
+        update-alternatives --remove "$i" $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/$i
+    done
+}
+
+stop_rdc() {
+    #stop RDC service if systemd exists and service is running
+    if [ -d /run/systemd/system ] && $( systemctl is-active --quiet rdc ); then
+        systemctl stop rdc
+    fi
+    return 0
+}
+
+rm_rdc_service() {
+    local LINK=@DISTRO_ROOT@/rdc.service
+    if [ -L $LINK ]; then
+       unlink $LINK
+    fi
+    return 0
+}
+
+reload_systemd() {
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+    fi
+    return 0
+}
+
+if [ "$1" -le 1 ]; then
+    # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
+    stop_rdc
+    rm_rdc_service
+    reload_systemd
+    do_update_alternatives
+fi

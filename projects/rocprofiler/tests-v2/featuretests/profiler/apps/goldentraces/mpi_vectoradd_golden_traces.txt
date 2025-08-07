@@ -1,0 +1,12 @@
+ROCProfilerV2: Collecting the following counters:
+- GRBM_COUNT
+Enabling Counter Collection
+ROCProfilerV2: Collecting the following counters:
+- GRBM_COUNT
+Enabling Counter Collection
+device count and rank is1: 1
+Rank Id: 0 | Device Id : 0 | Num Devices: 1
+Max error: 0.000000
+Max error: 0.000000
+Dispatch_ID(1), GPU_ID(5), Queue_ID(1), Process_ID(2185441), Thread_ID(2185441), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(139857691152944), End_Timestamp(139857835223272), Correlation_ID(0), GRBM_COUNT(499551.000000)
+Dispatch_ID(1), GPU_ID(4), Queue_ID(1), Process_ID(2185436), Thread_ID(2185436), Grid_Size(1048576), Workgroup_Size(256), LDS(0), Scratch_Size(0), Arch_VGPR(12), Accumulative_VGPR(4), SGPR(32), Wave_Size(64), Kernel_Name("add"), Begin_Timestamp(140429257347632), End_Timestamp(140429483317480), Correlation_ID(0), GRBM_COUNT(499406.000000)

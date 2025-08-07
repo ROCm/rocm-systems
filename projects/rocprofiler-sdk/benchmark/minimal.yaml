@@ -1,0 +1,32 @@
+defaults:
+  rocprofv3:
+    # keys are not provided so --filter-rocprofv3 option isn't supported for this YAML input
+    - [--runtime-trace]
+    - [--sys-trace]
+    - [--kernel-trace]
+    - [--hip-trace]
+    - [--hsa-trace]
+    - [--memory-copy-trace]
+    - [--memory-allocation-trace]
+    - [--scratch-memory-trace]
+    - [--pmc, SQ_WAVES]
+  benchmark:
+    # these names can be used with --filter-benchmark option
+    - baseline
+    - disabled-sdk-contexts
+    - sdk-buffer-overhead
+    - sdk-callback-overhead
+    - tool-runtime-overhead
+  group:
+    - examples
+
+jobs:
+  # explicitly specifies name, command, rocprofv3, and benchmark. inherits default group(s)
+  - name: hip-graph
+    command: [hip-graph, 8, 500]
+    rocprofv3:
+      - [--kernel-trace]
+      - [--hip-trace]
+    benchmark:
+      - baseline
+      - disabled-sdk-contexts
