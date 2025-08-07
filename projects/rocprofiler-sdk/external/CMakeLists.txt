@@ -339,4 +339,41 @@ else()
     endif()
 endif()
 
+find_package(re2 QUIET)
+if(re2_FOUND AND NOT ROCPROFILER_BUILD_RE2)
+    message(STATUS "Found re2: ${re2_INCLUDE_DIRS}")
+    target_link_libraries(rocprofiler-sdk-re2 INTERFACE re2::re2)
+else()
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/abseil-cpp
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/abseil/abseil-cpp.git
+        REPO_BRANCH "lts_2025_05_12")
+
+    rocprofiler_checkout_git_submodule(
+        RECURSIVE
+        RELATIVE_PATH external/re2
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        REPO_URL https://github.com/google/re2.git
+        REPO_BRANCH "2025-07-22")
+
+    function(add_re2_subdirectory)
+        set(ABSL_PROPAGATE_CXX_STD ON)
+        set(ABSL_ENABLE_INSTALL ON)
+        add_subdirectory(abseil-cpp EXCLUDE_FROM_ALL)
+        add_subdirectory(re2 EXCLUDE_FROM_ALL)
+        add_dependencies(rocprofiler-sdk-re2 re2::re2)
+        install(
+            TARGETS re2
+            DESTINATION "${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk"
+            OPTIONAL)
+    endfunction()
+
+    add_re2_subdirectory()
+
+    target_link_libraries(rocprofiler-sdk-re2 INTERFACE $<BUILD_INTERFACE:re2::re2>)
+endif()
+
 cmake_policy(POP)

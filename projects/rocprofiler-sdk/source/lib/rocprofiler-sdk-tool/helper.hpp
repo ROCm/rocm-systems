@@ -60,7 +60,6 @@
 #include <iostream>
 #include <map>
 #include <ostream>
-#include <regex>
 #include <set>
 #include <sstream>
 #include <string>

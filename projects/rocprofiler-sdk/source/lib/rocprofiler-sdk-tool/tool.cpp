@@ -59,6 +59,9 @@
 #include "lib/output/tmp_file.hpp"
 #include "lib/output/tmp_file_buffer.hpp"
 
+#include "re2/re2.h"
+#include "re2/stringpiece.h"
+
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -940,12 +943,12 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto kernel_filter_exclude = tool::get_config().kernel_filter_exclude;
                 auto kernel_filter_range   = tool::get_config().kernel_filter_range;
 
-                std::regex include_regex(kernel_filter_include);
-                std::regex exclude_regex(kernel_filter_exclude);
-                if(std::regex_search(kernel_info->formatted_kernel_name, include_regex))
+                RE2 include_re(kernel_filter_include);
+                RE2 exclude_re(kernel_filter_exclude);
+                if(RE2::PartialMatch(kernel_info->formatted_kernel_name, include_re))
                 {
                     if(kernel_filter_exclude.empty() ||
-                       !std::regex_search(kernel_info->formatted_kernel_name, exclude_regex))
+                    !RE2::PartialMatch(kernel_info->formatted_kernel_name, exclude_re))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
@@ -2120,8 +2123,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     // Handle kernel id of zero
-    bool include = std::regex_search("0", std::regex(tool::get_config().kernel_filter_include));
-    bool exclude = std::regex_search("0", std::regex(tool::get_config().kernel_filter_exclude));
+    RE2 include_re(tool::get_config().kernel_filter_include);
+    RE2 exclude_re(tool::get_config().kernel_filter_exclude);
+    bool include = RE2::PartialMatch("0", include_re);
+    bool exclude = RE2::PartialMatch("0", exclude_re);
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
 

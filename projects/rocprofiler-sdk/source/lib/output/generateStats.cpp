@@ -33,10 +33,11 @@
 
 #include <fmt/format.h>
 
+#include <re2/re2.h>
+
 #include <unistd.h>
 #include <cstdint>
 #include <iomanip>
-#include <regex>
 #include <sstream>
 #include <string_view>
 #include <utility>
@@ -429,7 +430,7 @@ generate_stats(const output_config& cfg,
             {
                 auto _col_name = get_domain_column_name(ditr.first);
 
-                if(std::regex_match(_col_name.data(), std::regex{itr}))
+                if(RE2::FullMatch(_col_name.data(), itr))
                 {
                     if(!ditr.second) continue;
                     _names.emplace_back(_col_name);
