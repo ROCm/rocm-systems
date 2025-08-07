@@ -147,10 +147,10 @@ generate_stats(const output_config& /*cfg*/,
         {
             auto _name = std::string_view{};
 
-            if(record.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
-               (record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA ||
-                record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA ||
-                record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA))
+            if(record.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+               (record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxMarkA ||
+                record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxThreadRangeA ||
+                record.operation == ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxProcessRangeA))
             {
                 _name = tool_metadata.get_marker_message(record.correlation_id.internal);
             }

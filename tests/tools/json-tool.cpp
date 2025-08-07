@@ -771,7 +771,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API ||
             record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API ||
-            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
@@ -970,7 +971,8 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API ||
-                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
+                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_marker_api_record_t*>(header->payload);
@@ -1428,6 +1430,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "marker core api tracing service configure");
 
+    // ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+    //                      marker_api_callback_ctx,
+    //                      ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+    //                      nullptr,
+    //                      0,
+    //                      tool_tracing_callback,
+    //                      nullptr),
+    //                  "marker core api tracing service configure");
+
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                          marker_api_callback_ctx,
                          ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
@@ -1771,6 +1782,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      0,
                                                      marker_api_buffered_buffer),
         "buffer tracing service configure");
+
+    // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+    //                      marker_api_buffered_ctx,
+    //                      ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,
+    //                      nullptr,
+    //                      0,
+    //                      marker_api_buffered_buffer),
+    //                  "buffer tracing service configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,

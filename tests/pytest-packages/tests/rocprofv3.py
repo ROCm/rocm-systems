@@ -136,7 +136,8 @@ def test_otf2_data(
             def roctx_mark_filter(val):
                 return (
                     None
-                    if get_kind_name(val.kind) == "MARKER_CORE_API"
+                    if get_kind_name(val.kind)
+                    in ["MARKER_CORE_API", "MARKER_CORE_RANGE_API"]
                     and get_operation_name(val.kind, val.operation) == "roctxMarkA"
                     else val
                 )
@@ -184,7 +185,12 @@ def test_rocpd_data(
         ),
         "marker": (
             "marker_api",
-            ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API"),
+            (
+                "MARKER_CORE_API",
+                "MARKER_CONTROL_API",
+                "MARKER_NAME_API",
+                "MARKER_CORE_RANGE_API",
+            ),
         ),
         "kernel": ("kernel_dispatch", ("KERNEL_DISPATCH")),
         "memory_copy": ("memory_copy", ("MEMORY_COPY")),
