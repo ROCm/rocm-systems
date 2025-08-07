@@ -231,7 +231,7 @@ in its current form. Therefore, to achieve more precise performance profiling, i
 Hardware-based (stochastic) PC sampling method
 ===============================================
 
-The ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method has been introduced for gfx942 architecture.
+The ``ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC`` method has been introduced for the gfx942 architecture.
 It employs a specific hardware for probing waves actively running on the GPU.
 Beside the information already provided with ``ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP`` useful for determining hotspots within the kernel, this method delivers additional information, which helps to determine whether a sampled wave issued an instruction represented with the specified PC.
 If not, this method provides the reason for not issuing the instruction (stall reason).
