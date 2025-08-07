@@ -1,0 +1,48 @@
+
+# References:
+# https://linuxconfig.org/how-to-create-systemd-service-unit-in-linux
+# https://www.linux.com/tutorials/systemd-services-beyond-starting-and-stopping/
+[Unit]
+Description=Radeon Data Center Daemon (rdcd)
+After=network.target
+
+# Add any services that must be started before rdcd here
+#After=
+
+# Add any non-service units required by rdcd here
+#Requires=
+
+[Service]
+EnvironmentFile=-/@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_DATAROOTDIR@/@RDC@/conf/rdc_options.conf
+User=rdc
+Group=rdc
+
+Type=simple
+
+CapabilityBoundingSet=CAP_DAC_OVERRIDE
+AmbientCapabilities=CAP_DAC_OVERRIDE
+
+# If we need to start anything before rdcd, use this
+# ExecStartPre=
+# update-alternative has been run for rdcd and
+# soft link will be available in usr/bin
+ExecStart=rdcd $RDC_OPTS
+
+# If we need to start anything after rdcd use this
+# ExecStartPost=
+
+# If we want to change the default time out for the ExecStop (90 sec),
+# we can modify that time limit with TimeoutStopSec
+# TimeoutStopSec=
+
+# Note, we can have multiple ExecStop commands if necessary
+ExecStop=/bin/kill -15 $MAINPID
+#ExecReload=
+#ExecStartPost=
+#ExecStopPost=
+
+# StandardOutput=journal
+# StandardError=inherit
+
+[Install]
+WantedBy= multi-user.target

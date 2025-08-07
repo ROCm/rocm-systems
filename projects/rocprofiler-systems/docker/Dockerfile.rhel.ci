@@ -1,0 +1,42 @@
+ARG DISTRO=rockylinux/rockylinux
+ARG VERSION=8
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ENV PATH /usr/lib64/openmpi/bin:/usr/local/bin:${PATH}
+
+ARG EXTRA_PACKAGES=""
+ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
+ARG BOOST_DOWNLOAD_VERSION="1.79.0"
+ARG NJOBS="8"
+
+RUN yum groupinstall -y "Development Tools" && \
+    yum install -y epel-release && crb enable && \
+    yum install -y --allowerasing chrpath cmake curl dpkg-devel iproute ninja-build numactl-devel \
+        openmpi-devel papi-devel python3-pip sqlite-devel texinfo wget which vim zlib-devel && \
+    yum clean all && \
+    python3 -m pip install 'cmake==3.21' perfetto
+
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
+
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    bash miniforge.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c conda-forge -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip numpy; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

@@ -1,0 +1,57 @@
+ARG DISTRO
+ARG VERSION
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV LANG en_US.UTF-8
+ENV LANGUAGE en_US
+ENV LC_ALL C
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ARG EXTRA_PACKAGES=""
+ARG ROCM_REPO_VERSION="debian"
+ARG ROCM_VERSION="0.0"
+ARG ROCM_REPO_DIST="ubuntu"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+ENV PATH ${HOME}/.local/bin:${PATH}
+
+RUN apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y build-essential cmake libnuma1 wget gnupg2 m4 bash-completion git-core autoconf libtool autotools-dev python3-pip lsb-release libpapi-dev libpfm4-dev libudev1 libopenmpi-dev rpm librpm-dev curl apt-utils && \
+    python3 -m pip install 'cmake==3.28.4'
+
+RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
+        if [ -d /etc/apt/trusted.gpg.d ]; then \
+            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | gpg --dearmor > /etc/apt/trusted.gpg.d/rocm.gpg; \
+        else \
+            wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add -; \
+        fi && \
+        echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${ROCM_REPO_VERSION}/ ${ROCM_REPO_DIST} main" | tee /etc/apt/sources.list.d/rocm.list && \
+        apt-get update && \
+        apt-get dist-upgrade -y && \
+        apt-get install -y hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev && \
+        apt-get install -y hip-base hip-runtime-amd hip-dev && \
+        apt-get install -y rocm-llvm rocm-core rocm-smi-lib rocm-device-libs && \
+        apt-get install -y roctracer-dev rocprofiler-dev rccl-dev ${EXTRA_PACKAGES} && \
+        if [ "$(echo ${ROCM_VERSION} | awk -F '.' '{print $1}')" -lt "5" ]; then apt-get install -y rocm-dev; fi && \
+        apt-get autoclean; \
+    fi
+
+RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c defaults -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
+    conda init
+
+ENV LC_ALL C.UTF-8
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

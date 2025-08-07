@@ -1,0 +1,846 @@
+
+// Copyright (c) 2019 - present Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+syntax = "proto3";
+
+// option java_multiple_files = true;
+// option java_package = "io.grpc.examples.helloworld";
+// option java_outer_classname = "HelloWorldProto";
+// option objc_class_prefix = "HLW";
+
+package rdc;
+
+/****************************************************************************/
+/********************************** RdcAdmin Service ************************/
+/****************************************************************************/
+service RdcAdmin {
+    // RDC admin services
+    rpc VerifyConnection (VerifyConnectionRequest)
+                                         returns (VerifyConnectionResponse) {}
+}
+
+/* GetNumDevices */
+message VerifyConnectionRequest {
+    uint64 magic_num = 1;
+}
+message VerifyConnectionResponse {
+    uint64 echo_magic_num = 1;
+}
+
+/****************************************************************************/
+/********************************** RdcAPI Service ************************/
+/****************************************************************************/
+
+service RdcAPI {
+  // Discovery API
+  // rdc_status_t rdc_get_all_devices(uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count)
+  rpc GetAllDevices(Empty) returns (GetAllDevicesResponse) {}
+  // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
+  rpc GetDeviceAttributes(GetDeviceAttributesRequest) returns (GetDeviceAttributesResponse) {}
+
+  //rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv);
+  rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
+
+  // Group API
+  // rdc_status_t rdc_group_gpu_create(rdc_group_type_t type,
+  //               const char* group_name, rdc_gpu_group_t* p_rdc_group_id)
+  rpc CreateGpuGroup(CreateGpuGroupRequest) returns (CreateGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_gpu_add(rdc_gpu_group_t groupId,
+  //             uint32_t gpu_index)
+  rpc AddToGpuGroup(AddToGpuGroupRequest) returns (AddToGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_create(uint32_t num_field_ids,
+  //      uint32_t* field_ids, const char* field_group_name,
+  //     rdc_field_grp_t* rdc_field_group_id)
+  rpc CreateFieldGroup(CreateFieldGroupRequest) returns (CreateFieldGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_get_info(
+  //     rdc_field_grp_t rdc_field_group_id,
+  //     rdc_field_group_info_t* field_group_info)
+  rpc GetFieldGroupInfo(GetFieldGroupInfoRequest) returns (GetFieldGroupInfoResponse) {}
+
+  // rdc_status_t rdc_group_gpu_get_info(
+  //     rdc_gpu_group_t p_rdc_group_id, rdc_group_info_t* p_rdc_group_info)
+  rpc GetGpuGroupInfo(GetGpuGroupInfoRequest) returns (GetGpuGroupInfoResponse) {}
+
+  // rdc_status_t rdc_group_gpu_destroy(
+  //     rdc_gpu_group_t p_rdc_group_id)
+  rpc DestroyGpuGroup(DestroyGpuGroupRequest) returns (DestroyGpuGroupResponse) {}
+
+  // rdc_status_t rdc_group_field_destroy(
+  //     rdc_field_grp_t rdc_field_group_id)
+  rpc DestroyFieldGroup(DestroyFieldGroupRequest) returns (DestroyFieldGroupResponse) {}
+
+  // Field API
+  // rdc_status_t rdc_watch_fields(rdc_gpu_group_t group_id,
+  //     rdc_field_grp_t field_group_id, uint64_t update_freq,
+  //     double max_keep_age, uint32_t max_keep_samples)
+  rpc WatchFields(WatchFieldsRequest) returns (WatchFieldsResponse) {}
+
+  // rdc_status_t rdc_get_latest_value_for_field(uint32_t gpu_index,
+  //     uint32_t field, rdc_field_value* value)
+  rpc GetLatestFieldValue(GetLatestFieldValueRequest) returns (GetLatestFieldValueResponse) {}
+
+  // rdc_status_t rdc_get_field_value_since(uint32_t gpu_index,
+  //     uint32_t field, uint64_t since_time_stamp,
+  //     uint64_t *next_since_time_stamp, rdc_field_value* value)
+  rpc GetFieldSince(GetFieldSinceRequest) returns (GetFieldSinceResponse) {}
+
+  // rdc_status_t rdc_unwatch_fields(rdc_gpu_group_t group_id,
+  //     rdc_field_grp_t field_group_id)
+  rpc UnWatchFields(UnWatchFieldsRequest) returns (UnWatchFieldsResponse) {}
+
+  // rdc_status_t rdc_update_all_fields(uint32_t wait_for_update)
+  rpc UpdateAllFields(UpdateAllFieldsRequest) returns (UpdateAllFieldsResponse) {}
+
+  // rdc_status_t rdc_group_get_all_ids(rdc_gpu_group_t group_id_list[], uint32_t* count)
+  rpc GetGroupAllIds(Empty) returns (GetGroupAllIdsResponse) {}
+
+  // rdc_status_t rdc_group_field_all_ids(rdc_field_grp_t field_group_id_list[], uint32_t* count)
+  rpc GetFieldGroupAllIds(Empty) returns (GetFieldGroupAllIdsResponse) {}
+
+  // JOB API
+  // rdc_status_t rdc_job_start_stats(rdc_gpu_group_t groupId,
+  //              char job_id[64], uint64_t update_freq)
+  rpc StartJobStats(StartJobStatsRequest) returns (StartJobStatsResponse) {}
+
+  // rdc_status_t rdc_job_get_stats(char jobId[64],
+  //              rdc_job_info_t* p_job_info)
+  rpc GetJobStats(GetJobStatsRequest) returns (GetJobStatsResponse) {}
+
+  // rdc_status_t rdc_job_stop_stats(char job_id[64])
+  rpc StopJobStats(StopJobStatsRequest) returns (StopJobStatsResponse) {}
+
+  // rdc_status_t rdc_job_remove(char job_id[64])
+  rpc RemoveJob(RemoveJobRequest) returns (RemoveJobResponse) {}
+
+  // rdc_status_t rdc_job_remove_all()
+  rpc RemoveAllJob(Empty) returns (RemoveAllJobResponse) {}
+
+  // rdc_status_t rdc_diagnostic_run(
+  //  rdc_gpu_group_t group_id,
+  //  rdc_diag_level_t level,
+  //  const char* config,
+  //  size_t config_size,
+  //  rdc_diag_response_t* response,
+  //  rdc_diag_callback_t* callback);
+  rpc DiagnosticRun(DiagnosticRunRequest) returns (stream DiagnosticRunResponse) {}
+
+  // rdc_status_t rdc_test_case_run(
+  //   rdc_gpu_group_t group_id,
+  //    rdc_diag_test_cases_t test_case,
+  //    const char* config,
+  //    size_t config_size,
+  //    rdc_diag_test_result_t* result,
+  //    rdc_diag_callback_t* callback);
+  rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (stream DiagnosticTestCaseRunResponse) {}
+
+  //Just an RPC method not used as an API
+  rpc GetMixedComponentVersion(GetMixedComponentVersionRequest) returns (GetMixedComponentVersionResponse) {}
+
+  // rdc_status_t rdc_policy_set(
+  //  rdc_handle_t p_rdc_handle,
+  //   rdc_gpu_group_t group_id,
+  //   rdc_policy_t policy);
+  rpc SetPolicy(SetPolicyRequest) returns (SetPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_get(
+  //  rdc_handle_t p_rdc_handle,
+  //   rdc_gpu_group_t group_id,
+  //   uint32_t* count,
+  //   rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_delete(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_type_t condition_type);
+  rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse) {}
+
+
+  // rdc_status_t rdc_policy_register(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition,
+  //  rdc_policy_register_callback callback);
+  rpc RegisterPolicy(RegisterPolicyRequest) returns (stream RegisterPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_unregister(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition);
+  rpc UnRegisterPolicy(UnRegisterPolicyRequest) returns (UnRegisterPolicyResponse) {}
+
+  // Health API
+  // rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components);
+  rpc SetHealth(SetHealthRequest) returns (SetHealthResponse) {}
+
+  // rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components);
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {}
+
+  // rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t r*esponse);
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse) {}
+
+  // rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id);
+  rpc ClearHealth(ClearHealthRequest) returns (ClearHealthResponse) {}
+  // rdc_status_t rdc_device_topology_get(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition);
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse) {}
+
+  //Set one configure
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse) {}
+
+  //Get the setting
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse) {}
+
+  //Clear the setting
+  rpc ClearConfig(ClearConfigRequest) returns (ClearConfigResponse) {}
+
+  // rdc_status_t GetLinkStatus()
+  rpc GetLinkStatus(Empty) returns (GetLinkStatusResponse) {}
+  
+  // Get number of partitions
+  rpc GetNumPartition(GetNumPartitionRequest) returns (GetNumPartitionResponse);
+
+  // Get instance profile of gpu
+  rpc GetInstanceProfile(GetInstanceProfileRequest) returns (GetInstanceProfileResponse);
+
+}
+
+message Empty {
+}
+
+message GetAllDevicesResponse {
+  uint32 status = 1;
+  repeated uint32 gpus = 2;
+}
+
+message GetDeviceAttributesRequest {
+  uint32 gpu_index = 1;
+}
+
+message DeviceAttributes {
+  string device_name = 1;
+}
+
+message GetDeviceAttributesResponse {
+  uint32 status = 1;
+  DeviceAttributes attributes = 2;
+}
+
+message GetComponentVersionRequest {
+  uint32 component_index = 1;
+}
+
+message GetComponentVersionResponse {
+  uint32 status = 1;
+  string version = 2;
+}
+
+message CreateGpuGroupRequest {
+  enum GpuGroupType {
+    RDC_GROUP_DEFAULT = 0;
+    RDC_GROUP_EMPTY = 1;
+  }
+  GpuGroupType type = 1;
+  string group_name = 2;
+}
+
+message CreateGpuGroupResponse {
+  uint32 status = 1;
+  uint32 group_id = 2;
+}
+
+message AddToGpuGroupRequest {
+  uint32 group_id = 1;
+  uint32 gpu_index = 2;
+}
+
+message AddToGpuGroupResponse {
+  uint32 status = 1;
+}
+
+message CreateFieldGroupRequest {
+  repeated uint32 field_ids = 1;
+  string field_group_name = 2;
+}
+
+message CreateFieldGroupResponse {
+  uint32 status = 1;
+  uint32 field_group_id = 2;
+}
+
+message GetFieldGroupInfoRequest {
+  uint32 field_group_id = 1;
+}
+
+message GetFieldGroupInfoResponse {
+  uint32 status = 1;
+  string filed_group_name = 2;
+  repeated uint32 field_ids = 3;
+}
+
+message GetGpuGroupInfoRequest {
+  uint32 group_id = 1;
+}
+
+message GetGpuGroupInfoResponse {
+  uint32 status = 1;
+  string group_name = 2;
+  repeated uint32 entity_ids = 3;
+}
+
+message DestroyGpuGroupRequest {
+  uint32 group_id = 1;
+}
+
+message DestroyGpuGroupResponse {
+  uint32 status = 1;
+}
+
+message DestroyFieldGroupRequest {
+  uint32 field_group_id = 1;
+}
+
+message DestroyFieldGroupResponse {
+  uint32 status = 1;
+}
+
+message WatchFieldsRequest {
+  uint32 group_id = 1;
+  uint32 field_group_id = 2;
+  uint64 update_freq = 3;
+  double max_keep_age = 4;
+  uint32 max_keep_samples = 5;
+}
+
+message WatchFieldsResponse {
+  uint32 status = 1;
+}
+
+message GetLatestFieldValueRequest {
+  uint32 gpu_index = 1;
+  uint32 field_id = 2;
+}
+
+message GetLatestFieldValueResponse {
+  uint32 status = 1;
+  uint32 field_id = 2;
+  uint32 rdc_status = 3;
+  uint64 ts = 4;
+  enum FieldType {
+    INTEGER = 0;
+     DOUBLE = 1;
+     STRING = 2;
+     BLOB = 3;
+  };
+  FieldType type = 5;
+  oneof value {
+    uint64 l_int = 6;
+    double dbl = 7;
+    string str = 8;
+  }
+}
+
+message GetFieldSinceRequest {
+  uint32 gpu_index = 1;
+  uint32 field_id = 2;
+  uint64 since_time_stamp = 3;
+}
+
+message GetFieldSinceResponse {
+  uint32 status = 1;
+  uint64 next_since_time_stamp = 2;
+  uint32 field_id = 3;
+  uint32 rdc_status = 4;
+  uint64 ts = 5;
+  enum FieldType {
+    INTEGER = 0;
+     DOUBLE = 1;
+     STRING = 2;
+     BLOB = 3;
+  };
+  FieldType type = 6;
+  oneof value {
+    uint64 l_int = 7;
+    double dbl = 8;
+    string str = 9;
+  }
+}
+
+message UnWatchFieldsRequest {
+  uint32 group_id = 1;
+  uint32 field_group_id = 2;
+}
+
+message UnWatchFieldsResponse {
+  uint32 status = 1;
+}
+
+message UpdateAllFieldsRequest {
+  uint32 wait_for_update = 1;
+}
+
+message UpdateAllFieldsResponse {
+  uint32 status = 1;
+}
+
+message GetGroupAllIdsResponse {
+  uint32 status = 1;
+  repeated uint32 group_ids = 2;
+}
+
+
+message GetFieldGroupAllIdsResponse {
+  uint32 status = 1;
+  repeated uint32 field_group_ids = 2;
+}
+
+message StartJobStatsRequest {
+  uint32 group_id = 1;
+  string job_id = 2;
+  uint64 update_freq = 3;
+}
+
+message StartJobStatsResponse {
+  uint32 status = 1;
+}
+
+message GetJobStatsRequest {
+  string job_id = 1;
+}
+
+message JobStatsSummary {
+  uint64 max_value = 1;
+  uint64 min_value = 2;
+  uint64 average = 3;
+  double standard_deviation = 4;
+}
+
+message GpuUsageInfo {
+  uint32 gpu_id = 1;
+  uint64 start_time = 2;
+  uint64 end_time = 3;
+  uint64 energy_consumed = 4;
+  JobStatsSummary power_usage = 5;
+  JobStatsSummary gpu_clock = 6;
+  JobStatsSummary gpu_utilization = 7;
+  uint64 max_gpu_memory_used = 8;
+  JobStatsSummary memory_utilization = 9;
+  uint64 ecc_correct = 10;
+  uint64 ecc_uncorrect = 11;
+  JobStatsSummary pcie_tx = 12;
+  JobStatsSummary pcie_rx = 13;
+  JobStatsSummary memory_clock = 14;
+  JobStatsSummary gpu_temperature = 15;
+  JobStatsSummary pcie_total = 16;
+}
+
+message RdcProcessStatsInfo {
+  uint32 pid = 1;
+  string process_name = 2;
+  uint64 start_time = 3;
+  uint64 stop_time = 4;
+}
+
+message GetJobStatsResponse {
+  uint32 status = 1;
+  uint32 num_gpus = 2;
+  GpuUsageInfo summary = 3;
+  repeated GpuUsageInfo gpus = 4;
+  uint32 num_processes = 5;
+  repeated RdcProcessStatsInfo processes = 6;
+}
+
+message StopJobStatsRequest {
+  string job_id = 1;
+}
+
+message StopJobStatsResponse {
+  uint32 status = 1;
+}
+
+message RemoveJobRequest {
+  string job_id = 1;
+}
+
+message RemoveJobResponse {
+  uint32 status = 1;
+}
+
+message RemoveAllJobResponse {
+  uint32 status = 1;
+}
+
+message DiagnosticRunRequest {
+  uint32 group_id = 1;
+  uint32 level = 2;
+  string config = 3;
+  uint32 config_size = 4;
+}
+
+message DiagnosticDetail {
+  string msg = 1;
+  uint32 code = 2;
+}
+
+message DiagnosticPerGpuResult {
+  uint32 gpu_index = 1;
+  DiagnosticDetail gpu_result = 2;
+}
+
+message DiagnosticTestResult {
+  uint32 status = 1;
+  DiagnosticDetail details = 2;
+  enum DiagnosticTestCase {
+    COMPUTE_PROCESS = 0;
+    SDMA_QUEUE = 1;
+    COMPUTE_QUEUE = 2;
+    VRAM_CHECK = 3;
+    SYS_MEM_CHECK = 4;
+    NODE_TOPOLOGY = 5;
+    GPU_PARAMETERS = 6;
+    RVS_GST_TEST = 7;
+    RVS_MEMBW_TEST = 8;
+    RVS_H2DD2H_TEST = 9;
+    RVS_IET_TEST = 10;
+  };
+  DiagnosticTestCase test_case = 3;
+  uint32 per_gpu_result_count = 4;
+  repeated DiagnosticPerGpuResult gpu_results = 5;
+  string info = 6;
+}
+
+message DiagnosticResponse {
+  uint32 results_count = 1;
+  repeated DiagnosticTestResult diag_info = 2;
+}
+
+message DiagnosticRunResponse {
+  uint32 status = 1;
+  DiagnosticResponse response = 2;
+  optional string log = 3;
+}
+
+message DiagnosticTestCaseRunRequest {
+    uint32 group_id = 1;
+    enum TestCaseType {
+      COMPUTE_PROCESS = 0;
+      SDMA_QUEUE = 1;
+      COMPUTE_QUEUE = 2;
+      VRAM_CHECK = 3;
+      SYS_MEM_CHECK = 4;
+      NODE_TOPOLOGY = 5;
+      GPU_PARAMETERS = 6;
+      RVS_GST_TEST = 7;
+      RVS_MEMBW_TEST = 8;
+      RVS_H2DD2H_TEST = 9;
+      RVS_IET_TEST = 10;
+    };
+    TestCaseType test_case = 2;
+    string config = 3;
+    uint32 config_size = 4;
+}
+
+message DiagnosticTestCaseRunResponse {
+  uint32 status = 1;
+  DiagnosticTestResult result = 2;
+  optional string log = 3;
+}
+
+message GetMixedComponentVersionRequest {
+  uint32 component_id = 1;
+}
+
+message GetMixedComponentVersionResponse {
+  uint32 status = 1;
+  string version = 2;
+}
+
+
+message PolicyCondition{
+  enum Type {
+    COND_MAX_PAGE_RETRIED = 0;
+    COND_THERMAL = 1;
+    COND_POWER = 2;
+  };
+  Type type = 1;
+  int64 value = 2;
+}
+
+
+message Policy{
+  PolicyCondition condition = 1;
+
+  enum Action {
+    ACTION_NONE = 0;
+    ACTION_GPU_RESET = 1;
+  };
+  Action action = 2;
+}
+
+message SetPolicyResult {
+  uint32 status = 1;
+}
+
+message SetPolicyRequest {
+  uint32 group_id = 1;
+  Policy policy =2;
+}
+
+message SetPolicyResponse {
+  uint32 status = 1;
+}
+
+
+message PolicyResponse {
+  uint32  count= 1;
+  repeated Policy policies = 2;
+}
+
+message GetPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message GetPolicyResponse {
+  uint32 status = 1;
+  PolicyResponse response = 2;
+}
+
+message DeletePolicyRequest {
+  uint32 group_id = 1;
+  enum PolicyConditionType{
+  RDC_POLICY_COND_MAX_PAGE_RETRIED = 0;
+  RDC_POLICY_COND_THERMAL = 1;
+  RDC_POLICY_COND_POWER = 2;
+};
+  PolicyConditionType condition_type = 2;
+}
+
+message DeletePolicyResponse {
+  uint32 status = 1;
+}
+
+
+message RegisterPolicyResult {
+  uint32 status = 1;
+}
+
+message RegisterPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message RegisterPolicyResponse {
+  uint32 status = 1;
+  uint32 version =2;
+  PolicyCondition condition =3;
+  uint32 group_id =4;
+  uint64 value=5;
+}
+
+message UnRegisterPolicyResult {
+  uint32 status = 1;
+}
+
+message UnRegisterPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message UnRegisterPolicyResponse {
+  uint32 status = 1;
+}
+
+message SetHealthRequest {
+  uint32 group_id = 1;
+  uint32 components = 2;
+}
+
+message SetHealthResponse {
+  uint32 status = 1;
+}
+message GetHealthRequest {
+  uint32 group_id = 1;
+}
+
+message GetHealthResponse {
+  uint32 status = 1;
+  uint32 components = 2;
+}
+
+message CheckHealthRequest {
+  uint32 group_id = 1;
+}
+
+message HealthDetail {
+  string msg = 1;
+  uint32 code = 2;
+}
+
+message HealthIncidents {
+  uint32 gpu_index = 1;
+  uint32 component = 2;
+  uint32 health = 3;
+  HealthDetail error = 4;
+}
+
+message HealthResponse {
+  uint32 overall_health = 1;
+  uint32 incidents_count = 2;
+  repeated HealthIncidents incidents = 3;
+}
+
+message CheckHealthResponse {
+  uint32 status = 1;
+  HealthResponse response = 2;
+}
+
+message ClearHealthRequest {
+  uint32 group_id = 1;
+}
+
+message ClearHealthResponse {
+  uint32 status = 1;
+}
+message TopologyLinkInfo{
+  uint32 gpu_index = 1;
+  uint64 weight = 2;
+  uint64 min_bandwidth = 3;
+  uint64 max_bandwidth = 4;
+  uint64 hops = 5;
+  enum LinkType {
+    RDC_IOLINK_TYPE_UNDEFINED = 0;
+    RDC_IOLINK_TYPE_PCIEXPRESS = 1;
+    RDC_IOLINK_TYPE_XGMI = 2;
+  };
+  LinkType link_type = 6;
+  bool p2p_accessible = 7;
+}
+message Topology{
+  uint32 num_of_gpus = 1;
+  repeated TopologyLinkInfo link_infos = 2;
+  uint32 numa_node = 3;
+}
+message GetTopologyResult {
+  uint32 status = 1;
+}
+message GetTopologyRequest {
+  uint32 gpu_index = 1;
+}
+message GetTopologyResponse {
+  uint32 status = 1;
+  Topology toppology = 2;
+}
+message GpuLinkStatus{
+  uint32 gpu_index = 1;
+  uint32 num_of_links = 2;
+  enum LinkTypes {
+    RDC_IOLINK_TYPE_UNDEFINED = 0;
+    RDC_IOLINK_TYPE_PCIEXPRESS = 1;
+    RDC_IOLINK_TYPE_XGMI = 2;
+  };
+  LinkTypes link_types = 3;
+  enum LinkState{
+    RDC_LINK_STATE_NOT_SUPPORTED = 0;
+    RDC_LINK_STATE_DISABLED = 1;
+    RDC_LINK_STATE_DOWN = 2;
+    RDC_LINK_STATE_UP = 3;
+  };
+  repeated LinkState link_states = 4;
+}
+message LinkStatus{
+  uint32 num_of_gpus = 1;
+  repeated GpuLinkStatus gpus = 2;
+}
+message GetLinkStatusResponse{
+  uint32 status = 1;
+  LinkStatus linkstatus = 2;
+}
+
+
+
+enum rdc_config_type {
+  RDC_CFG_GFX_CLOCK_LIMIT = 0;
+  RDC_CFG_MEMORY_CLOCK_LIMIT = 1;
+  RDC_CFG_POWER_LIMIT = 2;
+}
+
+message rdc_config_setting {
+  rdc_config_type type = 1;
+  uint64 target_value = 2;
+}
+
+message SetConfigRequest {
+  uint32 group_id = 1;
+  rdc_config_setting setting = 2;
+}
+
+message SetConfigResponse {
+  uint32 status = 1;
+}
+
+message GetConfigRequest {
+  uint32 group_id = 1;
+  uint32 num_of_settings = 2;
+}
+
+message GetConfigResponse {
+  uint32 status = 1;
+  repeated rdc_config_setting settings = 2;
+}
+
+message ClearConfigRequest {
+  uint32 group_id = 1;
+}
+
+message ClearConfigResponse {
+  uint32 status = 1;
+}
+
+// Request for getting the number of partitions for a given GPU index.
+message GetNumPartitionRequest {
+  // The GPU index for which to query the number of partitions.
+  uint32 gpu_index = 1;
+}
+
+// Response for getting the number of partitions.
+message GetNumPartitionResponse {
+  // Status of the operation, following RDC_ST_* codes.
+  uint32 status = 1;
+  // Number of partitions for the given GPU.
+  uint32 num_partition = 2;
+}
+
+message GetInstanceProfileRequest {
+  uint32 entity_index = 1;
+  uint32 resource_type = 2;
+}
+
+message GetInstanceProfileResponse {
+  uint32 status = 1;
+  uint32 partition_resource = 2;
+  uint32 num_partitions_share_resource = 3;
+}

@@ -1,0 +1,43 @@
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+parameters:
+- name: pipelinesRepoRef
+  type: string
+  default: refs/heads/develop
+- name: triggerDownstreamJobs
+  type: boolean
+  default: true
+
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+    ref: ${{ parameters.pipelinesRepoRef }}
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - develop
+  paths:
+    include:
+    - projects/rocr-runtime
+    exclude:
+    - projects/rocr-runtime/.github
+    - projects/rocr-runtime/LICENSE.txt
+    - projects/rocr-runtime/*.md
+
+pr: none
+
+stages:
+- stage: rocr_runtime
+  jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/ROCR-Runtime.yml@pipelines_repo
+    parameters:
+      sparseCheckoutDir: projects/rocr-runtime
+      triggerDownstreamJobs: ${{ parameters.triggerDownstreamJobs }}
+- template: templates/report-summary-check-wrapper.yml
