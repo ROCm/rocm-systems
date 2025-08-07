@@ -8,10 +8,10 @@ Text-based User Interface (TUI) analysis
 
 ROCm Compute Profiler's analyze mode now supports a lightweight Text-based User Interface (TUI)
 that provides an interactive terminal experience for enhanced usability. You can use the TUI
-interface as a more visually engaging and interactive alternative to explore analysis results
-compared to the standard :doc:`cli`. It provides enhanced visual feedback and easy navigation without
-needing the extra setup of a full graphical interface. This analysis option is implemented as a
-terminal-based interface that offers real-time visual feedback, keyboard shortcuts for common
+interface as a more visually engaging and interactive alternative to explore individual kernel analysis
+results compared to the standard :doc:`cli`. It provides enhanced visual feedback and easy navigation
+without needing the extra setup of a full graphical interface. This analysis option is implemented as
+a terminal-based interface that offers real-time visual feedback, keyboard shortcuts for common
 actions, and improved readability with formatted output.
 
 .. note::
@@ -30,18 +30,25 @@ For example:
 
    $ rocprof-compute analyze --tui
 
-2. To start the analysis, use the dropdown menu at the top left of the screen to select a single
-workload from ``rocprof-compute profile`` generated output directories.
+2. To start the individual kernel analysis, use the dropdown menu at the top left of the screen to select
+a single workload from ``rocprof-compute profile`` generated output directories.
 
-.. image:: ../../data/analyze/tui.png
+.. image:: ../../data/analyze/tui_home.png
    :align: center
    :alt: ROCm Compute Profiler TUI home screen
    :width: 800
 
-3. You can see the center window update with collapsed contents. Uncollapse to view tables, charts,
-and graphs visualizing the analysis data.
+3. You can see the center window update with a top header for kernel selection and collapsed contents beneath.
+Select a kernel of interest to load the corresponding analysis results, the default kernel selection is the top
+kernel.
 
-4. After the analysis results are loaded, you can start interactive analysis with detailed metrics.
+.. image:: ../../data/analyze/tui_kernel_selection.png
+   :align: center
+   :alt: ROCm Compute Profiler TUI home screen
+   :width: 800
+
+4. After the analysis results are loaded, you can start interactive analysis with detailed metrics by
+uncollapse contents to view tables, charts, and graphs visualizing the analysis data.
 The TUI supports basic keyboard shortcuts, including quit application commands for easy navigation.
 
 TUI analysis structure
@@ -50,9 +57,9 @@ TUI analysis structure
 Unlike the :doc:`cli` plain style interfaces, the TUI restructures the analysis workflow into four
 hierarchical categories to provide a more organized, top-down analysis approach:
 
-1. Top Stat
-2. High Level analysis
-3. Detailed block analysis
+1. Kernel Selection Header with Top Stats
+2. High Level Analysis
+3. Detailed Block Analysis
 4. Source Level analysis
 
 You are recommended to follow this top-down hierarchical structure to conduct a thorough performance
