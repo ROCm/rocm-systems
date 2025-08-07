@@ -24,6 +24,7 @@
 #include "agent_manager.hpp"
 #include "common.hpp"
 #include "config.hpp"
+#include "debug.hpp"
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
@@ -398,6 +399,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_in_time_sample_callback());
     parser.register_type_callback(entry_type::pmc_event_with_sample,
                                   get_pmc_event_with_sample_callback());
+    ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
 #endif
 }
 
@@ -409,6 +411,7 @@ rocpd_post_processing::post_process_metadata()
     {
         return;
     }
+    ROCPROFSYS_DEBUG("Post processing metadata..");
     auto& data_processor = get_data_processor();
     auto& agent_mngr     = agent_manager::get_instance();
     auto  n_info         = node_info::get_instance();

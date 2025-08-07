@@ -1188,11 +1188,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 const auto* _agent    = tool_data->get_gpu_tool_agent(_agent_id);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
-                if(_stream_id == 0)
-                {
-                    // kernel is not associated with a HIP stream
-                    _group_by_queue = true;
-                }
+                ROCPROFSYS_CI_THROW(
+                    _stream_id == 0,
+                    "Unexpected zero stream_id in kernel dispatch record: %s.",
+                    _name.c_str());
 
                 {
                     cache_category<category::rocm_kernel_dispatch>();
@@ -1311,11 +1310,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     tool_data->buffered_tracing_info.at(record->kind, record->operation);
 
                 uint64_t _stream_id = get_stream_id(record).handle;
-                if(_stream_id == 0)
-                {
-                    // memory_copy is not associated with a HIP stream
-                    _group_by_queue = true;
-                }
+                ROCPROFSYS_CI_THROW(
+                    _stream_id == 0,
+                    "Unexpected zero stream_id in memory copy record: %s.", _name.data());
 
                 {
                     size_t      thread_idx = record->thread_id;

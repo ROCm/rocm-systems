@@ -45,9 +45,9 @@ private:
     void post_process_metadata();
     cache_manager();
 
-    buffer_storage        m_storage;
+    buffer_storage        m_storage{ getpid() };
     metadata_registry     m_metadata;
-    storage_parser        m_parser;
+    storage_parser        m_parser{ getpid() };
     rocpd_post_processing m_postprocessing;
 };
 

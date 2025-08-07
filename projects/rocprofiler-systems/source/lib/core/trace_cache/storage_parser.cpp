@@ -33,6 +33,10 @@ namespace rocprofsys
 namespace trace_cache
 {
 
+storage_parser::storage_parser(pid_t _pid)
+: m_pid(_pid)
+{}
+
 void
 storage_parser::register_type_callback(
     const entry_type&                                           type,
@@ -44,6 +48,14 @@ storage_parser::register_type_callback(
 void
 storage_parser::consume_storage()
 {
+    ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s", filename.c_str());
+    if(m_pid != getpid())
+    {
+        ROCPROFSYS_DEBUG(
+            "Storage parser is not created in same process as shutting down..");
+        return;
+    }
+
     std::ifstream ifs(filename, std::ios::binary);
     if(!ifs)
     {
@@ -77,6 +89,10 @@ storage_parser::consume_storage()
 
         if(ifs.bad())
         {
+            ROCPROFSYS_WARNING(
+                1,
+                "Bad read while consuming buffered storage. Filename: %s. Bytes read: %d",
+                filename.c_str(), static_cast<int>(ifs.tellg()));
             continue;
         }
 
@@ -190,6 +206,8 @@ storage_parser::consume_storage()
     }
 
     ifs.close();
+    ROCPROFSYS_DEBUG("File parsing finished. Removing %s from file system",
+                     filename.c_str());
     std::remove(filename.c_str());
 }
 
