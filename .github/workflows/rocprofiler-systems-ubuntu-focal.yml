@@ -9,26 +9,17 @@ on:
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-focal.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
@@ -134,7 +125,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
-        git config --global --add safe.directory ${PWD} &&
+        git config --global --add safe.directory '*' &&
         TAG="" &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
         append-tagname ${{ matrix.lto }} lto &&
@@ -346,7 +337,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
-        git config --global --add safe.directory ${PWD} &&
+        git config --global --add safe.directory '*' &&
         cmake --version &&
         TAG="-rocm-${{ matrix.rocm-version }}" &&
         TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
@@ -482,7 +473,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
-        git config --global --add safe.directory ${PWD} &&
+        git config --global --add safe.directory '*' &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-codecov-mpi-python-ompt-papi
