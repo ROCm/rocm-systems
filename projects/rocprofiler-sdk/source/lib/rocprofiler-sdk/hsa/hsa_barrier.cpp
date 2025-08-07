@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <functional>
+#include <sstream>
 
 namespace rocprofiler
 {
@@ -159,6 +160,48 @@ hsa_barrier::clear_barrier()
     }
     _core_api.hsa_signal_store_screlease_fn(_barrier_signal, 0);
     ROCP_TRACE << "Barrier (handle: " << _barrier_signal.handle << ") is now cleared.";
+}
+
+std::string
+hsa_barrier::to_string() const
+{
+    std::ostringstream oss;
+    oss << "hsa_barrier{";
+
+    // _barrier_finished (function pointer - just indicate if it's set)
+    oss << "_barrier_finished: " << (_barrier_finished ? "set" : "null") << ", ";
+
+    // _barrier_signal
+    oss << "_barrier_signal: {handle: " << _barrier_signal.handle << "}, ";
+
+    // _queue_waiting
+    oss << "_queue_waiting: {";
+    _queue_waiting.rlock([&](const auto& queue_waiting) {
+        bool first = true;
+        for(const auto& [queue_id, count] : queue_waiting)
+        {
+            if(!first) oss << ", ";
+            oss << queue_id << ": " << count;
+            first = false;
+        }
+    });
+    oss << "}, ";
+
+    // _barrier_enqueued
+    oss << "_barrier_enqueued: {";
+    _barrier_enqueued.rlock([&](const auto& barrier_enqueued) {
+        bool first = true;
+        for(const auto& queue_id : barrier_enqueued)
+        {
+            if(!first) oss << ", ";
+            oss << queue_id;
+            first = false;
+        }
+    });
+    oss << "}";
+
+    oss << "}";
+    return oss.str();
 }
 
 }  // namespace hsa

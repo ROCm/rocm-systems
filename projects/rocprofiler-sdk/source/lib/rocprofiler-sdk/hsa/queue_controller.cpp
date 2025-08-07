@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -29,6 +30,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
+#include <sstream>
 
 namespace rocprofiler
 {
@@ -428,6 +430,80 @@ QueueController::get_supported_agents()
     return _supported_agents;
 }
 
+std::string
+QueueController::to_string() const
+{
+    std::ostringstream oss;
+    oss << "QueueController{";
+
+    // _queues (show count)
+    oss << "_queues: {";
+    _queues.rlock([&](const auto& queues) {
+        oss << "count: " << queues.size();
+        if(!queues.empty())
+        {
+            oss << ", queue_ids: [";
+            bool first = true;
+            for(const auto& [hsa_queue, queue_ptr] : queues)
+            {
+                if(!first) oss << ", ";
+                oss << "[" << (hsa_queue ? hsa_queue->id : 0) << fmt::format(",{}", *queue_ptr)
+                    << "]";
+                first = false;
+            }
+            oss << "]";
+        }
+    });
+    oss << "}, ";
+
+    // _callback_cache (show count)
+    oss << "_callback_cache: {";
+    _callback_cache.rlock([&](const auto& callbacks) { oss << "count: " << callbacks.size(); });
+    oss << "}, ";
+
+    // _supported_agents (show count and node_ids)
+    oss << "_supported_agents: {";
+    oss << "count: " << _supported_agents.size();
+    if(!_supported_agents.empty())
+    {
+        oss << ", node_ids: [";
+        bool first = true;
+        for(const auto& [node_id, agent_cache] : _supported_agents)
+        {
+            if(!first) oss << ", ";
+            oss << node_id;
+            first = false;
+        }
+        oss << "]";
+    }
+    oss << "}, ";
+
+    // _serialized_enabled
+    oss << "_serialized_enabled: " << (_serialized_enabled.load() ? "true" : "false") << ", ";
+
+    // _profiler_serializer (show count)
+    oss << "_profiler_serializer: {";
+    _profiler_serializer.rlock([&](const auto& serializers) {
+        for(const auto& [id, serializer] : serializers)
+        {
+            auto serializer_data = serializer->rlock([](const auto& s) { return s.to_string(); });
+            oss << "[" << id.handle << ": " << serializer_data << "]";
+        }
+    });
+    oss << "}";
+
+#if !defined(NDEBUG)
+    // _debug_signals (show count if in debug mode)
+    oss << ", _debug_signals: {";
+    _debug_signals.rlock(
+        [&](const auto& debug_signals) { oss << "count: " << debug_signals.size(); });
+    oss << "}";
+#endif
+
+    oss << "}";
+    return oss.str();
+}
+
 QueueController*
 get_queue_controller()
 {
@@ -482,3 +558,17 @@ queue_controller_fini()
 }
 }  // namespace hsa
 }  // namespace rocprofiler
+
+extern "C" void
+rocprofiler_debug_print_queue_controller_state()
+{
+    auto* controller = rocprofiler::hsa::get_queue_controller();
+    if(controller)
+    {
+        ROCP_ERROR << "QueueController Debug State: " << controller->to_string();
+    }
+    else
+    {
+        ROCP_ERROR << "QueueController Debug State: controller is null";
+    }
+}
