@@ -64,7 +64,7 @@ set_tests_properties(
 
 add_executable(pcs_bench_test)
 
-target_compile_options(pcs_bench_test PRIVATE "-Ofast")
+target_compile_options(pcs_bench_test PRIVATE "-O3" "-ffast-math")
 target_sources(pcs_bench_test
                PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_BENCH_TEST_SOURCES})
 target_include_directories(pcs_bench_test PRIVATE ${PCTEST_INCLUDE_DIR})
@@ -76,7 +76,7 @@ target_link_libraries(
             GTest::gtest_main)
 
 add_executable(pcs_thread_test)
-target_compile_options(pcs_thread_test PRIVATE "-Ofast")
+target_compile_options(pcs_thread_test PRIVATE "-O3" "-ffast-math")
 
 target_sources(pcs_thread_test
                PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_MULTIGPU_TEST_SOURCES})
