@@ -288,7 +288,11 @@ class PerfettoReader:
                 counter_track.id as slice_id,
                 counter.track_id,
                 counter_track.name as track_name,
-                'counter_collection' as category,
+                CASE
+                    WHEN counter_track.name LIKE '%SCRATCH MEMORY%' THEN 'scratch_memory'
+                    WHEN counter_track.name LIKE '%ALLOCATE BYTES%' THEN 'memory_allocation'
+                    ELSE 'counter_collection'
+                END as category,
                 0 as depth,
                 0 as stack_id,
                 0 as parent_stack_id,
@@ -297,7 +301,9 @@ class PerfettoReader:
                 counter_track.name as name
             FROM counter_track
             JOIN counter ON counter.track_id = counter_track.id
-            WHERE counter_track.name LIKE 'AGENT%'
+            WHERE (counter_track.name LIKE 'AGENT%'
+                   OR counter_track.name LIKE '%SCRATCH MEMORY%'
+                   OR counter_track.name LIKE '%ALLOCATE BYTES%')
             AND counter.value > 0
             GROUP BY counter.track_id"""
         )
@@ -328,7 +334,7 @@ class PerfettoReader:
                     "tp_index": counter_df["tp_index"],
                     "slice_id": counter_df["slice_id"],
                     "track_id": counter_df["track_id"],
-                    "category": "counter_collection",
+                    "category": counter_df["category"],
                     "depth": 0,
                     "stack_id": 0,
                     "parent_stack_id": 0,
