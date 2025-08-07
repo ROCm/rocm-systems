@@ -29,7 +29,7 @@ static void consumer(std::shared_ptr<class spm_state_t> s, aqlprofile_spm_data_c
 }
 
 struct spm_set_dest_buffer_args {
-  hsa_agent_t agent{0};
+  hsa_agent_t hsa_agent{0};
   size_t buf_size{0};
   uint32_t timeout{0};
   uint32_t size_copied{0};
@@ -38,6 +38,7 @@ struct spm_set_dest_buffer_args {
 };
 
 struct spm_state_t : public spm_set_dest_buffer_args {
+    aqlprofile_agent_handle_t aql_agent{};
     std::thread* manager_thread{nullptr};
     std::mutex work_mutex{};
     std::condition_variable work_cond{};
@@ -58,7 +59,8 @@ struct spm_state_t : public spm_set_dest_buffer_args {
 };
 
 inline static hsa_status_t HsaSpmSetDestBuffer(spm_set_dest_buffer_args& args) {
-    return hsa_amd_spm_set_dest_buffer(args.agent, args.buf_size, &args.timeout, &args.size_copied,
+    if (args.hsa_agent.handle == 0) throw std::runtime_error("Invalid hsa agent");
+    return hsa_amd_spm_set_dest_buffer(args.hsa_agent, args.buf_size, &args.timeout, &args.size_copied,
                                         args.dest_buf, &args.is_data_loss);
 }
 
@@ -66,12 +68,13 @@ class ManagerThread
 {
 public:
     ManagerThread(std::shared_ptr<spm_state_t> _s, aqlprofile_spm_data_callback_t cb, void* userdata)
-    : s(_s), agent(_s->agent)
+    : s(_s), agent(_s->hsa_agent)
     {
+        if (agent.handle == 0) throw std::runtime_error("Invalid hsa agent");
         s->stop_cons_thread = false;
         s->stop_prod_thread = false;
 
-        status = hsa_amd_spm_acquire(s->agent);
+        status = hsa_amd_spm_acquire(s->hsa_agent);
         CHECKHSA(status, return);
 
         // This non-blocking (timeout = 0) HsaSpmSetDestBuffer() call will clear up all the
@@ -116,11 +119,12 @@ namespace spm
 {
 
 std::vector<aqlprofile_spm_parameter_t> default_spm_params = {
-    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,          1<<26}, // 64MB
-    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK, 1<<13}, // 5us
-    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,              1000}   // 1sec
+    {AQLPROFILE_SPM_PARAMETER_TYPE_BUFFER_SIZE,     1<<26}, // 64MB
+    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, 1<<13}, // 4us
+    {AQLPROFILE_SPM_PARAMETER_TYPE_TIMEOUT,         100},   // 100ms
+    {AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,     AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK}
 };
-static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 3 && "Dont forget to add default param!");
+static_assert(AQLPROFILE_SPM_PARAMETER_TYPE_LAST == 4 && "Dont forget to add default param!");
 
 counter_des_t GetCounter(
     aql_profile::Pm4Factory* pm4_factory,
@@ -202,7 +206,8 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     size_t                               flags
 ) {
     auto s = std::make_shared<spm_state_t>();
-    s->agent = profile.agent;
+    s->aql_agent = profile.aql_agent;
+    s->hsa_agent = profile.hsa_agent;
 
     auto& params = s->parameters;
     for (auto& p : default_spm_params) params.at(p.type) = p.value; // Set default params
@@ -214,7 +219,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
     }
     catch(...) { return HSA_STATUS_ERROR_INVALID_ARGUMENT; }
 
-    s->memory = std::make_unique<SPMMemoryManager>(profile.agent, profile.alloc_cb, profile.dealloc_cb, profile.userdata);
+    s->memory = std::make_unique<SPMMemoryManager>(profile.aql_agent, profile.hsa_agent, profile.alloc_cb, profile.dealloc_cb, profile.userdata);
     auto& memory = s->memory;
 
     try
@@ -233,7 +238,7 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
         aql_profile::Pm4Factory* pm4_factory = nullptr;
         try
         {
-            pm4_factory = aql_profile::Pm4Factory::Create(profile.agent);
+            pm4_factory = aql_profile::Pm4Factory::Create(profile.aql_agent);
             if (!pm4_factory) throw std::exception();
         }
         catch(...) { return HSA_STATUS_ERROR_INVALID_AGENT; }
@@ -246,8 +251,11 @@ hsa_status_t _internal_aqlprofile_spm_create_packets(
         trace_config.spm_has_core1 = (pm4_factory->GetGpuId() == aql_profile::MI100_GPU_ID) ||
                                     (pm4_factory->GetGpuId() == aql_profile::MI200_GPU_ID);
         trace_config.spm_sample_delay_max = pm4_factory->GetSpmSampleDelayMax();
-        trace_config.sampleRate = (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK) + 16) & ~31ul;
+        trace_config.sampleRate = (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL) + 16) & ~31ul;
         if (trace_config.sampleRate == 0) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+        if (s->parameters.at(AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE) != AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK)
+            return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
         trace_config.xcc_number = pm4_factory->GetXccNumber();
         trace_config.se_number = pm4_factory->GetShaderEnginesNumber() / trace_config.xcc_number;
@@ -475,4 +483,40 @@ static void consumer(std::shared_ptr<spm_state_t> s, aqlprofile_spm_data_callbac
             base += s->buf_size_xcc;
         }
     }
+}
+
+PUBLIC_API bool
+aqlprofile_spm_is_event_supported(aqlprofile_agent_handle_t agent, aqlprofile_pmc_event_t event)
+{
+    aql_profile::Pm4Factory* pm4_factory = nullptr;
+    try
+    {
+        pm4_factory = aql_profile::Pm4Factory::Create(agent);
+        if (!pm4_factory) return false;
+    }
+    catch(...) { return false; }
+
+    if (pm4_factory->GetGpuId() < aql_profile::MI200_GPU_ID || pm4_factory->GetGpuId() > aql_profile::MI350_GPU_ID)
+        return false;
+
+    static auto blocks = []()
+    {
+        std::array<bool, AQLPROFILE_BLOCKS_NUMBER> valid_blocks{};
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPF] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCC] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCA] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TCP] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TA] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_TD] = true;
+        valid_blocks[HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI] = true;
+        return valid_blocks;
+    }();
+
+    if (event.flags.spm_flags.depth != AQLPROFILE_SPM_DEPTH_NONE) return false;
+    if (event.block_name >= blocks.size()) return false;
+
+    return blocks.at(event.block_name);
 }

@@ -258,9 +258,10 @@ class CodeobjMemoryManager : public MemoryManager {
 
 class SPMMemoryManager : public MemoryManager {
  public:
-  SPMMemoryManager(hsa_agent_t agent, aqlprofile_memory_alloc_callback_t alloc,
+  SPMMemoryManager(aqlprofile_agent_handle_t aql_agent, hsa_agent_t hsa_agent,
+                   aqlprofile_memory_alloc_callback_t alloc,
                    aqlprofile_memory_dealloc_callback_t dealloc, void* data)
-      : MemoryManager(agent, alloc, dealloc, data) {}
+      : MemoryManager(agent, alloc, dealloc, data) { this->agent_handle = aql_agent; }
 
   void CreateOutputBuf(size_t size) override {
     aqlprofile_buffer_desc_flags_t flags{};
