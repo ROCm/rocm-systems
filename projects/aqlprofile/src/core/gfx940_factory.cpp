@@ -46,6 +46,7 @@ class Mi300Factory : public Mi100Factory {
         block_info = new GpuBlockInfo(*base_table_ptr);
       block_table_[blockname_id] = block_info;
       // overwrite block info for any update from gfx9 to mi300
+      InitSpmBlockDelay(block_info);
       switch (block_info->id) {
         case SqCounterBlockId:
           block_info->event_id_max = 373;
