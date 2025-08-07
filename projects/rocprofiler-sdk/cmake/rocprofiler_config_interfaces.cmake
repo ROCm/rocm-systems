@@ -131,7 +131,14 @@ if(hip_VERSION VERSION_LESS "6.2")
 endif()
 
 target_link_libraries(rocprofiler-sdk-hip INTERFACE hip::host)
+# TODO: As of 2024/2/12, the hip::host target does not advertise its
+# include directory but amdhip64 does. This ordinarily wouldn't be an issue
+# because most folks just get it transitively, but here this is doing direct
+# property copying to get usage requirements.
+# The proper fix is for hip to export a hip::headers target with only usage
+# requirements and depend on that.
 rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::host)
+rocprofiler_config_nolink_target(rocprofiler-sdk-hip-nolink hip::amdhip64)
 
 # ----------------------------------------------------------------------------------------#
 #
@@ -222,7 +229,9 @@ find_library(
     HINTS ${rocm_version_DIR} ${ROCM_PATH}
     PATHS ${rocm_version_DIR} ${ROCM_PATH})
 
-target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
+if(hsa-amd-aqlprofile64_library)
+    target_link_libraries(rocprofiler-sdk-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_library})
+endif()
 
 # ----------------------------------------------------------------------------------------#
 #
