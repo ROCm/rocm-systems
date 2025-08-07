@@ -228,6 +228,10 @@ offering more accurate performance insights.
 It is important to note that the skid issue inherent in host-trap PC sampling is not likely to be resolved
 in its current form. Therefore, to achieve more precise performance profiling, it is recommended to adopt stochastic PC sampling starting with the gfx942 architecture.
 
+.. note::
+
+  Host-trap PC sampling is supported on AMD Instinct MI200, MI300, MI350, and MI355.
+
 Hardware-based (stochastic) PC sampling method
 ===============================================
 
@@ -362,3 +366,7 @@ Fields starting with ``arb_state_`` are of particular interest as they indicate 
 For example, ``arb_state_issue_`` fields indicate the type of instructions issued by the arbiter at the time of sampling.
 On the other hand, ``arb_state_stall_`` fields indicate the type of instructions stalled at the time of sampling.
 This information is useful for understanding how many instructions per cycle (IPC) are issued.
+
+.. note::
+
+  The stochastic PC sampling is supported on AMD Instinct MI300, MI350, and MI355.
