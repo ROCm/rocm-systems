@@ -51,6 +51,7 @@ jobs:
               -ghr '$(REPOSITORY_NAME)' \
               -ghsha '$(HEAD_SHA)' \
               -ghprn '$(PR_NUM)' \
+              -s '$(DEV)' \
               -ghpru '$(PR_URL)' \
               -ghprt \"\$TITLE\" \
               -ghpat '$(GH_PAT)' \
