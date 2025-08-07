@@ -37,7 +37,7 @@ jobs:
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
-    runs-on: rocprof-azure-multi-release-emu-runner-set
+    runs-on: rocm-systems-multi-release
 
     # define this for containers
     env:
@@ -118,7 +118,7 @@ jobs:
         ci-flags: ['']
 
     needs: prepare-packages
-    runs-on: rocprof-azure-multi-release-emu-runner-set
+    runs-on: rocm-systems-multi-release
 
     # define this for containers
     env:
