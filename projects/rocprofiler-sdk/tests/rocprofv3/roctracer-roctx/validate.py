@@ -38,7 +38,12 @@ def test_marker_api_trace(json_data):
                 return itr.value
         return None
 
-    valid_domain = ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API")
+    valid_domain = (
+        "MARKER_CORE_API",
+        "MARKER_CONTROL_API",
+        "MARKER_NAME_API",
+        "MARKER_CORE_RANGE_API",
+    )
 
     buffer_records = data["buffer_records"]
     marker_data = buffer_records["marker_api"]

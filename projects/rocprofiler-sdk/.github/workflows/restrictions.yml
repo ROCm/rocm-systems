@@ -27,7 +27,9 @@ concurrency:
 
 jobs:
   regex:
-    runs-on: rocprof-azure-docker-emu-runner-set
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
     env:
       FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx"
 

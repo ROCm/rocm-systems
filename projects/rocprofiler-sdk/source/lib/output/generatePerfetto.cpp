@@ -392,8 +392,8 @@ write_perfetto(
             for(auto itr : marker_api_gen.get(ditr))
             {
                 auto& track = thread_tracks.at(itr.thread_id);
-                auto  name  = (itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
-                             itr.operation != ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId)
+                auto  name  = (itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API &&
+                             itr.operation != ROCPROFILER_MARKER_CORE_RANGE_API_ID_roctxGetThreadId)
                                   ? tool_metadata.get_marker_message(itr.correlation_id.internal)
                                   : buffer_names.at(itr.kind, itr.operation);
 
