@@ -38,6 +38,7 @@
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/secure_filename.hpp"
 
 #include <hip/amd_detail/hip_api_trace.hpp>
 
@@ -83,8 +84,7 @@ size_t                   func_width       = 0;
 void
 print_call_stack(const call_stack_t& _call_stack)
 {
-    auto ofname = std::string{"intercept_table.log"};
-    if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
+    auto ofname = common::secure::get_safe_output_filename("intercept_table.log");
 
     std::ostream* ofs     = nullptr;
     auto          cleanup = std::function<void(std::ostream*&)>{};

@@ -39,6 +39,7 @@
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/secure_filename.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -214,8 +215,7 @@ rocprofiler_configure(uint32_t                 version,
     std::clog << info.str() << std::endl;
 
     std::ostream* output_stream = nullptr;
-    std::string   filename      = "pc_sampling.log";
-    if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
+    std::string   filename      = common::secure::get_safe_output_filename("pc_sampling.log");
     if(filename == "stdout")
         output_stream = &std::cout;
     else if(filename == "stderr")
