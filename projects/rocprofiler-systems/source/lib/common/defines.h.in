@@ -1,0 +1,162 @@
+// MIT License
+//
+// Copyright (c) 2022-2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+
+#pragma once
+
+// clang-format off
+#define ROCPROFSYS_VERSION_STRING "@FULL_VERSION_STRING@"
+#define ROCPROFSYS_VERSION_MAJOR @PROJECT_VERSION_MAJOR@
+#define ROCPROFSYS_VERSION_MINOR @PROJECT_VERSION_MINOR@
+#define ROCPROFSYS_VERSION_PATCH @PROJECT_VERSION_PATCH@
+#define ROCPROFSYS_GIT_DESCRIBE "@ROCPROFSYS_GIT_DESCRIBE@"
+#define ROCPROFSYS_GIT_REVISION "@ROCPROFSYS_GIT_REVISION@"
+
+// system info during compilation
+#define ROCPROFSYS_LIBRARY_ARCH     "@CMAKE_LIBRARY_ARCHITECTURE@"
+#define ROCPROFSYS_SYSTEM_NAME      "@CMAKE_SYSTEM_NAME@"
+#define ROCPROFSYS_SYSTEM_PROCESSOR "@CMAKE_SYSTEM_PROCESSOR@"
+#define ROCPROFSYS_SYSTEM_VERSION   "@CMAKE_SYSTEM_VERSION@"
+
+// compiler information
+#define ROCPROFSYS_COMPILER_ID      "@CMAKE_CXX_COMPILER_ID@"
+#define ROCPROFSYS_COMPILER_VERSION "@CMAKE_CXX_COMPILER_VERSION@"
+#define ROCPROFSYS_COMPILER_STRING  ROCPROFSYS_COMPILER_ID " v" ROCPROFSYS_COMPILER_VERSION
+
+#define ROCPROFSYS_DEFAULT_ROCM_PATH "@ROCmVersion_DIR@"
+#define ROCPROFSYS_ROCM_VERSION_STRING "@ROCPROFSYS_ROCM_VERSION@"
+#define ROCPROFSYS_ROCM_VERSION_MAJOR @ROCPROFSYS_ROCM_VERSION_MAJOR@
+#define ROCPROFSYS_ROCM_VERSION_MINOR @ROCPROFSYS_ROCM_VERSION_MINOR@
+#define ROCPROFSYS_ROCM_VERSION_PATCH @ROCPROFSYS_ROCM_VERSION_PATCH@
+
+// these can be set via defining the variable in CMake, e.g.:
+//      cmake -D ROCPROFSYS_CACHELINE_SIZE=N /path/to/source
+// if not defined when configuring cmake, these values fall back to
+// default values set in core/containers/aligned_static_vector.hpp.
+// the ROCPROFSYS_CACHELINE_SIZE_MIN is used to ensure portability
+#cmakedefine ROCPROFSYS_CACHELINE_SIZE @ROCPROFSYS_CACHELINE_SIZE@
+#cmakedefine ROCPROFSYS_CACHELINE_SIZE_MIN @ROCPROFSYS_CACHELINE_SIZE_MIN@
+
+// misc definitions which can be configured by cmake to override the defaults
+#cmakedefine ROCPROFSYS_ROCM_MAX_COUNTERS @ROCPROFSYS_ROCM_MAX_COUNTERS@
+// clang-format on
+
+#define ROCPROFSYS_VERSION                                                               \
+    ((10000 * ROCPROFSYS_VERSION_MAJOR) + (100 * ROCPROFSYS_VERSION_MINOR) +             \
+     ROCPROFSYS_VERSION_PATCH)
+
+#define ROCPROFSYS_ROCM_VERSION                                                          \
+    ((10000 * ROCPROFSYS_ROCM_VERSION_MAJOR) + (100 * ROCPROFSYS_ROCM_VERSION_MINOR) +   \
+     ROCPROFSYS_ROCM_VERSION_PATCH)
+
+#if ROCPROFSYS_ROCM_VERSION_MAJOR > 0
+#    define ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                                        \
+        "v@ROCPROFSYS_ROCM_VERSION_MAJOR@.@ROCPROFSYS_ROCM_VERSION_MINOR@.x"
+#else
+#    define ROCPROFSYS_ROCM_VERSION_COMPAT_STRING ""
+#endif
+
+// this should be passed to argparse::argument_parser::enable_version
+// Example:
+//      parser.enable_version(<name>, ROCPROFSYS_ARGPARSE_VERSION_INFO);
+#if !defined(ROCPROFSYS_ARGPARSE_VERSION_INFO)
+#    define ROCPROFSYS_ARGPARSE_VERSION_INFO                                             \
+        "v" ROCPROFSYS_VERSION_STRING, ROCPROFSYS_GIT_DESCRIBE, ROCPROFSYS_GIT_REVISION, \
+        {                                                                                \
+            { "", ROCPROFSYS_LIBRARY_ARCH }, { "compiler", ROCPROFSYS_COMPILER_STRING }, \
+            {                                                                            \
+                "rocm", ROCPROFSYS_ROCM_VERSION_COMPAT_STRING                            \
+            }                                                                            \
+        }
+#endif
+
+// clang-format off
+#if !defined(ROCPROFSYS_MAX_THREADS)
+#    define ROCPROFSYS_MAX_THREADS @ROCPROFSYS_MAX_THREADS@
+#endif
+
+#if !defined(ROCPROFSYS_MAX_UNWIND_DEPTH)
+#    define ROCPROFSYS_MAX_UNWIND_DEPTH @ROCPROFSYS_MAX_UNWIND_DEPTH@
+#endif
+// clang-format on
+
+// in general, we want to make sure the cache line size is not less than
+// 64 bytes (most common cacheline size for x86-64 CPUs) so unless
+// ROCPROFSYS_CACHELINE_SIZE was explicitly set, we set the min to 64
+// and use the max value of ROCPROFSYS_CACHELINE_SIZE and
+// ROCPROFSYS_CACHELINE_SIZE_MIN to assure that false-sharing is well
+// guarded against
+#if !defined(ROCPROFSYS_CACHELINE_SIZE_MIN)
+#    if defined(ROCPROFSYS_CACHELINE_SIZE)
+#        define ROCPROFSYS_CACHELINE_SIZE_MIN ROCPROFSYS_CACHELINE_SIZE
+#    else
+#        define ROCPROFSYS_CACHELINE_SIZE_MIN 64
+#    endif
+#endif
+
+#if !defined(ROCPROFSYS_ROCM_MAX_COUNTERS)
+#    define ROCPROFSYS_ROCM_MAX_COUNTERS 25
+#endif
+
+#define ROCPROFSYS_ATTRIBUTE(...)   __attribute__((__VA_ARGS__))
+#define ROCPROFSYS_VISIBILITY(MODE) ROCPROFSYS_ATTRIBUTE(visibility(MODE))
+#define ROCPROFSYS_PUBLIC_API       ROCPROFSYS_VISIBILITY("default")
+#define ROCPROFSYS_HIDDEN_API       ROCPROFSYS_VISIBILITY("hidden")
+#define ROCPROFSYS_INTERNAL_API     ROCPROFSYS_VISIBILITY("internal")
+#define ROCPROFSYS_INLINE           ROCPROFSYS_ATTRIBUTE(always_inline) inline
+#define ROCPROFSYS_NOINLINE         ROCPROFSYS_ATTRIBUTE(noinline)
+#define ROCPROFSYS_HOT              ROCPROFSYS_ATTRIBUTE(hot)
+#define ROCPROFSYS_COLD             ROCPROFSYS_ATTRIBUTE(cold)
+#define ROCPROFSYS_CONST            ROCPROFSYS_ATTRIBUTE(const)
+#define ROCPROFSYS_PURE             ROCPROFSYS_ATTRIBUTE(pure)
+#define ROCPROFSYS_WEAK             ROCPROFSYS_ATTRIBUTE(weak)
+#define ROCPROFSYS_PACKED           ROCPROFSYS_ATTRIBUTE(__packed__)
+#define ROCPROFSYS_PACKED_ALIGN(VAL)                                                     \
+    ROCPROFSYS_PACKED ROCPROFSYS_ATTRIBUTE(__aligned__(VAL))
+#define ROCPROFSYS_LIKELY(...)   __builtin_expect((__VA_ARGS__), 1)
+#define ROCPROFSYS_UNLIKELY(...) __builtin_expect((__VA_ARGS__), 0)
+
+#if defined(ROCPROFSYS_CI) && ROCPROFSYS_CI > 0
+#    if defined(NDEBUG)
+#        undef NDEBUG
+#    endif
+#    if !defined(DEBUG)
+#        define DEBUG 1
+#    endif
+#    if defined(__cplusplus)
+#        include <cassert>
+#    else
+#        include <assert.h>
+#    endif
+#endif
+
+#define ROCPROFSYS_STRINGIZE(X)           ROCPROFSYS_STRINGIZE2(X)
+#define ROCPROFSYS_STRINGIZE2(X)          #X
+#define ROCPROFSYS_VAR_NAME_COMBINE(X, Y) X##Y
+#define ROCPROFSYS_VARIABLE(X, Y)         ROCPROFSYS_VAR_NAME_COMBINE(X, Y)
+#define ROCPROFSYS_LINESTR                ROCPROFSYS_STRINGIZE(__LINE__)
+#define ROCPROFSYS_ESC(...)               __VA_ARGS__
+
+#if defined(__cplusplus)
+#    if !defined(ROCPROFSYS_FOLD_EXPRESSION)
+#        define ROCPROFSYS_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
+#    endif
+#endif

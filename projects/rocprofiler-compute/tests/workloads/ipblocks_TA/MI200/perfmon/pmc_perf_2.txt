@@ -1,0 +1,5 @@
+pmc:  TA_BUFFER_ATOMIC_WAVEFRONTS_sum TA_BUFFER_TOTAL_CYCLES_sum
+
+gpu:
+range:
+kernel:

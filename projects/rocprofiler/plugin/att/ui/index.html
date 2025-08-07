@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html>
+	<link href="data:image/x-icon;base64,AAABAAEAEBAQAAAAAAAoAQAAFgAAACgAAAAQAAAAIAAAAAEABAAAAAAAgAAAAAAAAAAAAAAAEAAAAAAAAADc6sMA////AG2nAAD4+vMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAERERERERERESIiIhERERMRIiIiIRERMhEiIiIiEREiESIiIiIhEiIRIiIREREiIhEiIhERESIiERIiERERIiIRESIREREiIhEREhERESIiERERERERIiIREREiIiIiIhEREiIiIiIiERAiIiIiIiIRAiIiIiIiIhEREREREREREAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" rel="icon" type="image/x-icon" />
+	<link rel="stylesheet" href="styles.css">
+	<head>
+		<title>ATT Analysis View</title>
+	</head>
+
+	<body>
+	<div id="Images">
+		<div id="padding" style="height:4px"></div>
+
+		<div style="order: 1px solid lightblue; overflow:auto; width: calc(min(100% - 350px, 1400px));">
+			<div class="tab">
+				<button class="tablinks" onclick="showImage('timeline.png')">Wave States</button>
+				<button class="tablinks" onclick="showImage('occupancy.png')">Occupancy</button>
+				<button class="tablinks" onclick="showImage('dispatches.png')">Dispatches</button>
+				<button class="tablinks" onclick="showImage('counters.png')" id="counterspng_button">Counters</button>
+			</div>
+			<img id="GraphImage" src=timeline.png width=100%>
+		</div>
+
+		<div id="ma_nav">
+			<nav>
+				<h3>Top-N Hot Spots</h3>
+				<h4>&nbsp&nbsp&nbsp&nbsp&nbsp Count(times) &nbsp&nbsp&nbsp Issue to Inst(cycles) &nbsp&nbsp&nbsp Delay to Next Issue(cycles)</h4>
+				<ol id="top_n"></ol>
+			</nav>
+		</div>
+	</div>
+
+	<div id="padding" style="height: 10px"></div>
+	<div id="Buttons" display="inline-block" style="overflow:scroll; max-width: calc(100% - 370px); height: 150px; z-index: 9999;">
+		<div id="GH_select"></div>
+		<div id="SE_select"></div>
+		<div id="SM_select"></div>
+		<div id="WSL_select"></div>
+		<div id="WID_select"></div>
+	</div>
+	<div id="map" style="position: absolute; top:570px; width: 100%;">
+		<div id="flexbox">
+			<div id="logo">
+				<div id="what"></div>
+			</div>
+		</div>
+		<div id="padding" style="height:2px"></div>
+		<div id="wave" style="position: absolute; top:100px; overflow-x:scroll; width: calc(100% - 35px); left: 10px;"></div>
+	</div>
+	<div id="minimap"></div>
+	<div id="ma_code">
+		<ul id="code" style="position: absolute; top:720px; left:390px"></ul>
+	</div>
+	<canvas id="arrows" width="400px" height="500px" style="position: absolute; top:740px; left:1px;"></canvas>
+
+	<script src="https://cdn.jsdelivr.net/npm/d3@7.0.0/dist/d3.min.js"></script>
+	<script>
+
+		function DrawArrow(ctx, posx, posy) {
+			ctx.beginPath();
+			ctx.moveTo(posx, posy+6);
+			ctx.lineTo(posx, posy-6);
+			ctx.lineTo(posx+8, posy);
+			ctx.fill();
+		}
+		
+		var canvas_waitcnt = 0
+		function DrawCanvas() {
+			if (canvas_waitcnt == 0) return;
+			var waitcnt = canvas_waitcnt
+
+			const canvas = document.getElementById("arrows");
+			if (canvas.getContext) {
+				const ctx = canvas.getContext("2d");
+				ctx.clearRect(0, 0, canvas.width, canvas.height);
+				
+				var elem = 0;
+				var elements = document.getElementsByClassName("line_"+elem);
+				if (elements == undefined || !elements || elements.length == 0)
+					return;
+				var y0 = elements[0].getBoundingClientRect().top;
+				
+				var offsets = []
+				while(elements.length > 0) {
+					var yN = elements[0].getBoundingClientRect().top;
+					offsets.push(yN-y0+10)
+					elem += 1;
+					var elements = document.getElementsByClassName("line_"+elem);
+				}
+				document.getElementById("arrows").setAttribute("height", offsets[offsets.length-1])
+
+				var connect = []
+				var slots = []
+				for(const f in offsets) { slots.push(0); connect.push([]) };
+
+				var max_slots = 8
+				for(const w in waitcnt) {
+					var y0 = offsets[waitcnt[w][0]]
+					for(const l in waitcnt[w][1]) {
+						const elem = waitcnt[w][1][l][0]
+
+						var bUsed = false;
+						for(var t=0; t<connect[elem].length; t++){ if(connect[elem][t] == waitcnt[w][0]) { bUsed=true; } }
+						if(bUsed==true) { continue; }
+
+						connect[elem].push(waitcnt[w][0]);
+
+						var smin = Math.min(elem, waitcnt[w][0])
+						var smax = Math.max(elem, waitcnt[w][0])
+						for(var s=smin; s<=smax; s++) {
+							slots[s] += 1
+							max_slots = Math.max(max_slots, waitcnt[w][1][l][1])
+						}
+					}
+				}
+				var spacing = 380.0 / max_slots
+				if (spacing > 10) spacing = 10;
+
+				var connect = []
+				for(const f in offsets) { connect.push([]) };
+
+				var colors = [[0, 128, 254], [254, 128, 0], [254, 0, 128],
+					[100, 100, 100], [128, 0, 254], [128, 254, 0], [0, 254, 128]]
+
+				ctx.globalAlpha = 0.8
+				var color_count = 0;
+
+				for(const w in waitcnt) {
+					var y0 = offsets[waitcnt[w][0]]
+					for(const l in waitcnt[w][1]) {
+						const elem = waitcnt[w][1][l][0]
+
+						var bUsed = false;
+						for(var t=0; t<connect[elem].length; t++){ if(connect[elem][t] == waitcnt[w][0]) { bUsed=true; } }
+						if(bUsed==true) { continue; }
+
+						var color = colors[color_count%colors.length]
+						ctx.fillStyle = 'rgb('+color[0]+','+color[1]+','+color[2]+')'
+
+						connect[elem].push(waitcnt[w][0]);
+
+						var smin = Math.min(elem, waitcnt[w][0])
+						var smax = Math.max(elem, waitcnt[w][0])
+						for(var s=smin; s<=smax; s++)
+							slots[s] -= 1
+
+						var xpos = 380 - spacing*waitcnt[w][1][l][1]
+						const ypos = offsets[elem];
+
+						var wnc_y = y0;
+						if(ypos > y0) { wnc_y += 3; }
+						else { wnc_y -= 3; }
+
+						DrawArrow(ctx, 387, ypos);
+						ctx.fillRect(xpos, wnc_y, 3, ypos-wnc_y);
+
+						ctx.fillRect(xpos, wnc_y-1.5, 387-xpos, 3);
+						ctx.fillRect(xpos, ypos-1.5, 387-xpos, 3);
+						DrawArrow(ctx, 387, wnc_y);
+						color_count += 1;
+					}
+				}
+			}
+		}
+
+		setInterval(DrawCanvas, 200)
+
+		var dropdowns_open = [[], [], [], []]
+		function closeAllDropDownsExcept(index) {
+			for (var i in dropdowns_open) {
+				if (i === index) continue;
+				for (var drop in dropdowns_open[i]) {
+					if (dropdowns_open[i][drop].classList.contains('show')) {
+						dropdowns_open[i][drop].classList.remove('show')
+					}
+				}
+			}
+		}
+		function dropDownSE() {
+			closeAllDropDownsExcept(0);
+			document.getElementById("SE_dropdown").classList.toggle("show");
+		}
+		function dropDownSM() {
+			closeAllDropDownsExcept(1);
+			document.getElementById("SM_dropdown").classList.toggle("show");
+		}
+		function dropDownWSL() {
+			closeAllDropDownsExcept(2);
+			document.getElementById("WSL_dropdown").classList.toggle("show");
+		}
+		function dropDownWID() {
+			closeAllDropDownsExcept(3);
+			document.getElementById("WID_dropdown").classList.toggle("show");
+		}
+
+		function ButtonHtml(id, onc_func, name, index) {
+			var slot_name = ""
+			if (index <= 16)
+				slot_name = name + index
+			else
+				slot_name = index
+			return '<button class="btn" id="'+id+index+'" onclick="'+onc_func+'('+index+')">'+slot_name+'</button>'
+		}
+		function WaveButtonHtml(index) {
+			return ButtonHtml("wid_button", "FetchNamesAndGather", "ID", index)
+		}
+		function SEButonHtml(index) {
+			return ButtonHtml("se_button", "OpenSIMDView", "Shader", index)
+		}
+		function SIMDButonHtml(index) {
+			return ButtonHtml("sm_button", "OpenWSLView", "SIMD", index)
+		}
+		function WSLButonHtml(index) {
+			return ButtonHtml("wsl_button", "OpenWIDView", "Slot", index)
+		}
+		function GraphButtonHtml(index, name) {
+			return '\n<input type="checkbox" id="gh_button' + index + '" onclick="UpdGraph(this, '+index+')" checked=true>'+name
+		}
+
+		var global_imagename = "timeline.png"
+		var graph_selected_counters = {};
+		function UpdImageSrc(imgname) {
+			if (imgname != null)
+				global_imagename = imgname
+			var endstr = document.getElementById("btn_norm").checked ? "1" : "0"
+			for(var key in graph_selected_counters) {
+				if(graph_selected_counters[key])
+					endstr += "1"
+				else
+					endstr += "0"
+			}
+			console.log(graph_selected_counters, 'Updated to', endstr)
+			document.getElementById("GraphImage").src = global_imagename + "?" + endstr
+		}
+
+		function UpdGraph(checkbox, index) {
+			graph_selected_counters[index] = checkbox.checked
+			document.getElementById('gh_button'+index).style.backgroundColor
+				= graph_selected_counters[name] ? "white" : "#D7D7D7"
+			UpdImageSrc(global_imagename)
+		}
+
+		var HTML_MAC = document.getElementById("ma_code").innerHTML
+		var HTML_MAP = document.getElementById("map").innerHTML
+		var HTML_MINI = document.getElementById("minimap").innerHTML
+		var HTML_IMAG = document.getElementById("Images").innerHTML
+		var SE_BTN_HTML = ""
+		var SM_BTN_HTML = ""
+		var WSL_BTN_HTML = ""
+		var WID_BTN_HTML = ""
+
+		var current_SE = 0
+		var current_SM = 0
+		var current_WSL = 0
+		var current_WID = 0
+		var filename_data = {}
+		var clock_scale = 1
+
+		fetch("filenames.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+			try {
+				clock_scale = data.gfxv === 'navi' ? 3 : 1
+			} catch { clock_scale = 1 }
+			filename_data = data.wave_filenames
+
+			wave_cu_index = {};
+			SE_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownSE()" class="dropbtn" id="SE_BTN_DROP">Shader:</button>\
+							<div id="SE_dropdown" class="dropdown-content">'
+			for(var i in filename_data) {
+				SE_BTN_HTML = SE_BTN_HTML + SEButonHtml(i)
+			}
+			SE_BTN_HTML += '</div></div>'
+
+			document.getElementById("ma_code").innerHTML = ""
+			document.getElementById("map").innerHTML = ""
+			document.getElementById("minimap").innerHTML = ""
+			document.getElementById('SE_select').innerHTML = SE_BTN_HTML
+			document.getElementById('SM_select').innerHTML = ""
+			document.getElementById('WSL_select').innerHTML = ""
+			document.getElementById('WID_select').innerHTML = ""
+
+			for(var se in filename_data)
+			for(var sm in filename_data[se])
+			for(var wsl in filename_data[se][sm])
+			for(var wid in filename_data[se][sm][wsl]) {
+				OpenSIMDView(se)
+				OpenWSLView(sm)
+				OpenWIDView(wsl)
+				FetchNamesAndGather(wid)
+				return
+			}
+		})
+
+		function OpenSIMDView(se_index) {
+			if(document.getElementById('se_button'+current_SE) != null)
+				document.getElementById('se_button'+current_SE).style.backgroundColor = "#D7D7D7"
+			document.getElementById('se_button'+se_index).style.backgroundColor = "white"
+			document.getElementById("SE_BTN_DROP").textContent = 'Shader: ' + se_index
+			current_SE = se_index
+
+			SM_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownSM()" class="dropbtn" id="SM_BTN_DROP">SIMD</button>\
+							<div id="SM_dropdown" class="dropdown-content">'
+			for(var i in filename_data[current_SE]) {
+				SM_BTN_HTML = SM_BTN_HTML + SIMDButonHtml(i)
+			}
+			SM_BTN_HTML += '</div></div>'
+
+			document.getElementById('SM_select').innerHTML = SM_BTN_HTML
+			document.getElementById('WSL_select').innerHTML = ""
+			document.getElementById('WID_select').innerHTML = ""
+		}
+		function OpenWSLView(sm_index) {
+			if(document.getElementById('sm_button'+current_SM) != null)
+				document.getElementById('sm_button'+current_SM).style.backgroundColor = "#D7D7D7"
+			document.getElementById('sm_button'+sm_index).style.backgroundColor = "white"
+			document.getElementById("SM_BTN_DROP").textContent = 'SIMD: ' + sm_index
+			current_SM = sm_index
+
+			WSL_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownWSL()" class="dropbtn" id="WSL_BTN_DROP">WaveSlot</button>\
+							<div id="WSL_dropdown" class="dropdown-content">'
+			for(var i in filename_data[current_SE][current_SM]) {
+				WSL_BTN_HTML = WSL_BTN_HTML + WSLButonHtml(i)
+			}
+			WSL_BTN_HTML += '</div></div>'
+
+			document.getElementById('WSL_select').innerHTML = WSL_BTN_HTML
+			document.getElementById('WID_select').innerHTML = ""
+		}
+		function OpenWIDView(sl_index) {
+			if(document.getElementById('wsl_button'+current_WSL) != null)
+				document.getElementById('wsl_button'+current_WSL).style.backgroundColor = "#D7D7D7"
+			document.getElementById('wsl_button'+sl_index).style.backgroundColor = "white"
+			document.getElementById("WSL_BTN_DROP").textContent = 'WaveSlot: ' + sl_index
+			current_WSL = sl_index
+
+			WID_BTN_HTML = 	'<div class="dropdown">\
+							<button onclick="dropDownWID()" class="dropbtn" id="WID_BTN_DROP">WaveID</button>\
+							<div id="WID_dropdown" class="dropdown-content">'
+			for(var i in filename_data[current_SE][current_SM][current_WSL]) {
+				WID_BTN_HTML = WID_BTN_HTML + WaveButtonHtml(i)
+			}
+			WID_BTN_HTML += '</div></div>'
+
+			document.getElementById('WID_select').innerHTML = WID_BTN_HTML
+		}
+
+		function ApplyLiveImage() {
+			fetch("live.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				if (data.live === 1)
+					return;
+				document.getElementById("btn_norm").disabled = true;
+				try {
+					for (var index = 0; index < 99; index++)
+						document.getElementById("gh_button"+index).disabled = true;
+				} catch {}
+			})
+		}
+
+		function showImage(imgname) {
+			fetch("graph_options.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				var html_gh = '<input type="checkbox" id="btn_norm" onclick="UpdImageSrc(null)" checked=false>Normalize\t'
+				try {
+					if (data[imgname] === undefined) throw "invalid";
+				} catch {
+					console.log("Invalid data:", imgname)
+					return
+				}
+				for(var key in data[imgname]) {
+					graph_selected_counters[key] = true
+					html_gh += GraphButtonHtml(key, data[imgname][key])
+				}
+
+				document.getElementById("GH_select").innerHTML = html_gh
+				document.getElementById("btn_norm").checked = false
+
+				ApplyLiveImage()
+				UpdImageSrc(imgname)
+			})
+		}
+
+		function FetchNamesAndGather(wave_index) {
+			if(document.getElementById('wid_button'+current_WID) != null)
+				document.getElementById('wid_button'+current_WID).style.backgroundColor = "#D7D7D7"
+			document.getElementById("WID_BTN_DROP").textContent = 'WaveID: ' + wave_index
+			document.getElementById('wid_button'+wave_index).style.backgroundColor = "white"
+			current_WID = wave_index
+
+			document.getElementById("ma_code").innerHTML = HTML_MAC
+			document.getElementById("map").innerHTML = HTML_MAP
+			document.getElementById("minimap").innerHTML = HTML_MINI
+			document.getElementById("Images").innerHTML = HTML_IMAG
+
+			showImage('timeline.png')
+			console.log('SE:',current_SE,' sm:', current_SM, 'wsl:', current_WSL, 'wid:',current_WID)
+			console.log('Fetch', filename_data[current_SE][current_SM][current_WSL][current_WID])
+
+			//GatherData(filename_data[current_SE][current_SM][current_WV][0][0])
+
+			fetch("graph_options.json", {cache: "no-store"}).then(response => response.json()).then(data => {
+				try { if (data["counters.png"] === undefined) throw "disabled"; }
+				catch { document.getElementById("counterspng_button").disabled = true; }
+			})
+
+			GatherCUWavesData(filename_data[current_SE][current_SM][current_WSL][current_WID])
+		}
+
+		var cuwaves_data = []
+		function GatherCUWavesData(wave_to_gather) {
+			shader = filename_data[current_SE]
+			file_to_gather = wave_to_gather[0]
+			wave_start = wave_to_gather[1]
+			wave_end = wave_to_gather[2]
+
+			wavelist = []
+			for (var sm in shader)
+			for (var wsl in shader[sm])
+			for (var wid in shader[sm][wsl]) {
+				wv = shader[sm][wsl][wid]
+				if (wv[1] < wave_end && wv[2] > wave_start)
+					wavelist.push([wv[0], wv[1], wv[2], sm, wsl, wid])
+			}
+			cuwaves_data = []
+			LoopOverList(file_to_gather, wavelist, 0)
+		}
+		function LoopOverList(file_to_gather, wavelist, index) {
+			if (index >= wavelist.length) {
+				GatherData(file_to_gather)
+			} else {
+				wave_sel = wavelist[index]
+				fetch(wave_sel[0]).then(response => response.json()).then(data => {
+					if (cuwaves_data.length == 0 || cuwaves_data[cuwaves_data.length-1][0] != wave_sel[3] || cuwaves_data[cuwaves_data.length-1][1] != wave_sel[4]) {
+						cuwaves_data.push([wave_sel[3], wave_sel[4], [wave_sel[5], wave_sel[1], wave_sel[2]], data.wave.instructions, data.wave.timeline])
+					} else {
+						cuwaves_data[cuwaves_data.length-1][3].concat(data.wave.instructions)
+						cuwaves_data[cuwaves_data.length-1][4].concat(data.wave.timeline)
+					}
+					LoopOverList(file_to_gather, wavelist, index+1)
+				})
+			}
+		}
+
+		function GatherData(file_to_gather) {
+			//document.getElementById('what').innerHTML = ""
+
+			d3.select('nav').style('visibility', 'hidden')
+			fetch(file_to_gather, {cache: "no-store"})
+				.then(response => response.json())
+				.then(data => {
+				console.log("Requestd:", file_to_gather)
+
+				fetch('code.json', {cache: "no-store"})
+				.then(response => response.json())
+				.then(code_data => {
+					const SP = '\u00A0'
+					window.data = data // DEBUG
+					const SOCKET_PORT = data.websocket_port
+					const wav = data.wave
+					let insts = wav.instructions
+					let L2FirstToken = {}
+					let L2InstTime = {}
+					insts.forEach((ins, i) => {
+						const line_num = ins[4]-1
+						if (!(line_num in L2FirstToken)) {
+							L2FirstToken[line_num] = ins[0]
+						}
+						if (!(line_num in L2InstTime)) {
+							L2InstTime[line_num] = [ins[2], ins[3]] // issue2inst, inst exec time
+						}
+						// handle dual issue
+						ins[5] = (i > 0 && ins[0] == insts[i-1][0]) ?  insts[i-1][5] + 1 : 0
+					})
+
+					const isInViewport = (el) => {
+						const rect = el.getBoundingClientRect()
+						return (
+							rect.top >= 0 &&
+							rect.left >= 0 &&
+							rect.bottom <= (window.innerHeight || document.documentElement.clientHeight) &&
+							rect.right <= (window.innerWidth || document.documentElement.clientWidth)
+						)
+					}
+
+					const what = d3.select('#what').append('svg')
+						.attr('width', '100%')
+						.attr('height', 100)
+						.append('g')
+					what.append('text')
+						.attr('x', 3)
+						.attr('y', 40)
+						.attr("font-family", "sans-serif")
+						.text('TRACE:')
+					what.append('text')
+						.attr('x', 68)
+						.attr('y', 40)
+						.attr("font-family", "sans-serif")
+						.attr('font-weight', 600)
+						.attr('fill', '#1F51FF')
+						.text(data.name)
+					// SIMD view
+					let simd_mode = false
+					const simd_button = what.append('rect')
+						.attr('x', 1)
+						.attr('y', 64)
+						.attr('rx', 4)
+						.attr('ry', 4)
+						.attr('width', 40)
+						.attr('height', 16)
+						.attr('fill', 'lightgray')
+					what.append('text')
+						.attr('x', 5)
+						.attr('y', 76)
+						.attr("font-family", "sans-serif")
+						.attr("font-size", "0.8em")
+						.text('SIMD')
+						//.attr('fill', 'white')
+						.style('cursor', 'pointer')
+						.on('click', () => {
+							if (simd_mode) {
+								simd_mode = false
+								simd_button.attr('fill', 'lightgray')
+								WAVE.transition()
+									.duration(800)
+									.attr('height', HEIGHT)
+									.on('end', () => {
+										d3.select('nav').style('visibility', 'visible')
+									})
+								d3.select('#SIMD').empty()
+							} else {
+								simd_mode = true
+								simd_button.attr('fill', '#03AC13') // '#597D35')
+								d3.select('nav').style('visibility', 'hidden')
+								WAVE.transition()
+									.duration(1000)
+									.attr('height', HEIGHT * (1 + data.simd_waves.length))
+									.ease(d3.easeLinear)
+								show_simd()
+							}
+					})
+
+					// wave => simd
+					what.append("path")
+						.attr("d", 'M 16 95 L 24 95 L 20 86 Z')
+						.attr("fill", "#0096FF")
+
+					let saved_cu_waves = null
+
+					const render_cu = () => {
+						d3.select('#map').style('visibility', 'hidden')
+						d3.select('#ma_code').style('visibility', 'hidden')
+						d3.select('nav').style('visibility', 'hidden')
+						d3.select('#Images').style('visibility', 'hidden')
+						d3.select('#Buttons').style('visibility', 'hidden')
+						d3.select("#minimap").style('visibility', 'hidden')
+						d3.select("#arrows").style('visibility', 'hidden')
+						const container = d3.select('body')
+							.insert("div",":first-child")
+							.attr('id', 'cu')
+						if (saved_cu_waves) {
+							container.append(() => saved_cu_waves.node())
+
+							if (scroll_to) {
+								const target = 'cu-' + wav.simd + '-' + wav.slot + '-' + scroll_to
+								const token = d3.select('#'+target).node()
+								token.scrollIntoView({
+									behavior: "smooth", inline: "start", block: "center"
+								})
+							}
+						} else {
+							//console.time("CU Rendering")
+							const kill_cu_div = container.append("div")
+							const kill_cu = kill_cu_div.append('svg')
+								.attr('width', 200)
+								.attr('height', 20)
+							kill_cu.append('rect')
+								.attr('x', 2)
+								.attr('y', 2)
+								.attr('rx', 4)
+								.attr('ry', 4)
+								.attr('width', 42)
+								.attr('height', 16)
+								.attr('fill', 'lightgray')
+							kill_cu.append('text')
+								.attr('x', 6)
+								.attr('y', 14)
+								.attr("font-family", "sans-serif")
+								.attr("font-size", "0.8em")
+								.text('return')
+								//.attr('fill', 'white')
+								.style('cursor', 'pointer')
+								.on('click', () => {
+									saved_cu_waves = d3.select('#cu').remove()
+									d3.select('#map').style('visibility', 'visible')
+									d3.select('#ma_code').style('visibility', 'visible')
+									d3.select('#Images').style('visibility', 'visible')
+									d3.select('#Buttons').style('visibility', 'visible')
+									d3.select("#minimap").style('visibility', 'visible')
+									d3.select("#arrows").style('visibility', 'visible')
+									if (simd_mode) {
+										d3.select('nav').style('visibility', 'hidden')
+									} else {
+										d3.select('nav').style('visibility', 'visible')
+									}
+									cu_button.style('fill', 'lightgray')
+									d3.select('#loading').remove()
+								})
+
+							const cu_waves_div = container.append("div")
+								.attr('id', 'cu_wave')
+							const CU = cu_waves_div.append('svg')
+								.attr('id', 'CU')
+								.attr('width', WIDTH)
+								.attr('height', cuwaves_data.length * CU_HEIGHT + MARGIN)
+								.append('g')
+							CU.append('rect')
+								.attr('x', 0)
+								.attr('y', 0)
+								.attr('width', '100%')
+								.attr('height', '100%')
+								.attr("fill", "black")
+								.attr("opacity", 0.3)
+
+							show_cu()
+							//console.timeEnd("CU Rendering")
+						}
+					}
+
+					const cu_button = what.append('rect')
+						.attr('x', 80)
+						.attr('y', 64)
+						.attr('rx', 4)
+						.attr('ry', 4)
+						.attr('width', 28)
+						.attr('height', 16)
+						.attr('fill', 'lightgray')
+					what.append('text')
+						.attr('x', 84)
+						.attr('y', 76)
+						.attr("font-family", "sans-serif")
+						.attr("font-size", "0.8em")
+						.text('CU')
+						.style('cursor', 'pointer')
+						.on('click', () => {
+							//jb
+							cu_button.transition()
+								.ease(d3.easeBounce)
+								.duration(100)
+								.style('fill', '#03AC13')
+							what.append('text')
+								.attr('id', 'loading')
+								.attr('x', 110)
+								.attr('y', 76)
+								.attr("font-family", "sans-serif")
+								.attr("font-size", "0.9em")
+								.attr('fill', '	#228B22')
+								.text('loading ...')
+
+							setTimeout(() => { render_cu() }, 100)
+					})
+
+					// simd => cu
+					what.append("path")
+						.attr("d", 'M 60 68 L 60 74 L 70 71 Z')
+						.attr("fill", "#0096FF")
+
+					
+					d3.select('#top_n')
+						.selectAll("li")
+						.data(code_data.top_n)
+						.enter()
+						.append('li')
+						.datum((d) => { return {data:d} })
+						.on('click', (e, d) => {
+							const line_num = d.data[0]
+							
+							if (line_num in L2FirstToken) {
+								d3.selectAll('.highlight').classed('highlight', false)
+								d3.select('.line_' + line_num).classed("highlight", true)
+								d3.select('.top_n_' + line_num).classed("highlight", true)
+								src_line = d3.select('.line_' + line_num).node()
+								scroll_to = L2FirstToken[line_num]
+								const token_id = "token" + scroll_to
+								const token = d3.select('#'+token_id).node()
+								// scrolling not consistent without the timer
+								src_line.scrollIntoView({behavior: "smooth", block: "start"})
+							}
+						})
+						.text((d,i) => {
+							return String(i+1).padStart(2, SP)
+								+ String(d.data[1]).padStart(6, SP)
+								+ String(d.data[2]).padStart(12, SP) + SP.repeat(9)
+								+ String(d.data[3])
+						})
+						.attr('class', (d) => { return 'top_n_' + d.data[0] })
+						.style("cursor", "pointer")
+
+					d3.select('nav').style('visibility', 'visible')
+
+					d3.select("#code")
+						.selectAll("li")
+						.data(code_data.code)
+						.enter()
+						.append('li')
+						.datum((d) => { return {data:d} })
+						.on('click', (e, d) => {
+							const line_num = d[4]
+							if (line_num in L2FirstToken) {
+								d3.selectAll(".highlight").classed("highlight", false)
+								d3.select('.line_' + line_num).classed("highlight", true)
+
+								scroll_to = L2FirstToken[line_num]
+								const token = "token" + scroll_to
+								const el = d3.select('#'+token).node()
+								el.scrollIntoView({behavior: "smooth", inline: "start"})
+							}
+						})
+						.text((d,i) => {
+							const LEFT_JUST = 58
+							const spacing = SP.repeat(Math.max(2, LEFT_JUST - d.data[0].length))
+							const line_num = String(i).padStart(4, SP);
+							return line_num + ' ' + d.data[0] + spacing
+						})
+						.attr('class', (d,i) => { return 'line_' + i })
+						.classed('clickable', (d,i) => { return (i in L2FirstToken) })
+						.append('span')
+						.classed("loop", (d,i) => { return (i in data.loop_count) })
+						.text((d,i) => {
+							return (i in data.loop_count) ?
+								'loop: ' + data.loop_count[i] + ' times' : ''
+						})
+
+					d3.select("#code")
+						.selectAll("li")
+						.data(code_data.code)
+						.append('a')
+						.datum((d) => { return {data:d} })
+						.attr("xlink:href", (d,i) => { return d.data[3] })
+						.text((d,i) => { return d.data[3] })
+						.on('click', (e,d) => {
+							const socket = new WebSocket('ws://localhost:' + SOCKET_PORT)
+							socket.addEventListener('open', function (event) {
+								socket.send(d.data[3])
+							})
+
+							socket.addEventListener('message', function (event) {
+								var tab = window.open('about:blank', '_blank')
+								const html = '<head><link rel="stylesheet" href="styles.css">\n' +
+									'<title>' + d.data[3].split(':')[0] + '</title></head>\n' +
+									'<body><ul>' + event.data + '</ul></body>'
+								const lines = event.data.split('\n')
+								tab.document.write(html)
+								tab.document.close()
+								tab.focus()
+								const line_num = d.data[3].split(':')[1]
+								const target_top = Math.max(1, line_num - 10)
+								const target_line = tab.document.getElementsByClassName('line_' + target_top)[0]
+								setTimeout(() => {
+									target_line.scrollIntoView({behavior: "smooth", block: "start"})
+								}, 500)
+							})
+						})
+					d3.select("#code")
+						.selectAll("li")
+						.data(code_data.code)
+						.append('span')
+						.datum((d) => { return {data:d} })
+						.classed("tooltip", (d,i) => { return (i in L2FirstToken) })
+						.text((d) => {
+							const line_num = d.data[4]
+							if (line_num in L2InstTime) {
+								times = L2InstTime[line_num]
+								return times[0] + ' cycles, ' + times[1] + ' cycles'
+							}
+						})
+
+					canvas_waitcnt = data.wave.waitcnt
+
+					const START_TIME = insts[0][0]
+					const DURATION = data.duration * clock_scale
+					const END_TIME = START_TIME + DURATION
+
+					const NUM_BINS = 20
+					const MINI_WIDTH = 360
+					const MINI_HEIGHT = 130
+					const MINI_MARGIN = 0
+					const minimap = d3.select("#minimap")
+					// minimap.selectAll("svg").remove()
+
+					const minisvg = minimap.append("svg")
+						.attr("width", MINI_WIDTH + 2*MINI_MARGIN)
+						.attr("height", MINI_HEIGHT + MINI_MARGIN)
+						.append("g")
+						.attr("transform", "translate(" + 2*MINI_MARGIN + ", -3)")
+
+					const minibackground = minisvg.append("svg").append("g")
+					minibackground.append("rect")
+						.attr("width", "100%")
+						.attr("height", "100%")
+						.attr("fill", "lightgray")
+						.attr("opacity", 0.3)
+					let x = d3.scaleLinear()
+						.domain([0, DURATION])
+						.range([MINI_MARGIN, MINI_WIDTH])
+					let y = d3.scaleLinear()
+						.range([MINI_HEIGHT, MINI_MARGIN])
+					let histogram = d3.bin()
+						.value(function(d) { return d[0] - START_TIME})
+						.domain(x.domain())
+						.thresholds(x.ticks(NUM_BINS))
+
+					let bins = histogram(insts)
+					y.domain([0, d3.max(bins, function(d) { return d.length })])
+					bins.splice(0, 0, bins[0]) // duh
+
+					minisvg.selectAll("rect")
+						.data(bins)
+						.enter().append("rect")
+						.attr("fill", "steelblue")
+						.attr("x", 1)
+						.attr("transform", function(d) {
+							return "translate(" + x(d.x0) + "," + y(d.length) + ")"
+						})
+						.attr("width", function(d) {
+							return Math.max(1, x(d.x1) - x(d.x0) - 1)
+						})
+						.attr("height", function(d) { return MINI_HEIGHT - y(d.length) })
+						.style("cursor", "pointer")
+						.append("svg:title")
+						.text((d) => { return d.length + ' OP(s)'})
+
+					minisvg.append("g")
+						.attr("transform", "translate(0," + MINI_HEIGHT + ")")
+						.call(d3.axisBottom(x).tickFormat(''))
+
+					minisvg.append("g")
+						.call(d3.axisLeft(y))
+
+					const here = minisvg.append("g")
+						.append('path')
+						.attr('id', 'here')
+						.attr("d", (d) => {
+							return d3.line()([[MINI_MARGIN, MINI_HEIGHT-5], [MINI_MARGIN, 0]])
+						})
+						.attr("stroke", 'red')
+						.style("stroke-dasharray", ("3, 3"))
+						.attr("opacity", 0.6)
+						.attr("stroke-width", 2)
+
+					const WIDTH = 2 * DURATION
+					const HEIGHT = 50
+					const CU_HEIGHT = 45
+					const MARGIN = 30
+					const PADDING = 3
+					const scaleX = d3.scaleLinear()
+						.domain([START_TIME, START_TIME + data.duration * clock_scale + MARGIN])
+						.range([MARGIN, WIDTH-MARGIN])
+					const toX = (x) => { return Math.ceil(scaleX(x)*clock_scale) }
+
+					const STATE_COLOR = {
+						0: ["EMPTY", "#ffffff"],
+						1: ["IDLE", "lightgray"],
+						2: ["EXEC", "green"],
+						3: ["WAIT", "yellow"],
+						4: ["STALL", "red"],
+					}
+					const INST_TYPE = {
+						1: ["SMEM", "#ebff00"],
+						2: ["SALU", "#99ff99"],
+						3: ["VMEM", "#feb72a"],
+						4: ["FLAT", "#8ed8f2"],
+						5: ["LDS", "#ff831d"],
+						6: ["VALU", "#009900"],
+						7: ["JUMP", "#bfbfbf"],
+						8: ["NEXT", "#d8d8d8"],
+						9: ["IMMED", "#ffffff"],
+					}
+					let scroll_to = null
+
+					d3.select('#wave')
+						.on('scroll', (e) => {
+							const wave = d3.select('#wave').node()
+							new_x = wave.scrollLeft * MINI_WIDTH / WIDTH + MINI_MARGIN
+							d3.select('#here')
+								.attr("d", (d) => {
+									return d3.line()([[new_x, MINI_HEIGHT-5], [new_x, 0]])
+								})
+						})
+
+					//d3.select("#wave").select("svg").remove()
+					const WAVE = d3.select("#wave")
+						.append("svg")
+						.attr("width", WIDTH)
+						.attr("height", HEIGHT)
+					const background = WAVE.append("svg").append("g")
+					background.append("rect")
+						.attr("width", WIDTH)
+						.attr("height", HEIGHT)
+						.attr("fill", "black")
+						.attr("opacity", 0.7)
+
+					const OPS = WAVE.append("svg").append("g")
+					const SIMD = WAVE.append("svg").append("g")
+						.attr('id', 'SIMD')
+					const wav_slot = OPS.append('text')
+						.attr('x', 2)
+						.attr('y', 28)
+						.attr("font-family", "sans-serif")
+						.attr("font-size", "1em")
+						.text(wav.simd + '-' + wav.slot)
+						.attr('fill', 'white')
+						.style("cursor", "pointer")
+					const wav_info = d3.select('#wave')
+						.append('div')
+						.style("position", "absolute")
+						.style("visibility", "hidden")
+						.style("background-color", "white")
+						.style("border", "solid")
+						.style("border-width", "1px")
+						.style("padding", "5px")
+						.html('<p>' + 'wave:' + wav.id + SP + SP +
+							'start:' + wav.begin + SP + SP +
+							'end:' + wav.end
+							+ '<p><pre>' + wav.info + '</pre>')
+
+					wav_slot
+						.on("mouseover", () => {
+							return wav_info.style("visibility", "visible")
+						}).on("mousemove", () => {
+							return wav_info.style("top", "50px")
+								.style("left", "25px")
+						}).on("mouseout", () => {
+							return wav_info.style("visibility", "hidden")
+						})
+
+					let last_color = null
+					OPS.selectAll("rect")
+						.data(insts)
+						.enter()
+						.append('rect')
+						.attr("width", 7)
+						.attr("height", 23)
+						.attr("id", (d) => { return "token" + d[0]})
+						.attr("x", (d) => { return toX(d[0]) })
+						.attr("y", (d) => { return 10 - 6 * d[5] }) // handle dual issue
+						.attr("rx", 2)
+						.attr("fill", (d) => { return INST_TYPE[d[1]][1] })
+						.style("cursor", "pointer")
+						.datum((d) => { return {data:d} })
+						.on('mouseenter', (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", true)
+								d3.select(".highlight") .classed("highlight", true)
+							} catch {}
+						})
+						.on("mouseleave", (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", false)
+								d3.select(".highlight") .classed("highlight", false)
+							} catch {}
+						})
+						.on('click', (e, d) => {
+							try {
+								d3.select('.line_' + d.data[4]).classed("highlight", true)
+								src_line = d3.select('.line_' + d.data[4]).node()
+								const inView = isInViewport(src_line)
+								if (!inView) {
+									src_line.scrollIntoView({behavior: "smooth", block: "start"})
+								}
+							} catch {}
+						})
+						.append("svg:title")
+						.text((d) => {
+							d = d.data
+							return INST_TYPE[d[1]][0] + ":" + d[0]
+						})
+					const clamp_timeline = (states, curr_time) => {
+						let result = []
+						// need a filler here
+						if (curr_time > START_TIME) {
+							result.push([0, curr_time - START_TIME])
+						}
+						states.every((x) => {
+							if (curr_time >= END_TIME) return false
+
+							if (curr_time >= START_TIME) {
+								result.push(x)
+							} else if (curr_time < START_TIME && curr_time + x[1] > START_TIME) {
+								result.push([x[0], curr_time + x[1] - START_TIME])
+							}
+							curr_time += x[1]
+							return true
+						})
+						return result
+					}
+
+					const states2timeline = (states) => {
+						let timeline = []
+						let curr_time = START_TIME
+						states.forEach((d) => {
+							timeline.push([d[0], d[1], curr_time])
+							curr_time += d[1]
+						})
+						return timeline
+					}
+
+					const line = WAVE.append("svg").append("g")
+					line.selectAll("path")
+						.data(states2timeline(clamp_timeline(wav.timeline, wav.begin)))
+						.enter()
+						.append('path')
+						.style("cursor", "pointer")
+						.attr("d", (d) => {
+							return d3.line()([[toX(d[2]), 38],
+								[toX(d[2] + d[1]), 38]])
+						})
+						.attr("stroke", (d) => { return STATE_COLOR[d[0]][1] })
+						.attr("stroke-width", 5)
+						.append("svg:title")
+						.text((d) => { return STATE_COLOR[d[0]][0] + ":" + d[1]})
+
+					const waves2str = (waves) => {
+						const wavs = waves.map((w) => {
+							return 'wave:' + w[0] + SP + SP + w[1] + '-' + w[2]
+						})
+						return wavs.join('\n')
+					}
+
+					const show_simd = () => {
+						SIMD.append("rect")
+							.attr("width", WIDTH)
+							.attr("height", HEIGHT * wave_info_data.simd_waves.length)
+							.attr("x", 0)
+							.attr("y", HEIGHT)
+							.attr("fill", "black")
+							.attr("opacity", 0.3)
+						let current_height = HEIGHT
+						wave_info_data.simd_waves.forEach((wave, i) => {
+							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
+							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
+							let ins_in_range = wave[3].filter((x) => {
+								return x[0] >= START_TIME && x[0] <= END_TIME
+							})
+
+							// handle dual issue
+							ins_in_range.forEach((ins, j) => {
+								ins[4] = (j > 0 && ins[0] == ins_in_range[j-1][0])
+									? ins_in_range[j-1][4] + 1 : 0
+							})
+							const SLOT = SIMD.append('g')
+							SLOT.append('text')
+								.attr('x', 2)
+								.attr('y', 28 + current_height)
+								.attr("font-family", "sans-serif")
+								.attr("font-size", "1em")
+								.attr('fill', 'white')
+								.text(simd + '-' + slot)
+								.style("cursor", "pointer")
+								.append("svg:title")
+								.text(waves2str([waves]))
+
+							SLOT.selectAll("rect")
+								.data(ins_in_range)
+								.enter()
+								.append('rect')
+								.attr("width", 7)
+								.attr("height", 15)
+								.attr("x", (d) => { return toX(d[0]) })
+								.attr("y", (d) => { return 10 - 6 * d[4] + current_height })
+								.attr("rx", 2)
+								.attr("fill", (d) => { return INST_TYPE[d[1]][1] })
+								.style("cursor", "pointer")
+								.append("svg:title")
+								.text((d) => {
+									return INST_TYPE[d[1]][0] + ":" + d[0] + SP + "slot:" + slot
+								})
+							SLOT.selectAll("path")
+								.data(states2timeline(clamp_timeline(wave[4], wave[2][1])))
+								.enter()
+								.append('path')
+								.style("cursor", "pointer")
+								.attr("d", (d) => {
+									return d3.line()([[toX(d[2]), 28 + current_height],
+										[toX(d[2] + d[1]), 28 + current_height]])
+								})
+								.attr("stroke", (d) => { return STATE_COLOR[d[0]][1] })
+								.attr("stroke-width", 4)
+								.append("svg:title")
+								.text((d) => { return STATE_COLOR[d[0]][0] + ":" + d[1]})
+
+							current_height += HEIGHT
+						})
+					}
+
+					const show_cu = () => {
+						const CU = d3.select('#CU')
+						let current_height = 10
+						cuwaves_data.forEach((wave, i) => {
+							// wave: (simd, slot, [(id, start, end)+], instructions, timeline)
+							let [simd, slot, waves] = [wave[0], wave[1], wave[2]]
+							let ins_in_range = wave[3].filter((x) => {
+								return x[0] >= START_TIME && x[0] <= END_TIME
+							})
+
+							// handle dual issue
+							ins_in_range.forEach((ins, j) => {
+								ins[4] = (j > 0 && ins[0] == ins_in_range[j-1][0])
+									? ins_in_range[j-1][4] + 1 : 0
+							})
+							const SLOT = CU.append('g')
+							if (simd == wav.simd && slot == wav.slot) {
+								SLOT.append("rect")
+									.attr("width", WIDTH)
+									.attr("height", CU_HEIGHT)
+									.attr("x", 0)
+									.attr("y", current_height)
+									.attr("fill", "black")
+									.attr("opacity", 0.7)
+							}
+							SLOT.append('text')
+								.attr('x', 2)
+								.attr('y', 28 + current_height)
+								.attr("font-family", "sans-serif")
+								.attr("font-size", "1em")
+								.attr('fill', 'white')
+								.text(simd + '-' + slot)
+								.style("cursor", "pointer")
+								.append("svg:title")
+								.text(waves2str([waves]))
+
+							SLOT.selectAll("rect")
+								.data(ins_in_range)
+								.enter()
+								.append('rect')
+								.attr("id", (d) => { return 'cu-' + simd + '-' + slot + '-' + d[0]})
+								.attr("width", 7)
+								.attr("height", 15)
+								.attr("x", (d) => { return toX(d[0]) })
+								.attr("y", (d) => { return 10 - 6 * d[4] + current_height })
+								.attr("rx", 2)
+								.attr("fill", (d) => { return INST_TYPE[d[1]][1] })
+								.style("cursor", "pointer")
+								.append("svg:title")
+								.text((d) => {
+									return INST_TYPE[d[1]][0] + ":" + d[0] + SP +
+										"slot:" + simd + '-' + slot
+								})
+							SLOT.selectAll("path")
+								.data(states2timeline(clamp_timeline(wave[4], wave[2][1])))
+								.enter()
+								.append('path')
+								.style("cursor", "pointer")
+								.attr("d", (d) => {
+									return d3.line()([[toX(d[2]), 28 + current_height],
+										[toX(d[2] + d[1]), 28 + current_height]])
+								})
+								.attr("stroke", (d) => { return STATE_COLOR[d[0]][1] })
+								.attr("stroke-width", 4)
+								.append("svg:title")
+								.text((d) => { return STATE_COLOR[d[0]][0] + ":" + d[1]})
+							current_height += CU_HEIGHT
+						})
+
+						if (scroll_to) {
+							const target = 'cu-' + wav.simd + '-' + wav.slot + '-' + scroll_to
+							const token = d3.select('#'+target).node()
+							token.scrollIntoView({
+								behavior: "smooth", inline: "start", block: "center"
+							})
+						}
+					}
+				})
+			})
+		}
+	</script>
+	</body>
+</html>

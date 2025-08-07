@@ -1,0 +1,35 @@
+# - How to use:
+#     python3 -m pip install pre-commit
+#     pre-commit install --install hooks
+# Upon a new commit - the hooks should automagically run
+#
+# - How to skip:
+#     git commit --no-verify
+# or
+#     SKIP=clang-format-docker git commit
+#     SKIP=cpplint-docker git commit
+
+fail_fast: false
+repos:
+  # For portability I decided to use Docker containers
+  - repo: https://github.com/dmitrii-galantsev/pre-commit-docker-cpplint
+    rev: 0.0.3
+    hooks:
+      - id: clang-format-docker
+      - id: cpplint-docker
+  # Below is a local way of running formatters and linters
+  # NOTE: clang-tidy is not used in the above tests
+  #  - repo: https://github.com/pocc/pre-commit-hooks
+  #    rev: v1.3.5
+  #    hooks:
+  #      - id: clang-format
+  #        args: [--no-diff, -i]
+  #      - id: clang-tidy
+  #        args: [-p=build, --quiet]
+  #      - id: cpplint
+  #        args: [--verbose=5]
+
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.19.3
+    hooks:
+    - id: gersemi
