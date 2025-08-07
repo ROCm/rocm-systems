@@ -119,8 +119,6 @@ def build_section_from_config(
                             )
         else:
             # Handle data_path
-            subsection_title = subsection_config.get("title", "Untitled")
-            subsection_collapsed = subsection_config.get("collapsed", True)
             tui_style = subsection_config.get("tui_style")
             data_path = subsection_config["data_path"]
 
@@ -135,7 +133,9 @@ def build_section_from_config(
 
             children.append(
                 Collapsible(
-                    *widgets, title=subsection_title, collapsed=subsection_collapsed
+                    *widgets,
+                    title=subsection_config.get("title", "Untitled"),
+                    collapsed=subsection_config.get("collapsed", True),
                 )
             )
 
