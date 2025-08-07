@@ -73,15 +73,18 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTarget hipSquareGenericTargetOnlyCompressed)
   endif()
 
-  add_custom_target(hipSpirvTest ALL
-                  COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
-                  ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                  ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
-                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
-                  -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH} --offload-arch=amdgcnspirv
-                  -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
-  add_dependencies(CompilerTest hipSpirvTest)
+  # SWDEV-548807 skip building hipSpirvTest
+  if(false)
+    add_custom_target(hipSpirvTest ALL
+                    COMMAND ${CMAKE_CXX_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
+                    ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/Catch2
+                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../external/picojson
+                    -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH} --offload-arch=amdgcnspirv
+                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
+    add_dependencies(CompilerTest hipSpirvTest)
+  endif()
 
 endif()
