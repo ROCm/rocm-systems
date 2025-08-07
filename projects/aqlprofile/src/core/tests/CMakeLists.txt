@@ -123,3 +123,29 @@ gtest_add_tests(
 set_tests_properties(
     ${counters-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add tests for pm4 factory
+add_executable(pm4-factory-test)
+SET(AQLPROFILE_PM4_FACTORY_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/pm4_factory_tests.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../pm4_factory.cpp
+)
+target_sources(pm4-factory-test PRIVATE ${AQLPROFILE_PM4_FACTORY_SOURCES})
+target_include_directories(pm4-factory-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    pm4-factory-test
+    PRIVATE
+            hsa-runtime64::hsa-runtime64
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main)
+
+gtest_add_tests(
+    TARGET pm4-factory-test
+    SOURCES ${AQLPROFILE_PM4_FACTORY_SOURCES}
+    TEST_LIST pm4-factory-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+set_tests_properties(
+    ${pm4-factory-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
