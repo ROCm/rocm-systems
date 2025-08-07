@@ -78,9 +78,9 @@ jobs:
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         RELEASE_MAJOR=$(echo ${RELEASE} | sed 's/\./ /g' | awk '{print $1}')
-        if (( RELEASE_MAJOR == 20 )); then RELEASE_NAME=focal; fi
-        if (( RELEASE_MAJOR == 22 )); then RELEASE_NAME=jammy; fi
-        if (( RELEASE_MAJOR == 24 )); then RELEASE_NAME=noble; fi
+        if [ "$RELEASE_MAJOR" -eq 20 ]; then RELEASE_NAME=focal; fi
+        if [ "$RELEASE_MAJOR" -eq 22 ];  then RELEASE_NAME=jammy; fi
+        if [ "$RELEASE_MAJOR" -eq 24 ];  then RELEASE_NAME=noble; fi
         wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/${RELEASE_NAME}/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
         apt-get update
