@@ -1,0 +1,51 @@
+--------------------SQTT DEBUG_TRACE--------------------
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildWritePConfigRegPacket' size(6)    : c0044000 00000005 00000000 00000000 0000d9f4 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e9 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e8 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ed 00030003
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ee 0c080683
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ec a0423941
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40010000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e9 00000100
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e8 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ed 00030003
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ee 0f0007ff
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ec a0423941
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40020000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e9 00000100
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019e8 00000001
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ed 00030003
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ee 0f0007ff
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ec a0423941
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40000000
+'BuildWriteShRegPacket' size(3)         : c0017600 0000021e 00000001
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000342 434f5200
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000342 00080201
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildWriteShRegPacket' size(3)         : c0017600 0000021e 00000000
+'BuildWaitRegMemCommand' size(7)        : c0053c00 00000003 0000d9f4 00000000 00000000 000003fc 00000010
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 000019ec a0423940
+'BuildWaitRegMemCommand' size(7)        : c0053c00 00000003 0000d9f4 00000000 00000000 02000000 00000010
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9f4 00000000 00000000 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9fa 00000000 00000004 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9ef 00000000 00000008 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40010000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9f4 00000000 00000010 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9fa 00000000 00000014 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9ef 00000000 00000018 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 40020000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9f4 00000000 00000020 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9fa 00000000 00000024 00000000
+'BuildCopyRegDataPacket' size(6)        : c0044000 00100200 0000d9ef 00000000 00000028 00000000
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildCacheFlushPacket' size(8)         : c0065800 00000000 00000000 00000000 00000000 00000000 00000010 00018000
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+----------------------------------------------------------------------------------------------------
+

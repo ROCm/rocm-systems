@@ -84,10 +84,16 @@ install(FILES ${TEST_DIR}/run_install.sh RENAME run_tests.sh
 
 #add_subdirectory(parser)
 
+# legacy tests
 add_test(NAME legacy-tests COMMAND "${TEST_BINARY_DIR}/run.sh")
 
 option(AQLPROFILE_BUILD_INTEGERATION_TESTS "Build integration tests" ON)
 
 if(AQLPROFILE_BUILD_INTEGERATION_TESTS)
     add_subdirectory(integration)
+endif()
+
+if(AQLPROFILE_BUILD_TESTS)
+    add_subdirectory(pm4-packets-regression-tests)
+    enable_testing()
 endif()
