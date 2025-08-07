@@ -19,7 +19,9 @@ The roofline model is a way to compare kernel or application performance against
 At a high level, the purpose is for displaying how efficient a program is executing. Typically, roofline is visualized as a graph plotting points of kernel performance against “roof lines”- the maximum theoretical ceilings for performance and bandwidth of a system. This visual tool can be used by developers to find points of optimization, bottlenecks, and limitations in their application and the given hardware it is running on.
 
 Roofline analysis in the profiling stage consists of two different data captures:
+
 * The performance counter collection which profiles the user’s workload itself. For roof-only case, we limit the counters to only those necessary for roofline analysis purposes. This data is used to plot the kernel points on the roofline graph.
+
 * The roofline micro-benchmarking which profiles the hardware capabilities of the system. This part executes the roofline binary, comprised of benchmarks that compute the theoretical peak of the hardware per data type. This phase is dependent on both the hardware architecture and the customer’s hardware settings, such as clock speed for example. This data is used to plot the ‘peaks’, or lines on the graph.
 
 .. image:: ../data/roofline/hw_counter_collection_phase.png
@@ -48,6 +50,7 @@ Interpreting a basic roofline plot involves a few key items:
 
 .. image:: ../data/roofline/roofline_efficiency.png
    :align: left
+   :alt: Roofline efficiency example
    :width: 800
 
 Referencing the graph above, the glowing lines represent the theoretical peaks, or the most optimal performance of the hardware and software in the most ideal conditions.
