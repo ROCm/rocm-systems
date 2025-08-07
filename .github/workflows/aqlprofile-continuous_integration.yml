@@ -50,7 +50,6 @@ jobs:
         build-type: ['RelWithDebInfo']
 
     runs-on: rocprofiler-${{ matrix.runner }}
-    if: github.event.pull_request.head.repo.full_name == 'AMD-ROCm-Internal/aqlprofile'
 
     permissions:
       contents: read
@@ -104,7 +103,6 @@ jobs:
           -S ./dashboard.cmake
 
   core-rpm:
-    if: github.ref != 'refs/heads/amd-npi' && github.event.pull_request.head.repo.full_name == 'AMD-ROCm-Internal/aqlprofile'
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
       fail-fast: false
