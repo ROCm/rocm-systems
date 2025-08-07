@@ -20,18 +20,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(PACKAGE_OUTPUT_DIR
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3_avail_module)
+set(rocprofv3_PYTHON_SOURCES __init__.py avail.py)
+rocprofiler_rocprofv3_python(${rocprofv3_PYTHON_SOURCES})
 
-set(ROCPROFV3_AVAIL_SOURCES __init__.py avail.py)
-
-foreach(_FILE ${ROCPROFV3_AVAIL_SOURCES})
-    configure_file(${CMAKE_CURRENT_LIST_DIR}/${_FILE} ${PACKAGE_OUTPUT_DIR}/${_FILE}
-                   COPYONLY)
-    install(
-        FILES ${PACKAGE_OUTPUT_DIR}/${_FILE}
-        DESTINATION ${CMAKE_INSTALL_BINDIR}/rocprofv3_avail_module
-        PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                    WORLD_READ WORLD_EXECUTE
-        COMPONENT tools)
-endforeach()
+rocprofiler_reset_python3_cache()

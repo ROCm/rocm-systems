@@ -210,3 +210,23 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         DESTINATION ${rocpd_PYTHON_INSTALL_DIRECTORY}
         COMPONENT rocpd)
 endfunction()
+
+function(rocprofiler_rocprofv3_python)
+    set(rocprofv3_PYTHON_INSTALL_DIRECTORY
+        ${CMAKE_INSTALL_LIBDIR}/python3/site-packages/rocprofv3)
+    set(rocprofv3_PYTHON_OUTPUT_DIRECTORY
+        ${PROJECT_BINARY_DIR}/${rocprofv3_PYTHON_INSTALL_DIRECTORY})
+    set(rocprofv3_PYTHON_SOURCES ${ARGN})
+    if(NOT rocprofv3_PYTHON_SOURCES)
+        message(
+            FATAL_ERROR "rocprofiler_rocprofv3_python requires specifying source files")
+    endif()
+    foreach(_SOURCE ${rocprofv3_PYTHON_SOURCES})
+        configure_file(${CMAKE_CURRENT_LIST_DIR}/${_SOURCE}
+                       ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE} COPYONLY)
+        install(
+            FILES ${rocprofv3_PYTHON_OUTPUT_DIRECTORY}/${_SOURCE}
+            DESTINATION ${rocprofv3_PYTHON_INSTALL_DIRECTORY}
+            COMPONENT tools)
+    endforeach()
+endfunction()

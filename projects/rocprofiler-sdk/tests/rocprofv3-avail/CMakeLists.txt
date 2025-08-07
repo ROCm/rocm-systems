@@ -78,29 +78,21 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
                "${test-rocprofv3-avail-env}" DISABLED "${IS_DISABLED}")
 
-if(TARGET rocprofv3-list-avail)
+add_test(NAME rocprofv3-avail-test-validate
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
+                 --rocm-path ${rocprofiler-sdk_ROOT_DIR})
 
-    add_test(NAME rocprofv3-avail-test-validate
-             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                     --rocm-path ${CMAKE_BINARY_DIR})
+set(test-rocprofv3-avail-validate-env "${PRELOAD_ENV}" "PYTHONPATH=$ENV{PYTHONPATH}")
 
-    # for validate, explicitly set ROCPROF_LIST_AVAIL_TOOL_LIBRARY since we copy
-    # rocprofv3-avail to directory
-    set(test-rocprofv3-avail-validate-env
-        "${PRELOAD_ENV}" "PYTHONPATH=$ENV{PYTHONPATH}:${CMAKE_BINARY_DIR}/bin/")
-
-    set_tests_properties(
-        rocprofv3-avail-test-validate
-        PROPERTIES TIMEOUT
-                   45
-                   LABELS
-                   "integration-tests"
-                   ENVIRONMENT
-                   "${test-rocprofv3-avail-validate-env}"
-                   FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-                   DEPENDS
-                   rocprofv3-avail-test-copy-module
-                   DISABLED
-                   "${IS_DISABLED}")
-endif()
+set_tests_properties(
+    rocprofv3-avail-test-validate
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${test-rocprofv3-avail-validate-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_DISABLED}")
