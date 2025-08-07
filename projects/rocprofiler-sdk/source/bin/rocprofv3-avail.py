@@ -25,7 +25,6 @@
 import os
 import argparse
 import sys
-from rocprofv3_avail_module import avail
 
 
 def format_help(formatter, w=120, h=40):
@@ -126,7 +125,7 @@ def parse_arguments(args=None):
 
     # Create the parser
     parser = argparse.ArgumentParser(
-        description="ROCProfilerV3-avail Run Script",
+        description="rocprofv3 query tool for agents, counters, pc-sampling, and more",
         usage="%(prog)s [options] ",
         epilog=usage_examples,
         formatter_class=format_help(argparse.RawTextHelpFormatter),
@@ -196,6 +195,8 @@ def get_number_columns(max_name_len):
 
 
 def list_basic_agent(args, list_counters):
+    from rocprofv3 import avail
+
     def print_agent_counter(counters):
         names_len = [len(counter.name) for counter in counters]
         names = [
@@ -235,6 +236,8 @@ def list_basic_agent(args, list_counters):
 
 
 def list_pc_sampling(args):
+    from rocprofv3 import avail
+
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
     print("Agents supporting PC Sampling\n")
@@ -249,6 +252,8 @@ def list_pc_sampling(args):
 
 
 def info_pc_sampling(args):
+    from rocprofv3 import avail
+
     sampling_agents = avail.get_pc_sample_configs()
     agent_info_map = avail.get_agent_info_map()
     for agent, configs in dict(sorted(sampling_agents.items())).items():
@@ -267,6 +272,8 @@ def info_pc_sampling(args):
 
 
 def listing(args):
+    from rocprofv3 import avail
+
     def print_agent_counter(counters):
         names_len = [len(counter.name) for counter in counters]
         names = [
@@ -306,6 +313,8 @@ def listing(args):
 
 
 def info_pmc(args):
+    from rocprofv3 import avail
+
     agent_counters = avail.get_counters()
     agent_info_map = avail.get_agent_info_map()
 
@@ -367,6 +376,8 @@ def process_list(args):
 
 
 def process_pmc_check(args):
+    from rocprofv3 import avail
+
     def get_device_agent(device_id):
         for agent, info in agent_info_map.items():
             if info["type"] == 2 and info["logical_node_type_id"] == device_id:
@@ -464,6 +475,18 @@ def main(argv=None):
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofv3-list-avail.so"
     )
     os.environ["ROCPROFILER_METRICS_PATH"] = f"{ROCM_DIR}/share/rocprofiler-sdk"
+    try:
+        # try to import rocprofv3 normally
+        from rocprofv3 import avail
+    except (ImportError, ModuleNotFoundError):
+        # if failed, find the python package for this python version
+        ROCPROFV3_AVAIL_PACKAGE = (
+            f"{ROCM_DIR}/lib/python{sys.version_info[0]}/site-packages"
+        )
+        sys.path.append(ROCPROFV3_AVAIL_PACKAGE)
+
+        from rocprofv3 import avail
+
     avail.loadLibrary.libname = os.environ.get(
         "ROCPROF_LIST_AVAIL_TOOL_LIBRARY", ROCPROF_LIST_AVAIL_TOOL_LIBRARY
     )
