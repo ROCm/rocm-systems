@@ -17,14 +17,17 @@ sections:
 
   - title: "Detailed Block Analysis"
     collapsed: true
-    class: "kernels-section"
-    dynamic_sections: true
-    skip_sections:
-      - "0. Top Stats"
-      - "1. System Info"
-      - "2. System Speed-of-Light"
-      - "3. Memory Chart"
-      - "4. Roofline"
+    class: "block-section"
+    subsections:
+      - title: "Block Analysis Sections"
+        auto_generate_from_data: true
+        exclude_keys:
+          - "0. Top Stats"
+          - "1. System Info"
+          - "2. System Speed-of-Light"
+          - "3. Memory Chart"
+          - "4. Roofline"
+        collapsed: true
 
   - title: "Source Level Analysis"
     collapsed: true
