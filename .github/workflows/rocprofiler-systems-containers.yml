@@ -1,4 +1,4 @@
-name: RocProfiler-Systems Continuous Integration Containers
+name: rocprofiler-systems Continuous Integration Containers
 run-name: ci-containers
 
 # nightly build

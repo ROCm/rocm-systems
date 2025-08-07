@@ -25,10 +25,10 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocminfo`             | EMU             | Pending          |                                       |                                       |
 | `rocm-smi-lib`         | EMU             | Pending          |                                       |                                       |
 | `rocprofiler`          | Public          | Completed        |                                       |                                       |
-| `rocprofiler-compute`  | Public          | Pending          |                                       |                                       |
+| `rocprofiler-compute`  | Public          | Completed        |                                       |                                       |
 | `rocprofiler-register` | Public          | Completed        |                                       |                                       |
 | `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
-| `rocprofiler-systems`  | Public          | Pending          |                                       |                                       |
+| `rocprofiler-systems`  | Public          | Completed        |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
 | `rocshmem`             | Public          | Pending          |                                       |                                       |
 | `roctracer`            | Public          | Completed        |                                       |                                       |
@@ -38,8 +38,6 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `rocprofiler-compute`  | 8/6            |
-| `rocprofiler-systems`  | 8/6            |
 | `aqlprofile`           | 8/7            |
 | `rocprofiler-sdk`      | 8/7            |
 | `rdc`                  | 8/8            |

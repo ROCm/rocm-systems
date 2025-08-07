@@ -3,14 +3,17 @@ Panel Config:
   id: 1400
   title: Scalar L1 Data Cache
   metrics_description:
-    Bandwidth: The number of bytes looked up in the sL1D cache, as a percent of the
-      peak theoretical bandwidth. Calculated as the ratio of sL1D requests over the
-      total sL1D cycles.
+    Bandwidth Utilization: The number of bytes looked up in the sL1D cache, as a percent
+      of the peak theoretical bandwidth. Calculated as the ratio of sL1D requests
+      over the total sL1D cycles.
     Cache Hit Rate: Indicates the percent of sL1D requests that hit on a previously
       loaded line the cache. The ratio of the number of sL1D requests that hit over
       the number of all sL1D requests.
+    sL1D-L2 BW Utilization: The percentage of the peak theoretical sL1D - L2 interface
+      bandwidth acheived.\ \ Caclulated as total number of bytes read from, written
+      to, or atomically updated\ \ across the sL1D - L2 interface.
     sL1D-L2 BW: "The total number of bytes read from, written to, or atomically updated\
-      \ across the sL1D\u2194L2 interface, per normalization unit. Note that sL1D\
+      \ across the sL1D\u2194L2 interface, divided by total duration. Note that sL1D\
       \ writes and atomics are typically unused on current CDNA accelerators, so in\
       \ the majority of cases this can be interpreted as an sL1D\u2192L2 read bandwidth."
     Req: The total number of requests, of any size or type, made to the sL1D per normalization
@@ -51,7 +54,7 @@ Panel Config:
         value: Avg
         unit: Unit
       metric:
-        Bandwidth:
+        Bandwidth Utilization:
           value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) * (End_Timestamp
             - Start_Timestamp))))
           unit: Pct of Peak
@@ -60,7 +63,7 @@ Panel Config:
             + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
             + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
           unit: Pct of Peak
-        sL1D-L2 BW:
+        sL1D-L2 BW Utilization:
           value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
             * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
           unit: Pct of Peak
@@ -158,12 +161,12 @@ Panel Config:
       metric:
         sL1D-L2 BW:
           avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-            * 64)) / $denom))
+            * 64)) / (End_Timestamp - Start_Timestamp)))
           min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-            * 64)) / $denom))
+            * 64)) / (End_Timestamp - Start_Timestamp)))
           max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-            * 64)) / $denom))
-          unit: (Bytes + $normUnit)
+            * 64)) / (End_Timestamp - Start_Timestamp)))
+          unit: Gbps
         Read Req:
           avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
           min: MIN((SQC_TC_DATA_READ_REQ / $denom))
