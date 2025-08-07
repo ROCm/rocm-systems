@@ -831,6 +831,9 @@ write_otf2(const output_config&                                          cfg,
     OTF2_CHECK(OTF2_GlobalDefWriter_WriteSystemTreeNode(
         global_def_writer, 0, _exe_hash, _node_hash, OTF2_UNDEFINED_SYSTEM_TREE_NODE));
 
+    OTF2_CHECK(OTF2_GlobalDefWriter_WriteSystemTreeNode(
+        global_def_writer, 0, OTF2_SYSTEM_TREE_DOMAIN_SHARED_MEMORY ));
+
     // Process
     OTF2_CHECK(OTF2_GlobalDefWriter_WriteLocationGroup(global_def_writer,
                                                        0,
@@ -846,12 +849,23 @@ write_otf2(const output_config&                                          cfg,
         auto        _hash = get_hash_id(_name);
 
         add_write_string(_hash, _name);
+
+        /* the device */
+        OTF2_CHECK(OTF2_GlobalDefWriter_WriteSystemTreeNode(
+            global_def_writer, agent_v.id.handle, _hash, 0, 0));
+
+        /* the device is an accelerator */
+        OTF2_CHECK(OTF2_GlobalDefWriter_WriteSystemTreeNode(
+            global_def_writer, agent_v.id.handle, OTF2_SYSTEM_TREE_DOMAIN_ACCELERATOR_DEVICE ));
+
+        /* the context */
         OTF2_CHECK(OTF2_GlobalDefWriter_WriteLocationGroup(global_def_writer,
                                                            agent_v.id.handle,
                                                            _hash,
                                                            OTF2_LOCATION_GROUP_TYPE_ACCELERATOR,
-                                                           0,
-                                                           OTF2_UNDEFINED_LOCATION_GROUP));
+                                                           agent_v.id.handle, // system tree node (aka the device)
+                                                           0                  // creating/controlling process
+                                                           ));
     }
 
     // Thread Events
