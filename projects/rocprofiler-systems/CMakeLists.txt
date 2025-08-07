@@ -40,6 +40,7 @@ project(
     DESCRIPTION "CPU/GPU Application tracing with static/dynamic binary instrumentation"
     HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-systems"
 )
+message(WARNING "########## CURRENT PROJECT DIRECTORY --------> ${PROJECT_SOURCE_DIR} #############")
 set(PROJECT_NAME_UNDERSCORED "rocprofiler_systems")
 
 set(BINARY_NAME_PREFIX "rocprof-sys")
