@@ -53,12 +53,10 @@ def test_data_structure(input_data):
     node_exists("buffer_records", sdk_data)
 
     node_exists("names", sdk_data["callback_records"])
-    # Uncomment once mainline rocprofiler register supports rocJPEG
-    # node_exists("rocjpeg_api_traces", sdk_data["callback_records"])
+    node_exists("rocjpeg_api_traces", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
-    # Uncomment once mainline rocprofiler register supports rocJPEG
-    # node_exists("rocjpeg_api_traces", sdk_data["buffer_records"])
+    node_exists("rocjpeg_api_traces", sdk_data["buffer_records"])
 
 
 def test_size_entries(input_data):
