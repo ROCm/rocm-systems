@@ -40,6 +40,8 @@
 #include <sqlite3.h>
 #include <algorithm>
 
+#include <algorithm>
+
 namespace rocpd
 {
 namespace interop
