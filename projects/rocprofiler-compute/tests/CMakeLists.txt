@@ -30,3 +30,9 @@ set_source_files_properties(${VRAND_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(vrandom_access ${VRAND_SOURCES})
 set_target_properties(vrandom_access PROPERTIES RUNTIME_OUTPUT_DIRECTORY
                                                 ${CMAKE_SOURCE_DIR}/tests)
+
+set(OCCUPANCY ../sample/occupancy.hip)
+set_source_files_properties(${OCCUPANCY} PROPERTIES LANGUAGE HIP)
+add_executable(occupancy ${OCCUPANCY})
+set_target_properties(occupancy PROPERTIES RUNTIME_OUTPUT_DIRECTORY
+                                                ${CMAKE_SOURCE_DIR}/tests)
