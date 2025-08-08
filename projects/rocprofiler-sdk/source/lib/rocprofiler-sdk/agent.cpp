@@ -749,6 +749,46 @@ read_topology()
             agent_info.cu_count           = agent_info.simd_count / agent_info.simd_per_cu;
 
             agent_info.uuid = static_cast<rocprofiler_uuid_t>(_uuid);
+
+            // read firmware_info
+            std::string fw_dir = fmt::format("/sys/class/drm/renderD{}/device/fw_version",
+                                             agent_info.drm_render_minor);
+
+            auto read_fw = [&](const char* fname) -> uint32_t {
+                fs::path fw_path = fs::path(fw_dir) / fname;
+                if(!fs::exists(fw_path))
+                {
+                    ROCP_WARNING << "Firmware version file missing: " << fw_path.string();
+                    return 0;
+                }
+                std::ifstream fw_file(fw_path);
+                std::string   fw_value;
+                if(fw_file && std::getline(fw_file, fw_value) && !fw_value.empty())
+                {
+                    try
+                    {
+                        return static_cast<uint32_t>(std::stoul(fw_value, nullptr, 0));
+                    } catch(const std::exception&)
+                    {
+                        // ignore parse error, fall through to return 0
+                    }
+                }
+                return 0;
+            };
+            agent_info.firmware_info.mec2_fw_version     = read_fw("mec2_fw_version");
+            agent_info.firmware_info.mec_fw_version      = read_fw("mec_fw_version");
+            agent_info.firmware_info.rlc_fw_version      = read_fw("rlc_fw_version");
+            agent_info.firmware_info.rlc_srlc_fw_version = read_fw("rlc_srlc_fw_version");
+            agent_info.firmware_info.rlc_srlg_fw_version = read_fw("rlc_srlg_fw_version");
+            agent_info.firmware_info.rlc_srls_fw_version = read_fw("rlc_srls_fw_version");
+            agent_info.firmware_info.sdma2_fw_version    = read_fw("sdma2_fw_version");
+            agent_info.firmware_info.sdma_fw_version     = read_fw("sdma_fw_version");
+            agent_info.firmware_info.smc_fw_version      = read_fw("smc_fw_version");
+            agent_info.firmware_info.sos_fw_version      = read_fw("sos_fw_version");
+            agent_info.firmware_info.ta_ras_fw_version   = read_fw("ta_ras_fw_version");
+            agent_info.firmware_info.ta_xgmi_fw_version  = read_fw("ta_xgmi_fw_version");
+            agent_info.firmware_info.vcn_fw_version      = read_fw("vcn_fw_version");
+
             if(int drm_fd = 0; (drm_fd = drmOpenRender(agent_info.drm_render_minor)) >= 0)
             {
                 uint32_t major_version = 0;

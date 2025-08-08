@@ -103,6 +103,7 @@ typedef enum rocprofiler_status_t  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,          ///< Exceeds hardware limits for collection.
     ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,  ///< Agent HW architecture not supported.
     ROCPROFILER_STATUS_ERROR_PERMISSION_DENIED,         ///< Permission denied.
+    ROCPROFILER_STATUS_FIRMWARE_INCOMPATIBLE,           ///< Installed firmware version is incompatible with the selected service
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 

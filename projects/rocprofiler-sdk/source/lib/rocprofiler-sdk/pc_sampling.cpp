@@ -49,6 +49,9 @@ namespace
         static constexpr auto name = #CODE;                                                        \
     };
 
+#define MINIMUM_PC_SAMPLING_MEC_FW_VERSION uint32_t(0x0000001a)
+#define MINIMUM_PC_SAMPLING_SOS_FW_VERSION uint32_t(0x00360259)
+
 template <size_t Idx>
 struct instruction_type_string;
 
@@ -138,6 +141,39 @@ is_pc_sampling_explicitly_enabled()
 
     return pc_sampling_enabled;
 }
+
+bool
+is_pc_sampling_firmware_version_correct(const rocprofiler_agent_t*       agent,
+                                        rocprofiler_pc_sampling_method_t method)
+{
+    if(!agent) return false;
+
+    // firmware check is needed only for gfx942 for now
+    if(std::string(agent->name) != "gfx942") return true;
+
+    if(method == ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC &&
+       agent->firmware_info.mec_fw_version < MINIMUM_PC_SAMPLING_MEC_FW_VERSION)
+    {
+        ROCP_WARNING << "PC sampling is not supported on agent-" << agent->node_id
+                     << " due to the firmware version mismatch. "
+                     << "Minimum required MEC firmware version is "
+                     << MINIMUM_PC_SAMPLING_MEC_FW_VERSION << ", but found "
+                     << agent->firmware_info.mec_fw_version;
+        return false;
+    }
+
+    if(method == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP &&
+       agent->firmware_info.sos_fw_version < MINIMUM_PC_SAMPLING_SOS_FW_VERSION)
+    {
+        ROCP_WARNING << "PC sampling is not supported on agent-" << agent->node_id
+                     << " due to the firmware version mismatch. "
+                     << "Minimum required SOS firmware version is "
+                     << MINIMUM_PC_SAMPLING_SOS_FW_VERSION << ", but found "
+                     << agent->firmware_info.sos_fw_version;
+        return false;
+    }
+    return true;
+}
 }  // namespace
 
 extern "C" {
@@ -158,6 +194,9 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
 
     const auto* agent = rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    if(!is_pc_sampling_firmware_version_correct(agent, method))
+        return ROCPROFILER_STATUS_FIRMWARE_INCOMPATIBLE;
 
     // checking if the registered context exists
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
@@ -198,6 +237,15 @@ rocprofiler_query_pc_sampling_agent_configurations(
 
     std::vector<rocprofiler_pc_sampling_configuration_t> configs;
     auto status = rocprofiler::pc_sampling::ioctl::ioctl_query_pcs_configs(agent, configs);
+    // Filter configs based on firmware support
+    configs.erase(std::remove_if(configs.begin(),
+                                 configs.end(),
+                                 [&](const rocprofiler_pc_sampling_configuration_t& cfg) {
+                                     return !is_pc_sampling_firmware_version_correct(agent,
+                                                                                     cfg.method);
+                                 }),
+                  configs.end());
+
     return (status == ROCPROFILER_STATUS_SUCCESS) ? cb(configs.data(), configs.size(), user_data)
                                                   : status;
 #else
