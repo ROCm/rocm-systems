@@ -157,7 +157,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Parse json from amd-smi
     amd_smi_static_json = json.loads(
-        run(["amd-smi", "static" "--json"], exit_on_error=True)
+        run(["amd-smi", "static", "--json"], exit_on_error=True)
     )
 
     # NOTE: Need to obtain partition information explicitly from amd-smi partition
@@ -166,17 +166,14 @@ def generate_machine_specs(args, sysinfo: dict = None):
         run(["amd-smi", "partition", "--json"], exit_on_error=True)
     )
 
-    vbios = (
-        amd_smi_static_json.get("gpu_data", {}).get("vbios", {}).get("part_number", None)
-    )
+    gpu_data = amd_smi_static_json.get("gpu_data", [])
+    vbios = gpu_data[0].get("vbios", {}).get("part_number", None) if gpu_data else None
 
-    compute_partition = amd_smi_partition_json.get("current_partition", {}).get(
-        "accelerator_type", None
+    partition_data = amd_smi_partition_json.get("current_partition", [])
+    compute_partition = (
+        partition_data[0].get("accelerator_type", None) if partition_data else None
     )
-
-    memory_partition = amd_smi_partition_json.get("current_partition", {}).get(
-        "memory", None
-    )
+    memory_partition = partition_data[0].get("memory", None) if partition_data else None
 
     if compute_partition is None:
         console_warning("Can not detect accelerator partition from amd-smi.")
