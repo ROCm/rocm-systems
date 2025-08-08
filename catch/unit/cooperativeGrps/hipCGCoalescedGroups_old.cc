@@ -394,6 +394,8 @@ static void test_shfl_any_to_any() {
 
     HIPCHECK(hipHostFree(hPtr));
     HIPCHECK(hipFree(dPtr));
+    HIPCHECK(hipFree(dResults));
+    HIPCHECK(hipFree(dsrcArr));
     free(srcArr);
     free(srcArrCpu);
     free(cpuResultsArr);
@@ -461,6 +463,7 @@ static void test_shfl_broadcast() {
 
     HIPCHECK(hipHostFree(hPtr));
     HIPCHECK(hipFree(dPtr));
+    HIPCHECK(hipFree(dResults));
     free(cpuResultsArr);
   }
 }
@@ -554,4 +557,11 @@ TEST_CASE("Unit_coalesced_groups") {
 
   std::cout << "Now grouping active threads based on branch divergence" << '\n' << std::endl;
   test_active_threads_grouping();
+
+  HIPCHECK(hipFree(d_data_to_filter));
+  HIPCHECK(hipFree(d_filtered_data));
+  HIPCHECK(hipFree(d_nres));
+  free(data_to_filter);
+  free(filtered_data);
+  free(host_filtered_data);
 }

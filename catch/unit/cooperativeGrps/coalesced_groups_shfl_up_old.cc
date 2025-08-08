@@ -221,6 +221,7 @@ static void test_shfl_up() {
 
     HIPCHECK(hipHostFree(hPtr));
     HIPCHECK(hipFree(dPtr));
+    HIPCHECK(hipFree(dResults));
     free(cpuResultsArr);
   }
 }
