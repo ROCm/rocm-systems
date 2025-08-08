@@ -1,15 +1,9 @@
 # Use amdsmi base image
 FROM amdsmi-image
 
-# Sync ROCm repositories
-RUN apt-get update && apt-get install -y wget gnupg2 && \
-    wget -qO - http://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - && \
-    echo 'deb [arch=amd64] http://repo.radeon.com/rocm/apt/debian/ jammy main' | tee /etc/apt/sources.list.d/rocm.list
-
 # Install ROCm runtime and dependencies
 RUN apt-get update && \
     apt-get install -y \
-    rocm-smi-lib \
     cmake \
     make \
     g++ \
@@ -18,18 +12,18 @@ RUN apt-get update && \
     automake \
     unzip \
     build-essential \
-    autoconf \
-    libtool \
-    pkg-config \
-    libgflags-dev \
-    libgtest-dev \
-    clang \
-    libc++-dev \
+    ccache \
+    cmake \
     curl \
+    git \
+    gzip \
+    jq \
     libcap-dev \
-    python3-argcomplete \
-    python3-pip \
-    bash && \
+    tar \
+    unzip \
+    wget \
+    zip \
+    zstd && \
     rm -rf /var/lib/apt/lists/*
 
 # Update setuptools
@@ -43,6 +37,14 @@ ENV GRPC_ROOT=/opt/grpc
 ENV RDC_LIB_DIR=/opt/rocm/lib/rdc
 ENV CMAKE_ROOT=/usr/bin/cmake
 
+# Install a newer version of CMake
+RUN apt-get remove -y cmake && \
+    apt-get update && apt-get install -y wget && \
+    wget https://github.com/Kitware/CMake/releases/download/v3.26.4/cmake-3.26.4-linux-x86_64.sh && \
+    chmod +x cmake-3.26.4-linux-x86_64.sh && \
+    ./cmake-3.26.4-linux-x86_64.sh --skip-license --prefix=/usr/local && \
+    rm cmake-3.26.4-linux-x86_64.sh
+
 # Install gRPC
 RUN git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules && \
     cd grpc && \
@@ -50,24 +52,34 @@ RUN git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submod
         -DgRPC_INSTALL=ON \
         -DgRPC_BUILD_TESTS=OFF \
         -DBUILD_SHARED_LIBS=ON \
-        -DCMAKE_INSTALL_PREFIX="$GRPC_ROOT" \
+        -DCMAKE_INSTALL_PREFIX="/opt/grpc" \
         -DCMAKE_INSTALL_LIBDIR=lib \
         -DCMAKE_BUILD_TYPE=Release && \
     make -C build -j $(nproc) && \
     make -C build install && \
-    echo "$GRPC_ROOT" | tee /etc/ld.so.conf.d/grpc.conf
+    echo "/opt/grpc" | tee /etc/ld.so.conf.d/grpc.conf && \
+    ldconfig
 
 # Build and install RDC
 RUN git clone https://github.com/ROCm/rdc && \
     cd rdc && \
-    cmake -B build -DGRPC_ROOT="$GRPC_ROOT" \
-        -DSMIDIR="$SMI_DIR" \
-        -DBUILD_TESTS=OFF \
+    cmake \
+        -B build \
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DGRPC_DESIRED_VERSION=1.61.0 \
+        -DGRPC_ROOT="/opt/grpc" \
+        -DBUILD_RUNTIME=ON \
+        -DGPU_TARGETS=gfx942 \
         -DBUILD_PROFILER=OFF \
-        -DBUILD_RUNTIME=OFF \
-        -DBUILD_RVS=OFF && \
+        -DBUILD_RVS=OFF \
+        -DBUILD_TESTS=ON \
+        -DCPACK_GENERATOR="DEB" \
+        -DCMAKE_INSTALL_PREFIX="/opt/rocm" && \
     make -C build -j $(nproc) && \
-    make -C build install
+    make -C build -j $(nproc) package && \
+    make -C build -j $(nproc) install
 
 # Update system library path
 RUN export RDC_LIB_DIR=/opt/rocm/lib/rdc && \
