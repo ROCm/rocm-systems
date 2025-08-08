@@ -63,24 +63,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/aqlprofile
-
+        sparse-checkout:
+          projects/aqlprofile
+          projects/rocprofiler-sdk/requirements.txt
+        submodules: true
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
       run: |
-        cd projects/aqlprofile
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        python3 -m pip install -U --user -r ./projects/rocprofiler-sdk/requirements.txt
 
     - name: List Files
       shell: bash
       run: |
-        cd projects/aqlprofile
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -92,15 +94,14 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      working-directory: projects/aqlprofile
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
+        LD_LIBRARY_PATH=./projects/aqlprofile/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="./projects/aqlprofile"
+          -DCTEST_BINARY_DIRECTORY="./projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S ./dashboard.cmake
+          -S ./projects/aqlprofile/dashboard.cmake
 
   core-rpm:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -136,14 +137,12 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        cd projects/aqlprofile
         git config --global --add safe.directory '*'
-        python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt
+        python3 -m pip install -U --user -r ./projects/rocprofiler-sdk/requirements.txt
 
     - name: List Files
       shell: bash
       run: |
-        cd projects/aqlprofile
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -155,12 +154,11 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      working-directory: projects/aqlprofile
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
+        LD_LIBRARY_PATH=./projects/aqlprofile/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="./projects/aqlprofile"
+          -DCTEST_BINARY_DIRECTORY="./projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S ./dashboard.cmake
+          -S ./projects/aqlprofile/dashboard.cmake
