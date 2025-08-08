@@ -13,8 +13,8 @@
       "url": "ROCm/rdc",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocm-core",
@@ -37,8 +37,8 @@
       "url": "ROCm/rocm_smi_lib",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler",
