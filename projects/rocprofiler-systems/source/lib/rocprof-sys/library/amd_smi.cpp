@@ -149,12 +149,25 @@ rocpd_initialize_smi_pmc(size_t gpu_id)
         trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
         trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
         COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0);
+
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        trait::name<category::amd_smi_vcn_activity>::value, "VCN_Act",
+        trait::name<category::amd_smi_vcn_activity>::description, LONG_DESCRIPTION,
+        COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+
+    data_processor.insert_pmc_description(
+        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        trait::name<category::amd_smi_jpeg_activity>::value, "JPEG_Act",
+        trait::name<category::amd_smi_jpeg_activity>::description, LONG_DESCRIPTION,
+        COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
 }
 
 void
 rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& settings,
                              uint64_t timestamp, double busy, double temp, double power,
-                             double usage)
+                             double                                           usage,
+                             const std::vector<amd_smi::data::xcp_metrics_t>& xcp_metrics)
 {
     if(!(settings.busy || settings.temp || settings.power || settings.mem_usage)) return;
 
@@ -178,6 +191,44 @@ rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& 
                             power);
     insert_event_and_sample(settings.mem_usage,
                             trait::name<category::amd_smi_memory_usage>::value, usage);
+
+    if(!(settings.vcn_activity || settings.jpeg_activity))
+    {
+        return;
+    }
+    auto       ni        = node_info::get_instance();
+    const auto thread_id = std::nullopt;
+
+    if(settings.vcn_activity && !xcp_metrics.empty())
+    {
+        for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
+        {
+            for(size_t i = 0; i < xcp_metrics[xcp_idx].vcn_busy.size(); ++i)
+            {
+                std::string vcn_name = "VCN_Activity_XCP_" + std::to_string(xcp_idx) +
+                                       "_" + std::to_string(i);
+                data_processor.insert_track(vcn_name.c_str(), ni.id, getpid(), thread_id);
+                insert_event_and_sample(true, vcn_name.c_str(),
+                                        xcp_metrics[xcp_idx].vcn_busy[i]);
+            }
+        }
+    }
+
+    if(settings.jpeg_activity && !xcp_metrics.empty())
+    {
+        for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
+        {
+            for(size_t i = 0; i < xcp_metrics[xcp_idx].jpeg_busy.size(); ++i)
+            {
+                std::string jpeg_name = "JPEG_Activity_XCP_" + std::to_string(xcp_idx) +
+                                        "_" + std::to_string(i);
+                data_processor.insert_track(jpeg_name.c_str(), ni.id, getpid(),
+                                            thread_id);
+                insert_event_and_sample(true, jpeg_name.c_str(),
+                                        xcp_metrics[xcp_idx].jpeg_busy[i]);
+            }
+        }
+    }
 }
 
 auto&
@@ -665,7 +716,7 @@ data::post_process(uint32_t _dev_id)
         if(use_rocpd)
         {
             rocpd_process_smi_pmc_events(_dev_id, _settings, _ts, _mmbusy, _temp, _power,
-                                         _usage);
+                                         _usage, itr.m_xcp_metrics);
         }
     }
 }
