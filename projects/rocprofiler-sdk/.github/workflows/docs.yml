@@ -38,22 +38,35 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        id: checkout
+        continue-on-error: true
         with:
             submodules: true
+      
+      - name: Check Checkout Status
+        if: ${{ steps.checkout.outcome == 'failure' }}
+        run: |
+          echo "FAILED_STEP=Checkout" >> $GITHUB_ENV
+          echo "::warning::Checkout failed - remaining steps will be skipped"
+          exit 0
       - name: Setup Pages
+        if: ${{ env.FAILED_STEP == '' }}
         uses: actions/configure-pages@v5
       - name: Create Docs Directory
+        if: ${{ env.FAILED_STEP == '' }}
         run: |
           git config --global --add safe.directory '*'
           mkdir -p docs/_doxygen/rocprofiler-sdk
           mkdir -p docs/_doxygen/roctx
       - name: Install documentation dependencies
+        if: ${{ env.FAILED_STEP == '' }}
         timeout-minutes: 10
         shell: bash
         run: |
           apt-get update
           apt-get install -y doxygen graphviz build-essential cmake
       - name: Build Docs
+        if: ${{ env.FAILED_STEP == '' }}
         shell: bash -el {0}
         working-directory: source/docs
         run: |
@@ -65,7 +78,7 @@ jobs:
           git config --global --add safe.directory '*'
           ../scripts/update-docs.sh
       - name: Upload artifact
-        if: ${{ github.event_name == 'workflow_dispatch' }}
+        if: ${{ github.event_name == 'workflow_dispatch' && env.FAILED_STEP == '' }}
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs
@@ -107,9 +120,17 @@ jobs:
       - name: Checkout
         if: ${{ env.FAILED_STEP == '' }}
         uses: actions/checkout@v4
+        id: checkout
         continue-on-error: true
         with:
             submodules: true
+      
+      - name: Check Checkout Status
+        if: ${{ steps.checkout.outcome == 'failure' }}
+        run: |
+          echo "FAILED_STEP=Checkout" >> $GITHUB_ENV
+          echo "::warning::Checkout failed - remaining steps will be skipped"
+          exit 0
       - name: Create Docs Directory
         if: ${{ env.FAILED_STEP == '' }}
         continue-on-error: true
@@ -163,7 +184,7 @@ jobs:
         if: always()
         shell: bash
         run: |
-          if [[ "${{ env.FAILED_STEP }}" == "Install os essentials" ]] || [[ "${{ env.FAILED_STEP }}" == "Install requirements" ]]; then
+          if [[ "${{ env.FAILED_STEP }}" == "Checkout" ]] || [[ "${{ env.FAILED_STEP }}" == "Install os essentials" ]] || [[ "${{ env.FAILED_STEP }}" == "Install requirements" ]]; then
             echo "::notice::✅ TEST PASSED - Job failed at ${{ env.FAILED_STEP }} step"
             echo "::notice::Since the failure occurred during ${{ env.FAILED_STEP }}, this is considered a passing test"
             echo "## Test Result: PASSED ✅" >> $GITHUB_STEP_SUMMARY

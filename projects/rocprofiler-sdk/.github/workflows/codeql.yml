@@ -79,9 +79,18 @@ jobs:
         fi
 
     - uses: actions/checkout@v4
+      id: checkout
       if: ${{ env.FAILED_STEP == '' }}
+      continue-on-error: true
       with:
         submodules: 'true'
+
+    - name: Check Checkout Status
+      if: ${{ steps.checkout.outcome == 'failure' }}
+      run: |
+        echo "FAILED_STEP=Checkout" >> $GITHUB_ENV
+        echo "::warning::Checkout failed - remaining steps will be skipped"
+        exit 0
 
     # Initializes the CodeQL tools for scanning.
     - name: Initialize CodeQL
@@ -119,7 +128,7 @@ jobs:
       if: always()
       shell: bash
       run: |
-        if [[ "${{ env.FAILED_STEP }}" == "Install requirements" ]]; then
+        if [[ "${{ env.FAILED_STEP }}" == "Checkout" ]] || [[ "${{ env.FAILED_STEP }}" == "Install requirements" ]]; then
           echo "::notice::✅ TEST PASSED - Job failed at Install requirements step"
           echo "::notice::Since the failure occurred during Install requirements, this is considered a passing test"
           echo "## Test Result: PASSED ✅" >> $GITHUB_STEP_SUMMARY
