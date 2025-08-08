@@ -86,7 +86,8 @@ def binary_handler_profile_rocprof_compute(request):
                     
             if not attach_detach_para:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--" , config[app_name]]
+                    + ["--"] \
+                    + config[app_name]
             else:
                 command_rocprof_compute = command_rocprof_compute \
                     + ["--pid" , str(attach_detach_para["pid"])]
@@ -115,7 +116,8 @@ def binary_handler_profile_rocprof_compute(request):
                     
             if not attach_detach_para:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--" , config[app_name]]
+                    + ["--"] \
+                    + config[app_name]
             else:
                 command_rocprof_compute = command_rocprof_compute \
                     + ["--pid" , str(attach_detach_para["pid"])]
