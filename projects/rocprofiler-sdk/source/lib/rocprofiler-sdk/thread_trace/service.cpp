@@ -98,6 +98,12 @@ rocprofiler_configure_dispatch_thread_trace_service(
             case ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL:
                 pack.bSerialize = param.value != 0;
                 break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK:
+                pack.perf_exclude_mask = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
+                pack.no_detail_simd = param.value != 0;
+                break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
@@ -166,6 +172,12 @@ rocprofiler_configure_device_thread_trace_service(
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL:
                 if(param.value != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK:
+                pack.perf_exclude_mask = param.value;
+                break;
+            case ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL:
+                pack.no_detail_simd = param.value != 0;
                 break;
             case ROCPROFILER_THREAD_TRACE_PARAMETER_LAST:
                 return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
