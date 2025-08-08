@@ -87,7 +87,7 @@ jobs:
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-systems/
-
+        
     - name: Install Packages
       timeout-minutes: 25
       uses: nick-fields/retry@v3
@@ -133,7 +133,10 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         TAG="" &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
@@ -345,7 +348,10 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="-rocm-${{ matrix.rocm-version }}" &&
@@ -481,7 +487,10 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
