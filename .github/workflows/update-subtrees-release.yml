@@ -1,4 +1,4 @@
-name: Synchronize Subtrees
+name: Synchronize Release Subtrees
 
 on:
   workflow_dispatch:
