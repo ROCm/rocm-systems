@@ -13,7 +13,7 @@
       "url": "ROCm/rdc",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -37,7 +37,7 @@
       "url": "ROCm/rocm_smi_lib",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
