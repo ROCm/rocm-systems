@@ -1421,23 +1421,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "code object tracing service configure");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(marker_api_callback_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-                                                       nullptr,
-                                                       0,
-                                                       tool_tracing_callback,
-                                                       nullptr),
-        "marker core api tracing service configure");
-
-    // ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
-    //                      marker_api_callback_ctx,
-    //                      ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
-    //                      nullptr,
-    //                      0,
-    //                      tool_tracing_callback,
-    //                      nullptr),
-    //                  "marker core api tracing service configure");
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         marker_api_callback_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
+                         nullptr,
+                         0,
+                         tool_tracing_callback,
+                         nullptr),
+                     "marker core range api tracing service configure");
 
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                          marker_api_callback_ctx,
@@ -1775,21 +1766,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     //                                                  hip_api_buffered_buffer),
     //     "buffer tracing service configure");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
-                                                     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
-                                                     nullptr,
-                                                     0,
-                                                     marker_api_buffered_buffer),
-        "buffer tracing service configure");
-
-    // ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-    //                      marker_api_buffered_ctx,
-    //                      ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,
-    //                      nullptr,
-    //                      0,
-    //                      marker_api_buffered_buffer),
-    //                  "buffer tracing service configure");
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                         marker_api_buffered_ctx,
+                         ROCPROFILER_BUFFER_TRACING_MARKER_CORE_RANGE_API,
+                         nullptr,
+                         0,
+                         marker_api_buffered_buffer),
+                     "buffer tracing service configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
@@ -2546,6 +2529,61 @@ write_perfetto()
         auto buffer_names     = sdk::get_buffer_tracing_names();
         auto callbk_name_info = sdk::get_callback_tracing_names();
 
+        for(const auto& itr : marker_api_bf_records)
+        {
+            std::string_view name  = "<unknown-marker-name>";
+            auto&            track = thread_tracks.at(itr.thread_id);
+
+            auto _args = callback_arg_array_t{};
+            if(enable_debug_annotations)
+            {
+                using namespace std::string_view_literals;
+
+                auto ritr = std::find_if(marker_api_cb_records.begin(),
+                                         marker_api_cb_records.end(),
+                                         [&itr](const auto& citr) {
+                                             return (citr.record.correlation_id.internal ==
+                                                         itr.correlation_id.internal &&
+                                                     !citr.args.empty());
+                                         });
+
+                if(ritr != marker_api_cb_records.end())
+                {
+                    auto elem =
+                        std::find_if(ritr->args.cbegin(), ritr->args.cend(), [](const auto& arg) {
+                            return arg.first == "message"sv;
+                        });
+                    if(elem != ritr->args.end())
+                    {
+                        name = elem->second;
+                    }
+                }
+            }
+
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::marker_api>::name,
+                              ::perfetto::StaticString(name.data()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "tid",
+                              itr.thread_id,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "corr_id",
+                              itr.correlation_id.internal,
+                              "ancestor_id",
+                              itr.correlation_id.ancestor);
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::marker_api>::name,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
         for(const auto& itr : hsa_api_bf_records)
         {
             auto  name  = buffer_names.at(itr.kind, itr.operation);
@@ -2840,7 +2878,9 @@ write_perfetto()
                               "dst_agent",
                               agents_map.at(itr.dst_agent_id).logical_node_id,
                               "copy_bytes",
-                              itr.bytes);
+                              itr.bytes,
+                              "corr_id",
+                              itr.correlation_id.internal);
             TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
                             track,
                             itr.end_timestamp,
