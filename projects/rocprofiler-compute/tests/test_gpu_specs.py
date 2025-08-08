@@ -23,24 +23,20 @@
 
 ##############################################################################
 
-
 import os
 import re
 import subprocess
-import sys
 import tempfile
 from importlib.machinery import SourceFileLoader
-from pathlib import Path
-from unittest.mock import MagicMock, mock_open, patch
+from unittest.mock import patch
 
-import pandas as pd
 import pytest
-import yaml
 
 from src.utils.specs import generate_machine_specs
 
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
-
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 # NOTE: Only testing gfx942 for now.
 GFX942_CHIP_IDS_TO_NUM_XCDS = {
@@ -70,7 +66,7 @@ def parse_table_dict(output: str) -> dict:
     """
     Parse an ASCII table into a dict mapping Spec -> Value.
     """
-    lines = [l for l in output.splitlines() if l.startswith("│")]
+    lines = [line for line in output.splitlines() if line.startswith("│")]
     # locate header row (the one containing 'Spec' and 'Value')
     header_idx = next(
         (i for i, ln in enumerate(lines) if "Spec" in ln and "Value" in ln), None
@@ -132,7 +128,6 @@ def get_num_xcds():
 
 
 def get_gpu_arch():
-
     rocminfo = str(
         # decode with utf-8 to account for rocm-smi changes in latest rocm
         subprocess.run(
@@ -182,18 +177,18 @@ def test_num_xcds_cli_output():
         stderr=subprocess.PIPE,
         text=True,
     )
-    assert (
-        proc.returncode == 0
-    ), f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    assert proc.returncode == 0, (
+        f"Non-zero exit ({proc.returncode}), stderr:\n{proc.stderr}"
+    )
 
     # 3. strip ANSI, parse table
     clean = strip_ansi(proc.stdout)
     return_dict = parse_table_dict(clean)
 
     # 4. check results are expected
-    assert (
-        "Compute Partition" in return_dict
-    ), "Spec 'Compute Partition' not found in table"
+    assert "Compute Partition" in return_dict, (
+        "Spec 'Compute Partition' not found in table"
+    )
     assert "Num XCDs" in return_dict, "Spec 'Num XCDs' not found in table"
 
     compute_partition_actual = return_dict["Compute Partition"]
@@ -257,7 +252,7 @@ def test_get_gpu_series_uninitialized():
 
     with patch.object(MIGPUSpecs, "_gpu_series_dict", {}):
         with pytest.raises(SystemExit):
-            result = MIGPUSpecs.get_gpu_series("gfx942")
+            result = MIGPUSpecs.get_gpu_series("gfx942")  # noqa: F841
 
 
 @pytest.mark.misc
@@ -315,7 +310,7 @@ def test_get_num_xcds_no_compute_partition_data():
 
     mock_dict = {"gfx942": None}
     with patch.object(MIGPUSpecs, "_gpu_arch_to_compute_partition_dict", mock_dict):
-        result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx942")
+        result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx942")  # noqa: F841
 
 
 @pytest.mark.misc
@@ -333,7 +328,7 @@ def test_get_num_xcds_unknown_gpu_model():
     """Test get_num_xcds with unknown gpu model - covers lines 319-321"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL")
+    result = MIGPUSpecs.get_num_xcds(gpu_arch="gfx950", gpu_model="UNKNOWN_MODEL")  # noqa: F841
 
 
 @pytest.mark.misc
@@ -341,7 +336,7 @@ def test_get_num_xcds_no_compute_partition():
     """Test get_num_xcds with no compute partition - covers lines 325-327"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(
+    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
         gpu_arch="gfx950", gpu_model="MI350", compute_partition=""
     )
 
@@ -351,7 +346,7 @@ def test_get_num_xcds_unknown_compute_partition():
     """Test get_num_xcds with unknown compute partition - covers lines 329-332"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(
+    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
         gpu_arch="gfx950", gpu_model="MI350", compute_partition="UNKNOWN"
     )
 
@@ -363,7 +358,7 @@ def test_get_num_xcds_none_partition_value():
 
     mock_dict = {"mi350": {"spx": None}}
     with patch.object(MIGPUSpecs, "_num_xcds_dict", mock_dict):
-        result = MIGPUSpecs.get_num_xcds(
+        result = MIGPUSpecs.get_num_xcds(  # noqa: F841
             gpu_arch="gfx950", gpu_model="MI350", compute_partition="spx"
         )
 
@@ -373,7 +368,7 @@ def test_get_num_xcds_no_gpu_model():
     """Test get_num_xcds with no gpu model - covers line 342"""
     from src.utils.mi_gpu_spec import MIGPUSpecs
 
-    result = MIGPUSpecs.get_num_xcds(
+    result = MIGPUSpecs.get_num_xcds(  # noqa: F841
         gpu_arch="gfx950", gpu_model="", compute_partition="spx"
     )
 
@@ -385,7 +380,7 @@ def test_get_chip_id_dict_empty():
 
     with patch.object(MIGPUSpecs, "_chip_id_dict", {}):
         with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
-            result = MIGPUSpecs.get_chip_id_dict()
+            result = MIGPUSpecs.get_chip_id_dict()  # noqa: F841
             mock_error.assert_called_once()
 
 
@@ -396,7 +391,7 @@ def test_get_num_xcds_dict_empty():
 
     with patch.object(MIGPUSpecs, "_num_xcds_dict", {}):
         with patch("src.utils.mi_gpu_spec.console_error") as mock_error:
-            result = MIGPUSpecs.get_num_xcds_dict()
+            result = MIGPUSpecs.get_num_xcds_dict()  # noqa: F841
             mock_error.assert_called_once()
 
 

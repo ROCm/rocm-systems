@@ -22,8 +22,6 @@
 # THE SOFTWARE.
 
 ##############################################################################
-
-
 """
 Main View Module
 ---------------
@@ -59,9 +57,7 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.start_path = (
             # NOTE: is cwd the best choice?
-            Path.cwd()
-            if DEFAULT_START_PATH is None
-            else Path(DEFAULT_START_PATH)
+            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
         )
 
         self.logger = Logger()
@@ -157,7 +153,9 @@ class MainView(Horizontal):
                 analyzer.sanitize()
                 self.logger.info("Step 2: Analyzer sanitized successfully")
             except Exception as e:
-                self.logger.error(f"Step 2 failed - Error sanitizing analyzer: {str(e)}")
+                self.logger.error(
+                    f"Step 2 failed - Error sanitizing analyzer: {str(e)}"
+                )
                 raise
 
             # Step 3: Load sys_info
@@ -172,7 +170,13 @@ class MainView(Horizontal):
                 sys_info_df = file_io.load_sys_info(sysinfo_path)
                 self.logger.info(f"Step 3: sys_info_df type = {type(sys_info_df)}")
                 self.logger.info(
-                    f"Step 3: sys_info_df shape = {sys_info_df.shape if hasattr(sys_info_df, 'shape') else 'No shape attribute'}"
+                    f"Step 3: sys_info_df shape = {
+                        (
+                            sys_info_df.shape
+                            if hasattr(sys_info_df, 'shape')
+                            else 'No shape attribute'
+                        )
+                    }"
                 )
 
             except Exception as e:
@@ -193,12 +197,16 @@ class MainView(Horizontal):
                     # If it's already a dict
                     sys_info = sys_info_df
                 else:
-                    raise TypeError(f"Unexpected type for sys_info: {type(sys_info_df)}")
+                    raise TypeError(
+                        f"Unexpected type for sys_info: {type(sys_info_df)}"
+                    )
 
                 self.logger.info(f"Step 4: sys_info converted = {sys_info}")
 
             except Exception as e:
-                self.logger.error(f"Step 4 failed - Error converting sys_info: {str(e)}")
+                self.logger.error(
+                    f"Step 4 failed - Error converting sys_info: {str(e)}"
+                )
                 raise
 
             # Step 5: Load SoC specs
@@ -236,7 +244,10 @@ class MainView(Horizontal):
                 # TODO: add per kernel Roofline support when available
 
                 if not self.per_kernel_dfs or not self.top_kernels:
-                    warning_msg = "Step 8: Per Kernel Analysis completed but not all data was returned"
+                    warning_msg = (
+                        "Step 8: Per Kernel Analysis completed but not all data "
+                        "was returned"
+                    )
                     self._update_view(warning_msg, LogLevel.WARNING)
                     self.logger.warning(warning_msg)
                 else:
@@ -289,7 +300,7 @@ class MainView(Horizontal):
                 return
 
             kernel_view.update_results(self.per_kernel_dfs, self.top_kernels)
-            self.logger.success(f"Results displayed successfully.")
+            self.logger.success("Results displayed successfully.")
         except Exception as e:
             self.logger.error(f"Error refreshing results: {str(e)}")
 
