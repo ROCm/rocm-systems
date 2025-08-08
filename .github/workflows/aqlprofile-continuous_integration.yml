@@ -63,9 +63,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: |
-          projects/aqlprofile
-          projects/rocprofiler-sdk/requirements.txt
+        sparse-checkout: projects/aqlprofile
         set-safe-directory: true
 
     - name: Install requirements
@@ -77,7 +75,6 @@ jobs:
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-        python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt
 
     - name: List Files
       shell: bash
@@ -126,17 +123,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: |
-          projects/aqlprofile
-          projects/rocprofiler-sdk/requirements.txt
+        sparse-checkout: projects/aqlprofile
         set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
-      run: |
-        git config --global --add safe.directory '*'
-        python3 -m pip install -U --user -r ./projects/rocprofiler-sdk/requirements.txt
+      run: git config --global --add safe.directory '*'
 
     - name: List Files
       shell: bash
