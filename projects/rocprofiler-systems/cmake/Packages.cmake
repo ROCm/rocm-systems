@@ -275,7 +275,6 @@ if(ROCPROFSYS_BUILD_DYNINST)
         REPO_URL https://github.com/ROCm/dyninst.git
         REPO_BRANCH dyninst_13
     )
-
     set(DYNINST_OPTION_PREFIX ON)
     set(DYNINST_BUILD_DOCS OFF)
     set(DYNINST_BUILD_RTLIB OFF)

@@ -82,9 +82,11 @@ jobs:
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
+      working-directory: 
       shell: bash
       run:
-        git config --global --add safe.directory ${PWD} &&
+        pwd
+        git config --global --add safe.directory $(pwd) &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-opensuse-${{ matrix.os-release }}-${{ matrix.compiler }}-nompi-python

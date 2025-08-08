@@ -86,6 +86,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
