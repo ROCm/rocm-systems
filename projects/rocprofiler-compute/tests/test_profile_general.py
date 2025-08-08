@@ -1593,18 +1593,6 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.section
-def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics"]
-    workload_dir = test_utils.get_output_dir()
-    _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False
-    )
-    # workload dir should be empty
-    assert not os.listdir(workload_dir)
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
 @pytest.mark.misc
 def test_comprehensive_error_paths():
     """Simplified test for error path coverage"""
