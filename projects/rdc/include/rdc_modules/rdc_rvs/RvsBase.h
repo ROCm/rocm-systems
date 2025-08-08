@@ -71,8 +71,8 @@ namespace rdc {
 
 inline amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                                     amdsmi_processor_handle* processor_handle) {
-  uint32_t socket_count;
-  uint32_t processor_count;
+  uint32_t socket_count = 0;
+  uint32_t processor_count = 0;
   auto ret = amdsmi_get_socket_handles(&socket_count, nullptr);
   if (ret != AMDSMI_STATUS_SUCCESS) {
     return ret;

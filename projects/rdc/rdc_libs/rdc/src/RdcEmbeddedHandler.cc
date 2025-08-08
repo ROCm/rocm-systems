@@ -49,8 +49,21 @@ class smi_initializer {
   smi_initializer() {
     // Make sure smi will not be initialized multiple times
     amdsmi_shut_down();
-    amdsmi_status_t ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    amdsmi_status_t ret = AMDSMI_STATUS_UNKNOWN_ERROR;
+    uint64_t init_flag = AMDSMI_INIT_AMD_GPUS;
+#ifdef ENABLE_ESMI_LIB
+    init_flag |= AMDSMI_INIT_AMD_CPUS;
+#endif
+    ret = amdsmi_init(init_flag);
+#ifdef ENABLE_ESMI_LIB
     if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Failed to initalize amdsmi with CPUs enabled.. Disabling CPUs.");
+      init_flag &= ~AMDSMI_INIT_AMD_CPUS;
+      ret = amdsmi_init(init_flag);
+    }
+#endif
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "SMI FAILED with" << ret);
       throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "SMI initialize fail");
     }
   }
