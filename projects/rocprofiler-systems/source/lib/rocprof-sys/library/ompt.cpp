@@ -80,7 +80,7 @@ struct ompt : comp::base<ompt, void>
     template <typename... Args>
     void start(const context_info_t& _ctx_info, Args&&...) const
     {
-        category_region<category::ompt>::start<tim::quirk::timemory>(m_prefix);
+        category_region<category::ompt>::start<tim::quirk::timemory>(_ctx_info.label);
 
         auto     _ts = tracing::now();
         uint64_t _cid =
@@ -97,25 +97,22 @@ struct ompt : comp::base<ompt, void>
         if(_cid > 0)
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                ::perfetto::Flow::ProcessScoped(_cid), std::move(_annotate));
+                _ctx_info.label, _ts, ::perfetto::Flow::ProcessScoped(_cid),
+                std::move(_annotate));
         }
         else
         {
             category_region<category::ompt>::start<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
+                _ctx_info.label, _ts, std::move(_annotate));
         }
     }
 
     template <typename... Args>
     void stop(const context_info_t& _ctx_info, Args&&...) const
     {
-        category_region<category::ompt>::stop<tim::quirk::timemory>(m_prefix);
+        category_region<category::ompt>::stop<tim::quirk::timemory>(_ctx_info.label);
 
-        auto     _ts = tracing::now();
-        uint64_t _cid =
-            (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
+        auto _ts       = tracing::now();
         auto _annotate = [&](::perfetto::EventContext ctx) {
             if(config::get_perfetto_annotations())
             {
@@ -125,18 +122,8 @@ struct ompt : comp::base<ompt, void>
             }
         };
 
-        if(_cid > 0)
-        {
-            category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
-        }
-        else
-        {
-            category_region<category::ompt>::stop<tim::quirk::perfetto>(
-                (_ctx_info.func.empty()) ? m_prefix : _ctx_info.func, _ts,
-                std::move(_annotate));
-        }
+        category_region<category::ompt>::stop<tim::quirk::perfetto>(_ctx_info.label, _ts,
+                                                                    std::move(_annotate));
     }
 
     template <typename... Args>
