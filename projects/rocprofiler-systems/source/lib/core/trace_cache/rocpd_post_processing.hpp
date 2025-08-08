@@ -21,43 +21,40 @@
 // SOFTWARE.
 
 #pragma once
-
-#include <cstddef>
-#include <cstdint>
-#include <string>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#endif
+#include "core/node_info.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
+#include "core/trace_cache/storage_parser.hpp"
 
 namespace rocprofsys
 {
-
-enum class agent_type : uint8_t
+namespace trace_cache
 {
-    CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
-};
 
-struct agent
+class rocpd_post_processing
 {
-    agent_type  type;
-    uint64_t    handle;
-    uint64_t    device_id;
-    uint32_t    node_id;
-    int32_t     logical_node_id;
-    int32_t     logical_node_type_id;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
+public:
+    rocpd_post_processing(metadata_registry& metadata);
 
-    size_t device_type_index{ 0 };
-    size_t base_id{ 0 };
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_processor_handle smi_handle = nullptr;
+    void register_parser_callback(storage_parser& parser);
+    void post_process_metadata();
+
+private:
+    using primary_key = size_t;
+
+    inline void rocpd_insert_thread_id(info::thread& t_info, const node_info& n_info,
+                                       const info::process& process_info) const;
+
+    postprocessing_callback get_kernel_dispatch_callback() const;
+    postprocessing_callback get_memory_copy_callback() const;
+#if(ROCPROFILER_VERSION >= 600)
+    postprocessing_callback get_memory_allocate_callback() const;
 #endif
+    postprocessing_callback get_region_callback() const;
+    postprocessing_callback get_in_time_sample_callback() const;
+    postprocessing_callback get_pmc_event_with_sample_callback() const;
+
+    metadata_registry& m_metadata;
 };
 
+}  // namespace trace_cache
 }  // namespace rocprofsys

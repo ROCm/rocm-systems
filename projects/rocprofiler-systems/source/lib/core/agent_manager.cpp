@@ -44,9 +44,28 @@ agent_manager::insert_agent(agent& _agent)
         (_agent.type == agent_type::GPU ? _gpu_agents_cnt : _cpu_agents_cnt),
         (_agent.type == agent_type::GPU ? "GPU" : "CPU"));
 
-    _agent.device_id =
+    _agent.device_type_index =
         (_agent.type == agent_type::GPU ? _gpu_agents_cnt++ : _cpu_agents_cnt++);
     _agents.emplace_back(std::make_shared<agent>(_agent));
+}
+
+const agent&
+agent_manager::get_agent_by_type_index(size_t type_index, agent_type type) const
+{
+    ROCPROFSYS_VERBOSE(3, "Getting agent for type: %s, with type index: %ld\n",
+                       (type == agent_type::GPU) ? "GPU" : "CPU", type_index);
+    auto _agent =
+        std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
+            return agent_ptr->type == type && agent_ptr->device_type_index == type_index;
+        });
+    if(_agent == _agents.end())
+    {
+        std::ostringstream oss;
+        oss << "Agent not found for type index: " << type_index
+            << ", type: " << (type == agent_type::GPU ? "GPU" : "CPU");
+        throw std::out_of_range(oss.str());
+    }
+    return **_agent;
 }
 
 const agent&
@@ -75,7 +94,7 @@ agent_manager::get_agent_by_handle(uint64_t device_handle, agent_type type) cons
                        device_handle, (type == agent_type::GPU ? "GPU" : "CPU"));
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
-            return agent_ptr->type == type && agent_ptr->id == device_handle;
+            return agent_ptr->type == type && agent_ptr->handle == device_handle;
         });
     if(_agent == _agents.end())
     {
@@ -93,7 +112,7 @@ agent_manager::get_agent_by_handle(size_t device_handle) const
     ROCPROFSYS_VERBOSE(3, "Getting agent for device handle: %ld\n", device_handle);
     auto _agent =
         std::find_if(_agents.begin(), _agents.end(), [&](const auto& agent_ptr) {
-            return agent_ptr->id == device_handle;
+            return agent_ptr->handle == device_handle;
         });
     if(_agent == _agents.end())
     {

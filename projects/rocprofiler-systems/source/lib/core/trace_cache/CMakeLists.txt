@@ -20,16 +20,25 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-set(rocpd_sources
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/json.cpp
+set(trace_cache_sources
+    ${CMAKE_CURRENT_LIST_DIR}/cache_manager.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/storage_parser.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.cpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd_post_processing.cpp
 )
 
-set(rocpd_headers
-    ${CMAKE_CURRENT_LIST_DIR}/data_processor.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/json.hpp
+set(trace_cache_headers
+    ${CMAKE_CURRENT_LIST_DIR}/cache_manager.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/storage_parser.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/buffer_storage.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/cache_utility.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/metadata_registry.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/rocpd_post_processing.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/sample_type.hpp
 )
 
-target_sources(rocprofiler-systems-core-library PRIVATE ${rocpd_sources} ${rocpd_headers})
-
-add_subdirectory(data_storage)
+target_sources(
+    rocprofiler-systems-core-library
+    PRIVATE ${trace_cache_sources} ${trace_cache_headers}
+)
