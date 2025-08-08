@@ -94,7 +94,7 @@ jobs:
       shell: bash
       working-directory: projects/aqlprofile
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -V -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
@@ -152,7 +152,7 @@ jobs:
       shell: bash
       working-directory: projects/aqlprofile
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -V -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
