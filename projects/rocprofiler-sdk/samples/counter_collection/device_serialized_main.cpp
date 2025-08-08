@@ -67,8 +67,9 @@ check_order_kernel(int expected, int* actual)
 class DualStreamExecutor
 {
 private:
-    hipStream_t stream1_, stream2_;
-    int         device_;
+    hipStream_t stream1_ = {};
+    hipStream_t stream2_ = {};
+    int         device_  = {0};
 
 public:
     DualStreamExecutor(int device = 0)
