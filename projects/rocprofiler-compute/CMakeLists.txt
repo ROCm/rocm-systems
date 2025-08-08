@@ -48,7 +48,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
 configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-                ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
+               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
