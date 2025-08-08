@@ -85,7 +85,24 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-        
+
+    - name: Update Git and Configure Repository
+      timeout-minutes: 10
+      run: |
+        apt-get update
+        apt-get install -y software-properties-common
+        add-apt-repository -y ppa:git-core/ppa
+        apt-get update
+        apt-get install -y git
+
+        git config --global --add safe.directory ${GITHUB_WORKSPACE}
+        git config --global --add safe.directory ${PWD}
+        git config --global --add safe.directory "*"
+
+        git --version
+        git status || echo "Git status check completed"
+
+
     - name: Install Packages
       timeout-minutes: 25
       uses: nick-fields/retry@v3
