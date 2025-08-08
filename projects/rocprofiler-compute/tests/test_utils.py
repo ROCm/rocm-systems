@@ -30,6 +30,7 @@ import json
 import locale
 import logging
 import os
+import tempfile
 import pathlib
 import re
 import shutil
