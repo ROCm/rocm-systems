@@ -48,7 +48,7 @@ if __name__ == "__main__":
         "--repo-url",
         help="Base GitHub repo URL",
         type=str,
-        default="https://github.com/AMD-ROCm-Internal/rocprofiler-sdk-internal",
+        default="https://github.com/ROCm/rocm-systems",
     )
     parser.add_argument(
         "-o",

@@ -14,7 +14,7 @@ This table provides the current status of the migration of specific ROCm systems
 | Component              | Source of Truth | Migration Status | Azure CI Status                       | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
-| `aqlprofile`           | EMU             | Pending          |                                       |                                       |
+| `aqlprofile`           | Public          | Pending          |                                       |                                       |
 | `clr`                  | EMU             | Pending          |                                       |                                       |
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
@@ -27,7 +27,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocprofiler`          | Public          | Completed        |                                       |                                       |
 | `rocprofiler-compute`  | Public          | Completed        |                                       |                                       |
 | `rocprofiler-register` | Public          | Completed        |                                       |                                       |
-| `rocprofiler-sdk`      | EMU             | Pending          |                                       |                                       |
+| `rocprofiler-sdk`      | Public          | Pending          |                                       |                                       |
 | `rocprofiler-systems`  | Public          | Completed        |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
 | `rocshmem`             | Public          | Pending          |                                       |                                       |
@@ -38,8 +38,6 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `aqlprofile`           | 8/7            |
-| `rocprofiler-sdk`      | 8/7            |
 | `rdc`                  | 8/8            |
 | `rocm-smi-lib`         | 8/8            |
 | `rocminfo`             | 8/11           |
