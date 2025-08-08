@@ -134,7 +134,13 @@ find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t vers
             // Check if the GPU agent supports PC sampling. If so, add it to the
             // output list `_out_agents`.
             if(query_avail_configs_for_agent(tool_gpu_agent.get()))
+            {
+                // In case one of the agents supporting PC sampling is MI300X,
+                // we need to temporarily disable strict checks due to high number
+                // of error samples observed on this GPU.
+                address_translation::disable_strict_checks_if_needed(*_agents[i]);
                 _out_agents->push_back(std::move(tool_gpu_agent));
+            }
         }
 
         ss << "[" << __FUNCTION__ << "] " << _agents[i]->name << " :: "
