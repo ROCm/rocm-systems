@@ -14,7 +14,7 @@ This table provides the current status of the migration of specific ROCm systems
 | Component              | Source of Truth | Migration Status | Azure CI Status                       | Component CI Status                   |
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
-| `aqlprofile`           | Public          | Pending          |                                       |                                       |
+| `aqlprofile`           | Public          | Completed        |                                       |                                       |
 | `clr`                  | EMU             | Pending          |                                       |                                       |
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
@@ -27,7 +27,7 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocprofiler`          | Public          | Completed        |                                       |                                       |
 | `rocprofiler-compute`  | Public          | Completed        |                                       |                                       |
 | `rocprofiler-register` | Public          | Completed        |                                       |                                       |
-| `rocprofiler-sdk`      | Public          | Pending          |                                       |                                       |
+| `rocprofiler-sdk`      | Public          | Completed        |                                       |                                       |
 | `rocprofiler-systems`  | Public          | Completed        |                                       |                                       |
 | `rocr-runtime`         | EMU             | Pending          |                                       |                                       |
 | `rocshmem`             | Public          | Pending          |                                       |                                       |
