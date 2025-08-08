@@ -256,7 +256,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        if [ "${OS_TYPE}" == "rhel" ]; then source scl_source enable gcc-toolset-11; fi;
+        if [ "${OS_TYPE}" == "rhel-8" ]; then source scl_source enable gcc-toolset-11; fi;
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
