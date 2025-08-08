@@ -1,0 +1,100 @@
+{
+  "repositories": [
+    {
+      "name": "aqlprofile",
+      "url": "ROCm/aqlprofile",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rdc",
+      "url": "ROCm/rdc",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocm-core",
+      "url": "ROCm/rocm-core",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocminfo",
+      "url": "ROCm/rocminfo",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocm-smi-lib",
+      "url": "ROCm/rocm_smi_lib",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler",
+      "url": "ROCm/rocprofiler",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler-compute",
+      "url": "ROCm/rocprofiler-compute",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler-register",
+      "url": "ROCm/rocprofiler-register",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler-sdk",
+      "url": "ROCm/rocprofiler-sdk",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocprofiler-systems",
+      "url": "ROCm/rocprofiler-systems",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "rocr-runtime",
+      "url": "ROCm/ROCR-Runtime",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "roctracer",
+      "url": "ROCm/roctracer",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": false
+    }
+  ]
+}

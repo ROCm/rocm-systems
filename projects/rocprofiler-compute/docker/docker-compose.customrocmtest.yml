@@ -1,0 +1,16 @@
+services:
+  customrocmtest: # service name
+    build:
+      context: ../../../
+      dockerfile: projects/rocprofiler-compute/docker/Dockerfile.customrocmtest
+    devices:
+      - /dev/kfd
+      - /dev/dri
+    security_opt:
+      - seccomp:unconfined
+    volumes:
+      - ../../../:/app
+    ports:
+      - 8050:8050
+    tty: true
+    stdin_open: true

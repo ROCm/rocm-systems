@@ -1,0 +1,91 @@
+[project]
+name = "rocprof_compute"
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+developer = [
+    "ruff>=0.12.7",
+    "pre-commit",
+]
+
+[tool.ruff]
+line-length = 88
+
+# Ruff's default excludes cover: .bzr, .direnv, .eggs, .git, .git-rewrite, .hg, .ipynb_checkpoints,
+# .mypy_cache, .nox, .pants.d, .pyenv, .pytest_cache, .pytype, .ruff_cache, .svn,
+# .tox, .venv, .vscode, __pypackages__, _build, buck-out, build, dist, node_modules,
+# site-packages, venv
+
+extend-exclude = [
+    ".github",
+    ".misc",
+    "external",
+    "build-rocprof_compute",
+]
+
+[tool.ruff.lint]
+# Enable Pyflakes (F), pycodestyle (E, W for PEP8), and isort (I) rules.
+select = ["E", "W", "F", "I"]
+ignore = ["E713", "E711"]
+fixable = ["ALL"]
+unfixable = []
+
+[tool.ruff.format]
+preview = true
+
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+
+[tool.pytest.ini_options]
+addopts = [
+    "--import-mode=importlib",
+]
+
+pythonpath = [
+    ".",
+    "src",
+    "src/rocprof_compute_soc",
+    "src/utils",
+    "src/rocprof_compute_analyze/utils",
+    "tests"
+]
+
+markers = [
+    "section",
+    "kernel_execution",
+    "misc",
+    "mem",
+    "sort",
+    "join",
+    "verbosity",
+    "dispatch",
+    "list_metrics",
+    "filter_block",
+    "filter_kernel",
+    "dispatch",
+    "normal_unit",
+    "max_stat",
+    "time_unit",
+    "decimal",
+    "col",
+    "kernel_verbose",
+    "serial",
+    "L1_cache",
+    "num_xcds_spec_class",
+    "num_xcds_cli_output",
+    "sets_func",
+    "sets_perf"
+]

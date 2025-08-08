@@ -1,0 +1,92 @@
+Run simple convolution kernel
+TestHsa::Initialize :
+> GPU agents :
+> agent[0] :
+>> Name : gfx900
+>> Max Wave Size : 64
+>> Max Queue Size : 131072
+>> Kernarg Region Id : 34762688
+> Using agent[0] : gfx900
+TestHsa::setup :
+SimpleConvolution::init :
+> Input[0] :
+> 15 201 51 89 92 34 96 66 11 225 161 96 81 211 108 124 202 244 182 90 215 92 98 20 44 225 55 247 202 0 45 218 202 97 51 39 131 147 105 143 116 11 239 198 222 92 67 169 81 250 3 40 86 101 60 131 70 116 123 17 117 168 236 64 
+> Mask :
+> 0 0.2 0 
+> 0.2 0.2 0.2 
+> 0 0.2 0 
+Code object filename: gfx9_SimpleConvolution.hsaco
+TestHsa::run :
+> Executing kernel: "SimpleConvolution"
+> Waiting on kernel dispatch signal, que_idx=0
+> Output[0] :
+> 45 60 89 75 79 86 45 43 104 82 144 105 99 90 109 124 123 146 149 124 120 87 43 36 88 91 113 103 98 53 68 104 113 106 76 90 90 122 82 92 102 124 95 149 112 102 69 82 146 116 103 62 50 96 99 87 84 110 88 81 61 105 134 71 
+Test : Passed
+Time taken for Setup by SimpleConvolution : 0.00116895
+Time taken for Dispatch by SimpleConvolution : 2.49023e-05
+Time taken in Total by SimpleConvolution : 0.00119385
+Run with PMC
+Test: PGen PMC
+TestHsa::Initialize :
+> GPU agents :
+> agent[0] :
+>> Name : gfx900
+>> Max Wave Size : 64
+>> Max Queue Size : 131072
+>> Kernarg Region Id : 24572160
+> Using agent[0] : gfx900
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001cbf 00000001
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001808 00000000
+>> BuildWritePConfigRegPacket dst_sel=0
+'BuildWritePConfigRegPacket' size(6)    : c0044000 00000005 02000000 00000000 00000c42 00000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 ffff4c3e 10000000
+>> BuildWritePConfigRegPacket dst_sel=0
+'BuildWritePConfigRegPacket' size(6)    : c0044000 00000005 00000000 00000000 00000c42 00000000
+>> BuildWritePConfigRegPacket dst_sel=0
+'BuildWritePConfigRegPacket' size(6)    : c0044000 00000005 01000000 00000000 00000c42 00000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+'BuildWriteShRegPacket' size(3)         : c0017600 0000020b 00000001
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001808 00000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001808 00000001
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+'BuildCacheFlushPacket' size(7)         : c0055800 28c40000 ffffffff 00ffffff 00000000 00000000 00000004
+'BuildBarrierCommand' size(2)           : c0004600 00000407
+'BuildCacheFlushPacket' size(7)         : c0055800 28c40000 ffffffff 00ffffff 00000000 00000000 00000004
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001808 00000402
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+>> BuildWritePConfigRegPacket dst_sel=0
+'BuildWritePConfigRegPacket' size(6)    : c0044000 00000005 00000000 00000000 00000c42 00000000
+>> BuildCopyRegDataPacket src_sel=0
+'BuildCopyRegDataPacket' size(6)        : c0044000 02002500 00000c43 00000000 04332000 00000000
+>> BuildCopyRegDataPacket src_sel=0
+'BuildCopyRegDataPacket' size(6)        : c0044000 02002500 00000c44 00000000 04332004 00000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00000200 e0000000
+>> BuildWriteUConfigRegPacket
+'BuildWriteUConfigRegPacket' size(3)    : c0017900 00001cbf 00000000
+'BuildIndirectBufferCmd' size(4)        : c0023f00 04330000 00000000 10800033
+AQL 'IB' size(16)                       : 10000000 c0023f00 43300000 00000000 10800033 a0000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+'BuildIndirectBufferCmd' size(4)        : c0023f00 04330100 00000000 10800027
+AQL 'IB' size(16)                       : 10000000 c0023f00 43301000 00000000 10800027 a0000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+TestHsa::setup :
+SimpleConvolution::init :
+> Input[0] :
+> f c9 33 59 5c 22 60 42 b e1 a1 60 51 d3 6c 7c ca f4 b6 5a d7 5c 62 14 2c e1 37 f7 ca 0 2d da ca 61 33 27 83 93 69 8f 74 b ef c6 de 5c 43 a9 51 fa 3 28 56 65 3c 83 46 74 7b 11 75 a8 ec 40 
+> Mask :
+> 0 0.2 0 
+> 0.2 0.2 0.2 
+> 0 0.2 0 
+Code object filename: gfx9_SimpleConvolution.hsaco
+TestHsa::run :
+> Executing kernel: "SimpleConvolution"
+> Waiting on kernel dispatch signal, que_idx=1

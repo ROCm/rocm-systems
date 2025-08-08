@@ -1,0 +1,402 @@
+name: rocprofiler-systems Ubuntu 22.04 (GCC, Python, ROCm)
+run-name: ubuntu-jammy
+
+on:
+  push:
+    paths:
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
+      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  ubuntu-jammy-external:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++-11', 'g++-12']
+        rocm: ['OFF']
+        mpi: ['OFF']
+        ompt: ['OFF']
+        papi: ['OFF']
+        python: ['ON']
+        strip: ['OFF']
+        hidden: ['ON', 'OFF']
+        build-type: ['Release']
+        mpi-headers: ['ON', 'OFF']
+        build-dyninst: ['ON']
+        rocm-version: ['0.0']
+
+    env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      ROCPROFSYS_CI: 'ON'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          cd projects/rocprofiler-systems/
+          apt-get update &&
+          apt-get install -y software-properties-common &&
+          apt-get upgrade -y &&
+          apt-get install -y autoconf bison build-essential clang environment-modules \
+            gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 \
+            openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
+
+    - name: Configure Env
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        TAG="" &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        append-tagname ${{ matrix.mpi }} mpi &&
+        append-tagname ${{ matrix.ompt }} ompt &&
+        append-tagname ${{ matrix.papi }} papi &&
+        append-tagname ${{ matrix.python }} python &&
+        append-tagname ${{ matrix.mpi-headers }} mpip &&
+        append-tagname ${{ matrix.build-dyninst }} internal-dyninst &&
+        append-tagname ${{ matrix.strip }} strip &&
+        append-tagname ${{ matrix.hidden }} hidden-viz &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
+          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }}
+          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
+          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          -DUSE_CLANG_OMP=OFF
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
+
+    - name: Install
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: CPack and Install
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
+
+    - name: Test Install with Modulefile
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/rocprofiler-systems/share/modulefiles
+        module avail
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          projects/rocprofiler-systems/build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
+
+  ubuntu-jammy-external-rocm:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        rocm: ['ON']
+        mpi: ['OFF']
+        ompt: ['OFF']
+        papi: ['OFF']
+        python: ['ON']
+        strip: ['OFF']
+        hidden: ['ON']
+        build-type: ['Release']
+        mpi-headers: ['OFF']
+        build-dyninst: ['ON']
+        rocm-version: ['6.3', '6.4']
+
+    env:
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      ROCPROFSYS_CI: 'ON'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          cd projects/rocprofiler-systems/
+          apt-get update &&
+          apt-get install -y software-properties-common &&
+          apt-get upgrade -y &&
+          apt-get install -y autoconf bison build-essential clang environment-modules \
+            gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 \
+            openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
+
+    - name: Install ROCm Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        shell: bash
+        command: |
+          cd projects/rocprofiler-systems/
+          ROCM_VERSION=${{ matrix.rocm-version }}
+          ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+          ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+          echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
+          wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/jammy/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+          apt-get update
+          apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
+          echo "/opt/rocm/bin" >> $GITHUB_PATH
+          echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV
+          echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+          /opt/rocm/bin/hipcc -O3 -c ./examples/transpose/transpose.cpp -o /tmp/transpose.o
+
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
+
+    - name: Configure Env
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        TAG="" &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        append-tagname ${{ matrix.rocm }} rocm-${{ matrix.rocm-version }} &&
+        append-tagname ${{ matrix.mpi }} mpi &&
+        append-tagname ${{ matrix.ompt }} ompt &&
+        append-tagname ${{ matrix.papi }} papi &&
+        append-tagname ${{ matrix.python }} python &&
+        append-tagname ${{ matrix.mpi-headers }} mpip &&
+        append-tagname ${{ matrix.build-dyninst }} internal-dyninst &&
+        append-tagname ${{ matrix.strip }} strip &&
+        append-tagname ${{ matrix.hidden }} hidden-viz &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
+          -DROCPROFSYS_USE_ROCM=${{ matrix.rocm }}
+          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
+          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          -DUSE_CLANG_OMP=OFF
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
+
+    - name: Install
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: CPack and Install
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        cd build
+        cpack -G STGZ
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
+
+    - name: Test Install with Modulefile
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/rocprofiler-systems/share/modulefiles
+        module avail
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          projects/rocprofiler-systems/build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
+          projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
