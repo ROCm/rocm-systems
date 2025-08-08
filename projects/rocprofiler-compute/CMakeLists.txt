@@ -48,7 +48,7 @@ execute_process(
     OUTPUT_STRIP_TRAILING_WHITESPACE)
 message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
 configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-                ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
+               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -172,7 +172,7 @@ message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 enable_testing()
 include(CTest)
 
-option(ENABLE_COVERAGE "Enable code coverage" OFF)
+option(ENABLE_COVERAGE "Enable code coverage" ON)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
     set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing")
@@ -358,7 +358,9 @@ if(${ENABLE_COVERAGE})
             DEPENDS
             "test_profile_kernel_execution;test_profile_dispatch;test_profile_mem;test_profile_join;test_profile_sort;test_profile_misc;test_profile_section;test_analyze_commands;test_analyze_workloads;test_L1_cache_counters;test_num_xcds_spec_class;test_num_xcds_cli_output;test_db_connector;test_utils;test_autogen_config"
             LABELS
-            "coverage")
+            "coverage"
+            ENVIRONMENT
+            "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
 # ---------
