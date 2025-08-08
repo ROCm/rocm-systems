@@ -104,9 +104,10 @@ void RdcConfigSettingsImpl::monitorSettings() {
           // Mem clock
           status = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_MEM, &info);
           if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq for mem failed: "
-                        << status);
+            RDC_LOG(
+                RDC_ERROR,
+                "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clock_info for mem failed: "
+                    << status);
             continue;
           }
 
@@ -129,9 +130,10 @@ void RdcConfigSettingsImpl::monitorSettings() {
           // GFX clock
           status = amdsmi_get_clock_info(processor_handle, AMDSMI_CLK_TYPE_GFX, &info);
           if (status != AMDSMI_STATUS_SUCCESS) {
-            RDC_LOG(RDC_ERROR,
-                    "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clk_freq for gfx failed: "
-                        << status);
+            RDC_LOG(
+                RDC_ERROR,
+                "RdcConfigSettingsImpl::monitorSettings(); amdsmi_get_clock_info for gfx failed: "
+                    << status);
             continue;
           }
 
