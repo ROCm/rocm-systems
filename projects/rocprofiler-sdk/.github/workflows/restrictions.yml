@@ -1,0 +1,55 @@
+
+name: Code Restrictions
+permissions:
+    contents: read
+
+# This workflow ensures that certain code restrictions are applied.
+# For examples, rocprofiler-sdk cannot use std::regex because of issues
+# when loaded into an application compiled with C++ dual ABI support because
+# while std::regex itself (and std::regex_traits) being ABI-tagged,
+# std::__detail::_Scanner is not. Applications compiled with dual ABI support
+# will either throw an exception or produce a segfault and thus, this workflow
+# attempts to catch usage of std::regex during CI.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths-ignore:
+      - '.github/workflows/pull_*.yml'
+      - '.github/workflows/linting.yml'
+      - '.github/workflows/markdown_lint.yml'
+      - '*.md'
+      - '**/README.md'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regex:
+    # Only run this job when targeting amd-staging, amd-mainline, or amd-npi branches
+    if: ${{ contains(fromJSON('["amd-staging", "amd-mainline", "amd-npi"]'), github.base_ref) || contains(fromJSON('["refs/heads/amd-staging", "refs/heads/amd-mainline", "refs/heads/amd-npi"]'), github.ref) }}
+    runs-on: AMD-ROCm-Internal-dev1
+    env:
+      FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx"
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y python3-pip
+        python3 -m pip install -U cmake-format
+
+    - name: Apply restriction
+      run: |
+        set +e
+        FILES="$(find ${FOLDERS} -type f)"
+        GREP="$(grep -E -n 'std::regex|<regex>' ${FILES})"
+        if [ "${GREP}" != "" ]; then
+          echo -e "\nError! std::regex is not allowed in ${FOLDERS}...\n"
+          echo -e "\nResults:\n"
+          echo "${GREP}"
+          exit 1
+        fi

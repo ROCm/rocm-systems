@@ -1,0 +1,9 @@
+#
+# ThreadSanitizer suppressions file for rocprofiler project.
+#
+
+# leaked thread
+thread:libhsa-runtime64.so
+
+# unlock of an unlocked mutex (or by a wrong thread)
+mutex:librocm_smi64.so
