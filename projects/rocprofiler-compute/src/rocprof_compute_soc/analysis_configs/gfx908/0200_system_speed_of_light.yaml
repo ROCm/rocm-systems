@@ -260,27 +260,29 @@ Panel Config:
           pop: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))))
             / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
         L2-Fabric Read BW:
-          value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+          value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
             * 64)) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
           peak: $hbmBandwidth
-          pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-            * 64)) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
+          pop: ((100 * AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum -
+            TCC_EA0_RDREQ_32B_sum) * 64)) / (End_Timestamp - Start_Timestamp)))) /
+            $hbmBandwidth)
         L2-Fabric Write BW:
-          value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+          value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
             * 32)) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
           peak: $hbmBandwidth
-          pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbmBandwidth)
+          pop: ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum -
+            TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))) /
+            $hbmBandwidth)
         L2-Fabric Read Latency:
-          value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          value: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
           unit: Cycles
           peak: None
           pop: None
         L2-Fabric Write Latency:
-          value: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          value: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
           unit: Cycles
           peak: None

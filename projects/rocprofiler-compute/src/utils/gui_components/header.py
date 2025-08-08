@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import dash_bootstrap_components as dbc
 from dash import dcc, html
 
@@ -67,7 +66,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                 children=[
                                     dbc.DropdownMenu(
                                         [
-                                            dbc.DropdownMenuItem("Overview", header=True),
+                                            dbc.DropdownMenuItem(
+                                                "Overview", header=True
+                                            ),
                                             dbc.DropdownMenuItem(
                                                 "Roofline",
                                                 href="#roofline",
@@ -88,7 +89,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 href="#system_speed-of-light",
                                                 external_link=True,
                                             ),
-                                            dbc.DropdownMenuItem("Compute", header=True),
+                                            dbc.DropdownMenuItem(
+                                                "Compute", header=True
+                                            ),
                                             dbc.DropdownMenuItem(
                                                 "Command Processor (CPF/CPC)",
                                                 href="#command_processor_cpccpf",
@@ -131,8 +134,14 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
-                                                "Address Processing Unit and Data Return Path (TA/TD)",
-                                                href="#address_processing_unit_and_data_return_path_tatd",
+                                                (
+                                                    "Address Processing Unit and "
+                                                    "Data Return Path (TA/TD)"
+                                                ),
+                                                href=(
+                                                    "#address_processing_unit_and"
+                                                    "_data_return_path_tatd"
+                                                ),
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
@@ -199,9 +208,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ),  # list avail gcd ids
                                                 id="gcd-filt",
                                                 multi=True,
-                                                value=input_filters[
-                                                    "gpu"
-                                                ],  # default to any gpu filters passed as args
+                                                # default to any gpu filters
+                                                # passed as args
+                                                value=input_filters["gpu"],
                                                 placeholder="ALL",
                                                 clearable=False,
                                                 style={"width": "60px"},
@@ -230,9 +239,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ),
                                                 id="disp-filt",
                                                 multi=True,
-                                                value=input_filters[
-                                                    "dispatch"
-                                                ],  # default to any dispatch filters passed as args
+                                                # default to any dispatch
+                                                # filters passed as args
+                                                value=input_filters["dispatch"],
                                                 placeholder="ALL",
                                                 style={"width": "150px"},
                                             ),
@@ -254,7 +263,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 id="top-n-filt",
                                                 value=input_filters[
                                                     "top_n"
-                                                ],  # default to any dispatch filters passed as args
+                                                ],  # default to any dispatch filters
+                                                # passed as args
                                                 clearable=False,
                                                 style={"width": "50px"},
                                             ),
@@ -287,7 +297,9 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 optionHeight=150,
                                                 placeholder="ALL",
                                                 style={
-                                                    "width": "600px",  # TODO: Change these widths to % rather than fixed value
+                                                    "width": "600px",
+                                                    # TODO: Change these widths to
+                                                    # % rather than fixed value
                                                 },
                                             ),
                                         ]

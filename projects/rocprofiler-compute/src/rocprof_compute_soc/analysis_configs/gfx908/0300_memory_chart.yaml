@@ -244,24 +244,24 @@ Panel Config:
             + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
             != 0) else None)), 0)
         Fabric_L2 Rd:
-          value: ROUND(AVG((TCC_EA_RDREQ_sum / $denom)), 0)
+          value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
         Fabric_L2 Wr:
-          value: ROUND(AVG((TCC_EA_WRREQ_sum / $denom)), 0)
+          value: ROUND(AVG((TCC_EA0_WRREQ_sum / $denom)), 0)
         Fabric_L2 Atomic:
-          value: ROUND(AVG((TCC_EA_ATOMIC_sum / $denom)), 0)
+          value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
         Fabric Rd Lat:
-          value: ROUND(AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          value: ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else  0)), 0)
         Fabric Wr Lat:
-          value: ROUND(AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          value: ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else  0)), 0)
         Fabric Atomic Lat:
-          value: ROUND(AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+          value: ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
             != 0) else  0)), 0)
         HBM Rd:
-          value: ROUND(AVG((TCC_EA_RDREQ_DRAM_sum / $denom)), 0)
+          value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
         HBM Wr:
-          value: ROUND(AVG((TCC_EA_WRREQ_DRAM_sum / $denom)), 0)
+          value: ROUND(AVG((TCC_EA0_WRREQ_DRAM_sum / $denom)), 0)
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart

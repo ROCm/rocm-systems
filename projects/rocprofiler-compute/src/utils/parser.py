@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import ast
 import json
 import re
@@ -66,10 +65,9 @@ pmc_kernel_top_table_id = 1
 #                    },
 #                    {
 #                         "case":  { "$eq": [ $normUnit, "per Sec"]} ,
-#                         "then":  {"$divide":[{"$subtract": ["&End_Timestamp", "&Start_Timestamp" ]}, 1000000000]}
-#                    }
-#                 ],
-#                "default": 1
+#                         "then":  {"$divide":[{"$subtract": ["&End_Timestamp",
+#                                                              "&Start_Timestamp" ]},
+#                                              1000000000]}
 #              }
 #       }
 supported_denom = {
@@ -84,16 +82,19 @@ build_in_vars = {
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
     "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
-    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), \
-              0) / $max_waves_per_cu) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
-              / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)",
+    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0) / $max_waves_per_cu) * 8) + \
+        MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / \
+        $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / \
+        1000) * $max_sclk)), 0)",
     "hbmBandwidth": "($max_mclk / 1000 * 32 * $num_hbm_channels)",
 }
 
 supported_call = {
-    # If the below has single arg, like(expr), it is a aggr, in which turn to a pd function.
-    # If it has args like list [], in which turn to a python function.
+    # If the below has a single arg, like(expr), it is an aggr,
+    # in which case it turns into a pandas function.
+    # If it has args like a list [], it turns into a Python function.
     "MIN": "to_min",
     "MAX": "to_max",
     # simple aggr
@@ -243,11 +244,18 @@ class CodeTransformer(ast.NodeTransformer):
 
     def visit_IfExp(self, node):
         self.generic_visit(node)
-        # print("visit_IfExp", type(node.test), type(node.body), type(node.orelse), dir(node))
+        # print(
+        #     "visit_IfExp",
+        #     type(node.test),
+        #     type(node.body),
+        #     type(node.orelse),
+        #     dir(node),
+        # )
 
         if isinstance(node.body, ast.Num):
             raise Exception(
-                "Don't support body of IF with number only! Has to be expr with df['column']."
+                "Don't support body of IF with number only! Has to be expr with "
+                "df['column']."
             )
 
         new_node = ast.Expr(
@@ -289,19 +297,58 @@ class CodeTransformer(ast.NodeTransformer):
 
 def build_eval_string(equation, coll_level, config):
     """
-    Convert user defined equation string to eval executable string
+    Convert user defined equation string to eval executable string.
     For example,
-        input: AVG(100  * SQ_ACTIVE_INST_SCA / ( GRBM_GUI_ACTIVE * $numCU ))
-        output: to_avg(100 * raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"] / \
-                 (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] * numCU))
-        input: AVG(((TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31) if (TCC_EA_RDREQ_31 != 0) else (0)))
-        output: to_avg((raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] / raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]).where(raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] != 0, 0))
-        We can not handle the below for now,
-        input: AVG((0 if (TCC_EA_RDREQ_31 == 0) else (TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31)))
-        But potential workaound is,
-        output: to_avg(raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"].where(raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] == 0, raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] / raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]))
+        input:
+            AVG(100  * SQ_ACTIVE_INST_SCA / ( GRBM_GUI_ACTIVE * $numCU ))
+        output:
+            to_avg(
+                100 * raw_pmc_df["pmc_perf"]["SQ_ACTIVE_INST_SCA"] /
+                (
+                    raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] *
+                    numCU
+                )
+            )
+        input:
+            AVG(
+                (
+                    TCC_EA_RDREQ_LEVEL_31 / TCC_EA_RDREQ_31
+                )
+                if (TCC_EA_RDREQ_31 != 0)
+                else (0)
+            )
+        output:
+            to_avg(
+                (
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
+                ).where(
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] != 0,
+                    0
+                )
+            )
+        We can not handle the below for now:
+        input:
+            AVG(
+                (
+                    0
+                    if (TCC_EA_RDREQ_31 == 0)
+                    else (
+                        TCC_EA_RDREQ_LEVEL_31 /
+                        TCC_EA_RDREQ_31
+                    )
+                )
+            )
+        But potential workaround is:
+        output:
+            to_avg(
+                raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"].where(
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"] == 0,
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_LEVEL_31"] /
+                    raw_pmc_df["pmc_perf"]["TCC_EA_RDREQ_31"]
+                )
+            )
     """
-
     if coll_level is None:
         raise Exception("Error: coll_level can not be None.")
 
@@ -333,7 +380,7 @@ def build_eval_string(equation, coll_level, config):
     # apply coll_level
     if config.get("format_rocprof_output") == "rocpd":
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
-        s = re.sub(f"SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
+        s = re.sub("SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
         s = re.sub(
             r"raw_pmc_df", "raw_pmc_df.get('" + schema.pmc_perf_file_prefix + "')", s
         )
@@ -420,21 +467,24 @@ def gen_counter_list(formula):
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD})), \
-              0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
-              / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
+                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
+                "$GRBM_GUI_ACTIVE_PER_XCD})), 0) / $maxWavesPerCU) * 8) + "
+                "MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / "
+                "$GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
             )
             .replace("$", "")
         )
         for node in ast.walk(tree):
             if isinstance(node, ast.Name):
-                val = str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                val = (
+                    str(node.id)[:-4] if str(node.id).endswith("_sum") else str(node.id)
+                )
                 if val.isupper() and val not in function_filter:
                     counters.append(val)
                     visited = True
                 if val in built_in_counter:
                     visited = True
-    except:
+    except Exception:
         pass
 
     return visited, counters
@@ -645,10 +695,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                         or (data_source_idx == "0")  # no filter
                         or (data_source_idx in filter_metrics)
                     ):
-                        if (
-                            "columnwise" in data_config
-                            and data_config["columnwise"] == True
-                        ):
+                        if "columnwise" in data_config and data_config["columnwise"]:
                             df = pd.DataFrame(
                                 [data_config["source"]], columns=["from_csv_columnwise"]
                             )
@@ -726,79 +773,93 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
     ammolite__se_per_gpu = int(sys_info.se_per_gpu)
     if np.isnan(ammolite__se_per_gpu) or ammolite__se_per_gpu == 0:
         console_warning(
-            "se_per_gpu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "se_per_gpu is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__pipes_per_gpu = int(sys_info.pipes_per_gpu)
     if np.isnan(ammolite__pipes_per_gpu) or ammolite__pipes_per_gpu == 0:
         console_warning(
-            "pipes_per_gpu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "pipes_per_gpu is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__cu_per_gpu = int(sys_info.cu_per_gpu)
     if np.isnan(ammolite__cu_per_gpu) or ammolite__cu_per_gpu == 0:
         console_warning(
-            "cu_per_gpu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "cu_per_gpu is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__simd_per_cu = int(sys_info.simd_per_cu)  # not used
     if np.isnan(ammolite__simd_per_cu) or ammolite__simd_per_cu == 0:
         console_warning(
-            "simd_per_cu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "simd_per_cu is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__sqc_per_gpu = int(sys_info.sqc_per_gpu)
     if np.isnan(ammolite__sqc_per_gpu) or ammolite__sqc_per_gpu == 0:
         console_warning(
-            "sqc_per_gpu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "sqc_per_gpu is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__lds_banks_per_cu = int(sys_info.lds_banks_per_cu)
     if np.isnan(ammolite__lds_banks_per_cu) or ammolite__lds_banks_per_cu == 0:
         console_warning(
-            "lds_banks_per_cu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "lds_banks_per_cu is not available in sysinfo.csv, please provide the "
+            "correct value using --specs-correction"
         )
     ammolite__cur_sclk = float(sys_info.cur_sclk)  # not used
     if np.isnan(ammolite__cur_sclk) or ammolite__cur_sclk == 0:
         console_warning(
-            "cur_sclk is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "cur_sclk is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__cur_mclk = float(sys_info.cur_mclk)  # not used
     if np.isnan(ammolite__cur_mclk) or ammolite__cur_mclk == 0:
         console_warning(
-            "cur_mclk is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "cur_mclk is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__max_mclk = float(sys_info.max_mclk)
     if np.isnan(ammolite__max_mclk) or ammolite__max_mclk == 0:
         console_warning(
-            "max_mclk is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "max_mclk is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__max_sclk = float(sys_info.max_sclk)
     if np.isnan(ammolite__max_sclk) or ammolite__max_sclk == 0:
         console_warning(
-            "max_sclk is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "max_sclk is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__max_waves_per_cu = int(sys_info.max_waves_per_cu)
     if np.isnan(ammolite__max_waves_per_cu) or ammolite__max_waves_per_cu == 0:
         console_warning(
-            "max_waver_per_cu is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "max_waver_per_cu is not available in sysinfo.csv, please provide the "
+            "correct value using --specs-correction"
         )
     ammolite__num_hbm_channels = float(sys_info.num_hbm_channels)
     if np.isnan(ammolite__num_hbm_channels) or ammolite__num_hbm_channels == 0:
         console_warning(
-            "num_hbm_channels is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "num_hbm_channels is not available in sysinfo.csv, please provide the "
+            "correct value using --specs-correction"
         )
     ammolite__total_l2_chan = calc_builtin_var("$total_l2_chan", sys_info)
     if np.isnan(ammolite__total_l2_chan) or ammolite__total_l2_chan == 0:
         console_warning(
-            "total_l2_chan is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "total_l2_chan is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__num_xcd = int(sys_info.num_xcd)
     if np.isnan(ammolite__num_xcd) or ammolite__num_xcd == 0:
         console_warning(
-            "num_xcd is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "num_xcd is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
     ammolite__wave_size = int(sys_info.wave_size)
     if np.isnan(ammolite__wave_size) or ammolite__wave_size == 0:
         console_warning(
-            "wave_size is not available in sysinfo.csv, please provide the correct value using --specs-correction"
+            "wave_size is not available in sysinfo.csv, please provide the correct "
+            "value using --specs-correction"
         )
-
     # TODO: fix all $normUnit in Unit column or title
 
     # build and eval all derived build-in global variables
@@ -817,9 +878,9 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
-    ammolite__GRBM_GUI_ACTIVE_PER_XCD = ammolite__build_in["GRBM_GUI_ACTIVE_PER_XCD"]
-    ammolite__GRBM_COUNT_PER_XCD = ammolite__build_in["GRBM_COUNT_PER_XCD"]
-    ammolite__GRBM_SPI_BUSY_PER_XCD = ammolite__build_in["GRBM_SPI_BUSY_PER_XCD"]
+    ammolite__GRBM_GUI_ACTIVE_PER_XCD = ammolite__build_in["GRBM_GUI_ACTIVE_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__GRBM_COUNT_PER_XCD = ammolite__build_in["GRBM_COUNT_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__GRBM_SPI_BUSY_PER_XCD = ammolite__build_in["GRBM_SPI_BUSY_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
 
     for key, value in build_in_vars.items():
         # next pass, we evaluate the builtins the depend on the per-XCD values
@@ -834,12 +895,16 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
-    ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]
-    ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]
-    ammolite__hbmBandwidth = ammolite__build_in["hbmBandwidth"]
+    ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__hbmBandwidth = ammolite__build_in["hbmBandwidth"]  # noqa: F841 - Ruff: var utilized during runtime
 
     # Hmmm... apply + lambda should just work
-    # df['Value'] = df['Value'].apply(lambda s: eval(compile(str(s), '<string>', 'eval')))
+    # df['Value'] = df['Value'].apply(
+    #     lambda s: eval(
+    #         compile(str(s), '<string>', 'eval')
+    #     )
+    # )
     for id, df in dfs.items():
         if dfs_type[id] == "metric_table":
             for idx, row in df.iterrows():
@@ -851,7 +916,9 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                     print("~" * 40 + "\nExpression:")
                                     print(expr, "=", row[expr])
                                     print("Inputs:")
-                                    matched_vars = re.findall(r"ammolite__\w+", row[expr])
+                                    matched_vars = re.findall(
+                                        r"ammolite__\w+", row[expr]
+                                    )
                                     if matched_vars:
                                         for v in matched_vars:
                                             print(
@@ -868,7 +935,7 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                             m = re.match(
                                                 r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", c
                                             )
-                                            t = raw_pmc_df[m.group(1)][
+                                            t = raw_pmc_df[m.group(1)][  # noqa: F841
                                                 m.group(2)
                                             ].to_list()
                                             print(c)
@@ -890,19 +957,22 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                         print("~" * 40)
                                     except TypeError:
                                         console_warning(
-                                            "Skipping entry. Encountered a missing counter\n{} has been assigned to None\n{}".format(
-                                                expr, np.nan
+                                            "Skipping entry. Encountered a missing "
+                                            "counter\n{} has been assigned to None\n{}"
+                                            .format(
+                                                expr,
+                                                np.nan,
                                             )
                                         )
                                     except AttributeError as ae:
                                         if (
                                             str(ae)
-                                            == "'NoneType' object has no attribute 'get'"
+                                            == "'NoneType' object has no attribute "
+                                            "'get'"
                                         ):
                                             console_warning(
-                                                "Skipping entry. Encountered a missing csv\n{}".format(
-                                                    np.nan
-                                                )
+                                                "Skipping entry. Encountered a missing "
+                                                "csv\n{}".format(np.nan)
                                             )
                                         else:
                                             console_error("analysis", str(ae))
@@ -967,14 +1037,16 @@ def apply_filters(workload, dir, is_gui, debug):
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
     if workload.filter_kernel_ids:
-        if all(type(kid) == int for kid in workload.filter_kernel_ids):
+        if all(isinstance(kid, int) for kid in workload.filter_kernel_ids):
             # Verify valid kernel filter
             kernels_df = pd.read_csv(str(Path(dir).joinpath("pmc_kernel_top.csv")))
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
-                        "{} is an invalid kernel id. Please enter an id between 0-{}".format(
-                            kernel_id, len(kernels_df["Kernel_Name"]) - 1
+                        "{} is an invalid kernel id. Please enter an id between 0-{}"
+                        .format(
+                            kernel_id,
+                            len(kernels_df["Kernel_Name"]) - 1,
                         )
                     )
             kernels = []
@@ -992,7 +1064,7 @@ def apply_filters(workload, dir, is_gui, debug):
                 ret_df = ret_df.loc[
                     ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(kernels)
                 ]
-        elif all(type(kid) == str for kid in workload.filter_kernel_ids):
+        elif all(isinstance(kid, str) for kid in workload.filter_kernel_ids):
             df_cleaned = ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].apply(
                 lambda x: x.strip() if isinstance(x, str) else x
             )
@@ -1028,7 +1100,8 @@ def apply_filters(workload, dir, is_gui, debug):
 
 def find_key_recursively(data, search_key):
     """
-    Recursively search for the search_key in the given data (which can be a dict or list).
+    Recursively search for the search_key in the given data
+    (which can be a dict or list).
     If the key is found, returns the value as a DataFrame.
     """
     if isinstance(data, dict):
@@ -1050,7 +1123,6 @@ def find_key_recursively(data, search_key):
 
 
 def search_key_in_json(file_path, search_key):
-
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
@@ -1081,14 +1153,18 @@ def search_pc_sampling_record(records):
                 "inst_index": None,
                 "stall_reason": {
                     "NONE": 0,
-                    "NO_INSTRUCTION_AVAILABLE": 0,  # No instruction available in the instruction cache.
+                    # No instruction available in the instruction cache.
+                    "NO_INSTRUCTION_AVAILABLE": 0,
                     "ALU_DEPENDENCY": 0,  # ALU dependency not resolved.
                     "WAITCNT": 0,
                     "INTERNAL_INSTRUCTION": 0,  # Wave executes an internal instruction.
                     "BARRIER_WAIT": 0,
                     "ARBITER_NOT_WIN": 0,  # The instruction did not win the arbiter.
-                    "ARBITER_WIN_EX_STALL": 0,  # Arbiter issued an instruction, but the execution pipe pushed it back from execution.
-                    "OTHER_WAIT": 0,  #  Other types of wait (e.g., wait for XNACK acknowledgment).
+                    "ARBITER_WIN_EX_STALL": 0,
+                    # Arbiter issued an instruction, but the execution pipe
+                    # pushed it back from execution.
+                    "OTHER_WAIT": 0,
+                    # Other types of wait (e.g., wait for XNACK acknowledgment).
                     "SLEEP_WAIT": 0,
                     "LAST": 0,
                 },
@@ -1116,14 +1192,19 @@ def search_pc_sampling_record(records):
             and inst_index is not None
         ):
             grouped_data[code_object_id][code_object_offset]["count"] += 1
-            # NB: the write here could be duplicated. If there is perf issue, We might want to opt it.
+            # NB: the write here could be duplicated. If there is perf issue,
+            # We might want to opt it.
             grouped_data[code_object_id][code_object_offset]["inst_index"] = inst_index
 
             if len(snapshot):
                 if issued:
-                    grouped_data[code_object_id][code_object_offset]["count_issued"] += 1
+                    grouped_data[code_object_id][code_object_offset][
+                        "count_issued"
+                    ] += 1
                 else:
-                    grouped_data[code_object_id][code_object_offset]["count_stalled"] += 1
+                    grouped_data[code_object_id][code_object_offset][
+                        "count_stalled"
+                    ] += 1
                     grouped_data[code_object_id][code_object_offset]["stall_reason"][
                         snapshot.get("stall_reason")[rocp_inst_not_issued_prefix_len:]
                     ] += 1
@@ -1138,7 +1219,8 @@ def search_pc_sampling_record(records):
 
     # print(grouped_data)
 
-    # Convert to sorted list of tuples (code_object_id, inst_index, code_object_offset, count)
+    # Convert to sorted list of tuples:
+    # (code_object_id, inst_index, code_object_offset, count)
     sorted_counts = sorted(
         [
             (
@@ -1148,7 +1230,8 @@ def search_pc_sampling_record(records):
                 info["count"],
                 info["count_issued"],
                 info["count_stalled"],
-                # For info["stall_reason"], remove the zero entries, sorting the remaining items by their values in descending order
+                # For info["stall_reason"], remove the zero entries,
+                # sorting the remaining items by their values in descending order
                 sorted(
                     ((k, v) for k, v in info["stall_reason"].items() if v > 0),
                     key=lambda item: item[1],
@@ -1173,7 +1256,8 @@ def load_pc_sampling_data_per_kernel(
 ) -> pd.DataFrame:
     """
     Load PC sampling raw data from json file with given method and kernel name,
-    count pc sampling and sort it in the order of compiled asm and associate with kernel source code if available,
+    count pc sampling and sort it in the order of compiled asm and associate with
+    kernel source code if available,
     then return df.
 
     :param method: "host_trap" or "stochastic".
@@ -1258,11 +1342,25 @@ def load_pc_sampling_data_per_kernel(
         (df["code_object_id"] == kernel_info["code_object_id"])
         & (df["offset"] > kernel_info["entry_byte_offset"])
         & (df["offset"] < kernel_info["potential_end_offset"])
-    ][["inst_index", "offset", "count", "count_issued", "count_stalled", "stall_reason"]]
+    ][
+        [
+            "inst_index",
+            "offset",
+            "count",
+            "count_issued",
+            "count_stalled",
+            "stall_reason",
+        ]
+    ]
 
     df["offset"] = df["offset"].apply(lambda x: hex(x))
 
-    # df["stall_reason"] = df["stall_reason"].apply(lambda x: ', '.join(f"{k}: {v}" for k, v in x))
+    # df["stall_reason"] = df["stall_reason"].apply(
+    #     lambda x: ', '.join(
+    #         f"{k}: {v}"
+    #         for k, v in x
+    #     )
+    # )
 
     pc_sample_instructions = search_key_in_json(file_name, "pc_sample_instructions")
     # print(pc_sample_instructions)
@@ -1334,7 +1432,9 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
     #  - The default file name is subject to changes from rocprofv3
     #  - Prioritize stochastic
     #  - Alternatively, we could check pc_sampling_method in json
-    csv_file_path = Path.joinpath(Path(dir), file_prefix + "_pc_sampling_stochastic.csv")
+    csv_file_path = Path.joinpath(
+        Path(dir), file_prefix + "_pc_sampling_stochastic.csv"
+    )
     if csv_file_path.exists():
         pc_sampling_method = "stochastic"
     else:
@@ -1352,7 +1452,6 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
 
     # No kernel filter, return grouped and sorted csv directly
     if not workload.filter_kernel_ids:
-
         df = pd.read_csv(csv_file_path)
         # Group by 'Instruction_Comment' and count occurrences
         grouped_counts = (
@@ -1379,7 +1478,8 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
 
     elif len(workload.filter_kernel_ids) > 1:
         console_error(
-            "PC sampling supports single kernel only! Please specify -k with single kernel."
+            "PC sampling supports single kernel only! Please specify -k with "
+            "single kernel."
         )
         return pd.DataFrame()
 
@@ -1409,7 +1509,8 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
 @demarcate
 def load_kernel_top(workload, dir, args):
     # NB:
-    #   - Do pmc_kernel_top.csv loading before eval_metric because we need the kernel names.
+    #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
+    #     kernel names.
     #   - There might be a better way/timing to load raw_csv_table.
 
     # FIXME:
@@ -1427,9 +1528,11 @@ def load_kernel_top(workload, dir, args):
                 tmp[id] = pd.read_csv(file)
             else:
                 console_warning(
-                    f"Couldn't load {file.name}. This may result in missing analysis data."
+                    f"Couldn't load {file.name}. "
+                    "This may result in missing analysis data."
                 )
-        # NB: Special case for sysinfo. Probably room for improvement in this whole function design
+        # NB: Special case for sysinfo. Probably room for improvement in this whole
+        # function design
         elif "from_csv_columnwise" in df.columns and id == 101:
             tmp[id] = workload.sys_info.transpose()
             # All transposed columns should be marked with a general header
@@ -1447,7 +1550,8 @@ def load_kernel_top(workload, dir, args):
                 tmp[id].columns = ["Info"]
             else:
                 console_warning(
-                    f"Couldn't load {file.name}. This may result in missing analysis data."
+                    f"Couldn't load {file.name}. "
+                    "This may result in missing analysis data."
                 )
         elif "from_pc_sampling" in df.columns:
             tmp[id] = load_pc_sampling_data(
@@ -1513,7 +1617,8 @@ def correct_sys_info(mspec, specs_correction: dict):
         if not hasattr(mspec, str(k)):
             console_error(
                 "analyze",
-                f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs",
+                f"Invalid specs correction '{k}'. Please use --specs option "
+                f"to peak valid specs",
             )
         setattr(mspec, str(k), v)
     return mspec.get_class_members()
