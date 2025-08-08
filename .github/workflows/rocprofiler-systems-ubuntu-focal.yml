@@ -85,8 +85,6 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        checkout: projects/rocprofiler-systems/
         
     - name: Install Packages
       timeout-minutes: 25
