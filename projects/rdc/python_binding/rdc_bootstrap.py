@@ -250,6 +250,19 @@ class rdc_field_t(c_int):
      RDC_HEALTH_POWER_THROTTLE_TIME = 3006
      RDC_HEALTH_THERMAL_THROTTLE_TIME = 3007
 
+     RDC_FI_CPU_COUNT = 10000
+     RDC_FI_CPU_UTIL_TOTAL = 10001
+     RDC_FI_CPU_UTIL_USER = 10002
+     RDC_FI_CPU_UTIL_NICE = 10003
+     RDC_FI_CPU_UTIL_SYS = 10004
+     RDC_FI_CPU_UTIL_IRQ = 10005
+     RDC_FI_CPU_TEMP_CURRENT = 10006
+     RDC_FI_CPU_CLOCK_CURRENT = 10007
+     RDC_FI_CPU_POWER_UTIL_CURRENT = 10008
+     RDC_FI_CPU_POWER_LIMIT = 10009
+     RDC_FI_CPU_VENDOR = 10010
+     RDC_FI_CPU_MODEL = 10011
+
      _rdc_metric_type_lookup = {
         RDC_FI_INVALID: rdc_metric_type_t.INVALID,
         RDC_FI_GPU_COUNT: rdc_metric_type_t.LABEL,
@@ -277,7 +290,7 @@ class rdc_field_t(c_int):
      def get_rdc_metric_type(cls, rdc_metric_t):
         if isinstance(rdc_metric_t, str):
             rdc_metric_t = getattr(cls, rdc_metric_t, None)
-        
+
         # If the metric was found, do the lookup, otherwise default GAUGE
         if rdc_metric_t is not None:
             return cls._rdc_metric_type_lookup.get(rdc_metric_t, rdc_metric_type_t.GAUGE)
@@ -288,7 +301,7 @@ class rdc_field_t(c_int):
         for attr_name, attr_value in cls.__dict__.items():
             if isinstance(attr_value, int) and attr_value == value:
                 return attr_name
-        return "Unknown field value"    
+        return "Unknown field value"
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32

@@ -38,7 +38,7 @@ static const fld_id2name_map_t field_id_to_descript = {
 
 #define FLD_DESC_ENT(ID, DESC, LABEL, DISPLAY) {#ID, (ID)},
 static fld_name2id_map_t field_name_to_id = {
-#include "common/rdc_field.data"  // NOLINT
+#include "common/rdc_field.data"
 };
 #undef FLD_DESC_ENT
 

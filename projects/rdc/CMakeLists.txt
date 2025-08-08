@@ -115,6 +115,11 @@ option(BUILD_EXAMPLES "Build examples" OFF)
 # Enable shared libraries for gtest
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
+option(BUILD_ESMI "Enable AMDSMI ESMI Library" ON)
+if(BUILD_ESMI)
+    add_definitions("-DENABLE_ESMI_LIB=1")
+endif()
+
 # Enable address sanitizer
 set(ADDRESS_SANITIZER_DEFAULT OFF)
 if(DEFINED ENV{ADDRESS_SANITIZER})
