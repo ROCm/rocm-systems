@@ -624,13 +624,12 @@ implementation, however it uses different parameters:
 The first parameter is the same as HIP's implementation, but
 ``MIN_BLOCKS_PER_MULTIPROCESSOR`` must  be converted to
 ``MIN_WARPS_PER_EXECUTION``, which uses warps and execution units rather than
-blocks and multiprocessors. This conversion is performed automatically by
-:doc:`HIPIFY <hipify:index>`, or can be done manually with the following
+blocks and multiprocessors. This conversion can be done manually with the following
 equation.
 
 .. code-block:: cpp
 
-  MIN_WARPS_PER_EXECUTION_UNIT = (MIN_BLOCKS_PER_MULTIPROCESSOR * MAX_THREADS_PER_BLOCK) / warpSize
+  MIN_WARPS_PER_EXECUTION_UNIT = (MIN_BLOCKS_PER_MULTIPROCESSOR * MAX_THREADS_PER_BLOCK) / (warpSize * NUM_EUS_PER_CU)
 
 Directly controlling the warps per execution unit makes it easier to reason
 about the occupancy, unlike with blocks, where the occupancy depends on the
