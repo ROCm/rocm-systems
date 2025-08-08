@@ -325,19 +325,20 @@ class RocProfCompute_Base:
                 )
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
-            console_error(
-                (
-                    "Profiling command required. Pass application executable after -- "
-                    "at the end of options.\n"
-                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
-                    "./vcopy -n 1048576 -b 256"
+            if not self.__args.pid:
+                console_error(
+                    (
+                        "Profiling command required. Pass application executable after -- "
+                        "at the end of options.\n"
+                        "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                        "./vcopy -n 1048576 -b 256"
+                    )
                 )
-            )
 
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            app_cmd=self.__args.remaining,
+            app_cmd=self.__args.remaining if self.__args.remaining else "",
             skip_roof=self.__args.no_roof,
             mspec=self._soc._mspec,
             soc=self._soc,
@@ -437,6 +438,15 @@ class RocProfCompute_Base:
             console_log("profiling", "Current input file: %s" % fname)
 
             options = self.get_profiler_options(fname, self._soc)
+
+            # Only 1-run case is permitted for attach/detach
+            if "--pid" in options and total_runs > 1:
+                console_error(
+                    "Attach/Detach can only work with 1 run of application. Current configuration needs {} times of replay of application".format(
+                        total_runs
+                    )
+                )
+
             if (
                 self.__profiler == "rocprofv1"
                 or self.__profiler == "rocprofv2"
@@ -465,6 +475,7 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
+
         # PC sampling data is only collected when block "21" is specified
         if "21" in self.get_args().filter_blocks and self.__profiler in (
             "rocprofv3",
