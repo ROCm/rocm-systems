@@ -91,13 +91,13 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=./projects/aqlprofile/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="./projects/aqlprofile"
-          -DCTEST_BINARY_DIRECTORY="./projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
+        LD_LIBRARY_PATH=$(PWD)/projects/aqlprofile/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(PWD)/projects/aqlprofile"
+          -DCTEST_BINARY_DIRECTORY="$(PWD)/projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S ./projects/aqlprofile/dashboard.cmake
+          -S $(PWD)/projects/aqlprofile/dashboard.cmake
 
   core-rpm:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -146,10 +146,10 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=./projects/aqlprofile/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="./projects/aqlprofile"
-          -DCTEST_BINARY_DIRECTORY="./projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
+        LD_LIBRARY_PATH=$(PWD)/projects/aqlprofile/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(PWD)/projects/aqlprofile"
+          -DCTEST_BINARY_DIRECTORY="$(PWD)/projects/aqlprofile/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
-          -S ./projects/aqlprofile/dashboard.cmake
+          -S $(PWD)/projects/aqlprofile/dashboard.cmake
