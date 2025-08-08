@@ -44,7 +44,7 @@ class gfx942_soc(OmniSoC_Base):
                     Path(str(config.rocprof_compute_home)).joinpath(
                         "rocprof_compute_soc",
                         "profile_configs",
-                        "gfx940",
+                        "gfx942",
                         "roofline",
                     )
                 )

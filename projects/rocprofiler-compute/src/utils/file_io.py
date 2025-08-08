@@ -61,6 +61,17 @@ def load_sys_info(f):
     """
     return pd.read_csv(f)
 
+def load_roofline_peaks(f):
+    """
+    Load empirical roofline peak values from a csv file to a df.
+    """
+    return pd.read_csv(f)
+
+def create_empty_dataframe():
+    """
+    Returns an empty pandas DataFrame.
+    """
+    return pd.DataFrame()
 
 def load_panel_configs(dir):
     """

@@ -29,6 +29,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from utils.logger import console_debug
+from utils import file_io, parser, schema
 
 ################################################
 # Global vars
@@ -254,8 +255,220 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 #                              Overlay application performance
 # -------------------------------------------------------------------------------------
 # Calculate relevant metrics for ai calculation
-def calc_ai(mspec, sort_type, ret_df):
+def calc_ai(mspec, sort_type, ret_df, workload=None, arch_config=None, profiling_config=None):
+    
+    """
+    Calculate arithmetic intensity for roofline analysis.
+    
+    RETURNS: 
+        - AI plot data dict (same format as before for compatibility)
+        
+    SIDE EFFECT: 
+        - Stores per-kernel metrics in workload.per_kernel_roofline (for tables)
+    
+    This single function handles both legacy and YAML-based calculation.
+    """
+    
+    # Try YAML-based calculation if all configs provided
+    if workload and arch_config and profiling_config:
+        print("Using YAML-based roofline calculation!!!!!!!!!!!!")
+        try:
+            arch = workload.sys_info.iloc[0]["gpu_arch"]
+            
+            # Get roofline configuration from YAML
+            if 400 not in arch_config.panel_configs:
+                raise ValueError("Roofline panel 400 not found")
+            
+            roofline_panel = arch_config.panel_configs[400]
+            
+            # Find tables 401 (performance rates) and 402 (calculation data)
+            table_401_config = None
+            table_402_config = None
+            
+            for data_source in roofline_panel["data source"]:
+                if "metric_table" in data_source:
+                    table_config = data_source["metric_table"]
+                    if table_config["id"] == 401:
+                        table_401_config = table_config
+                    elif table_config["id"] == 402:
+                        table_402_config = table_config
+            
+            if not table_401_config or not table_402_config:
+                raise ValueError("Tables 401/402 not found")
+            
+            # Initialize plot data (same format as legacy for compatibility)
+            ai_data = {
+                "ai_hbm": [[], []],  # [[x_values], [y_values]]
+                "ai_l2": [[], []],
+                "ai_l1": [[], []],
+                "ai_lds": [[], []],
+                "kernelNames": []
+            }
+            
+            # Initialize per-kernel metrics storage (for tables)
+            per_kernel_metrics = {
+                'performance_rates': [],  # Table 401 data
+                'calculation_data': []     # Table 402 data
+            }
+            
+            raw_pmc = ret_df.get("pmc_perf", pd.DataFrame())
+            if raw_pmc.empty:
+                return ai_data
+            
+            # Get metrics configuration for this architecture
+            metrics_401 = table_401_config["metric"].get(arch, {})
+            metrics_402 = table_402_config["metric"].get(arch, {})
+            
+            # PROCESS EACH KERNEL
+            for kernel_idx in raw_pmc.index:
+                kernel_name = raw_pmc.loc[kernel_idx, 'Kernel_Name']
+                ai_data["kernelNames"].append(kernel_name)
+                
+                # Create single-kernel DataFrame
+                single_kernel_df = raw_pmc.loc[[kernel_idx]].copy()
+                
+                # ===== EVALUATE TABLE 401 (Performance Rates with peaks) =====
+                df_401 = pd.DataFrame()
+                headers_401 = ["Metric_ID", "Metric", "value", "unit", "coll_level", "peak"]
+                data_401 = []
+                
+                for i, (metric_name, metric_def) in enumerate(metrics_401.items()):
+                    data_401.append([
+                        f"40100{i:02d}",
+                        metric_name,
+                        metric_def.get('value', ''),
+                        metric_def.get('unit', ''),
+                        'pmc_perf',
+                        metric_def.get('peak', '')
+                    ])
+                
+                df_401 = pd.DataFrame(data_401, columns=headers_401)
+                df_401.set_index("Metric_ID", inplace=True)
+                
+                # ===== EVALUATE TABLE 402 (Calculation Data without peaks) =====
+                df_402 = pd.DataFrame()
+                headers_402 = ["Metric_ID", "Metric", "value", "unit", "coll_level"]
+                data_402 = []
+                
+                for i, (metric_name, metric_def) in enumerate(metrics_402.items()):
+                    data_402.append([
+                        f"40200{i:02d}",
+                        metric_name,
+                        metric_def.get('value', ''),
+                        metric_def.get('unit', ''),
+                        'pmc_perf'
+                    ])
+                
+                df_402 = pd.DataFrame(data_402, columns=headers_402)
+                df_402.set_index("Metric_ID", inplace=True)
+                
+                # Prepare for eval_metric
+                temp_dfs = {401: df_401, 402: df_402}
+                temp_dfs_type = {401: "metric_table", 402: "metric_table"}
+                
+                # Build evaluation strings
+                parser.build_metric_value_string(
+                    temp_dfs,
+                    temp_dfs_type,
+                    "per_kernel",
+                    profiling_config
+                )
+                
+                # Create raw_pmc structure for this kernel
+                kernel_raw_pmc = {"pmc_perf": single_kernel_df}
+                
+                # EVALUATE using existing eval_metric (this does all the work!)
+                parser.eval_metric(
+                    temp_dfs,
+                    temp_dfs_type,
+                    workload.sys_info.iloc[0],
+                    workload.roofline_peaks,  # Has empirical peaks from roofline.csv
+                    kernel_raw_pmc,
+                    False,  # debug
+                    profiling_config
+                )
+                
+                # ===== EXTRACT RESULTS FOR TABLE DISPLAY =====
+                perf_metrics = {
+                    'kernel_idx': kernel_idx,
+                    'kernel_name': kernel_name,
+                    'metrics': []
+                }
+                
+                for idx, row in temp_dfs[401].iterrows():
+                    value = row.get('value', 0)
+                    if pd.isna(value) or value == float('inf'):
+                        value = 0.0
+                    
+                    # Peak is already evaluated by eval_metric!
+                    peak = row.get('peak', None)
+                    if pd.isna(peak) or peak == 0:
+                        peak = None
+                    
+                    perf_metrics['metrics'].append({
+                        'name': row['Metric'],
+                        'value': float(value),
+                        'unit': row.get('unit', ''),
+                        'peak': float(peak) if peak else None
+                    })
+                
+                calc_metrics = {
+                    'kernel_idx': kernel_idx,
+                    'kernel_name': kernel_name,
+                    'metrics': []
+                }
+                
+                for idx, row in temp_dfs[402].iterrows():
+                    value = row.get('value', 0)
+                    if pd.isna(value) or value == float('inf'):
+                        value = 0.0
+                    
+                    calc_metrics['metrics'].append({
+                        'name': row['Metric'],
+                        'value': float(value),
+                        'unit': row.get('unit', ''),
+                        'peak': None  # No peaks for calculation data
+                    })
+                
+                per_kernel_metrics['performance_rates'].append(perf_metrics)
+                per_kernel_metrics['calculation_data'].append(calc_metrics)
+                
+                # ===== EXTRACT VALUES FOR PLOT =====
+                calc_dict = {m['name']: m['value'] for m in calc_metrics['metrics']}
+                
+                total_flops = calc_dict.get('Total_FLOPs', 0)
+                perf_gflops = calc_dict.get('Performance_GFLOPs', 0)
+                
+                # Calculate AI for each memory level
+                for mem_level, data_key in [
+                    ('ai_hbm', 'Total_HBM_Data'),
+                    ('ai_l2', 'Total L2 Cache Data'),
+                    ('ai_l1', 'Total L1 Cache Data'),
+                    ('ai_lds', 'Total LDS Data')
+                ]:
+                    mem_data = calc_dict.get(data_key, 0)
+                    if mem_data > 0:
+                        ai_data[mem_level][0].append(total_flops / mem_data)
+                        ai_data[mem_level][1].append(perf_gflops)
+                    else:
+                        ai_data[mem_level][0].append(0)
+                        ai_data[mem_level][1].append(0)
+            
+            # STORE PER-KERNEL METRICS (side effect for table display)
+            workload.per_kernel_roofline = per_kernel_metrics
+            
+            console_log("Using YAML-based per-kernel roofline calculation")
+            return ai_data
+            
+        except Exception as e:
+            console_warning(f"YAML-based calc_ai failed: {e}, falling back to legacy")
+    
+    return calc_ai_profile(mspec, sort_type, ret_df)    
+            
+            
+def calc_ai_profile(mspec, sort_type, ret_df):
     """Given counter data, calculate arithmetic intensity for each kernel in the application."""
+    print("Starting legacy roofline calculation (froom roofline calc)")
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?
     df = df.sort_values(by=["Kernel_Name"])

@@ -84,6 +84,7 @@ supported_field = [
     "Avg",
     "Pct of Peak",
     "Peak",
+    "Peak (Empirical)",
     "Count",
     "Mean",
     "Pct",

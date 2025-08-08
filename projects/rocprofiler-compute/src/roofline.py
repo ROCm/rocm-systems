@@ -50,6 +50,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
     calc_ai,
+    calc_ai_profile,
     constuct_roof,
 )
 from utils.utils import mibench
@@ -177,8 +178,10 @@ class Roofline:
             self.roof_setup()
 
         console_debug("roofline", "Path: %s" % self.__run_parameters.get("workload_dir"))
-        self.__ai_data = calc_ai(
-            self.__mspec, self.__run_parameters.get("sort_type"), ret_df
+        self.__ai_data = calc_ai_profile(
+            self.__mspec,
+            self.__run_parameters.get("sort_type"),
+            ret_df
         )
 
         msg = "AI at each mem level:"

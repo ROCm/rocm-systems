@@ -145,6 +145,35 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
             continue
         ss = ""  # store content of all data_source from one panel
 
+        if panel_id == 400:
+            print("\n" + "=" * 80, "PANEL 400: Roofline", "=" * 80)
+            # Check for cli_style: Roofline in tables
+            has_roofline_style = False
+            for data_source in panel["data source"]:
+                if "metric_table" in data_source:
+                    if data_source["metric_table"].get("cli_style") == "Roofline":
+                        has_roofline_style = True
+                        break
+            print(has_roofline_style)
+            if has_roofline_style:
+                # Display per-kernel roofline tables
+                print(runs.items())
+                for run, workload in runs.items():
+                    
+                    if hasattr(workload, 'per_kernel_roofline'):
+                        display_per_kernel_roofline_tables(
+                            workload.per_kernel_roofline,
+                            args,
+                            output
+                        )
+                        break
+            
+            # Show roofline plot (uses same data)
+            if roof_plot:
+                show_roof_plot(roof_plot)
+            continue
+
+
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 # If block filtering was used during analysis, then dont use profiling config
@@ -167,15 +196,6 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     console_log(
                         f"Not showing table not selected during profiling: {table_id_str} {table_config['title']}"
                     )
-                    continue
-
-                # Show roofline
-                # Check if we have filter_metrics for analyze stage:
-                # no filter_metrics = show all, filter_metrics containing "4" = user requesting roofline chart
-                if panel_id == 400 and (
-                    not args.filter_metrics or "4" in args.filter_metrics
-                ):
-                    show_roof_plot(roof_plot)
                     continue
 
                 # Metrics baseline comparison mode
@@ -479,3 +499,56 @@ def show_kernel_stats(args, runs, archConfigs, output):
                         get_table_string(df, transpose=False, decimal=args.decimal),
                         file=output,
                     )
+
+
+def display_per_kernel_roofline_tables(per_kernel_data, args, output):
+    print("Entering display_per_kernel_roofline_tables")
+    """Display per-kernel roofline metrics in two-section format."""
+    
+    print("\n" + "=" * 80, file=output)
+    print("Per-Kernel Roofline Analysis", file=output)
+    print("=" * 80, file=output)
+    
+    num_kernels = len(per_kernel_data['performance_rates'])
+    max_show = min(args.max_stat_num, num_kernels)
+    
+    for i in range(max_show):
+        perf = per_kernel_data['performance_rates'][i]
+        calc = per_kernel_data['calculation_data'][i]
+        
+        print(f"\n{'─' * 80}", file=output)
+        print(f"Kernel {perf['kernel_idx']}: {perf['kernel_name'][:60]}...", file=output)
+        print(f"{'─' * 80}", file=output)
+        
+        # Performance Rates table (with peaks)
+        perf_rows = []
+        for m in perf['metrics']:
+            if m['peak'] is not None:
+                pct = (m['value'] / m['peak'] * 100) if m['peak'] > 0 else 0
+                perf_rows.append([
+                    m['name'],
+                    f"{m['value']:.2f}",
+                    m['unit'],
+                    f"{m['peak']:.2f}",
+                    f"{pct:.2f}%"
+                ])
+        
+        if perf_rows:
+            print("\nPerformance Rates (with Empirical Peaks):", file=output)
+            df = pd.DataFrame(perf_rows, 
+                columns=['Metric', 'Value', 'Unit', 'Peak', '% of Peak'])
+            print(get_table_string(df), file=output)
+        
+        # Calculation Data table (no peaks)
+        calc_rows = []
+        for m in calc['metrics']:
+            calc_rows.append([
+                m['name'],
+                f"{m['value']:.2e}" if m['value'] > 1e6 else f"{m['value']:.2f}",
+                m['unit']
+            ])
+        
+        if calc_rows:
+            print("\nCalculation Data:", file=output)
+            df = pd.DataFrame(calc_rows, columns=['Metric', 'Value', 'Unit'])
+            print(get_table_string(df), file=output)

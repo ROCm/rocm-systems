@@ -102,6 +102,7 @@ supported_call = {
     "STD": "to_std",
     # functions apply to whole column of df or a single value
     "TO_INT": "to_int",
+    "SUM": "to_sum",
     # Support the below with 2 inputs
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
@@ -193,6 +194,18 @@ def to_int(a):
     #     return int(a)
     else:
         raise Exception("to_int: unsupported type.")
+    
+def to_sum(a):
+    if str(type(a)) == "<class 'NoneType'>":
+        return np.nan
+    elif np.isnan(a).all():
+        return np.nan
+    elif a.empty:
+        return np.nan
+    elif isinstance(a, pd.core.series.Series):
+        return a.sum()
+    else:
+        raise Exception("to_sum: unsupported type.")
 
 
 def to_round(a, b):
@@ -708,7 +721,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
 
 
 @demarcate
-def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
+def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
     """
     Execute the expr string for each metric in the df.
     """
@@ -798,6 +811,12 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
         console_warning(
             "wave_size is not available in sysinfo.csv, please provide the correct value using --specs-correction"
         )
+        
+    if not empirical_peaks_df.empty:
+        peak_data_row = empirical_peaks_df.iloc[0]
+        for metric_name in empirical_peaks_df.columns:
+            var_name = f"ammolite__{metric_name}_empirical_peak"
+            locals()[var_name] = peak_data_row[metric_name]
 
     # TODO: fix all $normUnit in Unit column or title
 
@@ -1475,6 +1494,7 @@ def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False):
         workload.dfs,
         workload.dfs_type,
         workload.sys_info.iloc[0],
+        workload.roofline_peaks,
         apply_filters(workload, dir, is_gui, args.debug),
         args.debug,
         config,

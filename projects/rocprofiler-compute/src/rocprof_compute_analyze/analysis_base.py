@@ -189,6 +189,21 @@ class OmniAnalyze_Base:
                 else file_io.find_1st_sub_dir(d[0])
             )
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+            
+            if not getattr(self.get_args(), "no_roof", False):
+                try:
+                    roofline_path = sysinfo_path.joinpath("roofline.csv")
+                    roofline_df = file_io.load_roofline_peaks(roofline_path)
+
+                    # Use the original column names from roofline.csv directly
+                    w.roofline_peaks = roofline_df
+
+                except FileNotFoundError:
+                    console_warning(f"roofline.csv not found.")
+                    w.roofline_peaks = file_io.create_empty_dataframe()
+            else:
+                w.roofline_peaks = file_io.create_empty_dataframe()
+            
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:

@@ -2,8 +2,193 @@
 Panel Config:
   id: 400
   title: Roofline
-  metrics_description: {}
+  metrics_description:
+    VALU FLOPs: 'The total floating-point operations executed per second on the VALU.
+      This is also presented as a percent of the peak theoretical FLOPs achievable
+      on the specific accelerator. Note: this does not include any floating-point
+      operations from MFMA instructions.'
+    MFMA FLOPs (F8): The total number of 8-bit brain floating point MFMA operations
+      executed per second. This does not include any 16-bit brain floating point operations
+      from VALU instructions. The peak empirically measured F8 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison. It is supported
+      on AMD Instinct MI300 series and later only.
+    MFMA FLOPs (BF16): 'The total number of 16-bit brain floating point MFMA operations
+      executed per second. Note: this does not include any 16-bit brain floating point
+      operations from VALU instructions. The peak empirically measured BF16 MFMA operations
+      achievable on the specific accelerator is displayed alongside for comparison.'
+    MFMA FLOPs (F16): 'The total number of 16-bit floating point MFMA operations executed
+      per second. Note: this does not include any 16-bit floating point operations
+      from VALU instructions. The peak empirically measured F16 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison.'
+    MFMA FLOPs (F32): 'The total number of 32-bit floating point MFMA operations executed
+      per second. Note: this does not include any 32-bit floating point operations
+      from VALU instructions. The peak empirically measured F32 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison.'
+    MFMA FLOPs (F64): 'The total number of 64-bit floating point MFMA operations executed
+      per second. Note: this does not include any 64-bit floating point operations
+      from VALU instructions. The peak empirically measured F64 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison.'
+    MFMA IOPs (Int8): 'The total number of 8-bit integer MFMA operations executed
+      per second. Note: this does not include any 8-bit integer operations from VALU
+      instructions. The peak empirically measured INT8 MFMA operations achievable
+      on the specific accelerator is displayed alongside for comparison.'
+    HBM Bandwidth: ''
+    L2 Cache Bandwidth: The number of bytes looked up in the L2 cache per unit time.
+      The number of bytes is calculated as the number of cache lines requested multiplied
+      by the cache line size. This value does not consider partial requests, so e.g.,
+      if only a single value is requested in a cache line, the data movement will
+      still be counted as a full cache line. The peak empirically measured bandwidth
+      achievable on the specific accelerator is displayed alongside for comparison.
+    L1 Cache Bandwidth: The number of bytes looked up in the vL1D cache as a result
+      of VMEM instructions per unit time. The number of bytes is calculated as the
+      number of cache lines requested multiplied by the cache line size. This value
+      does not consider partial requests, so e.g., if only a single value is requested
+      in a cache line, the data movement will still be counted as a full cache line.
+      The peak empirically measured bandwidth achievable on the specific accelerator
+      is displayed alongside for comparison.
+    LDS Bandwidth: Indicates the maximum amount of bytes that could have been loaded
+      from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
+      example for more detail). The peak empirically measured LDS bandwidth achievable
+      on the specific accelerator is displayed alongside for comparison.
+    Total Flops: ''
+    Total VALU FLOPs: ''
+    Total HBM Data: ''
+    Total L2 Cache Data: ''
+    Total L1 Cache Data: ''
+    Total LDS Data: ''
+    AI HBM: ''
+    Performance GFLOPs: ''
   data source:
-  - None:
+  - metric_table:
       id: 401
-      title: Roofline
+      title: Roofline Performance Rates
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+        peak: Peak (Empirical)
+      metric:
+        VALU FLOPs:
+          value: AVG((($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+            + SQ_INSTS_VALU_TRANS_F64) )) / ((End_Timestamp - Start_Timestamp) / 1e9))
+            / 1e9)
+          unit: GFLOP/s
+          peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+        MFMA FLOPs (F64):
+          value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $MFMAF64Flops_empirical_peak
+        MFMA FLOPs (F32):
+          value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $MFMAF32Flops_empirical_peak
+        MFMA FLOPs (F16):
+          value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $MFMAF16Flops_empirical_peak
+        MFMA FLOPs (BF16):
+          value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GFLOP/s
+          peak: $MFMABF16Flops_empirical_peak
+        MFMA FLOPs (F8):
+          value: 0
+          unit: GFLOP/s
+          peak: 0
+        MFMA IOPs (Int8):
+          value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GIOP/s
+          peak: $MFMAI8Ops_empirical_peak
+        HBM Bandwidth:
+          value: AVG(((( (TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            * 64) + (TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            * 32) ))) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: $HBMBw_empirical_peak
+        L2 Cache Bandwidth:
+          value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+            TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64)) / ((End_Timestamp
+            - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: $L2Bw_empirical_peak
+        L1 Cache Bandwidth:
+          value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp)
+            / 1e9)) / 1e9)
+          unit: GB/s
+          peak: $L1Bw_empirical_peak
+        LDS Bandwidth:
+          value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu))
+            / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+          unit: GB/s
+          peak: $LDSBw_empirical_peak
+  - metric_table:
+      id: 402
+      title: Roofline Calculation Data
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        Total Flops:
+          value: SUM(($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+            + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+            (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+            512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512))
+          unit: FLOPs
+        Total VALU FLOPs:
+          value: SUM(($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+            + SQ_INSTS_VALU_TRANS_F64) )))
+          unit: FLOPs
+        Total HBM Data:
+          value: SUM((( (TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            * 64) + (TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            * 32) )))
+          unit: Bytes
+        Total L2 Cache Data:
+          value: SUM(((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum
+            + TCP_TCC_READ_REQ_sum) * 64))
+          unit: Bytes
+        Total L1 Cache Data:
+          value: SUM((TCP_TOTAL_CACHE_ACCESSES_sum * 64))
+          unit: Bytes
+        Total LDS Data:
+          value: SUM(((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4 * $lds_banks_per_cu))
+          unit: Bytes
+        AI HBM:
+          value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+            + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+            (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+            512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) ) / SUM( (TCC_EA_RDREQ_32B_sum
+            * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) + (TCC_EA_WRREQ_64B_sum
+            * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) ) )
+          unit: FLOPs/Byte
+        Performance GFLOPs:
+          value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+            + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+            + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+            + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+            + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+            (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+            512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) ) / (SUM(End_Timestamp - Start_Timestamp)
+            / 1e9) ) / 1e9
+          unit: GFLOP/s
