@@ -58,7 +58,6 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi300a
 
     steps:
     - uses: actions/checkout@v4
@@ -118,7 +117,6 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi300
 
     steps:
     - uses: actions/checkout@v4

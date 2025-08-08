@@ -224,7 +224,7 @@ jobs:
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.ROCPROFILER_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -266,7 +266,7 @@ jobs:
           ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
           </details>
       with:
-        github-token: ${{ secrets.TOKEN }}
+        github-token: ${{ secrets.ROCPROFILER_TOKEN }}
         script: |
           const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
             const commentBody = process.env.COMMENT_BODY;
