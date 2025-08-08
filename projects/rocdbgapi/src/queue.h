@@ -155,6 +155,16 @@ public:
                                std::function<void (agent_address_t)>>;
 
 protected:
+  struct context_save_area_header_s
+  {
+    uint32_t control_stack_offset;
+    uint32_t control_stack_size;
+    uint32_t wave_state_offset;
+    uint32_t wave_state_size;
+    uint32_t debugger_memory_offset;
+    uint32_t debugger_memory_size;
+  };
+
   class dummy_dispatch_t : public dispatch_t
   {
   private:
@@ -197,34 +207,88 @@ protected:
      is suspended.  */
   std::optional<size_t> m_waves_running{};
 
+  static constexpr amd_dbgapi_size_t debugger_memory_chunk_size = 32;
+
+  uint16_t m_debugger_memory_chunk_count{ 0 };
+  uint16_t m_debugger_memory_next_chunk{ 0 };
+  std::vector<uint16_t> m_debugger_memory_free_chunks{};
+
+  std::optional<displaced_instruction_ptr_t> m_park_instruction_ptr{};
+  std::optional<displaced_instruction_ptr_t> m_terminating_instruction_ptr{};
+
+  /* The memory reserved by the thunk library for the debugger is used to store
+     instruction buffers.  Instruction buffers are lazily allocated from the
+     reserved memory, and when freed, their index is returned to a free list.
+     Each wave is guaranteed its own unique instruction buffer.  */
+  std::optional<agent_address_t> m_debugger_memory_base{};
+
+  std::optional<amd_dbgapi_os_queue_packet_id_t> m_read_packet_id{};
+  std::optional<amd_dbgapi_os_queue_packet_id_t> m_write_packet_id{};
+  uint32_t m_compute_tmpring_size{ 0 };
+
+  /* Called whenever the queue changes state.  */
+  virtual void queue_state_changed () override;
+
+  void update_waves ();
+
+  virtual dispatch_t *
+  create_dispatch (amd_dbgapi_os_queue_packet_id_t packet_id);
+  virtual std::optional<amd_dbgapi_os_queue_packet_id_t>
+  get_os_queue_packet_id (
+    const architecture_t::cwsr_record_t & /* cwsr_record  */) const
+  {
+    /* Raw compute queue do not have have link to the dispatch packets.  */
+    return {};
+  }
+
+  /* TODO lsix: make that better.  */
+  virtual void refresh_scratch_on_suspend ();
+
+public:
   compute_queue_t (amd_dbgapi_queue_id_t queue_id, const agent_t &agent,
                    const os_queue_snapshot_entry_t &os_queue_info)
     : queue_t (queue_id, agent, os_queue_info), m_dummy_dispatch (*this)
   {
   }
 
-public:
   void wave_state_changed (const wave_t &wave);
 
   bool is_all_stopped () const override;
 
   /* Return the address of a park instruction.  */
-  virtual agent_address_t park_instruction_address () = 0;
+  virtual agent_address_t park_instruction_address ();
   /* Return the address of a terminating instruction.  */
-  virtual agent_address_t terminating_instruction_address () = 0;
+  virtual agent_address_t terminating_instruction_address ();
 
   /* Return the wave's scratch memory region (address and size).  */
   virtual std::pair<agent_address_t /* address */,
                     amd_dbgapi_size_t /* size */>
   scratch_memory_region (
-    const architecture_t::cwsr_record_t &cwsr_record) const
-    = 0;
+    const architecture_t::cwsr_record_t &cwsr_record) const;
 
   /* Return a pointer to device accessible memory containing the given
      instruction bytes.  */
   virtual displaced_instruction_ptr_t
-  allocate_displaced_instruction (const instruction_t &instruction)
-    = 0;
+  allocate_displaced_instruction (const instruction_t &instruction);
+
+  amd_dbgapi_os_queue_type_t type () const override
+  {
+    return AMD_DBGAPI_OS_QUEUE_TYPE_AMD_PM4;
+  }
+
+  size_t packet_size () const override { return 0; }
+
+  void active_packets_info (amd_dbgapi_os_queue_packet_id_t *,
+                            amd_dbgapi_os_queue_packet_id_t *,
+                            size_t *) const override
+  {
+  }
+
+  void active_packets_bytes (amd_dbgapi_os_queue_packet_id_t,
+                             amd_dbgapi_os_queue_packet_id_t, void *,
+                             size_t) const override
+  {
+  }
 };
 
 /* Wraps a queue and provides a RAII mechanism to suspend it if it wasn't

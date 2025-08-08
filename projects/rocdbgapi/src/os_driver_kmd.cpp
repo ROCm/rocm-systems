@@ -1950,8 +1950,8 @@ kmd_driver_t::queue_snapshot (os_queue_snapshot_entry_t *snapshots,
       else
         {
           queue.queue_type = os_queue_type (snap.queueType);
-          queue.ring_base_address = static_cast<host_address_t> (
-            snap.ringBufferAddress);
+          queue.ring_base_address
+            = static_cast<host_address_t> (snap.ringBufferAddress);
           queue.write_pointer_address
             = static_cast<host_address_t> (snap.writePtrAddress);
           queue.read_pointer_address
