@@ -64,7 +64,7 @@ gRPC and Protoc must be built from source as the prebuilt packages are not avail
 
    .. code-block:: shell
 
-    git clone -b v1.67.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    git clone -b v1.74.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
     export GRPC_ROOT=/opt/grpc
     cmake -B build \
