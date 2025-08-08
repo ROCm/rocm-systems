@@ -69,10 +69,10 @@
 /projects/rocprofiler/**/*.rst                                        @ammarwa @bgopesh @ROCm/rocm-documentation
 /projects/rocprofiler/doc/                                            @ammarwa @bgopesh @ROCm/rocm-documentation
 
-/projects/rocprofiler-compute/**/*.md                                 @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation
-/projects/rocprofiler-compute/**/*.rst                                @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation
-/projects/rocprofiler-compute/**/.readthedocs.yaml                    @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation
-/projects/rocprofiler-compute/docs/                                   @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation
+/projects/rocprofiler-compute/**/*.md                                 @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation @prbasyal-amd
+/projects/rocprofiler-compute/**/*.rst                                @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation @prbasyal-amd
+/projects/rocprofiler-compute/**/.readthedocs.yaml                    @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation @prbasyal-amd
+/projects/rocprofiler-compute/docs/                                   @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd @ROCm/rocm-documentation @prbasyal-amd
 
 /projects/rocprofiler-register/**/*.md                                @ammarwa @bgopesh @ROCm/rocm-documentation
 /projects/rocprofiler-register/**/*.rst                               @ammarwa @bgopesh @ROCm/rocm-documentation
