@@ -733,55 +733,6 @@ class OmniSoC_Base:
                 ]:
                     pmc.append(ctr)
                     if using_v3():
-                        # Add accumulation counters definitions
-                        if ctr == "SQ_IFETCH_LEVEL":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQ_IFETCH_LEVEL_ACCUM",
-                                "SQ_IFETCH_LEVEL accumulation",
-                                "accumulate(SQ_IFETCH_LEVEL, HIGH_RES)",
-                                [self.__arch],
-                            )
-                        elif ctr == "SQ_INST_LEVEL_LDS":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQ_INST_LEVEL_LDS_ACCUM",
-                                "SQ_INST_LEVEL_LDS accumulation",
-                                "accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)",
-                                [self.__arch],
-                            )
-                        elif ctr == "SQ_INST_LEVEL_SMEM":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQ_INST_LEVEL_SMEM_ACCUM",
-                                "SQ_INST_LEVEL_SMEM accumulation",
-                                "accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)",
-                                [self.__arch],
-                            )
-                        elif ctr == "SQ_INST_LEVEL_VMEM":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQ_INST_LEVEL_VMEM_ACCUM",
-                                "SQ_INST_LEVEL_VMEM accumulation",
-                                "accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)",
-                                [self.__arch],
-                            )
-                        elif ctr == "SQ_LEVEL_WAVES":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQ_LEVEL_WAVES_ACCUM",
-                                "SQ_LEVEL_WAVES accumulation",
-                                "accumulate(SQ_LEVEL_WAVES, HIGH_RES)",
-                                [self.__arch],
-                            )
-                        elif ctr == "SQC_DCACHE_INFLIGHT_LEVEL":
-                            counter_def = add_counter_extra_config_input_yaml(
-                                counter_def,
-                                "SQC_DCACHE_INFLIGHT_LEVEL_ACCUM",
-                                "SQC_DCACHE_INFLIGHT_LEVEL accumulation",
-                                "accumulate(SQC_DCACHE_INFLIGHT_LEVEL, HIGH_RES)",
-                                [self.__arch],
-                            )
                         # Add TCC channel counters definitions
                         if is_tcc_channel_counter(ctr):
                             counter_name = ctr.split("[")[0]

@@ -10601,3 +10601,75 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 337
+  - name: SQ_IFETCH_LEVEL_ACCUM
+    description: Accumulate SQ_IFETCH_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_IFETCH_LEVEL, HIGH_RES)
+  - name: SQ_INST_LEVEL_LDS_ACCUM
+    description: Accumulate SQ_INST_LEVEL_LDS
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_INST_LEVEL_LDS, HIGH_RES)
+  - name: SQ_INST_LEVEL_SMEM_ACCUM
+    description: Accumulate SQ_INST_LEVEL_SMEM
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_INST_LEVEL_SMEM, HIGH_RES)
+  - name: SQ_INST_LEVEL_VMEM_ACCUM
+    description: Accumulate SQ_INST_LEVEL_VMEM
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_INST_LEVEL_VMEM, HIGH_RES)
+  - name: SQ_LEVEL_WAVES_ACCUM
+    description: Accumulate SQ_LEVEL_WAVES
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_LEVEL_WAVES, HIGH_RES)
+  - name: SQ_DCACHE_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQ_DCACHE_INFLIGHT_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumlate(SQ_DCACHE_INFLIGHT_LEVEL, HIGH_RES)
