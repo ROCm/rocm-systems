@@ -10661,8 +10661,8 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)
-  - name: SQ_DCACHE_INFLIGHT_LEVEL_ACCUM
-    description: Accumulate SQ_DCACHE_INFLIGHT_LEVEL
+  - name: SQC_DCACHE_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQC_DCACHE_INFLIGHT_LEVEL
     properties: []
     definitions:
     - architectures:
