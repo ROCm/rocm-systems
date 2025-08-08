@@ -1,0 +1,121 @@
+name: Ubuntu 24.04 (GCC, Python, ROCm)
+run-name: ubuntu-noble
+
+on:
+  push:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+  pull_request:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+      - CMakePresets.json
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  ubuntu-noble:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        build-type: ['Release', 'Debug']
+        strip: ['OFF']
+        build-dyninst: ['OFF']
+        rocm-version: ['0.0','6.3','6.4']
+
+    env:
+      ROCPROFSYS_CI: 'ON'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          apt-get -y update && apt-get upgrade -y &&
+          apt-get install -y \
+            libiberty-dev clang libomp-dev libopenmpi-dev libfabric-dev \
+            openmpi-bin ${{ matrix.compiler }} &&
+          for i in 8 9 10 11 12; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+
+    - name: Install ROCm Packages
+      if: ${{ matrix.rocm-version > 0 }}
+      timeout-minutes: 30
+      shell: bash
+      run: |
+        ROCM_VERSION=${{ matrix.rocm-version }}
+        ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
+        ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
+        ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
+        echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}"
+        wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/noble/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
+        apt-get update
+        apt-get install -y rocm-dev rocdecode-dev libavformat-dev libavcodec-dev
+
+    - name: Configure
+      timeout-minutes: 30
+      shell: bash
+      run: |
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version
+        USE_ROCM=OFF
+        if [ ${{ matrix.rocm-version }} != "0.0" ]; then USE_ROCM=ON; fi
+        cmake -B build \
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g') \
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }} \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
+          -DROCPROFSYS_BUILD_TESTING=ON \
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target" \
+          -DROCPROFSYS_USE_ROCM=${USE_ROCM} \
+          -DRCOPROFSYS_USE_PYTHON=ON \
+          -DROCPROFSYS_BUILD_DYNINST=ON \
+          -DROCPROFSYS_BUILD_BOOST=ON \
+          -DROCPROFSYS_BUILD_TBB=ON \
+          -DROCPROFSYS_BUILD_ELFUTILS=ON \
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON \
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
+          -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12"
+
+    - name: Build
+      timeout-minutes: 115
+      run: cmake --build build --parallel 2

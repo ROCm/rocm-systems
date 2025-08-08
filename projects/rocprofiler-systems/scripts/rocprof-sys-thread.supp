@@ -1,0 +1,31 @@
+# false positive
+race:rocprofsys::component::pthread_create_gotcha::operator()
+race:pthread_create
+race:tim::impl::storage<*>::_data()
+race:tim::graph<*>::append_child
+
+# unlock of mutex by wrong thread (rsmi_init -> rsmi_shut_down)
+called_from_lib:librocm_smi64.so
+
+# suppress any races originating in Dyninst
+called_from_lib:libcommon.so
+called_from_lib:libdynC_API.so
+called_from_lib:libdynDwarf.so
+called_from_lib:libdynElf.so
+called_from_lib:libdyninstAPI.so
+called_from_lib:libinstructionAPI.so
+called_from_lib:libparseAPI.so
+called_from_lib:libpatchAPI.so
+called_from_lib:libpcontrol.so
+called_from_lib:libstackwalk.so
+called_from_lib:libsymtabAPI.so
+called_from_lib:libtbb.so
+
+# suppress any races originating in some Dyninst function
+race_top:Dyninst::
+race:Dyninst::
+race:libparseAPI.so
+race:boost::
+
+# thread leaks
+thread:*

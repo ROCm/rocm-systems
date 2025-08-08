@@ -1,0 +1,28 @@
+{
+	"name": "ROCm Compute Profiler Data",
+	"id": "amd-rocprofiler-compute-data-plugin",
+	"type": "datasource",
+	"backend": true,
+	"partials": {
+		"config": "public/app/plugins/datasource/simplejson/partials/config.html"
+	},
+	"metrics": true,
+	"annotations": false,
+	"info": {
+		"description": "An ROCm Compute Profiler datasource build for MongoDB",
+		"author": {
+			"name": "Audacious Software Group",
+			"url": ""
+		},
+		"logos": {
+			"small": "img/rocprofiler-compute_circle.png",
+			"large": "img/rocprofiler-compute_circle.png"
+		},
+		"version": "%VERSION%",
+		"updated": "%TODAY%"
+	},
+	"dependencies": {
+		"grafanaVersion": ">=7.0.0",
+		"plugins": []
+	}
+}

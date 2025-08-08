@@ -1,0 +1,68 @@
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+
+# Pre-configuration file for pre-commit hooks
+# This is optional. To run pre-commit, see CONTRIBUTING.md
+
+exclude: \.(svg)$|(^|/)\.gitignore$ # Exclude files with these extensions
+default_stages: [pre-commit]
+repos:
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml # Check YAML files for syntax errors
+      - id: trailing-whitespace # Remove trailing whitespace
+      - id: end-of-file-fixer # Fix files to have a newline at the end
+
+  - repo: https://github.com/pre-commit/mirrors-clang-format
+    rev: v18.1.8 # Version 18 as specified in contributor guide
+    hooks:
+      - id: clang-format
+        files: \.(c|cpp|h.*)$
+
+  - repo: https://github.com/BlankSpruce/gersemi
+    rev: 0.19.3
+    hooks:
+    - id: gersemi
+
+  - repo: local
+    hooks:
+      - id: check-copyright
+        name: copyright-detector
+        require_serial: true # Slightly slower, but prevents hook running script many times
+        entry: ./scripts/check-copyright.sh
+        language: script
+        files: \.(c|h|txt|cpp|hpp|py)$
+        exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
+
+  # - repo: local
+  #   hooks:
+  #     - id: check-copyright-date
+  #       name: Check Copyright Date
+  #       # Check copyright date in all files
+  #       # Fails if something is out of date.
+  #       # -u automatically updates copyright year
+  #       entry: ./scripts/check-copyright.sh -u
+  #       language: script
+  #       files: \.(c|h|txt|cpp|hpp|py)$
+  #       exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
