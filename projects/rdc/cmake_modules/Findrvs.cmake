@@ -8,12 +8,16 @@ if(NOT DEFINED ROCM_DIR)
 endif()
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_DIR})
 
+find_package(${NAME} NAMES ${NAME} rocm_validation_suite REQUIRED CONFIG)
+
 find_library(
     ${NAME}_LIBRARY
     NAMES
+        ${ROCM_VALIDATION_SUITE_LIBRARY} # this is set by the RVS package
         ${NAME}
         ${NAME}64
         ${NAME}lib # RVS is special and is named librvslib.so
+    HINTS "${ROCM_DIR}" "${ROCM_VALIDATION_SUITE_LIB_DIR}"
     REQUIRED
     REGISTRY_VIEW
     BOTH
@@ -24,8 +28,9 @@ if(NOT DEFINED (${NAME}_INCLUDE_DIR))
     find_path(
         ${NAME}_INCLUDE_DIR
         NAMES ${NAME}.h
-        HINTS "${ROCM_DIR}/include"
+        HINTS "${ROCM_DIR}/include" "${ROCM_VALIDATION_SUITE_INCLUDE_DIR}"
         PATH_SUFFIXES ${NAME} ${NAME}/inc
+        REQUIRED
     )
 endif()
 
@@ -36,6 +41,7 @@ find_package_handle_standard_args(
     REQUIRED_VARS ${NAME}_LIBRARY ${NAME}_INCLUDE_DIR
 )
 
+# rvs::rvs is not defined, but found rvs package, so we define our own library
 if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
     add_library(${NAME}::${NAME} UNKNOWN IMPORTED)
     set_target_properties(
@@ -45,7 +51,7 @@ if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
             INTERFACE_COMPILE_OPTIONS "${PC_${NAME}_CFLAGS_OTHER}"
             INTERFACE_INCLUDE_DIRECTORIES "${${NAME}_INCLUDE_DIR}"
     )
-    find_library(rocm-core NAMES rocm-core REQUIRED)
+    find_package(rocm-core REQUIRED)
     find_package(yaml-cpp REQUIRED)
     find_package(rocblas REQUIRED)
     find_package(hipblaslt REQUIRED)
@@ -57,7 +63,7 @@ if(${NAME}_FOUND AND NOT TARGET ${NAME}::${NAME})
     target_link_libraries(
         ${NAME}::${NAME}
         INTERFACE
-            ${rocm-core}
+            rocm-core
             yaml-cpp
             roc::rocblas
             roc::hipblaslt
