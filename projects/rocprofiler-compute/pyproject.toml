@@ -9,7 +9,6 @@ developer = [
 ]
 
 [tool.ruff]
-target-version="py38"
 line-length = 88
 
 # Ruff's default excludes cover: .bzr, .direnv, .eggs, .git, .git-rewrite, .hg, .ipynb_checkpoints,
