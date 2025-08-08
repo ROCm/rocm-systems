@@ -126,7 +126,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/aqlprofile
+        sparse-checkout:
+          projects/aqlprofile
+          projects/rocprofiler-sdk/requirements.txt
+        submodules: true
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
@@ -134,6 +138,7 @@ jobs:
       run: |
         cd projects/aqlprofile
         git config --global --add safe.directory '*'
+        python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt
 
     - name: List Files
       shell: bash
