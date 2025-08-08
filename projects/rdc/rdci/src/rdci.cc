@@ -32,16 +32,16 @@ THE SOFTWARE.
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
 #include "RdciHealthSubSystem.h"
-#include "RdciTopologyLinkSubSystem.h"
 #include "RdciPolicySubSystem.h"
 #include "RdciStatsSubSystem.h"
+#include "RdciTopologyLinkSubSystem.h"
 #include "RdciXgmiLinkStatusSubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
 
 #define RDC_CLIENT_VERSION_MAJOR 1
-#define RDC_CLIENT_VERSION_MINOR 1
+#define RDC_CLIENT_VERSION_MINOR 2
 #define RDC_CLIENT_VERSION_RELEASE 0
 
 #define RDC_CLIENT_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
@@ -58,7 +58,8 @@ int main(int argc, char** argv) {
   const std::string usage_help =
       "Usage:\trdci <subsystem>|<options>\n"
       "subsystem: \n"
-      "          discovery, dmon, group, fieldgroup, stats, diag, config, policy, health, topo, link\n"
+      "          discovery, dmon, group, fieldgroup, stats, diag, config, policy, health, topo, "
+      "link\n"
       "options: \n"
       "        -v(--version) : Print client version information only\n";
 
