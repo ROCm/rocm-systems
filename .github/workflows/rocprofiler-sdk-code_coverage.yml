@@ -1,4 +1,4 @@
-name: RocProfiler-SDK Code Coverage
+name: rocprofiler-sdk Code Coverage
 
 permissions:
   contents: read
@@ -7,6 +7,8 @@ permissions:
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
@@ -61,7 +63,7 @@ jobs:
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: rocprofiler-ubuntu-22
+    runs-on: rocprofiler-mi3xx
 
     # define this for container
     env:
@@ -138,8 +140,9 @@ jobs:
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run:
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -157,9 +160,10 @@ jobs:
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -176,10 +180,11 @@ jobs:
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
+      working-directory: projects/rocprofiler-sdk
       shell: bash
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -200,15 +205,15 @@ jobs:
       with:
         key: ${{ github.sha }}-codecov
         path: |
-          .codecov/*.xml
+          projects/rocprofiler-sdk/.codecov/*.xml
 
     - id: generatereport
       name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
+      working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
-        cd projects/rocprofiler-sdk
         echo "PWD: ${PWD}"
         ls -la
 
@@ -219,7 +224,7 @@ jobs:
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.ROCPROFILER_TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -261,7 +266,7 @@ jobs:
           ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
           </details>
       with:
-        github-token: ${{ secrets.TOKEN }}
+        github-token: ${{ secrets.ROCPROFILER_TOKEN }}
         script: |
           const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
             const commentBody = process.env.COMMENT_BODY;
@@ -302,7 +307,7 @@ jobs:
       with:
         name: code-coverage-details
         path: |
-          ${{github.workspace}}/.codecov/*
+          ${{github.workspace}}/projects/rocprofiler-sdk/.codecov/*
 
     - name: Verify Test Labels
       timeout-minutes: 5

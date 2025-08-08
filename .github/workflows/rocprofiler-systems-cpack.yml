@@ -1,0 +1,195 @@
+name: rocprofiler-systems Installer Packaging (CPack)
+run-name: cpack
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+    tags:
+      - "v[1-9].[0-9]+.[0-9]+*"
+      - "rocm-[1-9].[0-9]+.[0-9]+*"
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-cpack.yml'
+      - 'projects/rocprofiler-systems/docker/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  installers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu 20.04
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "6.3"
+          # ubuntu 22.04
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.4"
+          # ubuntu 24.04
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.4"
+          # opensuse 15.5
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "0.0"
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "6.3"
+          # opensuse 15.6
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "0.0"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.3"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.4"
+          # RHEL 8.10
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "6.4"
+          # RHEL 9.4
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.4"
+          # RHEL 9.5
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.4"
+
+    steps:
+      - name: Free Disk Space
+        uses: jlumbroso/free-disk-space@v1.2.0
+        with:
+            tool-cache: false
+            android: true
+            dotnet: true
+            haskell: true
+            large-packages: false
+            swap-storage: false
+
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+          submodules: recursive
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version == 0 }}
+        run: |
+          echo "CI_SCRIPT_ARGS=--core +python" >> $GITHUB_ENV
+
+      - name: Configure ROCm Version
+        if: ${{ matrix.rocm-version > 0 }}
+        run: |
+          echo "CI_SCRIPT_ARGS=--rocm +python" >> $GITHUB_ENV
+
+      - name: Configure Generators
+        run: |
+          echo "CI_GENERATOR_ARGS=--generators STGZ" >> $GITHUB_ENV
+
+      - name: Build Base Container
+        timeout-minutes: 30
+        working-directory: projects/rocprofiler-systems
+        run: |
+          pushd docker
+          ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }}
+          popd
+
+      - name: Build Release
+        timeout-minutes: 150
+        working-directory: projects/rocprofiler-systems
+        run: |
+          pushd docker
+          ./build-docker-release.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} -- ${CI_SCRIPT_ARGS} ${CI_GENERATOR_ARGS}
+          popd
+
+      - name: List Files
+        timeout-minutes: 10
+        working-directory: projects/rocprofiler-systems
+        run: |
+          find build-release -type f | egrep '\.(sh|deb|rpm)$'
+
+      - name: STGZ Artifacts
+        timeout-minutes: 10
+        uses: actions/upload-artifact@v4
+        with:
+          name: rocprofiler-systems-stgz-${{ matrix.os-distro }}-${{ matrix.os-version }}-rocm-${{ matrix.rocm-version }}-installer
+          path: |
+            projects/rocprofiler-systems/build-release/stgz/*.sh
+
+      # before testing remove any artifacts of the build
+      - name: Remove Build
+        timeout-minutes: 10
+        working-directory: projects/rocprofiler-systems
+        run: |
+          shopt -s nullglob
+          for i in $(find build-release -type f | egrep '/(stgz|deb|rpm)/.*\.(sh|deb|rpm)$'); do mv ${i} ./; done
+          sudo rm -rf build-release
+          sudo rm -rf /opt/rocprofiler-systems
+
+      - name: Test STGZ Install
+        timeout-minutes: 20
+        working-directory: projects/rocprofiler-systems
+        run: |
+          set -v
+          for i in rocprofiler-systems-*.sh
+          do
+            ./docker/test-docker-release.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} -- --stgz ${i}
+          done
+
+      - name: Upload STGZ Release Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          fail_on_unmatched_files: True
+          files: |
+            projects/rocprofiler-systems/rocprofiler-systems-*.sh

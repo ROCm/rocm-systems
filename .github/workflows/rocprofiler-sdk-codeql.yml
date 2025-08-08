@@ -1,4 +1,4 @@
-name: "RocProfiler-SDK CodeQL Advanced Analysis"
+name: rocprofiler-sdk Advanced Analysis
 
 on:
   workflow_dispatch:
@@ -10,6 +10,8 @@ on:
       - '!projects/rocprofiler-sdk/*.md'
 
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/CODEOWNERS'

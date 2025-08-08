@@ -1,8 +1,10 @@
-name: RocProfiler-SDK Python Linting
+name: rocprofiler-sdk Python Linting
 
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
   pull_request:

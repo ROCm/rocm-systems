@@ -1258,29 +1258,29 @@ panels:
             pop: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBandwidth
-            pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum -
-              TCC_EA_RDREQ_32B_sum) * 64)) / (End_Timestamp - Start_Timestamp))))
+            pop: ((100 * AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum -
+              TCC_EA0_RDREQ_32B_sum) * 64)) / (End_Timestamp - Start_Timestamp))))
               / $hbmBandwidth)
           L2-Fabric Write BW:
-            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBandwidth
-            pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum -
-              TCC_EA_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp))))
+            pop: ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum -
+              TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp))))
               / $hbmBandwidth)
           L2-Fabric Read Latency:
-            value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            value: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
             pop: None
           L2-Fabric Write Latency:
-            value: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            value: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
@@ -2423,24 +2423,24 @@ panels:
               + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else None)), 0)
           Fabric_L2 Rd:
-            value: ROUND(AVG((TCC_EA_RDREQ_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
           Fabric_L2 Wr:
-            value: ROUND(AVG((TCC_EA_WRREQ_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_WRREQ_sum / $denom)), 0)
           Fabric_L2 Atomic:
-            value: ROUND(AVG((TCC_EA_ATOMIC_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
           Fabric Rd Lat:
-            value: ROUND(AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            value: ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else  0)), 0)
           Fabric Wr Lat:
-            value: ROUND(AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            value: ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else  0)), 0)
           Fabric Atomic Lat:
-            value: ROUND(AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            value: ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else  0)), 0)
           HBM Rd:
-            value: ROUND(AVG((TCC_EA_RDREQ_DRAM_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
           HBM Wr:
-            value: ROUND(AVG((TCC_EA_WRREQ_DRAM_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_WRREQ_DRAM_sum / $denom)), 0)
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart
@@ -7972,7 +7972,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth:
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -7988,7 +7988,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth (% of Peak):
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -8004,7 +8004,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth (% of Peak):
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -8020,7 +8020,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth (% of Peak):
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -8036,7 +8036,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth (% of Peak):
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -8052,7 +8052,7 @@ panels:
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
-          Theoretical Bandwidth:
+          Theoretical Bandwidth Utilization:
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) *
               0.00128)))
@@ -8082,12 +8082,12 @@ panels:
             unit: (Instr  + $normUnit)
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8143,12 +8143,12 @@ panels:
             unit: (Instr  + $normUnit)
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8204,12 +8204,12 @@ panels:
             unit: (Instr  + $normUnit)
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8265,12 +8265,12 @@ panels:
             unit: (Instr  + $normUnit)
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8356,12 +8356,12 @@ panels:
             units: Gbps
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8427,12 +8427,12 @@ panels:
             unit: (Instr  + $normUnit)
           Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
-              / $denom))
-            unit: (Bytes  + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           LDS Latency:
             avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0)
               else None))
@@ -8502,17 +8502,28 @@ panels:
         <desc-scheduler>` issuing :ref:`LDS <desc-lds>` instructions over the :ref:`total
         CU cycles <total-cu-cycles>`.
       unit: Percent
-    Theoretical Bandwidth:
+    Theoretical Bandwidth Utilization:
       plain: Indicates the maximum amount of bytes that could have been loaded from,
-        stored to, or atomically updated in the LDS per normalization unit. Does not
-        take into account the execution mask of the wavefront when the instruction
+        stored to, or atomically updated in the LDS divided as percentage of theoretical peak.
+        Does not take into account the execution mask of the wavefront when the instruction
         was executed.
       rst: Indicates the maximum amount of bytes that could have been loaded from,  stored
-        to, or atomically updated in the LDS per  :ref:`normalization unit <normalization-units>`.
+        to, or atomically updated in the LDS divided as percentage of theoretical peak.
         Does *not* take into  account the execution mask of the wavefront when the
         instruction was  executed. See the  :ref:`LDS bandwidth example <lds-bandwidth>`
         for more detail.
-      unit: Bytes per normalization unit
+      unit: Percent
+    Theoretical Bandwidth:
+      plain: Indicates the maximum amount of bytes that could have been loaded from,
+        stored to, or atomically updated in the LDS divided by total duration. Does not
+        take into account the execution mask of the wavefront when the instruction
+        was executed.
+      rst: Indicates the maximum amount of bytes that could have been loaded from,  stored
+        to, or atomically updated in the LDS divided by total duration.
+        Does *not* take into  account the execution mask of the wavefront when the
+        instruction was  executed. See the  :ref:`LDS bandwidth example <lds-bandwidth>`
+        for more detail.
+      unit: Gbps
     Bank Conflict Rate:
       plain: Indicates the percentage of active LDS cycles that were spent servicing
         bank conflicts. Calculated as the ratio of LDS cycles spent servicing bank
@@ -8601,7 +8612,7 @@ panels:
         unit: Unit
       metric:
         gfx90a:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8609,12 +8620,12 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
         gfx941:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8622,12 +8633,12 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
         gfx940:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8635,12 +8646,12 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
         gfx942:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8648,12 +8659,12 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
         gfx950:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8661,12 +8672,12 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
         gfx908:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8674,7 +8685,7 @@ panels:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
-          L1I-L2 Bandwidth:
+          L1I-L2 Bandwidth Utilization:
             value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -8913,42 +8924,42 @@ panels:
       metric:
         gfx90a:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
         gfx941:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
         gfx940:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
         gfx942:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
         gfx950:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
         gfx908:
           L1I-L2 Bandwidth:
-            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
-            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
-            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
   metrics_description:
-    Bandwidth:
+    Bandwidth Utilization:
       plain: The number of bytes looked up in the L1I cache, as a percent of the peak
         theoretical bandwidth. Calculated as the ratio of L1I requests over the total
         L1I cycles.
@@ -8964,7 +8975,7 @@ panels:
         the cache. Calculated as the ratio of the number of L1I requests  that hit
         over the number of all L1I requests.
       unit: Percent
-    L1I-L2 Bandwidth:
+    L1I-L2 Bandwidth Utilization:
       plain: "The percent of the peak theoretical L1I \u2192 L2 cache request bandwidth\
         \ achieved. Calculated as the ratio of the total number of requests from the\
         \ L1I to the L2 cache over the total L1I-L2 interface cycles."
@@ -8972,6 +8983,10 @@ panels:
         \  achieved. Calculated as the ratio of the total number of requests from\
         \  the L1I to the L2 cache over the  :ref:`total L1I-L2 interface cycles <total-l1i-cycles>`."
       unit: Percent
+    L1I-L2 Bandwidth:
+      plain: Total number of bytes transferred across L1I - L2 interface divided by total duration.
+      rst: Total number of bytes transferred across L1I - L2 interface divided by total duration.
+      unit: Gbps
     Req:
       plain: The total number of requests made to the L1I per normalization-unit
       rst: The total number of requests made to the L1I per normalization-unit
@@ -9013,7 +9028,7 @@ panels:
         unit: Unit
       metric:
         gfx90a:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9022,12 +9037,12 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
         gfx941:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9036,12 +9051,12 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
         gfx940:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9050,12 +9065,12 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
         gfx942:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9064,12 +9079,12 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
         gfx950:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9078,12 +9093,12 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
         gfx908:
-          Bandwidth:
+          Bandwidth Utilization:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu) *
               (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
@@ -9092,7 +9107,7 @@ panels:
               + SQC_DCACHE_MISSES_DUPLICATE)) if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: Pct of Peak
-          sL1D-L2 BW:
+          sL1D-L2 BW Utilization:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
               * 100000) / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
@@ -9542,12 +9557,12 @@ panels:
         gfx90a:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9571,12 +9586,12 @@ panels:
         gfx941:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9600,12 +9615,12 @@ panels:
         gfx940:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9629,12 +9644,12 @@ panels:
         gfx942:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9658,12 +9673,12 @@ panels:
         gfx950:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9687,12 +9702,12 @@ panels:
         gfx908:
           sL1D-L2 BW:
             avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
-              * 64)) / $denom))
-            unit: (Bytes + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -9714,7 +9729,7 @@ panels:
             max: MAX((SQC_TC_STALL / $denom))
             unit: (Cycles  + $normUnit)
   metrics_description:
-    Bandwidth:
+    Bandwidth Utilization:
       plain: The number of bytes looked up in the sL1D cache, as a percent of the
         peak theoretical bandwidth. Calculated as the ratio of sL1D requests over
         the total sL1D cycles.
@@ -9730,18 +9745,26 @@ panels:
         the cache. The ratio of the number of sL1D requests that hit  [#sl1d-cache]_
         over the number of all sL1D requests.
       unit: Percent
+    sL1D-L2 BW Utilization:
+      plain: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.\
+        \ Caclulated as total number of bytes read from, written to, or atomically updated\
+        \ across the sL1D - L2 interface.
+      rst: The percentage of the peak theoretical sL1D - L2 interface bandwidth acheived.\
+        \ Caclulated as total number of bytes read from, written to, or atomically updated\
+        \ across the sL1D - L2 interface.
+      unit: Percent
     sL1D-L2 BW:
       plain: "The total number of bytes read from, written to, or atomically updated\
-        \ across the sL1D\u2194L2 interface, per normalization unit. Note that sL1D\
+        \ across the sL1D\u2194L2 interface, divided by total duration. Note that sL1D\
         \ writes and atomics are typically unused on current CDNA accelerators, so\
         \ in the majority of cases this can be interpreted as an sL1D\u2192L2 read\
         \ bandwidth."
       rst: "The total number of bytes read from, written to, or atomically updated\
-        \  across the sL1D\u2194:doc:`L2 <l2-cache>` interface, per  :ref:`normalization\
-        \ unit <normalization-units>`. Note that sL1D writes  and atomics are typically\
+        \  across the sL1D\u2194:doc:`L2 <l2-cache>` interface, divided by total duration.\
+        \ Note that sL1D writes and atomics are typically\
         \ unused on current CDNA accelerators, so in the  majority of cases this can\
         \ be interpreted as an sL1D\u2192L2 read bandwidth."
-      unit: Bytes per normalization unit
+      unit: Gbps
     Req:
       plain: The total number of requests, of any size or type, made to the sL1D per
         normalization unit.
@@ -10938,7 +10961,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
             unit: Pct of Peak
@@ -10957,7 +10980,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             unit: Pct of Peak
@@ -10976,7 +10999,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             unit: Pct of Peak
@@ -10995,7 +11018,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             unit: Pct of Peak
@@ -11014,7 +11037,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             unit: Pct of Peak
@@ -11033,7 +11056,7 @@ panels:
               / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum !=
               0) else None))
             unit: Pct of Peak
-          Bandwidth:
+          Bandwidth Utilization:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp
               - Start_Timestamp)))) / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
             unit: Pct of Peak
@@ -11203,10 +11226,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11244,12 +11267,12 @@ panels:
             unit: (Req + $normUnit)
           L1-L2 BW:
             avg: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            unit: (Bytes + $normUnit)
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -11323,10 +11346,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11365,14 +11388,14 @@ panels:
           L1-L2 BW:
             avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
-            unit: (Bytes + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -11416,10 +11439,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11458,14 +11481,14 @@ panels:
           L1-L2 BW:
             avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
-            unit: (Bytes + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -11509,10 +11532,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11551,14 +11574,14 @@ panels:
           L1-L2 BW:
             avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
-            unit: (Bytes + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -11602,10 +11625,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11644,14 +11667,14 @@ panels:
           L1-L2 BW:
             avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
+              / (End_Timestamp - Start_Timestamp)))
             max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 * (TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
-              / $denom))
-            unit: (Bytes + $normUnit)
+              / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Tag RAM 0 Req:
             avg: AVG((TCP_TAGRAM0_REQ_sum / $denom))
             min: MIN((TCP_TAGRAM0_REQ_sum / $denom))
@@ -11730,10 +11753,10 @@ panels:
               / $denom))
             unit: (Req  + $normUnit)
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            unit: (Bytes + $normUnit)
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           Cache Hit Rate:
             avg: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
               + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
@@ -11771,12 +11794,12 @@ panels:
             unit: (Req + $normUnit)
           L1-L2 BW:
             avg: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            unit: (Bytes + $normUnit)
+              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           L1-L2 Read:
             avg: AVG((TCP_TCC_READ_REQ_sum / $denom))
             min: MIN((TCP_TCC_READ_REQ_sum / $denom))
@@ -12600,7 +12623,7 @@ panels:
         vL1D cache over the total number of cache line requests to the  :ref:`vL1D
         Cache RAM <desc-tc>`.
       unit: Percent
-    Bandwidth:
+    Bandwidth Utilization:
       plain: The number of bytes looked up in the vL1D cache as a result of VMEM instructions,
         as a percent of the peak theoretical bandwidth achievable on the specific
         accelerator. The number of bytes is calculated as the number of cache lines
@@ -12700,18 +12723,18 @@ panels:
       unit: Requests per normalization unit
     Cache BW:
       plain: The number of bytes looked up in the vL1D cache as a result of VMEM instructions
-        per normalization unit. The number of bytes is calculated as the number of
+        divided by total duration. The number of bytes is calculated as the number of
         cache lines requested multiplied by the cache line size.  This value does
         not consider partial requests, so for instance, if only a single value is
         requested in a cache line, the data movement will still be counted as a full
         cache line.
-      rst: The number of bytes looked up in the vL1D cache as a result of  :ref:`VMEM
-        <desc-vmem>` instructions per  :ref:`normalization unit <normalization-units>`.  The
-        number of bytes is  calculated as the number of cache lines requested multiplied
-        by the cache  line size.  This value does not consider partial requests, so
-        for  instance, if only a single value is requested in a cache line, the data  movement
+      rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM
+        <desc-vmem>` instructions divided by total duration. The
+        number of bytes is calculated as the number of cache lines requested multiplied
+        by the cache line size. This value does not consider partial requests, so
+        for  instance, if only a single value is requested in a cache line, the data movement
         will still be counted as a full cache line.
-      unit: Bytes per normalization unit
+      unit: Gbps
     Cache Hit Rate:
       plain: The ratio of the number of vL1D cache line requests that hit in vL1D
         cache over the total number of cache line requests to the vL1D Cache RAM.
@@ -12741,18 +12764,18 @@ panels:
       unit: Invalidations per normalization unit
     L1-L2 BW:
       plain: The number of bytes transferred across the vL1D-L2 interface as a result
-        of VMEM instructions, per normalization unit. The number of bytes is calculated
+        of VMEM instructions, divided by total duration. The number of bytes is calculated
         as the number of cache lines requested multiplied by the cache line size.
         This value does not consider partial requests, so for instance, if only a
         single value is requested in a cache line, the data movement will still be
         counted as a full cache line.
       rst: The number of bytes transferred across the vL1D-L2 interface as a result  of
-        :ref:`VMEM <desc-vmem>` instructions, per  :ref:`normalization unit <normalization-units>`.
+        :ref:`VMEM <desc-vmem>` instructions, divided by total duration.
         The number of bytes is  calculated as the number of cache lines requested
         multiplied by the cache  line size. This value does not consider partial requests,
         so for  instance, if only a single value is requested in a cache line, the
         data  movement will still be counted as a full cache line.
-      unit: Bytes per normalization unit
+      unit: Gbps
     L1-L2 Read:
       plain: The number of read requests for a vL1D cache line that were not satisfied
         by the vL1D and must be retrieved from the to the L2 Cache per normalization
@@ -13041,11 +13064,11 @@ panels:
               + TCC_MISS_sum) != 0) else 0))
             unit: pct
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
           L2-Fabric Write and Atomic BW:
-            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
           HBM Bandwidth:
@@ -13064,12 +13087,12 @@ panels:
         gfx90a:
           Read BW:
             avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Read Traffic:
             avg: AVG((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
               != 0) else None))
@@ -13095,11 +13118,11 @@ panels:
               != 0) else None))
             unit: pct
           Write and Atomic BW:
-            avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
-            min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
-            max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
             unit: (Bytes  + $normUnit)
           HBM Write and Atomic Traffic:
@@ -13161,12 +13184,12 @@ panels:
         gfx941:
           Read BW:
             avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Read Traffic:
             avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
@@ -13193,12 +13216,12 @@ panels:
             unit: pct
           Write and Atomic BW:
             avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 32)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Write and Atomic Traffic:
             avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
@@ -13258,12 +13281,12 @@ panels:
         gfx940:
           Read BW:
             avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 64)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Read Traffic:
             avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
@@ -13290,12 +13313,12 @@ panels:
             unit: pct
           Write and Atomic BW:
             avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 32)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Write and Atomic Traffic:
             avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
@@ -13355,12 +13378,12 @@ panels:
         gfx942:
           Read BW:
             avg: AVG(((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / $denom))
+              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))
             min: MIN(((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / $denom))
+              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))
             max: MAX(((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
-              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / $denom))
-            unit: (Bytes  + $normUnit)
+              - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Read Traffic:
             avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
@@ -13387,12 +13410,12 @@ panels:
             unit: pct
           Write and Atomic BW:
             avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 32)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Write and Atomic Traffic:
             avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
@@ -13452,12 +13475,12 @@ panels:
         gfx950:
           Read BW:
             avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
-              + (TCC_EA0_RDREQ_128B_sum * 128)) / $denom))
+              + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
-              + (TCC_EA0_RDREQ_128B_sum * 128)) / $denom))
+              + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + (TCC_EA0_RDREQ_64B_sum * 64)
-              + (TCC_EA0_RDREQ_128B_sum * 128)) / $denom))
-            unit: (Bytes  + $normUnit)
+              + (TCC_EA0_RDREQ_128B_sum * 128)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Read Traffic:
             avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
@@ -13484,12 +13507,12 @@ panels:
             unit: pct
           Write and Atomic BW:
             avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / $denom))
-            unit: (Bytes  + $normUnit)
+              * 32)) / (End_Timestamp - Start_Timestamp)))
+            unit: Gbps
           HBM Write and Atomic Traffic:
             avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
@@ -13567,99 +13590,99 @@ panels:
             unit: pct
         gfx908:
           Read BW:
-            avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / $denom))
-            min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / $denom))
-            max: MAX((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / $denom))
             unit: (Bytes  + $normUnit)
           HBM Read Traffic:
-            avg: AVG((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: pct
           Remote Read Traffic:
-            avg: AVG((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
+            avg: AVG((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
             unit: pct
           Uncached Read Traffic:
-            avg: AVG((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: pct
           Write and Atomic BW:
-            avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
-            min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
-            max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / $denom))
             unit: (Bytes  + $normUnit)
           HBM Write and Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Remote Write and Atomic Traffic:
-            avg: AVG((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
+            avg: AVG((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
             unit: pct
           Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Uncached Write and Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Read Latency:
-            avg: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: Cycles
           Write and Atomic Latency:
-            avg: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: Cycles
           Atomic Latency:
-            avg: AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            avg: AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
-            min: MIN(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            min: MIN(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
-            max: MAX(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            max: MAX(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
             unit: Cycles
   - metric_table:
@@ -13674,10 +13697,10 @@ panels:
       metric:
         gfx90a:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 128) / $denom)
-            min: MIN((TCC_REQ_sum * 128) / $denom)
-            max: MAX((TCC_REQ_sum * 128) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -13773,10 +13796,10 @@ panels:
             unit: (Req  + $normUnit)
         gfx941:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 128) / $denom)
-            min: MIN((TCC_REQ_sum * 128) / $denom)
-            max: MAX((TCC_REQ_sum * 128) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -13872,10 +13895,10 @@ panels:
             unit: (Req  + $normUnit)
         gfx940:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 128) / $denom)
-            min: MIN((TCC_REQ_sum * 128) / $denom)
-            max: MAX((TCC_REQ_sum * 128) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -13971,10 +13994,10 @@ panels:
             unit: (Req  + $normUnit)
         gfx942:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 128) / $denom)
-            min: MIN((TCC_REQ_sum * 128) / $denom)
-            max: MAX((TCC_REQ_sum * 128) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -14070,25 +14093,25 @@ panels:
             unit: (Req  + $normUnit)
         gfx950:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 128) / $denom)
-            min: MIN((TCC_REQ_sum * 128) / $denom)
-            max: MAX((TCC_REQ_sum * 128) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Read Bandwidth:
-            avg: AVG(TCC_READ_SECTORS_sum * 32/ $denom)
-            min: MIN(TCC_READ_SECTORS_sum * 32/ $denom)
-            max: MAX(TCC_READ_SECTORS_sum * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_READ_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Write Bandwidth:
-            avg: AVG(TCC_WRITE_SECTORS_sum * 32/ $denom)
-            min: MIN(TCC_WRITE_SECTORS_sum * 32/ $denom)
-            max: MAX(TCC_WRITE_SECTORS_sum * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_WRITE_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Atomic Bandwidth:
-            avg: AVG(TCC_ATOMIC_SECTORS_sum * 32/ $denom)
-            min: MIN(TCC_ATOMIC_SECTORS_sum * 32/ $denom)
-            max: MAX(TCC_ATOMIC_SECTORS_sum * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_ATOMIC_SECTORS_sum * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -14194,10 +14217,10 @@ panels:
             unit: (Req  + $normUnit)
         gfx908:
           Bandwidth:
-            avg: AVG((TCC_REQ_sum * 64) / $denom)
-            min: MIN((TCC_REQ_sum * 64) / $denom)
-            max: MAX((TCC_REQ_sum * 64) / $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))
+            min: MIN((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))
+            max: MAX((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Req:
             avg: AVG((TCC_REQ_sum / $denom))
             min: MIN((TCC_REQ_sum / $denom))
@@ -14736,20 +14759,20 @@ panels:
             max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Read Bandwidth - PCIe:
-            avg: AVG(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
-            min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
-            max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_RDREQ_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           "Read Bandwidth - Infinity Fabric\u2122":
-            avg: AVG(TCC_EA0_RDREQ_GMI_32B_sum * 32/ $denom)
-            min: MIN(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_RDREQ_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_RDREQ_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Read Bandwidth - HBM:
-            avg: AVG(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
-            min: MIN(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_RDREQ_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Write and Atomic (32B):
             avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
             min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
@@ -14776,20 +14799,20 @@ panels:
             max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Write Bandwidth - PCIe:
-            avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_WRITE_IO_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           "Write Bandwidth - Infinity Fabric\u2122":
-            avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_WRITE_GMI_32B_sum * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_WRITE_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Write Bandwidth - HBM:
-            avg: AVG(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_WRITE_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Atomic:
             avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
             min: MIN((TCC_EA0_ATOMIC_sum / $denom))
@@ -14801,75 +14824,75 @@ panels:
             max: MAX((TCC_EA0_WRREQ_ATOMIC_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
           Atomic Bandwidth - PCIe:
-            avg: AVG(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_ATOMIC_IO_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           "Atomic Bandwidth - Infinity Fabric\u2122":
-            avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_ATOMIC_GMI_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
           Atomic Bandwidth - HBM:
-            avg: AVG(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
-            min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
-            max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ $denom)
-            unit: (Bytes + $normUnit)
+            avg: AVG(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            min: MIN(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            max: MAX(TCC_EA0_WRREQ_ATOMIC_DRAM_32B_sum  * 32/ (End_Timestamp - Start_Timestamp))
+            unit: Gbps
         gfx908:
           Read (32B):
-            avg: AVG((TCC_EA_RDREQ_32B_sum / $denom))
-            min: MIN((TCC_EA_RDREQ_32B_sum / $denom))
-            max: MAX((TCC_EA_RDREQ_32B_sum / $denom))
+            avg: AVG((TCC_EA0_RDREQ_32B_sum / $denom))
+            min: MIN((TCC_EA0_RDREQ_32B_sum / $denom))
+            max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
             unit: (Req  + $normUnit)
           Read (64B):
-            avg: AVG(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-            min: MIN(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-            max: MAX(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+            avg: AVG(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            min: MIN(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            max: MAX(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
             unit: (Req  + $normUnit)
           Read (Uncached):
-            avg: AVG((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-            min: MIN((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-            max: MAX((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+            avg: AVG((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
             unit: (Req  + $normUnit)
           HBM Read:
-            avg: AVG((TCC_EA_RDREQ_DRAM_sum / $denom))
-            min: MIN((TCC_EA_RDREQ_DRAM_sum / $denom))
-            max: MAX((TCC_EA_RDREQ_DRAM_sum / $denom))
+            avg: AVG((TCC_EA0_RDREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
           Remote Read:
-            avg: AVG((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-            min: MIN((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-            max: MAX((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+            avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (32B):
-            avg: AVG(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-            min: MIN(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-            max: MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+            avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+            min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+            max: MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (Uncached):
-            avg: AVG((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-            min: MIN((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-            max: MAX((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+            avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (64B):
-            avg: AVG((TCC_EA_WRREQ_64B_sum / $denom))
-            min: MIN((TCC_EA_WRREQ_64B_sum / $denom))
-            max: MAX((TCC_EA_WRREQ_64B_sum / $denom))
+            avg: AVG((TCC_EA0_WRREQ_64B_sum / $denom))
+            min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
+            max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
             unit: (Req  + $normUnit)
           HBM Write and Atomic:
-            avg: AVG((TCC_EA_WRREQ_DRAM_sum / $denom))
-            min: MIN((TCC_EA_WRREQ_DRAM_sum / $denom))
-            max: MAX((TCC_EA_WRREQ_DRAM_sum / $denom))
+            avg: AVG((TCC_EA0_WRREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA0_WRREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA0_WRREQ_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
           Remote Write and Atomic:
-            avg: AVG((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-            min: MIN((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-            max: MAX((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+            avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Atomic:
-            avg: AVG((TCC_EA_ATOMIC_sum / $denom))
-            min: MIN((TCC_EA_ATOMIC_sum / $denom))
-            max: MAX((TCC_EA_ATOMIC_sum / $denom))
+            avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
+            min: MIN((TCC_EA0_ATOMIC_sum / $denom))
+            max: MAX((TCC_EA0_ATOMIC_sum / $denom))
             unit: (Req  + $normUnit)
   metrics_description:
     Utilization:
@@ -14920,11 +14943,9 @@ panels:
         channels multiplied by the HBM channel width multiplied by the HBM clock frequency.
       unit: GB/s
     Read BW:
-      plain: The total number of bytes read by the L2 cache from Infinity Fabric per
-        normalization unit.
-      rst: The total number of bytes read by the L2 cache from Infinity Fabric per  :ref:`normalization
-        unit <normalization-units>`.
-      unit: Bytes per normalization unit
+      plain: The total number of bytes read by the L2 cache from Infinity Fabric divided by total duration.
+      rst: The total number of bytes read by the L2 cache from Infinity Fabric divided by total duration.
+      unit: Gbps
     HBM Read Traffic:
       plain: The percent of read requests generated by the L2 cache that are routed
         to the accelerator's local high-bandwidth memory (HBM). This breakdown does
@@ -14972,17 +14993,17 @@ panels:
       unit: Percent
     Write and Atomic BW:
       plain: The total number of bytes written by the L2 over Infinity Fabric by write
-        and atomic operations per normalization unit. Note that on current CDNA accelerators,
+        and atomic operations divided by total duration. Note that on current CDNA accelerators,
         such as the MI2XX, requests are only considered atomic by Infinity Fabric
         if they are targeted at non-write-cacheable memory, for example, fine-grained
         memory allocations or uncached memory allocations on the MI2XX.
       rst: The total number of bytes written by the L2 over Infinity Fabric by write  and
-        atomic operations per  :ref:`normalization unit <normalization-units>`. Note
+        atomic operations divided by total duration. Note
         that on current  CDNA accelerators, such as the :ref:`MI2XX <mixxx-note>`,
         requests are  only considered *atomic* by Infinity Fabric if they are targeted
         at  non-write-cacheable memory, for example,  :ref:`fine-grained memory <memory-type>`
         allocations or  :ref:`uncached memory <memory-type>` allocations on the  MI2XX.
-      unit: Bytes per normalization unit
+      unit: Gbps
     HBM Write and Atomic Traffic:
       plain: The percent of write and atomic requests generated by the L2 cache that
         are routed to the accelerator's local high-bandwidth memory (HBM). This breakdown
@@ -15074,36 +15095,36 @@ panels:
         (atomic with return value) was returned to the L2.
       unit: Cycles
     Bandwidth:
-      plain: The number of bytes looked up in the L2 cache, per normalization unit.
+      plain: The number of bytes looked up in the L2 cache, divided by total duration.
         The number of bytes is calculated as the number of cache lines requested multiplied
         by the cache line size. This value does not consider partial requests, so
         for example, if only a single value is requested in a cache line, the data
         movement will still be counted as a full cache line.
-      rst: The number of bytes looked up in the L2 cache, per  :ref:`normalization
-        unit <normalization-units>`.  The number of bytes is  calculated as the number
-        of cache lines requested multiplied by the cache  line size. This value does
-        not consider partial requests, so for example,  if only a single value is
+      rst: The number of bytes looked up in the L2 cache, divided by total duration.
+        The number of bytes is  calculated as the number of cache lines requested
+        multiplied by the cache line size. This value does
+        not consider partial requests, so for example, if only a single value is
         requested in a cache line, the data movement  will still be counted as a full
         cache line.
-      unit: Bytes per normalization unit
+      unit: Gbps
     Read Bandwidth:
       plain: Total number of bytes looked up in the L2 cache for read requests,
-        per normalization unit.
+        divided by total duration.
       rst: Total number of bytes looked up in the L2 cache for read requests,
-        per :ref:`normalization unit <normalization-units>`.
-      unit: Bytes per normalization unit
+        divided by total duration.
+      unit: Gbps
     Write Bandwidth:
       plain: Total number of bytes looked up in the L2 cache for write requests,
-        per normalization unit.
+        divided by total duration.
       rst: Total number of bytes looked up in the L2 cache for write requests,
-        per :ref:`normalization unit <normalization-units>`.
-      unit: Bytes per normalization unit
+        divided by total duration.
+      unit: Gbps
     Atomic Bandwidth:
       plain: Total number of bytes looked up in the L2 cache for atomic requests,
-        per normalization unit.
+        divided by total duration.
       rst: Total number of bytes looked up in the L2 cache for atomic requests,
-        per :ref:`normalization unit <normalization-units>`.
-      unit: Bytes per normalization unit
+        divided by total duration.
+      unit: Gbps
     Req:
       plain: The total number of incoming requests to the L2 from all clients for
         all request types, per normalization unit.
@@ -15276,17 +15297,17 @@ panels:
         unit <normalization-units>`. See  :ref:`l2-request-flow` for more detail.
       unit: Requests per normalization unit
     Read Bandwidth - PCIe:
-      plain: Total number of bytes due to L2 read requests due to PCIe traffic, per normalization unit.
-      rst: Total number of bytes due to L2 read requests due to PCIe traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+      rst: Total number of bytes due to L2 read requests due to PCIe traffic, divided by total duration.
+      unit: Gbps
     "Read Bandwidth - Infinity Fabric\u2122":
-      plain: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, per normalization unit.
-      rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+      rst: Total number of bytes due to L2 read requests due to Infinity Fabric traffic, divided by total duration.
+      unit: Gbps
     Read Bandwidth - HBM:
-      plain: Total number of bytes due to L2 read requests due to HBM traffic, per normalization unit.
-      rst: Total number of bytes due to L2 read requests due to HBM traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+      rst: Total number of bytes due to L2 read requests due to HBM traffic, divided by total duration.
+      unit: Gbps
     Write and Atomic (32B):
       plain: The total number of L2 requests to Infinity Fabric to write or atomically
         update 32B of data to any memory location, per normalization unit.
@@ -15326,29 +15347,29 @@ panels:
         for more detail.
       unit: Requests per normalization unit
     Write Bandwidth - PCIe:
-      plain: Total number of bytes due to L2 write requests due to PCIe traffic, per normalization unit.
-      rst: Total number of bytes due to L2 write requests due to PCIe traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+      rst: Total number of bytes due to L2 write requests due to PCIe traffic, divided by total duration.
+      unit: Gbps
     "Write Bandwidth - Infinity Fabric\u2122":
-      plain: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, per normalization unit.
-      rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+      rst: Total number of bytes due to L2 write requests due to Infinity Fabric traffic, divided by total duration.
+      unit: Gbps
     Write Bandwidth - HBM:
-      plain: Total number of bytes due to L2 write requests due to HBM traffic, per normalization unit.
-      rst: Total number of bytes due to L2 write requests due to HBM traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+      rst: Total number of bytes due to L2 write requests due to HBM traffic, divided by total duration.
+      unit: Gbps
     Atomic Bandwidth - PCIe:
-      plain: Total number of bytes due to L2 atomic requests due to PCIe traffic, per normalization unit.
-      rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+      rst: Total number of bytes due to L2 atomic requests due to PCIe traffic, divided by total duration.
+      unit: Gbps
     "Atomic Bandwidth - Infinity Fabric\u2122":
-      plain: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, per normalization unit.
-      rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+      rst: Total number of bytes due to L2 atomic requests due to Infinity Fabric traffic, divided by total duration.
+      unit: Gbps
     Atomic Bandwidth - HBM:
-      plain: Total number of bytes due to L2 atomic requests due to HBM traffic, per normalization unit.
-      rst: Total number of bytes due to L2 atomic requests due to HBM traffic, per normalization unit.
-      unit: Bytes per normalization unit
+      plain: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+      rst: Total number of bytes due to L2 atomic requests due to HBM traffic, divided by total duration.
+      unit: Gbps
     Atomic:
       plain: The total number of L2 requests to Infinity Fabric to atomically update
         32B or 64B of data in any memory location, per normalization unit. See Request
@@ -16247,9 +16268,9 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            read req: AVG((TO_INT(TCC_EA_RDREQ[::_1]) / $denom))
-            write req: AVG((TO_INT(TCC_EA_WRREQ[::_1]) / $denom))
-            atomic req: AVG((TO_INT(TCC_EA_ATOMIC[::_1]) / $denom))
+            read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
+            write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
           placeholder_range:
             ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -16293,7 +16314,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_RDREQ_LEVEL[::_1] / TCC_EA_RDREQ[::_1]) if (TCC_EA_RDREQ[::_1]
+            expr: ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
               != 0) else None)
           placeholder_range:
             ::_1: $total_l2_chan
@@ -16338,7 +16359,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_WRREQ_LEVEL[::_1] / TCC_EA_WRREQ[::_1]) if (TCC_EA_WRREQ[::_1]
+            expr: ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
               != 0) else None)
           placeholder_range:
             ::_1: $total_l2_chan
@@ -16383,7 +16404,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_ATOMIC_LEVEL[::_1] / TCC_EA_ATOMIC[::_1]) if (TCC_EA_ATOMIC[::_1]
+            expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if (TCC_EA0_ATOMIC[::_1]
               != 0) else 0)
           placeholder_range:
             ::_1: $total_l2_chan

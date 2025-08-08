@@ -5,8 +5,8 @@
       "url": "ROCm/aqlprofile",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rdc",
@@ -53,8 +53,8 @@
       "url": "ROCm/rocprofiler-compute",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler-register",
@@ -69,16 +69,16 @@
       "url": "ROCm/rocprofiler-sdk",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler-systems",
       "url": "ROCm/rocprofiler-systems",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocr-runtime",
