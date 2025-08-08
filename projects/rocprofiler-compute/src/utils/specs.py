@@ -620,7 +620,7 @@ class MachineSpecs:
     )
 
     def get_hbm_channels(self):
-        if self.memory_partition.lower().startswith("nps"):
+        if self.memory_partition and self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
             if self.memory_partition.lower() == "nps4":
                 hbmchannels /= 4
