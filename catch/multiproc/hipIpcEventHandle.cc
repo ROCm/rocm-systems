@@ -196,6 +196,9 @@ void runMultiProcKernel(ipcEventInfo_t *shmEventInfo, int index) {
             }
         }
     }
+    for (int i = 1; i < g_processCnt; i++) {
+      HIP_CHECK(hipEventDestroy(event[i]));
+    }
   } else {
     hipEvent_t event;
     HIP_CHECK(hipEventCreateWithFlags(&event,
