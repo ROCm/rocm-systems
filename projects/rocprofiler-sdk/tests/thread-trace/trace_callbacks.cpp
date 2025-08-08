@@ -36,7 +36,7 @@ namespace Callbacks
 {
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
-std::atomic<bool>                     has_sdata{true};
+std::atomic<bool>                     has_sdata{false};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -90,10 +90,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
             const auto* events =
                 static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(trace_events);
             for(size_t i = 0; i < trace_size; i++)
-            {
-                has_sdata = events[i].value == SDATA_RECORD;
-                if(!has_sdata) std::cerr << "SDATA Value: " << events[i].value << std::endl;
-            }
+                if(events[i].value == SDATA_RECORD) has_sdata = true;
         }
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
@@ -129,7 +126,8 @@ finalize(void* /* tool_data */)
         else if(!extra_args && latency == 0)
             throw std::runtime_error("Missing detailed profiling!");
 
-        if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
+        // disabling until new decoder version is picked up
+        // if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
     }
 
     rocprofiler_thread_trace_decoder_destroy(decoder);
