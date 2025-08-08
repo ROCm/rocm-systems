@@ -63,7 +63,7 @@ endmacro()
 ctest_start(Continuous)
 
 set(CTEST_SOURCE_DIRECTORY_BACKUP "${CTEST_SOURCE_DIRECTORY}")
-set(CTEST_SOURCE_DIRECTORY "../../")
+set(CTEST_SOURCE_DIRECTORY "${CTEST_SOURCE_DIRECTORY}/../../")
 
 ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _update_ret)
 handle_error("Update" _update_ret)
