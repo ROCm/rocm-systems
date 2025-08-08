@@ -36,7 +36,7 @@ namespace Callbacks
 {
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
-std::atomic<bool>                     has_sdata{false};
+std::atomic<bool>                     has_sdata{true};
 
 // defined in kernel_lds.cpp
 constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
@@ -90,7 +90,7 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
             const auto* events =
                 static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(trace_events);
             for(size_t i = 0; i < trace_size; i++)
-                if(events[i].value == SDATA_RECORD) has_sdata = true;
+                if(events[i].value != SDATA_RECORD) has_sdata = false;
         }
 
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
