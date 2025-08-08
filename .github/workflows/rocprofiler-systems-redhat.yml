@@ -103,6 +103,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="${{ github.repository_owner }}-${{ github.ref_name }}-rhel-${{ matrix.os-release }}-${{ matrix.compiler }}-python-mpip" &&

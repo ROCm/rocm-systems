@@ -23,18 +23,21 @@ ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
 ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
 ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
 
-RUN apt-get update && \
+RUN add-apt-repository -y ppa:git-core/ppa && apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
-        bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
+        bzip2 chrpath cmake curl environment-modules flex gettext git git-core gnupg2 \
         gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
-        locales lsb-release m4 ninja-build python3-pip texinfo unzip wget vim zip zlib1g-dev && \
+        locales lsb-release m4 ninja-build python3-pip software-properties-common \
+        texinfo unzip wget vim zip zlib1g-dev && \
     apt-get autoclean && \
     if [ "${OS_VERSION}" == "24.04" ]; then \
         python3 -m pip install --break-system-packages 'cmake==3.21' perfetto \
     else \
         python3 -m pip install 'cmake==3.21' perfetto; \
     fi
+
+RUN apt-get install -y software-properties-common && add-apt-repository -y ppa:git-core/ppa && apt-get update && apt-get install -y git
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 
