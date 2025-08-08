@@ -172,13 +172,16 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
 /**
  * @brief Matches the reference (realtime) clock with the shader clock
  * Added in rocprof-trace-decoder 0.1.3. Requires aqlprofile for rocm 7.1+.
+ * clock_in_seconds = realtime_clock / ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY
+ * gfx_frequency = delta(shader_clock) / delta(clock_in_seconds)
+ * For best average, use
+ * gfx_frequency[n] = (shader_clock[n]-shader_clock[0]) / (clock_in_seconds[n]-clock_in_seconds[0])
  */
 typedef struct rocprofiler_thread_trace_decoder_realtime_t
 {
-    uint64_t _reserved1;
-    int64_t  shader_clock;
-    uint64_t realtime_clock;
-    uint64_t _reserved2;
+    int64_t  shader_clock;  ///< Clock timestamp in gfx clock units
+    uint64_t realtime_clock;  ///< Clock timestamp in realtime units
+    uint64_t _reserved;
 } rocprofiler_thread_trace_decoder_realtime_t;
 
 /**
@@ -218,8 +221,9 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE,   ///< rocprofiler_thread_trace_decoder_wave_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_INFO,   ///< rocprofiler_thread_trace_decoder_info_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DEBUG,  ///< Debug
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,  ///< uint64_t*. Realtime clock frequency in Hz.
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 } rocprofiler_thread_trace_decoder_record_type_t;
 
