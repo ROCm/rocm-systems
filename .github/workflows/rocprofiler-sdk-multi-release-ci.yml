@@ -1,0 +1,207 @@
+name: ROCm Release Backward Compatibility Testing
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ develop ]
+    paths-ignore:
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/**/README.md'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/CODEOWNERS'
+  pull_request:
+    paths-ignore:
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/**/README.md'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/CODEOWNERS'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
+  ROCM_PATH: "/opt/rocm"
+  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  PATH: "/usr/bin:$PATH"
+  LATEST_ROCM_RELEASE: "6.4.1"
+
+jobs:
+  prepare-packages:
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ['ubuntu-22.04']
+        build-type: ['RelWithDebInfo']
+        ci-flags: ['']
+
+    runs-on: rocm-systems-multi-release
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+        submodules: true
+        set-safe-directory: true
+
+    - name: Install requirements
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-sdk
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        python3 -m pip install -U --user -r requirements.txt
+        rm -rf /opt/rocm*/lib/*rocprofiler-sdk* /opt/rocm*/lib/cmake/*rocprofiler-sdk* /opt/rocm*/share/*rocprofiler-sdk* /opt/rocm*/libexec/*rocprofiler-sdk*
+
+    - name: List Files
+      shell: bash
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat /opt/rocm*/.info/version
+        ls -la
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 30
+      working-directory: projects/rocprofiler-sdk
+      shell: bash
+      run:
+        python3 ./source/scripts/run-ci.py -B build
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-rocm-${{ matrix.runner }}-core
+          --build-jobs 16
+          --site ${RUNNER_HOSTNAME}
+          --gpu-targets ${{ env.GPU_TARGETS }}
+          --run-attempt ${{ github.run_attempt }}
+          --stages Start Update Configure Build Submit
+          ${{ matrix.ci-flags }}
+          --
+          -DROCPROFILER_DEP_ROCMCORE=ON
+          -DROCPROFILER_BUILD_DOCS=OFF
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
+          -DCPACK_GENERATOR='TGZ'
+          -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprofiler-sdk
+          -DPython3_EXECUTABLE=$(which python3)
+          -DOPENMP_GPU_TARGETS="gfx942"
+
+    - name: Build Packaging
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-sdk
+      run:
+        cmake --build build --target package --parallel 16
+
+    - name: Archive production artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: rocprofiler-sdk-packages
+        path: ${{github.workspace}}/projects/rocprofiler-sdk/build/*.tar.gz
+
+  test:
+    # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
+    strategy:
+      fail-fast: false
+      matrix:
+        rocm-release: ['6.4.1', '6.3.4', '6.2.4', '6.2.1']
+        os: ['ubuntu-22.04']
+        build-type: ['RelWithDebInfo']
+        ci-flags: ['']
+
+    needs: prepare-packages
+    runs-on: rocm-systems-multi-release
+
+    # define this for containers
+    env:
+      GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-sdk
+        set-safe-directory: true
+
+    - name: Install requirements
+      timeout-minutes: 10
+      working-directory: projects/rocprofiler-sdk
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        apt-get update
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        python3 -m pip install -U --user -r requirements.txt
+        rm -rf /opt/rocm*/lib/*rocprofiler-sdk* /opt/rocm*/lib/cmake/*rocprofiler-sdk* /opt/rocm*/share/*rocprofiler-sdk* /opt/rocm*/libexec/*rocprofiler-sdk*
+
+    - name: List Files
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat /opt/rocm*/.info/version
+        ls -la
+
+    - name: Download Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: rocprofiler-sdk-packages
+        path: ./build-packages
+
+    - name: Install
+      timeout-minutes: 10
+      run: |
+        tar -xvzf ./build-packages/*.tar.gz -C /
+        ls -lah /opt/rocprofiler-sdk
+        ls -lah /opt/rocprofiler-sdk/lib/cmake
+
+    - name: Test Install Build - SDK Tests
+      timeout-minutes: 20
+      working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
+      env:
+        ROCM_RELEASE: ${{ matrix.rocm-release }}
+      shell: bash
+      run: |
+        set -x
+        echo -e "Testing SDK Tests on ROCm ${ROCM_RELEASE} started..."
+        update-alternatives --set rocm /opt/rocm-${ROCM_RELEASE}
+        realpath /opt/rocm
+        ls -lah /opt/rocm-${ROCM_RELEASE}/lib
+        rm -rf build*
+        export LD_LIBRARY_PATH=/opt/rocm-${ROCM_RELEASE}/lib:/opt/rocprofiler-sdk/lib:/opt/rocm-${{ env.LATEST_ROCM_RELEASE }}/lib:${LD_LIBRARY_PATH}
+        CMAKE_PREFIX_PATH="/opt/rocm-${ROCM_RELEASE};/opt/rocprofiler-sdk;/opt/rocm-${{ env.LATEST_ROCM_RELEASE }}" cmake -B build-tests -DOPENMP_GPU_TARGETS="gfx942" -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd tests
+        cmake --build build-tests --target all --parallel 16
+        ctest --test-dir build-tests --output-on-failure
+        echo -e "Testing SDK Tests on ROCm ${ROCM_RELEASE} finished..."
+
+    - name: Test Install Build - Samples
+      timeout-minutes: 20
+      working-directory: /opt/rocprofiler-sdk/share/rocprofiler-sdk
+      env:
+        ROCM_RELEASE: ${{ matrix.rocm-release }}
+      shell: bash
+      run: |
+        set -x
+        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} started..."
+        update-alternatives --set rocm /opt/rocm-${ROCM_RELEASE}
+        realpath /opt/rocm
+        ls -lah /opt/rocm-${ROCM_RELEASE}/lib
+        rm -rf build*
+        export LD_LIBRARY_PATH=/opt/rocm-${ROCM_RELEASE}/lib:/opt/rocprofiler-sdk/lib:/opt/rocm-${{ env.LATEST_ROCM_RELEASE }}/lib:${LD_LIBRARY_PATH}
+        CMAKE_PREFIX_PATH="/opt/rocm-${ROCM_RELEASE};/opt/rocprofiler-sdk;/opt/rocm-${{ env.LATEST_ROCM_RELEASE }}" cmake -B build-samples -DOPENMP_GPU_TARGETS="gfx942" -Drocprofiler-sdk-roctx_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-roctx -Drocprofiler-sdk-rocpd_DIR=/opt/rocprofiler-sdk/lib/cmake/rocprofiler-sdk-rocpd samples
+        cmake --build build-samples --target all --parallel 16
+        ctest --test-dir build-samples --output-on-failure
+        echo -e "Testing Samples on ROCm ${ROCM_RELEASE} finished..."
