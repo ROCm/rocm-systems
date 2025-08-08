@@ -140,8 +140,9 @@ jobs:
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run:
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -159,9 +160,10 @@ jobs:
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -178,10 +180,11 @@ jobs:
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
+      working-directory: projects/rocprofiler-sdk
       shell: bash
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
-        python3 projects/rocprofiler-sdk/source/scripts/run-ci.py -B build
+        python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -202,15 +205,15 @@ jobs:
       with:
         key: ${{ github.sha }}-codecov
         path: |
-          .codecov/*.xml
+          projects/rocprofiler-sdk/.codecov/*.xml
 
     - id: generatereport
       name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
+      working-directory: projects/rocprofiler-sdk
       shell: bash
       run: |
-        cd projects/rocprofiler-sdk
         echo "PWD: ${PWD}"
         ls -la
 
@@ -304,7 +307,7 @@ jobs:
       with:
         name: code-coverage-details
         path: |
-          ${{github.workspace}}/.codecov/*
+          ${{github.workspace}}/projects/rocprofiler-sdk/.codecov/*
 
     - name: Verify Test Labels
       timeout-minutes: 5
