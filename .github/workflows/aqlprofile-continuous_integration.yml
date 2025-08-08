@@ -66,7 +66,6 @@ jobs:
         sparse-checkout:
           projects/aqlprofile
           projects/rocprofiler-sdk/requirements.txt
-        submodules: true
         set-safe-directory: true
 
     - name: Install requirements
@@ -130,7 +129,6 @@ jobs:
         sparse-checkout:
           projects/aqlprofile
           projects/rocprofiler-sdk/requirements.txt
-        submodules: true
         set-safe-directory: true
 
     - name: Install requirements
