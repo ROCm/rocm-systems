@@ -98,9 +98,8 @@ set_tests_properties(
 
 # unstable counter collection test: Generates HW exception leading to GPU hang or memory
 # access fault
-set_tests_properties(
-    device_counting_service_test.sync_counters device_counting_service_test.async_counters
-    PROPERTIES DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+set_tests_properties(device_counting_service_test.async_counters
+                     PROPERTIES DISABLED "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
 
 set(ROCPROFILER_LIB_CONSUMER_TEST_SOURCES consumer_test.cpp)
 

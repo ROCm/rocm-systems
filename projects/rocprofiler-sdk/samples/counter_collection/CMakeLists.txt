@@ -55,16 +55,9 @@ add_test(NAME counter-collection-buffer COMMAND $<TARGET_FILE:counter-collection
 
 set_tests_properties(
     counter-collection-buffer
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "samples"
-               ENVIRONMENT
-               "${counter-collection-buffer-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+               "${counter-collection-buffer-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_source_files_properties(device_serialized_main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-buffer-device-serialization)
@@ -110,16 +103,9 @@ add_test(NAME counter-collection-callback
 
 set_tests_properties(
     counter-collection-callback
-    PROPERTIES TIMEOUT
-               120
-               LABELS
-               "samples"
-               ENVIRONMENT
-               "${counter-collection-callback-env}"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               "${ROCPROFILER_DISABLE_UNSTABLE_CTESTS}")
+    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+               "${counter-collection-callback-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
