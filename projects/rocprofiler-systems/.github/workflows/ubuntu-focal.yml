@@ -1,0 +1,485 @@
+name: Ubuntu 20.04 (GCC, Python, ROCm, MPICH, OpenMPI)
+run-name: ubuntu-focal
+
+on:
+  push:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+  pull_request:
+    branches: [ amd-mainline, amd-staging, release/** ]
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+      - 'source/docs/**'
+      - 'source/python/gui/**'
+      - '.github/workflows/docs.yml'
+      - '.github/workflows/cpack.yml'
+      - '.github/workflows/containers.yml'
+      - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
+      - 'docker/**'
+      - .wordlist.txt
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
+
+jobs:
+  ubuntu-focal-external:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++-7', 'g++-8']
+        lto: ['OFF']
+        strip: ['OFF']
+        python: ['OFF']
+        build-type: ['Release']
+        mpi-headers: ['OFF']
+        static-libgcc: ['OFF']
+        static-libstdcxx: ['OFF']
+        include:
+          - compiler: 'g++-9'
+            lto: 'OFF'
+            strip: 'ON'
+            python: 'OFF'
+            build-type: 'Release'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'ON'
+          - compiler: 'g++-10'
+            lto: 'OFF'
+            strip: 'ON'
+            python: 'ON'
+            build-type: 'Release'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'OFF'
+          - compiler: 'g++-11'
+            lto: 'ON'
+            strip: 'ON'
+            python: 'OFF'
+            build-type: 'Release'
+            mpi-headers: 'ON'
+            static-libgcc: 'ON'
+            static-libstdcxx: 'OFF'
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y software-properties-common &&
+          add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
+          apt-get update &&
+          apt-get upgrade -y &&
+          apt-get install -y autoconf bison build-essential clang environment-modules gettext libiberty-dev libmpich-dev libtool m4 mpich python3-pip texinfo ${{ matrix.compiler }} &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+
+
+    - name: Test Environment Modules
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -v
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module avail
+
+    - name: Configure Env
+      run:
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        TAG="" &&
+        append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
+        append-tagname ${{ matrix.lto }} lto &&
+        append-tagname ${{ matrix.strip }} strip &&
+        append-tagname ${{ matrix.python }} python &&
+        append-tagname ${{ matrix.mpi-headers }} mpip &&
+        append-tagname ${{ matrix.static-libgcc }} libgcc &&
+        append-tagname ${{ matrix.static-libstdcxx }} libstdcxx &&
+        cmake --version &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_ROCM=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PAPI=OFF
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DROCPROFSYS_BUILD_LTO=${{ matrix.lto }}
+          -DROCPROFSYS_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
+          -DROCPROFSYS_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          -DMPI_HEADERS_ALLOW_MPICH=OFF
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"
+
+    - name: Test Build-Tree Module
+      timeout-minutes: 45
+      shell: bash
+      run: |
+        cd build
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use ./share/modulefiles
+        module avail
+        module load rocprofiler-systems
+        echo $(which rocprof-sys-instrument)
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-avail --help
+        rocprof-sys-sample --help
+
+    - name: Test Build-Tree Source Script
+      timeout-minutes: 45
+      shell: bash
+      run: |
+        cd build
+        source ./share/rocprofiler-systems/setup-env.sh
+        echo $(which rocprof-sys-instrument)
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-avail --help
+        rocprof-sys-sample --help
+
+    - name: Install
+      timeout-minutes: 10
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test Install
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        source /usr/share/modules/init/$(basename ${SHELL})
+        module use /opt/rocprofiler-systems/share/modulefiles
+        module avail
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime}=1 --test-rocprof-sys-python=${{ matrix.python }}
+
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+  ubuntu-focal-external-rocm:
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: ['g++']
+        rocm-version: ['6.3']
+        mpi-headers: ['OFF']
+        build-jobs: ['3']
+        ctest-exclude: ['-LE "transpose|videodecode|jpegdecode|network"']
+
+    env:
+      BUILD_TYPE: MinSizeRel
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y software-properties-common wget gnupg2 &&
+          ROCM_VERSION=${{ matrix.rocm-version }} &&
+          ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}') &&
+          ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}') &&
+          ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) )) &&
+          echo "ROCM_MAJOR=${ROCM_MAJOR} ROCM_MINOR=${ROCM_MINOR} ROCM_VERSN=${ROCM_VERSN}" &&
+          wget -q https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/ubuntu/focal/amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb &&
+          apt-get install -y ./amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb &&
+          apt-get update &&
+          apt-get install -y autoconf bison build-essential clang curl gettext libfabric-dev libnuma1 libomp-dev libopenmpi-dev libpapi-dev libtool libudev1 m4 openmpi-bin python3-pip rocm-dev texinfo &&
+          apt-get install -y rocdecode-dev libavformat-dev libavcodec-dev &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+
+
+    - name: Configure Env
+      run: |
+        echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV
+        echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV
+        echo "CMAKE_PREFIX_PATH=/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
+        echo "LD_LIBRARY_PATH=/opt/rocm/lib:/usr/local/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        cat << EOF > test-install.cfg
+        ROCPROFSYS_PROFILE               = ON
+        ROCPROFSYS_TRACE                 = ON
+        ROCPROFSYS_USE_PID               = OFF
+        ROCPROFSYS_USE_SAMPLING          = OFF
+        ROCPROFSYS_USE_PROCESS_SAMPLING  = OFF
+        ROCPROFSYS_COUT_OUTPUT           = ON
+        ROCPROFSYS_TIME_OUTPUT           = OFF
+        ROCPROFSYS_TIMEMORY_COMPONENTS   = cpu_clock cpu_util current_peak_rss kernel_mode_time monotonic_clock monotonic_raw_clock network_stats num_io_in num_io_out num_major_page_faults num_minor_page_faults page_rss peak_rss priority_context_switch process_cpu_clock process_cpu_util read_bytes read_char system_clock thread_cpu_clock thread_cpu_util timestamp trip_count user_clock user_mode_time virtual_memory voluntary_context_switch wall_clock written_bytes written_char
+        ROCPROFSYS_OUTPUT_PATH           = rocprofsys-tests-output
+        ROCPROFSYS_OUTPUT_PREFIX         = %tag%/
+        ROCPROFSYS_DEBUG                 = OFF
+        ROCPROFSYS_VERBOSE               = 3
+        ROCPROFSYS_DL_VERBOSE            = 3
+        ROCPROFSYS_PERFETTO_BACKEND      = system
+        EOF
+        realpath test-install.cfg
+        cat test-install.cfg
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        TAG="-rocm-${{ matrix.rocm-version }}" &&
+        TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-rocm-${{ matrix.compiler }}${TAG}
+          --build-jobs 2
+          --site GitHub
+          --
+          -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
+          -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
+          -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DEVELOPER=ON
+          -DROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS=OFF
+          -DROCPROFSYS_BUILD_LTO=OFF
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_ROCM=ON
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_USE_PAPI=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_USE_SANITIZER=OFF
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_CI_GPU=OFF
+          -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          ${{ matrix.ctest-exclude }}
+
+    - name: Install
+      run:
+        cmake --build build --target install --parallel 2
+
+    - name: Test Install
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
+
+    - name: Test User API
+      timeout-minutes: 10
+      run: |
+        set -v
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
+
+    - name: CTest Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: ctest-${{ github.job }}-${{ strategy.job-index }}-log
+        path: |
+          build/*.log
+
+    - name: Data Artifacts
+      if: failure()
+      continue-on-error: True
+      uses: actions/upload-artifact@v4
+      with:
+        name: data-${{ github.job }}-${{ strategy.job-index }}-files
+        path: |
+          rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
+
+    - name: Kill Perfetto
+      if: success() || failure()
+      continue-on-error: True
+      run: |
+        set +e
+        RUNNING_PROCS=$(pgrep trace_processor_shell)
+        if [ -n "${RUNNING_PROCS}" ]; then kill -s 9 ${RUNNING_PROCS}; fi
+
+  ubuntu-focal-codecov:
+    runs-on: ubuntu-latest
+
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
+      options: --cap-add CAP_SYS_ADMIN
+
+    env:
+      ROCPROFSYS_VERBOSE: 2
+      ROCPROFSYS_CAUSAL_BACKEND: perf
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          apt-get update &&
+          apt-get install -y autoconf bison build-essential clang environment-modules gcc g++ libmpich-dev libomp-dev libtool m4 mpich python3-pip texinfo &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+
+    - name: Configure Env
+      run:
+        echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      run:
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-codecov-mpi-python-ompt-papi
+          --build-jobs 2
+          --site GitHub
+          --coverage
+          --
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_CI=OFF
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_BUILD_DEBUG=OFF
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF
+          -DROCPROFSYS_USE_MPI=ON
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_USE_OMPT=ON
+          -DROCPROFSYS_USE_PAPI=ON
+          -DROCPROFSYS_USE_ROCM=OFF
+          -DROCPROFSYS_USE_RCCL=OFF
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"

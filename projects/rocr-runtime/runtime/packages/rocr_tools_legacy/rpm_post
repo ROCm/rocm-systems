@@ -1,0 +1,1 @@
+echo /opt/rocm/hsa/lib > /etc/ld.so.conf.d/rocr_tools_legacy.conf && ldconfig

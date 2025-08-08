@@ -1,0 +1,524 @@
+// MIT License
+//
+// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
+
+#include "lib/rocprofiler-sdk/hsa/defines.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
+#include <rocprofiler-sdk/external_correlation.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+
+#include <hsa/hsa_api_trace.h>
+
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ::CoreApiTable, core)
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ::AmdExtTable, amd_ext)
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_ImageExt, ::ImageExtTable, img_ext)
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ::FinalizerExtTable, fini_ext)
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdTool, ::ToolsApiTable, amd_tool)
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_PcSamplingExt,
+                                ::PcSamplingExtTable,
+                                pc_sampling_ext)
+#endif
+
+namespace rocprofiler
+{
+namespace hsa
+{
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    using args_type          = rocprofiler_hsa_api_args_t;
+    using retval_type        = rocprofiler_hsa_api_retval_t;
+    using callback_data_type = rocprofiler_callback_tracing_hsa_api_data_t;
+    using buffer_data_type   = rocprofiler_buffer_tracing_hsa_api_record_t;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_Core>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    using enum_type                           = rocprofiler_hsa_core_api_id_t;
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
+    static constexpr auto none                = ROCPROFILER_HSA_CORE_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_HSA_CORE_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_CORE_API;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdExt>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    using enum_type                           = rocprofiler_hsa_amd_ext_api_id_t;
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API;
+    static constexpr auto none                = ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_HSA_AMD_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_AMD_EXT_API;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_ImageExt>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    using enum_type                           = rocprofiler_hsa_image_ext_api_id_t;
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API;
+    static constexpr auto none                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_IMAGE_EXT_API;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    using enum_type                           = rocprofiler_hsa_finalize_ext_api_id_t;
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API;
+    static constexpr auto none                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_FINALIZE_EXT_API;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdTool>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_NONE;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+    static constexpr auto none                = 0;
+    static constexpr auto last                = 0;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_PcSamplingExt>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_NONE;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+    static constexpr auto none                = 0;
+    static constexpr auto last                = 0;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE;
+};
+}  // namespace hsa
+}  // namespace rocprofiler
+
+#if defined(ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL) &&                                       \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_INFO_DEFINITION_0(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_init, hsa_init, hsa_init_fn)
+HSA_API_INFO_DEFINITION_0(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down, hsa_shut_down, hsa_shut_down_fn)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_info, hsa_system_get_info, hsa_system_get_info_fn, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_system_extension_supported, hsa_system_extension_supported, hsa_system_extension_supported_fn, extension, version_major, version_minor, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_extension_table, hsa_system_get_extension_table, hsa_system_get_extension_table_fn, extension, version_major, version_minor, table)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents, hsa_iterate_agents, hsa_iterate_agents_fn, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info, hsa_agent_get_info, hsa_agent_get_info_fn, agent, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_create, hsa_queue_create, hsa_queue_create_fn, agent, size, type, callback, data, private_segment_size, group_segment_size, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_soft_queue_create, hsa_soft_queue_create, hsa_soft_queue_create_fn, region, size, type, features, doorbell_signal, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_destroy, hsa_queue_destroy, hsa_queue_destroy_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_inactivate, hsa_queue_inactivate, hsa_queue_inactivate_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_read_index_scacquire, hsa_queue_load_read_index_scacquire, hsa_queue_load_read_index_scacquire_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_read_index_relaxed, hsa_queue_load_read_index_relaxed, hsa_queue_load_read_index_relaxed_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_write_index_scacquire, hsa_queue_load_write_index_scacquire, hsa_queue_load_write_index_scacquire_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_load_write_index_relaxed, hsa_queue_load_write_index_relaxed, hsa_queue_load_write_index_relaxed_fn, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_write_index_relaxed, hsa_queue_store_write_index_relaxed, hsa_queue_store_write_index_relaxed_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_write_index_screlease, hsa_queue_store_write_index_screlease, hsa_queue_store_write_index_screlease_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_scacq_screl, hsa_queue_cas_write_index_scacq_screl, hsa_queue_cas_write_index_scacq_screl_fn, queue, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_scacquire, hsa_queue_cas_write_index_scacquire, hsa_queue_cas_write_index_scacquire_fn, queue, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_relaxed, hsa_queue_cas_write_index_relaxed, hsa_queue_cas_write_index_relaxed_fn, queue, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_cas_write_index_screlease, hsa_queue_cas_write_index_screlease, hsa_queue_cas_write_index_screlease_fn, queue, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_scacq_screl, hsa_queue_add_write_index_scacq_screl, hsa_queue_add_write_index_scacq_screl_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_scacquire, hsa_queue_add_write_index_scacquire, hsa_queue_add_write_index_scacquire_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_relaxed, hsa_queue_add_write_index_relaxed, hsa_queue_add_write_index_relaxed_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_add_write_index_screlease, hsa_queue_add_write_index_screlease, hsa_queue_add_write_index_screlease_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_read_index_relaxed, hsa_queue_store_read_index_relaxed, hsa_queue_store_read_index_relaxed_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_queue_store_read_index_screlease, hsa_queue_store_read_index_screlease, hsa_queue_store_read_index_screlease_fn, queue, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_regions, hsa_agent_iterate_regions, hsa_agent_iterate_regions_fn, agent, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_region_get_info, hsa_region_get_info, hsa_region_get_info_fn, region, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_exception_policies, hsa_agent_get_exception_policies, hsa_agent_get_exception_policies_fn, agent, profile, mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_extension_supported, hsa_agent_extension_supported, hsa_agent_extension_supported_fn, extension, agent, version_major, version_minor, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_register, hsa_memory_register, hsa_memory_register_fn, ptr, size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_deregister, hsa_memory_deregister, hsa_memory_deregister_fn, ptr, size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_allocate, hsa_memory_allocate, hsa_memory_allocate_fn, region, size, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_free, hsa_memory_free, hsa_memory_free_fn, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_copy, hsa_memory_copy, hsa_memory_copy_fn, dst, src, size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_assign_agent, hsa_memory_assign_agent, hsa_memory_assign_agent_fn, ptr, agent, access)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_create, hsa_signal_create, hsa_signal_create_fn, initial_value, num_consumers, consumers, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy, hsa_signal_destroy, hsa_signal_destroy_fn, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_load_relaxed, hsa_signal_load_relaxed, hsa_signal_load_relaxed_fn, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_load_scacquire, hsa_signal_load_scacquire, hsa_signal_load_scacquire_fn, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_store_relaxed, hsa_signal_store_relaxed, hsa_signal_store_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_store_screlease, hsa_signal_store_screlease, hsa_signal_store_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_wait_relaxed, hsa_signal_wait_relaxed, hsa_signal_wait_relaxed_fn, signal, condition, compare_value, timeout_hint, wait_state_hint)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_wait_scacquire, hsa_signal_wait_scacquire, hsa_signal_wait_scacquire_fn, signal, condition, compare_value, timeout_hint, wait_state_hint)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_relaxed, hsa_signal_and_relaxed, hsa_signal_and_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_scacquire, hsa_signal_and_scacquire, hsa_signal_and_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_screlease, hsa_signal_and_screlease, hsa_signal_and_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_and_scacq_screl, hsa_signal_and_scacq_screl, hsa_signal_and_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_relaxed, hsa_signal_or_relaxed, hsa_signal_or_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_scacquire, hsa_signal_or_scacquire, hsa_signal_or_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_screlease, hsa_signal_or_screlease, hsa_signal_or_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_or_scacq_screl, hsa_signal_or_scacq_screl, hsa_signal_or_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_relaxed, hsa_signal_xor_relaxed, hsa_signal_xor_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_scacquire, hsa_signal_xor_scacquire, hsa_signal_xor_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_screlease, hsa_signal_xor_screlease, hsa_signal_xor_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_xor_scacq_screl, hsa_signal_xor_scacq_screl, hsa_signal_xor_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_relaxed, hsa_signal_exchange_relaxed, hsa_signal_exchange_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_scacquire, hsa_signal_exchange_scacquire, hsa_signal_exchange_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_screlease, hsa_signal_exchange_screlease, hsa_signal_exchange_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_exchange_scacq_screl, hsa_signal_exchange_scacq_screl, hsa_signal_exchange_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_relaxed, hsa_signal_add_relaxed, hsa_signal_add_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_scacquire, hsa_signal_add_scacquire, hsa_signal_add_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_screlease, hsa_signal_add_screlease, hsa_signal_add_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_add_scacq_screl, hsa_signal_add_scacq_screl, hsa_signal_add_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_relaxed, hsa_signal_subtract_relaxed, hsa_signal_subtract_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_scacquire, hsa_signal_subtract_scacquire, hsa_signal_subtract_scacquire_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_screlease, hsa_signal_subtract_screlease, hsa_signal_subtract_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_subtract_scacq_screl, hsa_signal_subtract_scacq_screl, hsa_signal_subtract_scacq_screl_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_relaxed, hsa_signal_cas_relaxed, hsa_signal_cas_relaxed_fn, signal, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_scacquire, hsa_signal_cas_scacquire, hsa_signal_cas_scacquire_fn, signal, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_screlease, hsa_signal_cas_screlease, hsa_signal_cas_screlease_fn, signal, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_cas_scacq_screl, hsa_signal_cas_scacq_screl, hsa_signal_cas_scacq_screl_fn, signal, expected, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_from_name, hsa_isa_from_name, hsa_isa_from_name_fn, name, isa)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_info, hsa_isa_get_info, hsa_isa_get_info_fn, isa, attribute, index, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_compatible, hsa_isa_compatible, hsa_isa_compatible_fn, code_object_isa, agent_isa, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_serialize, hsa_code_object_serialize, hsa_code_object_serialize_fn, code_object, alloc_callback, callback_data, options, serialized_code_object, serialized_code_object_size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_deserialize, hsa_code_object_deserialize, hsa_code_object_deserialize_fn, serialized_code_object, serialized_code_object_size, options, code_object)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_destroy, hsa_code_object_destroy, hsa_code_object_destroy_fn, code_object)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_info, hsa_code_object_get_info, hsa_code_object_get_info_fn, code_object, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_symbol, hsa_code_object_get_symbol, hsa_code_object_get_symbol_fn, code_object, symbol_name, symbol)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_symbol_get_info, hsa_code_symbol_get_info, hsa_code_symbol_get_info_fn, code_symbol, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_iterate_symbols, hsa_code_object_iterate_symbols, hsa_code_object_iterate_symbols_fn, code_object, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_create, hsa_executable_create, hsa_executable_create_fn, profile, executable_state, options, executable)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_destroy, hsa_executable_destroy, hsa_executable_destroy_fn, executable)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_code_object, hsa_executable_load_code_object, hsa_executable_load_code_object_fn, executable, agent, code_object, options)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_freeze, hsa_executable_freeze, hsa_executable_freeze_fn, executable, options)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_info, hsa_executable_get_info, hsa_executable_get_info_fn, executable, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_global_variable_define, hsa_executable_global_variable_define, hsa_executable_global_variable_define_fn, executable, variable_name, address)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_agent_global_variable_define, hsa_executable_agent_global_variable_define, hsa_executable_agent_global_variable_define_fn, executable, agent, variable_name, address)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_readonly_variable_define, hsa_executable_readonly_variable_define, hsa_executable_readonly_variable_define_fn, executable, agent, variable_name, address)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_validate, hsa_executable_validate, hsa_executable_validate_fn, executable, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_symbol, hsa_executable_get_symbol, hsa_executable_get_symbol_fn, executable, module_name, symbol_name, agent, call_convention, symbol)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_symbol_get_info, hsa_executable_symbol_get_info, hsa_executable_symbol_get_info_fn, executable_symbol, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_symbols, hsa_executable_iterate_symbols, hsa_executable_iterate_symbols_fn, executable, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_status_string, hsa_status_string, hsa_status_string_fn, status, status_string)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_extension_get_name, hsa_extension_get_name, hsa_extension_get_name_fn, extension, name)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_system_major_extension_supported, hsa_system_major_extension_supported, hsa_system_major_extension_supported_fn, extension, version_major, version_minor, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_system_get_major_extension_table, hsa_system_get_major_extension_table, hsa_system_get_major_extension_table_fn, extension, version_major, table_length, table)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_major_extension_supported, hsa_agent_major_extension_supported, hsa_agent_major_extension_supported_fn, extension, agent, version_major, version_minor, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_cache_get_info, hsa_cache_get_info, hsa_cache_get_info_fn, cache, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_caches, hsa_agent_iterate_caches, hsa_agent_iterate_caches_fn, agent, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_silent_store_relaxed, hsa_signal_silent_store_relaxed, hsa_signal_silent_store_relaxed_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_silent_store_screlease, hsa_signal_silent_store_screlease, hsa_signal_silent_store_screlease_fn, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_create, hsa_signal_group_create, hsa_signal_group_create_fn, num_signals, signals, num_consumers, consumers, signal_group)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_destroy, hsa_signal_group_destroy, hsa_signal_group_destroy_fn, signal_group)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_wait_any_scacquire, hsa_signal_group_wait_any_scacquire, hsa_signal_group_wait_any_scacquire_fn, signal_group, conditions, compare_values, wait_state_hint, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_signal_group_wait_any_relaxed, hsa_signal_group_wait_any_relaxed, hsa_signal_group_wait_any_relaxed_fn, signal_group, conditions, compare_values, wait_state_hint, signal, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_agent_iterate_isas, hsa_agent_iterate_isas, hsa_agent_iterate_isas_fn, agent, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_info_alt, hsa_isa_get_info_alt, hsa_isa_get_info_alt_fn, isa, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_exception_policies, hsa_isa_get_exception_policies, hsa_isa_get_exception_policies_fn, isa, profile, mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_get_round_method, hsa_isa_get_round_method, hsa_isa_get_round_method_fn, isa, fp_type, flush_mode, round_method)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_wavefront_get_info, hsa_wavefront_get_info, hsa_wavefront_get_info_fn, wavefront, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_isa_iterate_wavefronts, hsa_isa_iterate_wavefronts, hsa_isa_iterate_wavefronts_fn, isa, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_get_symbol_from_name, hsa_code_object_get_symbol_from_name, hsa_code_object_get_symbol_from_name_fn, code_object, module_name, symbol_name, symbol)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_create_from_file, hsa_code_object_reader_create_from_file, hsa_code_object_reader_create_from_file_fn, file, code_object_reader)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_create_from_memory, hsa_code_object_reader_create_from_memory, hsa_code_object_reader_create_from_memory_fn, code_object, size, code_object_reader)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_code_object_reader_destroy, hsa_code_object_reader_destroy, hsa_code_object_reader_destroy_fn, code_object_reader)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_create_alt, hsa_executable_create_alt, hsa_executable_create_alt_fn, profile, default_float_rounding_mode, options, executable)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_program_code_object, hsa_executable_load_program_code_object, hsa_executable_load_program_code_object_fn, executable, code_object_reader, options, loaded_code_object)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_load_agent_code_object, hsa_executable_load_agent_code_object, hsa_executable_load_agent_code_object_fn, executable, agent, code_object_reader, options, loaded_code_object)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_validate_alt, hsa_executable_validate_alt, hsa_executable_validate_alt_fn, executable, options, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_get_symbol_by_name, hsa_executable_get_symbol_by_name, hsa_executable_get_symbol_by_name_fn, executable, symbol_name, agent, symbol)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_agent_symbols, hsa_executable_iterate_agent_symbols, hsa_executable_iterate_agent_symbols_fn, executable, agent, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_executable_iterate_program_symbols, hsa_executable_iterate_program_symbols, hsa_executable_iterate_program_symbols_fn, executable, callback, data)
+
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_coherency_get_type, hsa_amd_coherency_get_type, hsa_amd_coherency_get_type_fn, agent, type)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_coherency_set_type, hsa_amd_coherency_set_type, hsa_amd_coherency_set_type_fn, agent, type)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_set_profiler_enabled, hsa_amd_profiling_set_profiler_enabled, hsa_amd_profiling_set_profiler_enabled_fn, queue, enable)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_async_copy_enable, hsa_amd_profiling_async_copy_enable, hsa_amd_profiling_async_copy_enable_fn, enable)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_dispatch_time, hsa_amd_profiling_get_dispatch_time, hsa_amd_profiling_get_dispatch_time_fn, agent, signal, time)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_async_copy_time, hsa_amd_profiling_get_async_copy_time, hsa_amd_profiling_get_async_copy_time_fn, signal, time)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_convert_tick_to_system_domain, hsa_amd_profiling_convert_tick_to_system_domain, hsa_amd_profiling_convert_tick_to_system_domain_fn, agent, agent_tick, system_tick)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_async_handler, hsa_amd_signal_async_handler, hsa_amd_signal_async_handler_fn, signal, cond, value, handler, arg)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_async_function, hsa_amd_async_function, hsa_amd_async_function_fn, callback, arg)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_wait_any, hsa_amd_signal_wait_any, hsa_amd_signal_wait_any_fn, signal_count, signals, conds, values, timeout_hint, wait_hint, satisfying_value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_cu_set_mask, hsa_amd_queue_cu_set_mask, hsa_amd_queue_cu_set_mask_fn, queue, num_cu_mask_count, cu_mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_get_info, hsa_amd_memory_pool_get_info, hsa_amd_memory_pool_get_info_fn, memory_pool, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_iterate_memory_pools, hsa_amd_agent_iterate_memory_pools, hsa_amd_agent_iterate_memory_pools_fn, agent, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate_fn, memory_pool, size, flags, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_free, hsa_amd_memory_pool_free, hsa_amd_memory_pool_free_fn, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy, hsa_amd_memory_async_copy, hsa_amd_memory_async_copy_fn, dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine_fn, dst, dst_agent, src, src_agent, size, num_dep_signals, dep_signals, completion_signal, engine_id, force_copy_on_sdma)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_copy_engine_status, hsa_amd_memory_copy_engine_status, hsa_amd_memory_copy_engine_status_fn, dst_agent, src_agent, engine_ids_mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_memory_pool_get_info, hsa_amd_agent_memory_pool_get_info, hsa_amd_agent_memory_pool_get_info_fn, agent, memory_pool, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agents_allow_access, hsa_amd_agents_allow_access, hsa_amd_agents_allow_access_fn, num_agents, agents, flags, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_can_migrate, hsa_amd_memory_pool_can_migrate, hsa_amd_memory_pool_can_migrate_fn, src_memory_pool, dst_memory_pool, result)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_migrate, hsa_amd_memory_migrate, hsa_amd_memory_migrate_fn, ptr, memory_pool, flags)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_lock, hsa_amd_memory_lock, hsa_amd_memory_lock_fn, host_ptr, size, agents, num_agent, agent_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_unlock, hsa_amd_memory_unlock, hsa_amd_memory_unlock_fn, host_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_fill, hsa_amd_memory_fill, hsa_amd_memory_fill_fn, ptr, value, count)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_map_buffer, hsa_amd_interop_map_buffer, hsa_amd_interop_map_buffer_fn, num_agents, agents, interop_handle, flags, size, ptr, metadata_size, metadata)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_interop_unmap_buffer, hsa_amd_interop_unmap_buffer, hsa_amd_interop_unmap_buffer_fn, ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_image_create, hsa_amd_image_create, hsa_amd_image_create_fn, agent, image_descriptor, image_layout, image_data, access_permission, image)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_pointer_info, hsa_amd_pointer_info, hsa_amd_pointer_info_fn, ptr, info, alloc, num_agents_accessible, accessible)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_pointer_info_set_userdata, hsa_amd_pointer_info_set_userdata, hsa_amd_pointer_info_set_userdata_fn, ptr, userdata)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_memory_create, hsa_amd_ipc_memory_create, hsa_amd_ipc_memory_create_fn, ptr, len, handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_memory_attach, hsa_amd_ipc_memory_attach, hsa_amd_ipc_memory_attach_fn, handle, len, num_agents, mapping_agents, mapped_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_memory_detach, hsa_amd_ipc_memory_detach, hsa_amd_ipc_memory_detach_fn, mapped_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_create, hsa_amd_signal_create, hsa_amd_signal_create_fn, initial_value, num_consumers, consumers, attributes, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_create, hsa_amd_ipc_signal_create, hsa_amd_ipc_signal_create_fn, signal, handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_ipc_signal_attach, hsa_amd_ipc_signal_attach, hsa_amd_ipc_signal_attach_fn, handle, signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_register_system_event_handler, hsa_amd_register_system_event_handler, hsa_amd_register_system_event_handler_fn, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_set_priority, hsa_amd_queue_set_priority, hsa_amd_queue_set_priority_fn, queue, priority)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect_fn, dst, dst_offset, src, src_offset, range, copy_agent, dir, num_dep_signals, dep_signals, completion_signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_lock_to_pool, hsa_amd_memory_lock_to_pool, hsa_amd_memory_lock_to_pool_fn, host_ptr, size, agents, num_agent, pool, flags, agent_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_register_deallocation_callback, hsa_amd_register_deallocation_callback, hsa_amd_register_deallocation_callback_fn, ptr, callback, user_data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_deregister_deallocation_callback, hsa_amd_deregister_deallocation_callback, hsa_amd_deregister_deallocation_callback_fn, ptr, callback)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_value_pointer, hsa_amd_signal_value_pointer, hsa_amd_signal_value_pointer_fn, signal, value_ptr)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_attributes_set, hsa_amd_svm_attributes_set, hsa_amd_svm_attributes_set_fn, ptr, size, attribute_list, attribute_count)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_attributes_get, hsa_amd_svm_attributes_get, hsa_amd_svm_attributes_get_fn, ptr, size, attribute_list, attribute_count)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_svm_prefetch_async, hsa_amd_svm_prefetch_async, hsa_amd_svm_prefetch_async_fn, ptr, size, agent, num_dep_signals, dep_signals, completion_signal)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_spm_acquire, hsa_amd_spm_acquire, hsa_amd_spm_acquire_fn, preferred_agent)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_spm_release, hsa_amd_spm_release, hsa_amd_spm_release_fn, preferred_agent)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_spm_set_dest_buffer, hsa_amd_spm_set_dest_buffer, hsa_amd_spm_set_dest_buffer_fn, preferred_agent, size_in_bytes, timeout, size_copied, dest, is_data_loss)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_cu_get_mask, hsa_amd_queue_cu_get_mask, hsa_amd_queue_cu_get_mask_fn, queue, num_cu_mask_count, cu_mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_portable_export_dmabuf, hsa_amd_portable_export_dmabuf, hsa_amd_portable_export_dmabuf_fn, ptr, size, dmabuf, offset)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_portable_close_dmabuf, hsa_amd_portable_close_dmabuf, hsa_amd_portable_close_dmabuf_fn, dmabuf)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_intercept_create, hsa_amd_queue_intercept_create, hsa_amd_queue_intercept_create_fn, agent_handle, size, type, callback, data, private_segment_size, group_segment_size, queue)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_intercept_register, hsa_amd_queue_intercept_register, hsa_amd_queue_intercept_register_fn, queue, callback, user_data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_runtime_queue_create_register, hsa_amd_runtime_queue_create_register, hsa_amd_runtime_queue_create_register_fn, callback, user_data)
+
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_get_capability, hsa_ext_image_get_capability, hsa_ext_image_get_capability_fn, agent, geometry, image_format, capability_mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_data_get_info, hsa_ext_image_data_get_info, hsa_ext_image_data_get_info_fn, agent, image_descriptor, access_permission, image_data_info)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_create, hsa_ext_image_create, hsa_ext_image_create_fn, agent, image_descriptor, image_data, access_permission, image)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_import, hsa_ext_image_import, hsa_ext_image_import_fn, agent, src_memory, src_row_pitch, src_slice_pitch, dst_image, image_region)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_export, hsa_ext_image_export, hsa_ext_image_export_fn, agent, src_image, dst_memory, dst_row_pitch, dst_slice_pitch, image_region)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_copy, hsa_ext_image_copy, hsa_ext_image_copy_fn, agent, src_image, src_offset, dst_image, dst_offset, range)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_clear, hsa_ext_image_clear, hsa_ext_image_clear_fn, agent, image, data, image_region)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_destroy, hsa_ext_image_destroy, hsa_ext_image_destroy_fn, agent, image)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_sampler_create, hsa_ext_sampler_create, hsa_ext_sampler_create_fn, agent, sampler_descriptor, sampler)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_sampler_destroy, hsa_ext_sampler_destroy, hsa_ext_sampler_destroy_fn, agent, sampler)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_get_capability_with_layout, hsa_ext_image_get_capability_with_layout, hsa_ext_image_get_capability_with_layout_fn, agent, geometry, image_format, image_data_layout, capability_mask)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_data_get_info_with_layout, hsa_ext_image_data_get_info_with_layout, hsa_ext_image_data_get_info_with_layout_fn, agent, image_descriptor, access_permission, image_data_layout, image_data_row_pitch, image_data_slice_pitch, image_data_info)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_ImageExt, ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_create_with_layout, hsa_ext_image_create_with_layout, hsa_ext_image_create_with_layout_fn, agent, image_descriptor, image_data, access_permission, image_data_layout, image_data_row_pitch, image_data_slice_pitch, image)
+
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_create, hsa_ext_program_create, hsa_ext_program_create_fn, machine_model, profile, default_float_rounding_mode, options, program)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_destroy, hsa_ext_program_destroy, hsa_ext_program_destroy_fn, program)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_add_module, hsa_ext_program_add_module, hsa_ext_program_add_module_fn, program, module)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_iterate_modules, hsa_ext_program_iterate_modules, hsa_ext_program_iterate_modules_fn, program, callback, data)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_get_info, hsa_ext_program_get_info, hsa_ext_program_get_info_fn, program, attribute, value)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_finalize, hsa_ext_program_finalize, hsa_ext_program_finalize_fn, program, isa, call_convention, control_directives, options, code_object_type, code_object)
+// clang-format on
+
+#    if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_address_reserve,
+                          hsa_amd_vmem_address_reserve,
+                          hsa_amd_vmem_address_reserve_fn,
+                          ptr,
+                          size,
+                          address,
+                          flags)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_address_free,
+                          hsa_amd_vmem_address_free,
+                          hsa_amd_vmem_address_free_fn,
+                          ptr,
+                          size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_create,
+                          hsa_amd_vmem_handle_create,
+                          hsa_amd_vmem_handle_create_fn,
+                          pool,
+                          size,
+                          type,
+                          flags,
+                          memory_handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_release,
+                          hsa_amd_vmem_handle_release,
+                          hsa_amd_vmem_handle_release_fn,
+                          memory_handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_map,
+                          hsa_amd_vmem_map,
+                          hsa_amd_vmem_map_fn,
+                          va,
+                          size,
+                          in_offset,
+                          memory_handle,
+                          flags)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_unmap,
+                          hsa_amd_vmem_unmap,
+                          hsa_amd_vmem_unmap_fn,
+                          va,
+                          size)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_set_access,
+                          hsa_amd_vmem_set_access,
+                          hsa_amd_vmem_set_access_fn,
+                          va,
+                          size,
+                          desc,
+                          desc_cnt)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_get_access,
+                          hsa_amd_vmem_get_access,
+                          hsa_amd_vmem_get_access_fn,
+                          va,
+                          perms,
+                          agent_handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_export_shareable_handle,
+                          hsa_amd_vmem_export_shareable_handle,
+                          hsa_amd_vmem_export_shareable_handle_fn,
+                          dmabuf_fd,
+                          handle,
+                          flags)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_import_shareable_handle,
+                          hsa_amd_vmem_import_shareable_handle,
+                          hsa_amd_vmem_import_shareable_handle_fn,
+                          dmabuf_fd,
+                          handle)
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_retain_alloc_handle,
+                          hsa_amd_vmem_retain_alloc_handle,
+                          hsa_amd_vmem_retain_alloc_handle_fn,
+                          handle,
+                          addr)
+HSA_API_INFO_DEFINITION_V(
+    ROCPROFILER_HSA_TABLE_ID_AmdExt,
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_get_alloc_properties_from_handle,
+    hsa_amd_vmem_get_alloc_properties_from_handle,
+    hsa_amd_vmem_get_alloc_properties_from_handle_fn,
+    alloc_handle,
+    pool,
+    type)
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x01
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_set_async_scratch_limit,
+                          hsa_amd_agent_set_async_scratch_limit,
+                          hsa_amd_agent_set_async_scratch_limit_fn,
+                          agent,
+                          threshold)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x02
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_get_info,
+                          hsa_amd_queue_get_info,
+                          hsa_amd_queue_get_info_fn,
+                          queue,
+                          attribute,
+                          value)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x03
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_address_reserve_align,
+                          hsa_amd_vmem_address_reserve_align,
+                          hsa_amd_vmem_address_reserve_align_fn,
+                          ptr,
+                          size,
+                          address,
+                          alignment,
+                          flags)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x04
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_enable_logging,
+                          hsa_amd_enable_logging,
+                          hsa_amd_enable_logging_fn,
+                          flags,
+                          file)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x05
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_signal_wait_all,
+                          hsa_amd_signal_wait_all,
+                          hsa_amd_signal_wait_all_fn,
+                          signal_count,
+                          signals,
+                          conds,
+                          values,
+                          timeout_hint,
+                          wait_hint,
+                          satisfying_values)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x06
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_get_preferred_copy_engine,
+                          hsa_amd_memory_get_preferred_copy_engine,
+                          hsa_amd_memory_get_preferred_copy_engine_fn,
+                          dst_agent,
+                          src_agent,
+                          recommended_ids_mask)
+#        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x07
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_portable_export_dmabuf_v2,
+                          hsa_amd_portable_export_dmabuf_v2,
+                          hsa_amd_portable_export_dmabuf_v2_fn,
+                          ptr,
+                          size,
+                          dmabuf,
+                          offset,
+                          flags)
+#        endif
+#    endif
+
+#elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy, hsa_amd_memory_async_copy, hsa_amd_memory_async_copy_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine, hsa_amd_memory_async_copy_on_engine_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect_fn)
+// clang-format on
+
+#elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_MEMORY_ALLOCATION_CPP_IMPL) &&                       \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_MEMORY_ALLOCATION_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_allocate, hsa_memory_allocate, hsa_memory_allocate_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_create, hsa_amd_vmem_handle_create, hsa_amd_vmem_handle_create_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_free, hsa_memory_free, hsa_memory_free_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_free, hsa_amd_memory_pool_free, hsa_amd_memory_pool_free_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_release, hsa_amd_vmem_handle_release, hsa_amd_vmem_handle_release_fn)
+// clang-format on
+
+#else
+#    error "Do not compile this file directly. It is included by lib/rocprofiler/hsa/hsa.cpp"
+#endif

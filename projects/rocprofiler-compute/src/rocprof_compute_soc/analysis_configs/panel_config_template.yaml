@@ -1,0 +1,51 @@
+---
+#
+# Rules to define a panel and its data sources:
+#    - Each panel has its own yaml file.
+#    - Each yaml file has 2 sections: (1) Description Details. (2) Panel Config.
+#    - id for each panel/ data_source has to be unique.
+#    - The data source of panel support only: raw_csv_table and metric_table for now.
+#    - For raw_csv_table, data will be loaded from the specified csv file directly,
+#      and may be sorted.
+#    - For metric_table, the number of entries of each metric must match of
+#      the number of entries of table header. The metric can be raw pmc counters
+#      or an expression derived from them. The key keyword of the metric has to be
+#      one defined in parser.supported_field, i.e. "Value", "Min", "Max", "Avg" etc.
+#
+
+Metric Description:
+  METRIC01: &METRIC01_anchor Scalar Arithmetic Logic Unit
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 800
+  title: # define panel title to display
+  data source:
+    # Metric table sample
+    - metric_table:
+        id: 801
+        title: # subtitle for this table(optional)
+        header:
+          metric: Metric
+          value: Value
+          unit: Unit
+          peak: Peak
+          pop: Pct of Peak
+          tips: Tips
+        metric:
+          METRIC01:
+            value: AVG(100 * SQ_ACTIVE_INST_SCA / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu ))
+            unit: pct
+            peak: 100
+            pop: AVG(100* SQ_ACTIVE_INST_SCA/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
+            tips: *METRIC01_anchor
+          METRIC02:
+            value: AVG(100 * SQ_ACTIVE_INST_VALU / ( $GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+            unit: pct
+            peak: 100
+            pop: AVG(100* SQ_ACTIVE_INST_VALU/($GRBM_GUI_ACTIVE_PER_XCD*$cu_per_gpu))
+            tips:
+    # CSV table sample
+    - raw_csv_table:
+        id: 802
+        source: abc.csv

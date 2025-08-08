@@ -1,0 +1,5 @@
+pmc:  TCC_NC_REQ_sum TCC_UC_REQ_sum TCC_CC_REQ_sum TCC_RW_REQ_sum
+
+gpu:
+range:
+kernel:
