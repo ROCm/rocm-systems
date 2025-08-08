@@ -3240,7 +3240,7 @@ rocprofiler-sdk:
       event: 136
   - name: SQ_IFETCH_LEVEL
     description: Number of inflight instruction fetch requests from the cache. This is a value returned per-sharder engine.
-      Best used with accumlate() functions as part of a derived counter.
+      Best used with accumulate() functions as part of a derived counter.
     properties: []
     definitions:
     - architectures:
@@ -10612,7 +10612,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_IFETCH_LEVEL, HIGH_RES)
+      expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)
   - name: SQ_INST_LEVEL_LDS_ACCUM
     description: Accumulate SQ_INST_LEVEL_LDS
     properties: []
@@ -10624,7 +10624,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_INST_LEVEL_LDS, HIGH_RES)
+      expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)
   - name: SQ_INST_LEVEL_SMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_SMEM
     properties: []
@@ -10636,7 +10636,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_INST_LEVEL_SMEM, HIGH_RES)
+      expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)
   - name: SQ_INST_LEVEL_VMEM_ACCUM
     description: Accumulate SQ_INST_LEVEL_VMEM
     properties: []
@@ -10648,7 +10648,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_INST_LEVEL_VMEM, HIGH_RES)
+      expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)
   - name: SQ_LEVEL_WAVES_ACCUM
     description: Accumulate SQ_LEVEL_WAVES
     properties: []
@@ -10660,7 +10660,7 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_LEVEL_WAVES, HIGH_RES)
+      expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)
   - name: SQ_DCACHE_INFLIGHT_LEVEL_ACCUM
     description: Accumulate SQ_DCACHE_INFLIGHT_LEVEL
     properties: []
@@ -10672,4 +10672,4 @@ rocprofiler-sdk:
       - gfx941
       - gfx942
       - gfx950
-      expression: accumlate(SQ_DCACHE_INFLIGHT_LEVEL, HIGH_RES)
+      expression: accumulate(SQC_DCACHE_INFLIGHT_LEVEL, HIGH_RES)
