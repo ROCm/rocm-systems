@@ -158,6 +158,8 @@ def check_csv_files(output_dir, num_devices, num_kernels):
                 assert len(file_dict[file].index) >= num_kernels
         elif file.endswith(".pdf"):
             file_dict[file] = "pdf"
+        elif file.endswith(".json"):
+            file_dict[file] = "json"
     return file_dict
 
 
