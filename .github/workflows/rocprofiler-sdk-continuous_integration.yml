@@ -200,7 +200,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel', 'sles']
+        os: ['rhel-8', 'sles-15']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
