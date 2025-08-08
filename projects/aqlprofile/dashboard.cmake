@@ -23,7 +23,7 @@ set(CTEST_CUSTOM_MAXIMUM_NUMBER_OF_WARNINGS "100")
 set(CTEST_CUSTOM_MAXIMUM_PASSED_TEST_OUTPUT_SIZE "51200")
 
 if(NOT DEFINED CTEST_SOURCE_DIRECTORY)
-  set(CTEST_SOURCE_DIRECTORY ".")
+  set(CTEST_SOURCE_DIRECTORY "../../")
 endif()
 
 if(NOT DEFINED CTEST_BINARY_DIRECTORY)
@@ -61,8 +61,15 @@ macro(handle_error _message _ret)
 endmacro()
 
 ctest_start(Continuous)
+
+set(CTEST_SOURCE_DIRECTORY_BACKUP "${CTEST_SOURCE_DIRECTORY}")
+set(CTEST_SOURCE_DIRECTORY "../../")
+
 ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _update_ret)
-handle_error("Configure" _update_ret)
+handle_error("Update" _update_ret)
+
+set(CTEST_SOURCE_DIRECTORY "${CTEST_SOURCE_DIRECTORY_BACKUP}")
+
 ctest_configure(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _configure_ret)
 dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
 
