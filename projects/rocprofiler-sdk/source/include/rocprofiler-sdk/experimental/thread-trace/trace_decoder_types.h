@@ -179,7 +179,7 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
  */
 typedef struct rocprofiler_thread_trace_decoder_realtime_t
 {
-    int64_t  shader_clock;  ///< Clock timestamp in gfx clock units
+    int64_t  shader_clock;    ///< Clock timestamp in gfx clock units
     uint64_t realtime_clock;  ///< Clock timestamp in realtime units
     uint64_t _reserved;
 } rocprofiler_thread_trace_decoder_realtime_t;
@@ -223,7 +223,8 @@ typedef enum rocprofiler_thread_trace_decoder_record_type_t
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_DEBUG,  ///< Debug
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA,  ///< rocprofiler_thread_trace_decoder_shaderdata_t*
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME,  ///< rocprofiler_thread_trace_decoder_realtime_t*
-    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,  ///< uint64_t*. Realtime clock frequency in Hz.
+    ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY,  ///< uint64_t*. Realtime clock frequency
+                                                           ///< in Hz.
     ROCPROFILER_THREAD_TRACE_DECODER_RECORD_LAST
 } rocprofiler_thread_trace_decoder_record_type_t;
 
