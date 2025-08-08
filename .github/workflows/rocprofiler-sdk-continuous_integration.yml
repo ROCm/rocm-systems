@@ -3,6 +3,8 @@ name: rocprofiler-sdk Continuous Integration
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-sdk/**'
       - '!projects/rocprofiler-sdk/*.md'
@@ -198,7 +200,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel', 'sles']
+        os: ['rhel-8', 'sles-15']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
@@ -301,7 +303,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
+      run: |
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev
@@ -326,8 +328,7 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
-          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+      run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
