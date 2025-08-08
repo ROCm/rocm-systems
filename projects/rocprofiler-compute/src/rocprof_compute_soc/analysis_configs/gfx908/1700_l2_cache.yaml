@@ -235,11 +235,11 @@ Panel Config:
             + TCC_MISS_sum) != 0) else 0))
           unit: pct
         L2-Fabric Read BW:
-          value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+          value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
             * 64)) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
         L2-Fabric Write and Atomic BW:
-          value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+          value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
             * 32)) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
         HBM Bandwidth:
@@ -256,99 +256,99 @@ Panel Config:
         unit: Unit
       metric:
         Read BW:
-          avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-            * 64)) / (End_Timestamp - Start_Timestamp)))
-          min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-            * 64)) / (End_Timestamp - Start_Timestamp)))
-          max: MAX((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-            * 64)) / (End_Timestamp - Start_Timestamp)))
-          unit: Gbps
+          avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+            * 64)) / $denom))
+          min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+            * 64)) / $denom))
+          max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+            * 64)) / $denom))
+          unit: (Bytes  + $normUnit)
         HBM Read Traffic:
-          avg: AVG((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          min: MIN((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          min: MIN((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          max: MAX((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
           unit: pct
         Remote Read Traffic:
-          avg: AVG((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-            if (TCC_EA_RDREQ_sum != 0) else None))
-          min: MIN((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-            if (TCC_EA_RDREQ_sum != 0) else None))
-          max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-            if (TCC_EA_RDREQ_sum != 0) else None))
+          avg: AVG((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+            if (TCC_EA0_RDREQ_sum != 0) else None))
+          min: MIN((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+            if (TCC_EA0_RDREQ_sum != 0) else None))
+          max: MAX((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+            if (TCC_EA0_RDREQ_sum != 0) else None))
           unit: pct
         Uncached Read Traffic:
-          avg: AVG((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          avg: AVG((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          min: MIN((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          min: MIN((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          max: MAX((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
           unit: pct
         Write and Atomic BW:
-          avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          unit: Gbps
+          avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          unit: (Bytes  + $normUnit)
         HBM Write and Atomic Traffic:
-          avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          min: MIN((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          min: MIN((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          max: MAX((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
           unit: pct
         Remote Write and Atomic Traffic:
-          avg: AVG((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-            if (TCC_EA_WRREQ_sum != 0) else None))
-          min: MIN((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-            if (TCC_EA_WRREQ_sum != 0) else None))
-          max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-            if (TCC_EA_WRREQ_sum != 0) else None))
+          avg: AVG((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+            if (TCC_EA0_WRREQ_sum != 0) else None))
+          min: MIN((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+            if (TCC_EA0_WRREQ_sum != 0) else None))
+          max: MAX((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+            if (TCC_EA0_WRREQ_sum != 0) else None))
           unit: pct
         Atomic Traffic:
-          avg: AVG((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          avg: AVG((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          min: MIN((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          min: MIN((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          max: MAX((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
           unit: pct
         Uncached Write and Atomic Traffic:
-          avg: AVG((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          avg: AVG((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          min: MIN((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          min: MIN((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          max: MAX((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
           unit: pct
         Read Latency:
-          avg: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          avg: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          min: MIN(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          min: MIN(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
-          max: MAX(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+          max: MAX(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
             != 0) else None))
           unit: Cycles
         Write and Atomic Latency:
-          avg: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          avg: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          min: MIN(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
-          max: MAX(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+          max: MAX(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
             != 0) else None))
           unit: Cycles
         Atomic Latency:
-          avg: AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+          avg: AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
             != 0) else None))
-          min: MIN(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+          min: MIN(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
             != 0) else None))
-          max: MAX(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+          max: MAX(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
             != 0) else None))
           unit: Cycles
   - metric_table:
@@ -504,57 +504,57 @@ Panel Config:
         unit: Unit
       metric:
         Read (32B):
-          avg: AVG((TCC_EA_RDREQ_32B_sum / $denom))
-          min: MIN((TCC_EA_RDREQ_32B_sum / $denom))
-          max: MAX((TCC_EA_RDREQ_32B_sum / $denom))
+          avg: AVG((TCC_EA0_RDREQ_32B_sum / $denom))
+          min: MIN((TCC_EA0_RDREQ_32B_sum / $denom))
+          max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
           unit: (Req  + $normUnit)
         Read (64B):
-          avg: AVG(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-          min: MIN(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-          max: MAX(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+          avg: AVG(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+          min: MIN(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+          max: MAX(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
           unit: (Req  + $normUnit)
         Read (Uncached):
-          avg: AVG((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-          min: MIN((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-          max: MAX((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+          avg: AVG((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+          min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+          max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
           unit: (Req  + $normUnit)
         HBM Read:
-          avg: AVG((TCC_EA_RDREQ_DRAM_sum / $denom))
-          min: MIN((TCC_EA_RDREQ_DRAM_sum / $denom))
-          max: MAX((TCC_EA_RDREQ_DRAM_sum / $denom))
+          avg: AVG((TCC_EA0_RDREQ_DRAM_sum / $denom))
+          min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
+          max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
           unit: (Req  + $normUnit)
         Remote Read:
-          avg: AVG((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+          min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+          max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
           unit: (Req  + $normUnit)
         Write and Atomic (32B):
-          avg: AVG(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-          min: MIN(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-          max: MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+          avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+          min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+          max: MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
           unit: (Req  + $normUnit)
         Write and Atomic (Uncached):
-          avg: AVG((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-          min: MIN((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-          max: MAX((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+          avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+          min: MIN((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+          max: MAX((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
           unit: (Req  + $normUnit)
         Write and Atomic (64B):
-          avg: AVG((TCC_EA_WRREQ_64B_sum / $denom))
-          min: MIN((TCC_EA_WRREQ_64B_sum / $denom))
-          max: MAX((TCC_EA_WRREQ_64B_sum / $denom))
+          avg: AVG((TCC_EA0_WRREQ_64B_sum / $denom))
+          min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
+          max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
           unit: (Req  + $normUnit)
         HBM Write and Atomic:
-          avg: AVG((TCC_EA_WRREQ_DRAM_sum / $denom))
-          min: MIN((TCC_EA_WRREQ_DRAM_sum / $denom))
-          max: MAX((TCC_EA_WRREQ_DRAM_sum / $denom))
+          avg: AVG((TCC_EA0_WRREQ_DRAM_sum / $denom))
+          min: MIN((TCC_EA0_WRREQ_DRAM_sum / $denom))
+          max: MAX((TCC_EA0_WRREQ_DRAM_sum / $denom))
           unit: (Req  + $normUnit)
         Remote Write and Atomic:
-          avg: AVG((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-          min: MIN((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-          max: MAX((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+          avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+          min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+          max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
           unit: (Req  + $normUnit)
         Atomic:
-          avg: AVG((TCC_EA_ATOMIC_sum / $denom))
-          min: MIN((TCC_EA_ATOMIC_sum / $denom))
-          max: MAX((TCC_EA_ATOMIC_sum / $denom))
+          avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
+          min: MIN((TCC_EA0_ATOMIC_sum / $denom))
+          max: MAX((TCC_EA0_ATOMIC_sum / $denom))
           unit: (Req  + $normUnit)
