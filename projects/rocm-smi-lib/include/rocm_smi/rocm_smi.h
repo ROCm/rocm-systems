@@ -523,6 +523,7 @@ typedef enum {
   RSMI_VOLT_TYPE_FIRST = 0,
 
   RSMI_VOLT_TYPE_VDDGFX = RSMI_VOLT_TYPE_FIRST,  //!< Vddgfx GPU voltage
+  RSMI_VOLT_TYPE_VDDNB,                          //!< Vddnb iGPU
   RSMI_VOLT_TYPE_VDDBOARD,                       //!< Voltage for VDDBOARD
 
   RSMI_VOLT_TYPE_LAST = RSMI_VOLT_TYPE_VDDBOARD,
