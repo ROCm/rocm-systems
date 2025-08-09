@@ -28,6 +28,7 @@
 #include "trace_callbacks.hpp"
 
 #include <unistd.h>
+#include <atomic>
 #include <cassert>
 #include <fstream>
 
@@ -35,6 +36,10 @@ namespace Callbacks
 {
 rocprofiler_thread_trace_decoder_id_t decoder{};
 std::atomic<size_t>                   latency{0};
+std::atomic<bool>                     has_sdata{false};
+
+// defined in kernel_lds.cpp
+constexpr uint64_t SDATA_RECORD = 0xDEADBEEF;
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -80,6 +85,14 @@ shader_data_callback(rocprofiler_agent_id_t /* agent */,
                     void*                                          trace_events,
                     uint64_t                                       trace_size,
                     void* /* userdata */) {
+        if(record_type_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_SHADERDATA)
+        {
+            const auto* events =
+                static_cast<rocprofiler_thread_trace_decoder_shaderdata_t*>(trace_events);
+            for(size_t i = 0; i < trace_size; i++)
+                if(events[i].value == SDATA_RECORD) has_sdata = true;
+        }
+
         if(record_type_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
         for(size_t w = 0; w < trace_size; w++)
@@ -102,9 +115,22 @@ init()
 void
 finalize(void* /* tool_data */)
 {
-    rocprofiler_thread_trace_decoder_destroy(decoder);
+    const char* env_args   = std::getenv("ATT_NODETAIL");
+    const bool  extra_args = env_args ? std::stoi(env_args) != 0 : false;
 
-    if(latency.load() == 0) std::cerr << "Error: No latency was assigned to the trace!";
+    // only check if we have a valid decoder
+    if(decoder.handle != 0)
+    {
+        if(extra_args && latency != 0)
+            throw std::runtime_error("Got detailled profling in nondetail mode");
+        else if(!extra_args && latency == 0)
+            throw std::runtime_error("Missing detailed profiling!");
+
+        // disabling until new decoder version is picked up
+        // if(!has_sdata) throw std::runtime_error("Missing shaderdata record!");
+    }
+
+    rocprofiler_thread_trace_decoder_destroy(decoder);
 }
 
 }  // namespace Callbacks
