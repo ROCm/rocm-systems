@@ -13,6 +13,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
+* Dedicated Roofline documentation page that includes conceptual information and usage of each mode, with examples.
 
 * Add missing counters based on register specification which enables missing metrics
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
