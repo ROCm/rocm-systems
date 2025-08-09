@@ -169,18 +169,9 @@ class OmniSoC_Base:
         amd_smi_mclk = run(
             ["amd-smi", "static", "--clock", "--json"], exit_on_error=True
         )
-        amd_smi_mclk = json.loads(amd_smi_mclk)
-
-        if isinstance(amd_smi_mclk, dict):
-            # The output of `amd-smi static --clock --json` is a dict with
-            # amd-smi>=26.0.0.
-            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"][
-                "frequency_levels"
-            ]
-        else:
-            # For backward compatibility: the output of `amd-smi static --clock --json`
-            # used to be a list for amd-smi<26.0.0.
-            amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
+        # For backward compatibility: amd-smi < 26 does not have top level "gpu_data" key
+        amd_smi_mclk = json.loads(amd_smi_mclk).get("gpu_data", [])
+        amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
 
         # Choose the highest level of memory clock frequency
         amd_smi_mclk = amd_smi_mclk[sorted(amd_smi_mclk.keys())[-1]]
@@ -302,7 +293,8 @@ class OmniSoC_Base:
                     f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
                 )
             self.__args.filter_blocks = [
-                next(iter(metric.keys())) for metric in sets_info[set_selected]["metric"]
+                next(iter(metric.keys()))
+                for metric in sets_info[set_selected]["metric"]
             ]
 
         if not self.get_args().filter_blocks:
@@ -375,10 +367,14 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
-                })
+                counters = counters.union(
+                    {
+                        f"{counter_name}[{i}]"
+                        for i in range(
+                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
+                        )
+                    }
+                )
 
         return counters
 
