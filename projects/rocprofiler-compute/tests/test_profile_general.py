@@ -73,12 +73,12 @@ DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
 ALL_CSVS_MI100 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
     "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -90,12 +90,12 @@ ALL_CSVS_MI100 = sorted([
 ])
 
 ALL_CSVS_MI200 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
     "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -108,12 +108,12 @@ ALL_CSVS_MI200 = sorted([
     "timestamps.csv",
 ])
 ALL_CSVS_MI300 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
     "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
@@ -126,12 +126,12 @@ ALL_CSVS_MI300 = sorted([
     "timestamps.csv",
 ])
 ALL_CSVS_MI350 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
     "SQ_INST_LEVEL_VMEM.csv",
     "SQ_LEVEL_WAVES.csv",
-    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
     "pmc_perf.csv",
     "pmc_perf_0.csv",
     "pmc_perf_1.csv",
