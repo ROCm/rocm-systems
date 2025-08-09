@@ -1054,8 +1054,21 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_snapshot_v0_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_pc_sampling_memory_counters_t data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("load_cnt", load_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("store_cnt", store_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("bvh_cnt", bvh_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("sample_cnt", sample_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("ds_cnt", ds_cnt);
+    ROCP_SDK_SAVE_DATA_BITFIELD("km_cnt", km_cnt);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_v0_t data)
 {
+    // TODO: we probably don't need to serialize flags.
     // flags specific for stochastic sampling
     ROCP_SDK_SAVE_DATA_FIELD(flags);
 
@@ -1076,7 +1089,11 @@ save(ArchiveT& ar, rocprofiler_pc_sampling_record_stochastic_v0_t data)
     ROCP_SDK_SAVE_DATA_BITFIELD("wave_cnt", wave_count);
     ROCP_SDK_SAVE_DATA_FIELD(snapshot);
 
-    // TODO: add memory counters
+    // serializing memory counters only if they exist
+    if(data.flags.has_memory_counter)
+    {
+        ROCP_SDK_SAVE_DATA_FIELD(memory_counters);
+    }
 }
 
 template <typename ArchiveT>

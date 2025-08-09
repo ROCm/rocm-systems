@@ -22,6 +22,13 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 set(TRANSPOSE_NUM_THREADS 16)
 set(TRANSPOSE_NUM_ITERATIONS 100)
 
+list(GET rocprofiler-sdk-tests-gfx-info 0 gpu-0-gfx-info)
+if(gpu-0-gfx-info MATCHES "gfx120[0-9]")
+    # reducing job for Navi4x GPUs
+    set(TRANSPOSE_NUM_THREADS 4)
+    set(TRANSPOSE_NUM_ITERATIONS 50)
+endif()
+
 add_test(
     NAME rocprofv3-test-pc-sampling-host-trap-transpose-multiple-agents-input-cmd-execute
     COMMAND

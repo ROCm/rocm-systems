@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx12.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx950.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
@@ -113,7 +114,7 @@ copyChipletId(PcSamplingRecordT& record, const SType& sample)
     record.hw_id.chiplet = sample.chiplet_and_wave_id >> 8;
 }
 
-template <typename GFX9, typename HwIdT>
+template <typename GFX, typename HwIdT>
 inline void
 copyHwId(HwIdT& hw_id, const uint32_t hsa_hw_id);
 
@@ -143,6 +144,33 @@ copyHwId<GFX9, rocprofiler_pc_sampling_hw_id_v0_t>(rocprofiler_pc_sampling_hw_id
     // 29:27 -> state_id (ignored)
     // 31:30 -> me_id
     hw_id.microengine_id = EXTRACT_BITS(hw_id_reg, 31, 30);
+}
+
+template <>
+inline void
+copyHwId<GFX12, rocprofiler_pc_sampling_hw_id_v0_t>(rocprofiler_pc_sampling_hw_id_v0_t& hw_id,
+                                                    const uint32_t                      hw_id_reg)
+{
+    // 4:0 -> wave_id
+    hw_id.wave_id = EXTRACT_BITS(hw_id_reg, 4, 0);
+    // 8:5 -> queue_id
+    hw_id.queue_id = EXTRACT_BITS(hw_id_reg, 8, 5);
+    // 13:10 -> wgp_id
+    hw_id.cu_or_wgp_id = EXTRACT_BITS(hw_id_reg, 13, 10);
+    // 15:14 -> simd_id
+    hw_id.simd_id = EXTRACT_BITS(hw_id_reg, 15, 14);
+    // 16 -> sa_id
+    hw_id.shader_array_id = EXTRACT_BITS(hw_id_reg, 16, 16);
+    // 17 -> me_id
+    hw_id.microengine_id = EXTRACT_BITS(hw_id_reg, 17, 17);
+    // 19:18 -> se_id
+    hw_id.shader_engine_id = EXTRACT_BITS(hw_id_reg, 19, 18);
+    // 21:20 -> pipe_id
+    hw_id.pipe_id = EXTRACT_BITS(hw_id_reg, 21, 20);
+    // 27:23 -> wg_id
+    hw_id.workgroup_id = EXTRACT_BITS(hw_id_reg, 27, 23);
+    // 31:28 -> vm_id
+    hw_id.vm_id = EXTRACT_BITS(hw_id_reg, 31, 28);
 }
 
 template <typename PcSamplingRecordT, typename SType>
@@ -290,6 +318,90 @@ copySample<GFX11, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sa
     // TODO: decode other fields
     // TODO: implement logic for manipulating stochastic related fields
     // ret.wave_count      = sample_.perf_snapshot_data1 & 0x3F;
+    return ret;
+}
+
+/**
+ * @brief Host trap V0 sample for GFX12
+ */
+template <>
+inline rocprofiler_pc_sampling_record_host_trap_v0_t
+copySample<GFX12, rocprofiler_pc_sampling_record_host_trap_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_host_trap_v1*>(sample);
+    auto        ret     = copySampleHeader<rocprofiler_pc_sampling_record_host_trap_v0_t>(sample_);
+    copyHwId<GFX12>(ret.hw_id, sample_.hw_id);
+    return ret;
+}
+
+template <>
+inline rocprofiler_pc_sampling_record_stochastic_v0_t
+copySample<GFX12, rocprofiler_pc_sampling_record_stochastic_v0_t>(const void* sample)
+{
+    const auto& sample_ = *static_cast<const perf_sample_snapshot_v1*>(sample);
+
+    // Extracting data from the perf_snapshot_data register
+    auto perf_snapshot_data = sample_.perf_snapshot_data;
+    // The sample is valid  if perf_snapshot_data.valid == 1
+    auto valid = static_cast<bool>(EXTRACT_BITS(perf_snapshot_data, 0, 0));
+    if(!valid)
+    {
+        // To reduce refactoring of the PC sampling parser, we agreed to internally represent
+        // invalid samples with `rocprofiler_pc_sampling_record_stochastic_v0_t` with size 0.
+        // Eventually, those records are replaced with rocprofiler_pc_sampling_record_invalid_t
+        // and placed into the SDK buffer consumed by the end tool.
+        rocprofiler_pc_sampling_record_stochastic_v0_t invalid{};
+        invalid.size = 0;
+        // No need to further process invalid samples
+        return invalid;
+    }
+
+    auto ret = copySampleHeader<rocprofiler_pc_sampling_record_stochastic_v0_t>(sample_);
+    copyHwId<GFX12>(ret.hw_id, sample_.hw_id);
+
+    // wave issued an instruction
+    ret.wave_issued = EXTRACT_BITS(perf_snapshot_data, 1, 1);
+    // type of issued instruction, valid only if `ret.wave_issued` is true.
+    ret.inst_type = translate_inst<GFX12>(EXTRACT_BITS(perf_snapshot_data, 5, 2));
+    // reason for not issuing an instruction, valid only if `ret.wave_issued` is false
+    ret.snapshot.reason_not_issued =
+        translate_reason<GFX12>(EXTRACT_BITS(perf_snapshot_data, 8, 6));
+
+    // arbiter state information
+    auto     perf_snapshot_data1 = sample_.perf_snapshot_data1;
+    uint16_t arb_state           = EXTRACT_BITS(perf_snapshot_data1, 21, 6);
+
+    ret.snapshot.arb_state_issue_brmsg      = EXTRACT_BITS(arb_state, 0, 0);
+    ret.snapshot.arb_state_issue_exp        = EXTRACT_BITS(arb_state, 1, 1);
+    ret.snapshot.arb_state_issue_lds_direct = EXTRACT_BITS(arb_state, 2, 2);
+    ret.snapshot.arb_state_issue_lds        = EXTRACT_BITS(arb_state, 3, 3);
+    ret.snapshot.arb_state_issue_vmem_tex   = EXTRACT_BITS(arb_state, 4, 4);
+    ret.snapshot.arb_state_issue_scalar     = EXTRACT_BITS(arb_state, 5, 5);
+    ret.snapshot.arb_state_issue_valu       = EXTRACT_BITS(arb_state, 6, 6);
+
+    ret.snapshot.arb_state_stall_brmsg      = EXTRACT_BITS(arb_state, 8, 8);
+    ret.snapshot.arb_state_stall_exp        = EXTRACT_BITS(arb_state, 9, 9);
+    ret.snapshot.arb_state_stall_lds_direct = EXTRACT_BITS(arb_state, 10, 10);
+    ret.snapshot.arb_state_stall_lds        = EXTRACT_BITS(arb_state, 11, 11);
+    ret.snapshot.arb_state_stall_vmem_tex   = EXTRACT_BITS(arb_state, 12, 12);
+    ret.snapshot.arb_state_stall_scalar     = EXTRACT_BITS(arb_state, 13, 13);
+    ret.snapshot.arb_state_stall_valu       = EXTRACT_BITS(arb_state, 14, 14);
+
+    ret.wave_count = EXTRACT_BITS(perf_snapshot_data1, 5, 0);
+
+    // Memory counters exist on GFX12.
+    ret.flags.has_memory_counter = true;
+    // Extracting memory counters from the perf_snapshot_data2 register
+    auto perf_snapshot_data2       = sample_.perf_snapshot_data2;
+    ret.memory_counters.load_cnt   = EXTRACT_BITS(perf_snapshot_data2, 5, 0);
+    ret.memory_counters.store_cnt  = EXTRACT_BITS(perf_snapshot_data2, 11, 6);
+    ret.memory_counters.bvh_cnt    = EXTRACT_BITS(perf_snapshot_data2, 14, 12);
+    ret.memory_counters.sample_cnt = EXTRACT_BITS(perf_snapshot_data2, 20, 15);
+    ret.memory_counters.ds_cnt     = EXTRACT_BITS(perf_snapshot_data2, 26, 21);
+    ret.memory_counters.km_cnt     = EXTRACT_BITS(perf_snapshot_data2, 31, 27);
+
+    // TODO: assert that the wave_id of snapshot_data matches the hw_id.wave_id
+
     return ret;
 }
 
