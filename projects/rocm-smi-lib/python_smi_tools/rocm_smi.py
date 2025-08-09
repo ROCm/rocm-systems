@@ -1443,7 +1443,7 @@ def setClocks(deviceList, clktype, clk):
             # Validate frequency bitmask
             freq = rsmi_frequencies_t()
             ret = rocmsmi.rsmi_dev_gpu_clk_freq_get(device, rsmi_clk_names_dict[clktype], byref(freq))
-            if rsmi_ret_ok(ret, device, 'get_gpu_clk_freq_' + str(clktype)) == False:
+            if not rsmi_ret_ok(ret, device, 'get_gpu_clk_freq_' + str(clktype)):
                 RETCODE = 1
                 return
             # The freq_bitmask should be less than 2^(freqs.num_supported)
@@ -1463,7 +1463,7 @@ def setClocks(deviceList, clktype, clk):
             # Validate the bandwidth bitmask
             bw = rsmi_pcie_bandwidth_t()
             ret = rocmsmi.rsmi_dev_pci_bandwidth_get(device, byref(bw))
-            if rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth') == False:
+            if not rsmi_ret_ok(ret, device, 'get_PCIe_bandwidth'):
                 RETCODE = 1
                 return
             # The freq_bitmask should be less than 2^(bw.transfer_rate.num_supported)
@@ -1694,7 +1694,7 @@ def setPowerOverDrive(deviceList, value, autoRespond):
             new_power_cap.value = int(value) * 1000000
 
         ret = rocmsmi.rsmi_dev_power_cap_range_get(device, 0, byref(power_cap_max), byref(power_cap_min))
-        if rsmi_ret_ok(ret, device, 'get_power_cap_range') == False:
+        if not rsmi_ret_ok(ret, device, 'get_power_cap_range'):
             printErrLog(device, 'Unable to parse Power OverDrive range')
             RETCODE = 1
             continue
@@ -4490,7 +4490,7 @@ if __name__ == '__main__':
 
     if not PRINT_JSON:
         print('\n')
-    if not isConciseInfoRequested(args) and args.showhw == False:
+    if not isConciseInfoRequested(args) and not args.showhw:
         printLogSpacer(headerString)
 
     if args.showallinfo:
@@ -4743,10 +4743,10 @@ if __name__ == '__main__':
             devCsv = ''
             sysCsv = ''
             # JSON won't have any 'system' data without one of these flags
-            if args.showdriverversion and args.showallinfo == False:
+            if args.showdriverversion and not args.showallinfo:
                 sysCsv = formatCsv(['system'])
                 print('%s' % (sysCsv))
-            elif args.showallinfo is True:
+            elif args.showallinfo:
                 sysCsv = formatCsv(['system'])
                 devCsv = formatCsv(deviceList)
                 print('%s\n%s' % (sysCsv, devCsv))
@@ -4754,7 +4754,7 @@ if __name__ == '__main__':
                 devCsv = formatCsv(deviceList)
                 print(devCsv)
 
-    if not isConciseInfoRequested(args) and args.showhw == False:
+    if not isConciseInfoRequested(args) and not args.showhw:
         printLogSpacer(footerString)
 
     rsmi_ret_ok(rocmsmi.rsmi_shut_down())
