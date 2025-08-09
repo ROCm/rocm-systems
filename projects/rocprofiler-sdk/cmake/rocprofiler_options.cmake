@@ -34,6 +34,13 @@ rocprofiler_add_option(
     ROCPROFILER_BUILD_CI "Enable continuous integration default values for options" OFF
     ADVANCED)
 
+rocprofiler_add_option(ROCPROFILER_GPU_TARGETS "Targets for building tests and samples"
+                       "")
+if(NOT ROCPROFILER_GPU_TARGETS OR ROCPROFILER_GPU_TARGETS STREQUAL "")
+    set(ROCPROFILER_GPU_TARGETS
+        "gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102")
+endif()
+
 rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"

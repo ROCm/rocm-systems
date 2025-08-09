@@ -236,14 +236,14 @@ main()
     // Barrier on queue 1 waiting for signal_2 (from queue2's Kernel B)
     submit_barrier_packet(obj, queue1, completion_signal_2);
 
+    // Second dispatch packet on queue 1, Kernel C (waits for barrier above)
+    submit_kernel_packet(obj, queue1, copyC, args, completion_signal_3);
+
     // Barrier on queue 2 waiting for signal_1 (from queue1's Kernel A)
     submit_barrier_packet(obj, queue2, completion_signal_1);
 
     // Kernel B on queue 2 (waits for barrier above)
     submit_kernel_packet(obj, queue2, copyB, args, completion_signal_2);
-
-    // Second dispatch packet on queue 1, Kernel C (waits for barrier above)
-    submit_kernel_packet(obj, queue1, copyC, args, completion_signal_3);
 
     // Set up arguments for second batch
     args_memory->a = c;

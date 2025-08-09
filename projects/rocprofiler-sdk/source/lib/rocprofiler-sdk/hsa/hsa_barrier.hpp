@@ -31,9 +31,12 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
+#include <fmt/format.h>
+
 #include <atomic>
 #include <functional>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -72,6 +75,9 @@ public:
     // If this is the last queue waiting, clears the barrier and marks it as complete.
     void remove_queue(const Queue* queue);
 
+    // Returns a string containing all class variable data
+    std::string to_string() const;
+
 private:
     std::function<void()>                                      _barrier_finished = {};
     CoreApiTable                                               _core_api         = {};
@@ -86,3 +92,23 @@ private:
 
 }  // namespace hsa
 }  // namespace rocprofiler
+
+namespace fmt
+{
+// fmt::format support for hsa_barrier
+template <>
+struct formatter<rocprofiler::hsa::hsa_barrier>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(rocprofiler::hsa::hsa_barrier const& barrier, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{}", barrier.to_string());
+    }
+};
+}  // namespace fmt
