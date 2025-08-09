@@ -285,9 +285,8 @@ class PerfettoReader:
 
         counter_df = self.query_tp(
             """SELECT
-                counter_track.id as slice_id,
+                counter.id as slice_id,
                 counter.track_id,
-                counter_track.name as track_name,
                 CASE
                     WHEN counter_track.name LIKE '%SCRATCH MEMORY%' THEN 'scratch_memory'
                     WHEN counter_track.name LIKE '%ALLOCATE BYTES%' THEN 'memory_allocation'
@@ -296,16 +295,15 @@ class PerfettoReader:
                 0 as depth,
                 0 as stack_id,
                 0 as parent_stack_id,
-                MIN(CASE WHEN counter.value > 0 THEN counter.ts ELSE NULL END) as ts,
-                0 as dur,
+                counter.ts as ts,
+                end.ts - counter.ts as dur,
                 counter_track.name as name
-            FROM counter_track
-            JOIN counter ON counter.track_id = counter_track.id
+            FROM counter AS counter
+            JOIN counter AS end ON counter.id + 1 == end.id AND end.track_id == counter.track_id
+            JOIN counter_track ON counter.track_id = counter_track.id
             WHERE (counter_track.name LIKE 'AGENT%'
                    OR counter_track.name LIKE '%SCRATCH MEMORY%'
-                   OR counter_track.name LIKE '%ALLOCATE BYTES%')
-            AND counter.value > 0
-            GROUP BY counter.track_id"""
+                   OR counter_track.name LIKE '%ALLOCATE BYTES%') AND counter.id % 2 == 0"""
         )
 
         # Transform counter data to match the main dataframe schema
@@ -426,26 +424,38 @@ class PerfettoReader:
             _thread_name = (
                 thread.thread_name if thread.track_name is None else thread.track_name
             )
-            for process in self.process.itertuples():
-                if process.tp_index != thread.tp_index:
-                    continue
-                _process_name = (
-                    process.process_name
-                    if process.track_name is None
-                    else process.track_name
-                )
-                if process.track_id == thread.track_parent_id:
+            if thread.track_parent_id == 0:
                     self.track_ids[thread.tp_index][thread.track_id] = {
                         "tp_index": thread.tp_index,
-                        "pid": process.pid,
+                        "pid": 0,
                         "tid": thread.tid,
                         "rank": -1,
                         "thread": -1,
                         "prio": 0 if thread.is_main_thread else 1,
-                        "process_name": _process_name,
+                        "process_name": "",
                         "thread_name": _thread_name,
                     }
-                    break
+            else:
+                for process in self.process.itertuples():
+                    if process.tp_index != thread.tp_index:
+                        continue
+                    _process_name = (
+                        process.process_name
+                        if process.track_name is None
+                        else process.track_name
+                    )
+                    if process.track_id == thread.track_parent_id:
+                        self.track_ids[thread.tp_index][thread.track_id] = {
+                            "tp_index": thread.tp_index,
+                            "pid": process.pid,
+                            "tid": thread.tid,
+                            "rank": -1,
+                            "thread": -1,
+                            "prio": 0 if thread.is_main_thread else 1,
+                            "process_name": _process_name,
+                            "thread_name": _thread_name,
+                        }
+                        break
 
         # some track ids do not have an associated system thread id so handle them here.
         # for example, omnitrace post-processes sampling data collected on a thread
