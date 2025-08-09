@@ -25,6 +25,7 @@
 """Get host/gpu specs."""
 
 import importlib
+import json
 import os
 import re
 import socket
@@ -154,32 +155,34 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocm_version = get_rocm_ver().strip()
     # FIXME: use device
 
-    amd_smi_output = run(["amd-smi", "static"], exit_on_error=True)
-    vbios_pattern = r"PART_NUMBER:\s*(\S+)"
-    compute_partition_pattern = r"COMPUTE_PARTITION:\s*(\S+)"
-    accelerator_partition_pattern = r"ACCELERATOR_PARTITION:\s*(\S+)"
-    memory_partition_pattern = r"MEMORY_PARTITION:\s*(\S+)"
+    # Parse json from amd-smi
+    amd_smi_static_json = json.loads(
+        run(["amd-smi", "static", "--json"], exit_on_error=True)
+    )
 
-    vbios = search(vbios_pattern, amd_smi_output)
+    # NOTE: Need to obtain partition information explicitly from amd-smi partition
+    #       https://github.com/ROCm/amdsmi/commit/88473b7fd0d34790bca09fcc3607ea79e3a837e0
+    amd_smi_partition_json = json.loads(
+        run(["amd-smi", "partition", "--json"], exit_on_error=True)
+    )
 
-    # Non-high-frequency System Patterns
-    compute_partition = search(compute_partition_pattern, amd_smi_output)
-    console_debug(f"amd-smi compute partition: {compute_partition}")
+    gpu_data = amd_smi_static_json.get("gpu_data", [])
+    vbios = gpu_data[0].get("vbios", {}).get("part_number", None) if gpu_data else None
 
-    # High-frequency System Pattern using keyword accelerator
+    partition_data = amd_smi_partition_json.get("current_partition", [])
+    compute_partition = (
+        partition_data[0].get("accelerator_type", None) if partition_data else None
+    )
+    memory_partition = partition_data[0].get("memory", None) if partition_data else None
+
     if compute_partition is None:
-        compute_partition = search(accelerator_partition_pattern, amd_smi_output)
-        console_debug(f"amd-smi accelerator partition: {compute_partition}")
-
-    # Apply default compute partition is above fails
-    if compute_partition is None:
-        console_warning("Can not detect compute/accelerator partition from amd-smi.")
-        console_warning("Applying default compute partition: SPX")
+        console_warning("Can not detect accelerator partition from amd-smi.")
+        console_warning("Applying default accelerator partition: SPX")
+        # Apply default compute partition
         compute_partition = "SPX"
 
-    memory_partition = search(memory_partition_pattern, amd_smi_output)
     if memory_partition is None:
-        memory_partition = "NA"
+        console_warning("Can not detect memory partition from amd-smi.")
 
     console_debug(
         "vbios is {}, compute partition is {}, memory partition is {}".format(
@@ -218,9 +221,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Load above SoC specs via module import
     try:
-        soc_module = importlib.import_module(
-            "rocprof_compute_soc.soc_" + specs.gpu_arch
-        )
+        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + specs.gpu_arch)
     except ModuleNotFoundError as e:
         console_error(
             "Arch %s marked as supported, but couldn't find class implementation %s."
@@ -619,7 +620,7 @@ class MachineSpecs:
     )
 
     def get_hbm_channels(self):
-        if self.memory_partition.lower().startswith("nps"):
+        if self.memory_partition and self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
             if self.memory_partition.lower() == "nps4":
                 hbmchannels /= 4
@@ -677,9 +678,7 @@ class MachineSpecs:
                         if name == "version":
                             topstr += f"Output version: {value}\n"
                         else:
-                            console_error(
-                                f"Unknown out of table printing field: {name}"
-                            )
+                            console_error(f"Unknown out of table printing field: {name}")
                         continue
                     if "name" in class_field.metadata:
                         name = class_field.metadata["name"]
