@@ -141,6 +141,23 @@ loadYAML(const std::string& filename, std::optional<ArchMetric> add_metric)
                 header.push_back(counter);
             }
         }
+        else
+        {
+            ROCP_ERROR << "Invalid extra counters YAML format. Expected structure:\n"
+                       << "rocprofiler-sdk:\n"
+                       << "  counters-schema-version: 1\n"
+                       << "  counters:\n"
+                       << "  - name: COUNTER_NAME\n"
+                       << "    description: 'Counter description'\n"
+                       << "    properties: []\n"
+                       << "    definitions:\n"
+                       << "    - architectures:\n"
+                       << "      - gfx942\n"
+                       << "      block: BLOCK_NAME\n"
+                       << "      event: EVENT_ID\n"
+                       << "Got:\n"
+                       << override.data;
+        }
     }
 
     for(const auto& counter : header)
