@@ -121,7 +121,6 @@ ALL_CSVS_MI300 = sorted([
     "pmc_perf_3.csv",
     "pmc_perf_4.csv",
     "pmc_perf_5.csv",
-    "pmc_perf_6.csv",
     "sysinfo.csv",
     "timestamps.csv",
 ])
