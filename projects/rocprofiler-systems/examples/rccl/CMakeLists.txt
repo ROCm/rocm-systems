@@ -121,3 +121,18 @@ if(hip_FOUND AND rccl_FOUND)
         set(RCCL_TEST_TARGETS "${_RCCL_TEST_TARGETS}" CACHE INTERNAL "rccl-test targets")
     endif()
 endif()
+
+# Only add the finalize_wrap if not disabled
+if(NOT DEFINED DISABLE_AMDSMI_WRAP)
+    add_library(finalize_wrap SHARED libamdsmi_wrap.cpp)
+    target_link_libraries(finalize_wrap PRIVATE dl)
+    set_target_properties(
+        finalize_wrap
+        PROPERTIES
+            POSITION_INDEPENDENT_CODE ON
+            OUTPUT_NAME finalize_wrap
+            LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+            ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib
+    )
+endif()

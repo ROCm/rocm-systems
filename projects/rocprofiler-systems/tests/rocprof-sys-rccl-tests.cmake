@@ -92,3 +92,39 @@ foreach(_TARGET ${RCCL_TEST_TARGETS})
         ARGS --counter-names "RCCL Comm" -p
     )
 endforeach()
+
+# Preload finalize_wrap only for all 20 test cases failing due to double free or corruption issue
+if(TARGET finalize_wrap AND NOT DISABLE_AMDSMI_WRAP)
+    # List of all RCCL tests known to need finalize_wrap
+    set(_ROCPROFSYS_RCCL_TESTS
+        rccl-test-all-gather-perf-sampling
+        rccl-test-all-gather-perf-binary-rewrite-run
+        rccl-test-all-reduce-perf-sampling
+        rccl-test-all-reduce-perf-binary-rewrite-run
+        rccl-test-alltoall-perf-sampling
+        rccl-test-alltoall-perf-binary-rewrite-run
+        rccl-test-alltoallv-perf-sampling
+        rccl-test-alltoallv-perf-binary-rewrite-run
+        rccl-test-broadcast-perf-sampling
+        rccl-test-broadcast-perf-binary-rewrite-run
+        rccl-test-gather-perf-sampling
+        rccl-test-gather-perf-binary-rewrite-run
+        rccl-test-reduce-perf-sampling
+        rccl-test-reduce-perf-binary-rewrite-run
+        rccl-test-reduce-scatter-perf-sampling
+        rccl-test-reduce-scatter-perf-binary-rewrite-run
+        rccl-test-scatter-perf-sampling
+        rccl-test-scatter-perf-binary-rewrite-run
+        rccl-test-sendrecv-perf-sampling
+        rccl-test-sendrecv-perf-binary-rewrite-run
+    )
+
+    foreach(_TEST_NAME IN LISTS _ROCPROFSYS_RCCL_TESTS)
+        set_tests_properties(
+            ${_TEST_NAME}
+            PROPERTIES
+                ENVIRONMENT
+                    "LD_PRELOAD=$<TARGET_FILE:finalize_wrap>;ROCPROFSYS_DEBUG_SETTINGS=1"
+        )
+    endforeach()
+endif()
