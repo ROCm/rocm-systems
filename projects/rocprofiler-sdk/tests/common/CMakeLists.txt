@@ -9,7 +9,7 @@ set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
 
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
-    "threw an exception|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
+    "threw an exception|terminate called after throwing|Permission denied|Could not create logging file|failed with error code|Subprocess aborted"
     CACHE INTERNAL "Default FAIL_REGULAR_EXPRESSION for tests")
 
 set(DEFAULT_GPU_TARGETS
@@ -179,4 +179,80 @@ function(rocprofiler_configure_pytest_files)
         configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
                        ${RCPF_OUTPUT_DIRECTORY}/${FILENAME} @ONLY)
     endforeach()
+endfunction()
+
+function(rocprofiler_add_test)
+    cmake_parse_arguments(
+        arg
+        "WILL_FAIL" # <options>
+        "NAME;TARGET;WORKING_DIRECTORY;DEPENDS;TIMEOUT;LABELS;DISABLED" # <one_value_keywords>
+        "ARGS;COMMAND;ATTACHED_FILES;ATTACHED_FILES_ON_FAIL;ENVIRONMENT;PASS_REGULAR_EXPRESSION;FAIL_REGULAR_EXPRESSION;SKIP_REGULAR_EXPRESSION" # <multi_value_keywords>
+        ${ARGN})
+
+    # Helper to set a property only if the arg is set
+    function(_rocprofiler_set_test_property_if_arg TEST_NAME PROPERTY_NAME)
+        if(DEFINED "arg_${PROPERTY_NAME}")
+            set_tests_properties(${TEST_NAME} PROPERTIES ${PROPERTY_NAME}
+                                                         "${arg_${PROPERTY_NAME}}")
+        endif()
+    endfunction()
+
+    if(DEFINED arg_COMMAND AND DEFINED arg_TARGET)
+        message(SEND_ERROR "Cannot specify both TARGET and COMMAND arguments at once")
+        return()
+    elseif(NOT DEFINED arg_COMMAND AND NOT DEFINED arg_TARGET)
+        message(SEND_ERROR "One of COMMAND or TARGET must be specified")
+        return()
+    endif()
+
+    if(DEFINED arg_COMMAND AND NOT DEFINED arg_DEPENDS)
+        message(SEND_ERROR "COMMAND signature without DEPENDS specified")
+
+    elseif(
+        DEFINED arg_COMMAND
+        AND DEFINED arg_DEPENDS
+        AND TARGET ${arg_DEPENDS})
+
+        list(JOIN arg_COMMAND " " joined_CMD)
+
+        add_test(NAME "${arg_NAME}" COMMAND ${arg_COMMAND})
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} TIMEOUT)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} LABELS)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} WORKING_DIRECTORY)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ENVIRONMENT)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} PASS_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} FAIL_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} SKIP_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ATTACHED_FILES)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ATTACHED_FILES_ON_FAIL)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} DEPENDS)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} DISABLED)
+
+    elseif(DEFINED arg_TARGET AND TARGET ${arg_TARGET})
+        list(JOIN arg_ARGS " " joined_ARGS)
+
+        add_test(NAME "${arg_NAME}" COMMAND $<TARGET_FILE:${arg_TARGET}> ${arg_ARGS})
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} TIMEOUT)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} LABELS)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} WORKING_DIRECTORY)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ENVIRONMENT)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} PASS_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} FAIL_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} SKIP_REGULAR_EXPRESSION)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ATTACHED_FILES)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} ATTACHED_FILES_ON_FAIL)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} DEPENDS)
+        _rocprofiler_set_test_property_if_arg(${arg_NAME} DISABLED)
+    else()
+        add_test(
+            NAME "${arg_NAME}"
+            COMMAND
+                ${CMAKE_COMMAND} -E echo
+                "'${arg_TARGET}' with args '${arg_ARGS}' could not be executed because the target does not exist"
+            )
+
+        # If this target is accidentally run, report it as a failed test
+        set_tests_properties("${arg_NAME}" PROPERTIES FAIL_REGULAR_EXPRESSION ".*"
+                                                      DISABLED ${arg_DISABLED})
+    endif()
 endfunction()
