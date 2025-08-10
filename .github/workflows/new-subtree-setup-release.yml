@@ -45,11 +45,11 @@ jobs:
 
       - name: Add Repositories to the Super-repo
         run: |
-          for repo in $(cat .github/repos-added-config-.json | jq -r '.repositories[].name'); do
-            repo_name=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
-            url=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
-            branch=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
-            category=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
+          for repo in $(cat .github/repos-added-config-release.json | jq -r '.repositories[].name'); do
+            repo_name=$(cat .github/repos-added-config-release.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
+            url=$(cat .github/repos-added-config-release.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
+            branch=$(cat .github/repos-added-config-release.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
+            category=$(cat .github/repos-added-config-release.json | jq -r ".repositories[] | select(.name == \"$repo\") | .category")
 
             git subtree add --prefix "${category}/${repo}" https://github.com/${url}.git "$branch"
           done
