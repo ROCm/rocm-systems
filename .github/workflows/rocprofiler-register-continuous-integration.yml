@@ -2,6 +2,8 @@ name: rocprofiler-register Continuous Integration
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-register/**'
       - '!projects/rocprofiler-register/*.md'
@@ -45,7 +47,7 @@ jobs:
         #     ci-args: '--memcheck UndefinedBehaviorSanitizer'
         #     ci-tag: '-undefined-behavior-sanitizer'
 
-    runs-on: rocprofiler-ubuntu-22
+    runs-on: rocprofiler-mi3xx
 
     env:
         BUILD_TYPE: RelWithDebInfo

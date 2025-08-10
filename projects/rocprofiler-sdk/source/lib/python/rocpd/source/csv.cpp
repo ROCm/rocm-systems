@@ -318,7 +318,13 @@ write_memory_allocation_csv(
         CsvType::MEMORY_ALLOCATION,
         memory_alloc_gen,
         [](CsvManager& cm, CsvType type, const rocpd::types::memory_allocation& malloc) {
-            std::string operation = fmt::format("MEMORY_ALLOCATION_{}", malloc.type);
+            std::string normalized_type = malloc.type;
+            if (normalized_type == "ALLOC")
+            {
+                normalized_type = "ALLOCATE";
+            }
+
+            std::string operation = fmt::format("MEMORY_ALLOCATION_{}", normalized_type);
 
             std::string agent_identifier = create_agent_index(cm.config.agent_index_value,
                                                               malloc.agent_abs_index,

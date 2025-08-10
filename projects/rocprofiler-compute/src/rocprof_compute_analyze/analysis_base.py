@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import copy
 import sys
 import textwrap
@@ -231,7 +230,7 @@ class OmniAnalyze_Base:
 
             # Todo: more err check
             if not (
-                self.__args.nodes != None
+                self.__args.nodes is not None
                 or self.__args.list_nodes
                 or self.__args.spatial_multiplexing
             ):

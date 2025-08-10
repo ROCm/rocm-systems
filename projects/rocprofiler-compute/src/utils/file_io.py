@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import os
 import re
 from collections import OrderedDict
@@ -83,7 +82,8 @@ def load_panel_configs(dirs):
                                 metric_table["metric"] = {}
                         d[config_yml["Panel Config"]["id"]] = config_yml["Panel Config"]
 
-    # TODO: sort metrics as the header order in case they are not defined in the same order
+    # TODO: sort metrics as the header order in case they-
+    # are not defined in the same order
 
     od = OrderedDict(sorted(d.items()))
     # for key, value in od.items():
@@ -160,9 +160,9 @@ def create_df_kernel_top_stats(
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
-        {"ExeTime": ["count", "sum", "mean", "median"]}
-    )
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
+        "ExeTime": ["count", "sum", "mean", "median"]
+    })
 
     time_unit_str = "(" + time_unit + ")"
     grouped.columns = [
@@ -208,8 +208,8 @@ def create_df_pmc(
         dfs = []
         coll_levels = []
 
-        df = pd.DataFrame()
-        new_df = pd.DataFrame()
+        df = pd.DataFrame()  # noqa: F841
+        new_df = pd.DataFrame()  # noqa: F841
         for root, dirs, files in os.walk(raw_data_dir):
             for f in files:
                 # print("file ", f)

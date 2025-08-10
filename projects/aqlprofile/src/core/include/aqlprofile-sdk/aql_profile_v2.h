@@ -248,12 +248,20 @@ typedef enum {
 hsa_status_t aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                                      aqlprofile_pmc_info_type_t attribute, void* value);
 
+typedef enum aqlprofile_att_parameter_rt_timestamp_t
+{
+  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DEFAULT = 0,
+  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_ENABLE,
+  AQLPROFILE_ATT_PARAMETER_RT_TIMESTAMP_DISABLE
+} aqlprofile_att_parameter_rt_timestamp_t;
+
 typedef enum aqlprofile_att_parameter_name_ext_t
 {
   /**
    * HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE + 1
    */
   AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH = 11,
+  AQLPROFILE_ATT_PARAMETER_NAME_RT_TIMESTAMP,  // one of aqlprofile_att_parameter_rt_timestamp_t
 } aqlprofile_att_parameter_name_ext_t;
 
 // Profile parameter object

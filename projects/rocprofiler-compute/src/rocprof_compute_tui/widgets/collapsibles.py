@@ -79,7 +79,10 @@ def load_config(config_path) -> Dict[str, Any]:
             return yaml.safe_load(file)
     except FileNotFoundError:
         raise FileNotFoundError(
-            f"Configuration file {config_path} not found, \nplease populate the analysis_config.yaml file."
+            (
+                f"Configuration file {config_path} not found, \n"
+                "please populate the analysis_config.yaml file."
+            )
         )
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML configuration: {e}")
@@ -138,7 +141,6 @@ def build_section_from_config(
                     collapsed=subsection_config.get("collapsed", True),
                 )
             )
-
     return Collapsible(*children, title=title, collapsed=collapsed)
 
 

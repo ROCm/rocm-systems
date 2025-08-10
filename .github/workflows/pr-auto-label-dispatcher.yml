@@ -1,0 +1,37 @@
+# Auto Label PR Dispatcher
+# ------------------------
+# This workflow is triggered by pull request events and sends a repository_dispatch event
+# to the pr-auto-label workflow to handle label management.
+# This allows the workflow to support pull requests from forks and main repository branches.
+
+name: Auto Label PR Trigger
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+    branches:
+      - develop
+      - release/rocm-rel-7.*
+
+concurrency:
+  group: pr-auto-label-dispatcher-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  trigger-dispatch:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - name: Send repository_dispatch to run labeling logic
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api repos/${{ github.repository }}/dispatches \
+            -f event_type="pr-auto-label" \
+            -f client_payload='{"pr":"${{ github.event.pull_request.number }}"}'

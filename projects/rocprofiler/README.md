@@ -594,5 +594,3 @@ Please report in the Github Issues.
 - gfx10xx ([Navi2x] AMD Radeon(TM) Graphics)
 - gfx11xx ([Navi3x] AMD Radeon(TM) Graphics)
 
-> [!WARNING]
-> The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler source.
