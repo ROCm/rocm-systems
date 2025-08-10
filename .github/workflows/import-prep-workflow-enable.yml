@@ -2,7 +2,7 @@
 # ------------------------------
 # This GitHub Actions workflow enables all non-Import-related workflows in the repository.
 # This is useful as a preparatory step before performing a bulk import of issues from another repository.
-name: "Import Prep: Disable workflows"
+name: "Import Prep: Enable workflows"
 
 on:
   workflow_dispatch:
