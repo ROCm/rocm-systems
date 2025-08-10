@@ -66,47 +66,17 @@ def resolve_dependencies(projects, dependencies):
 
 def main(argv=None) -> None:
     """Main function to process the projects and output those to be run."""
-    # Mathlib build+test dependency tree as defined in Azure CI and TheRock
-    math_dependencies = {
-        "shared/tensile": {},
-        "projects/rocrand": {},
-        "projects/hiprand": {"projects/rocrand"},
-        "projects/rocfft": {"projects/hiprand"},
-        "projects/hipfft": {"projects/rocfft"},
-        "projects/rocprim": {},
-        "projects/hipcub": {"projects/rocprim"},
-        "projects/rocthrust": {"projects/rocprim"},
-        "projects/hipblas-common": {},
-        "projects/hipblaslt": {"projects/hipblas-common"},
-        "projects/rocblas": {"projects/hipblaslt"},
-        "projects/rocsolver": {"projects/rocprim", "projects/rocblas"},
-        "projects/rocsparse": {"projects/rocprim", "projects/rocblas"},
-        "projects/hipblas": {"projects/rocsolver"},
-        "projects/hipsolver": {"projects/rocsolver", "projects/rocsparse"},
-        "projects/hipsparse": {"projects/rocsparse"},
-        "projects/hipsparselt": {"projects/hipsparse"},
-        "projects/miopen": {"projects/rocrand", "projects/hipblas"}
+    # Systems build+test dependency tree as defined in Azure CI and TheRock
+    systems_dependencies = {
     }
     # Azure pipeline IDs for each project, to be populated as projects are enabled
     definition_ids = {
-        "shared/tensile": 305,
-        "projects/rocrand": 274,
-        "projects/hiprand": 275,
-        "projects/rocfft": 282,
-        "projects/hipfft": 283,
-        "projects/rocprim": 273,
-        "projects/hipcub": 277,
-        "projects/rocthrust": 276,
-        "projects/hipblas-common": 300,
-        "projects/hipblaslt": 301,
-        "projects/hipsparselt": 309,
-        "projects/rocblas": 302,
-        "projects/rocsolver": 303,
+        "projects/rocprofiler-register": 327,
     }
 
     args = parse_arguments(argv)
     projects = read_file_into_set(args.subtree_file)
-    projects_to_run = resolve_dependencies(projects, math_dependencies)
+    projects_to_run = resolve_dependencies(projects, systems_dependencies)
 
     for project in projects_to_run:
         if project in definition_ids:
