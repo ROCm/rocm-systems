@@ -45,7 +45,7 @@ jobs:
 
       - name: Add Repositories to the Super-repo
         run: |
-          for repo in $(cat .github/repos-added-config-.json | jq -r '.repositories[].name'); do
+          for repo in $(cat .github/repos-added-config.json | jq -r '.repositories[].name'); do
             repo_name=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .reponame")
             url=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .url")
             branch=$(cat .github/repos-added-config.json | jq -r ".repositories[] | select(.name == \"$repo\") | .branch")
