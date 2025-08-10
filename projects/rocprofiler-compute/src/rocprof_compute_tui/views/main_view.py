@@ -108,26 +108,21 @@ class MainView(Horizontal):
         self.top_kernel_to_df_list = []
 
         if not self.selected_path:
-            try:
-                self.app.call_from_thread(
-                    lambda: self.query_one("#kernel-view").update_view(
-                        "No directory selected for analysis", LogLevel.ERROR
-                    )
+            self.app.call_from_thread(
+                lambda: self.query_one("#kernel-view").update_view(
+                    "No directory selected for analysis", LogLevel.ERROR
                 )
-            except:
-                pass
+            )
             return
 
         try:
             self.logger.info(f"Starting analysis on: {self.selected_path}")
-            try:
-                self.app.call_from_thread(
-                    lambda: self.query_one("#kernel-view").update_view(
-                        f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
-                    )
+
+            self.app.call_from_thread(
+                lambda: self.query_one("#kernel-view").update_view(
+                    f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
                 )
-            except:
-                pass
+            )
 
             # 1. Create and TUI analyzer
             analyzer = tui_analysis(
@@ -135,30 +130,26 @@ class MainView(Horizontal):
             )
             analyzer.sanitize()
 
-            # 2. Load and process system info
+            # 2. Load and process system info and Configure SoC
             sysinfo_path = Path(self.selected_path) / "sysinfo.csv"
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
-
             sys_info = file_io.load_sys_info(sysinfo_path).iloc[0].to_dict()
-
-            # 3. Configure SoC and run analysis
             self.app.load_soc_specs(sys_info)
+
+            # 3. run analysis
             analyzer.set_soc(self.app.soc)
             analyzer.pre_processing()
             self.kernel_to_df_dict = analyzer.run_kernel_analysis()
             self.top_kernel_to_df_list = analyzer.run_top_kernel()
 
             if not self.kernel_to_df_dict or not self.top_kernel_to_df_list:
-                try:
-                    self.app.call_from_thread(
-                        lambda: self.query_one("#kernel-view").update_view(
-                            "Analysis completed but not all data was returned",
-                            LogLevel.WARNING,
-                        )
+                self.app.call_from_thread(
+                    lambda: self.query_one("#kernel-view").update_view(
+                        "Analysis completed but not all data was returned",
+                        LogLevel.WARNING,
                     )
-                except:
-                    pass
+                )
             else:
                 self.app.call_from_thread(self.refresh_results)
                 self.logger.info("Kernel Analysis completed successfully")
@@ -169,30 +160,22 @@ class MainView(Horizontal):
 
             error_msg = f"Analysis failed: {str(e)}"
             self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
-            try:
-                self.app.call_from_thread(
-                    lambda: self.query_one("#kernel-view").update_view(
-                        error_msg, LogLevel.ERROR
-                    )
+            self.app.call_from_thread(
+                lambda: self.query_one("#kernel-view").update_view(
+                    error_msg, LogLevel.ERROR
                 )
-            except:
-                pass
+            )
 
     def refresh_results(self) -> None:
-        try:
-            kernel_view = self.query_one("#kernel-view")
-            if kernel_view and self.kernel_to_df_dict and self.top_kernel_to_df_list:
-                kernel_view.update_results(
-                    self.kernel_to_df_dict, self.top_kernel_to_df_list
-                )
-                self.logger.success("Results displayed successfully.")
-            else:
-                self.logger.error("Kernel view not found or no data available")
-        except Exception as e:
-            self.logger.error(f"Error refreshing results: {str(e)}")
+        kernel_view = self.query_one("#kernel-view")
+        if kernel_view:
+            kernel_view.update_results(self.kernel_to_df_dict, self.top_kernel_to_df_list)
+            self.logger.success("Results displayed successfully.")
+        else:
+            self.logger.error("Kernel view not found or no data available")
 
     def refresh_view(self) -> None:
-        if self.top_kernel_to_df_list:
+        if self.kernel_to_df_dict and self.top_kernel_to_df_list:
             self.refresh_results()
         else:
             self.logger.warning("No data available for refresh")

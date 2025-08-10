@@ -73,7 +73,7 @@ class OmniAnalyze_Base:
             arch_panel_config = (
                 config_dir if single_panel_config else config_dir.joinpath(arch)
             )
-            ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
+            ac.panel_configs = file_io.load_panel_configs(arch_panel_config, {})
 
         # TODO: filter_metrics should/might be one per arch
         # print(ac)

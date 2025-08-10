@@ -62,7 +62,7 @@ def load_sys_info(f):
     return pd.read_csv(f)
 
 
-def load_panel_configs(dir):
+def load_panel_configs(dir, file_replacements={}):
     """
     Load all panel configs from yaml file.
     """
@@ -70,6 +70,10 @@ def load_panel_configs(dir):
     for root, dirs, files in os.walk(dir):
         for f in files:
             if f.endswith(".yaml"):
+                # Use replacement filename if specified, otherwise use original
+                f = file_replacements.get(f, f)
+                print(f"{f}")
+                print(f"{str(Path(root).joinpath(f))}")
                 with open(str(Path(root).joinpath(f))) as file:
                     config = yaml.safe_load(file)
                     # metric key can be None due to some metric tables not having any metrics
