@@ -11,7 +11,7 @@
     {
       "name": "clr",
       "url": "ROCm/clr",
-      "branch": "amd-staging",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
@@ -19,7 +19,7 @@
     {
       "name": "hip",
       "url": "ROCm/hip",
-      "branch": "amd-staging",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
@@ -27,7 +27,7 @@
     {
       "name": "hipother",
       "url": "ROCm/hipother",
-      "branch": "amd-staging",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
@@ -35,7 +35,7 @@
     {
       "name": "hip-tests",
       "url": "ROCm/hip-tests",
-      "branch": "amd-staging",
+      "branch": "release/rocm-rel-7.0",
       "category": "projects",
       "auto_subtree_pull": true,
       "auto_subtree_push": false
