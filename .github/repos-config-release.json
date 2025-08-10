@@ -9,11 +9,43 @@
       "auto_subtree_push": false
     },
     {
+      "name": "clr",
+      "url": "ROCm/clr",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "hip",
+      "url": "ROCm/hip",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "hipother",
+      "url": "ROCm/hipother",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
+      "name": "hip-tests",
+      "url": "ROCm/hip-tests",
+      "branch": "release/rocm-rel-7.0",
+      "category": "projects",
+      "auto_subtree_pull": true,
+      "auto_subtree_push": false
+    },
+    {
       "name": "rdc",
       "url": "ROCm/rdc",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -37,7 +69,7 @@
       "url": "ROCm/rocm_smi_lib",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
