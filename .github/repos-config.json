@@ -5,7 +5,7 @@
       "url": "ROCm/aqlprofile",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -77,7 +77,7 @@
       "url": "ROCm/rocprofiler",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -85,7 +85,7 @@
       "url": "ROCm/rocprofiler-compute",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -93,7 +93,7 @@
       "url": "ROCm/rocprofiler-register",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -101,7 +101,7 @@
       "url": "ROCm/rocprofiler-sdk",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -109,7 +109,7 @@
       "url": "ROCm/rocprofiler-systems",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -125,7 +125,7 @@
       "url": "ROCm/roctracer",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     }
   ]

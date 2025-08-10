@@ -1,13 +1,13 @@
 
-name: RocProfiler-Compute Formatting
+name: rocprofiler-compute Formatting
 
 on:
   push:
-    path:
-      - 'projects/rocprofiler-compute'
+    paths:
+      - 'projects/rocprofiler-compute/**'
   pull_request:
-    path:
-      - 'projects/rocprofiler-compute'
+    paths:
+      - 'projects/rocprofiler-compute/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
