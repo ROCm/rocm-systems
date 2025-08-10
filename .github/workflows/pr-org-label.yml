@@ -32,7 +32,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          gh pr list --state open --json number --jq '.[].number' > pr_numbers.txt
+          gh pr list --state open --json number,labels \
+            --jq '[.[] | select(
+              ([.labels[].name] | index(env.ORG_LABEL) | not) and
+              ([.labels[].name] | index(env.EXTERNAL_LABEL) | not)
+            ) | .number] | .[]' \
+            > pr_numbers.txt
 
       - name: Label PRs based on author membership
         env:
