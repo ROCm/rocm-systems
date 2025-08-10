@@ -1,7 +1,7 @@
 # TUI use only
 # NOTE: This is used as a TUI-only yaml file for the beta release of the new performance metric organization
 Panel Config:
-  id: 200
+  id: 3200
   title: System Speed-of-Light
   metrics_description:
     Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
@@ -36,7 +36,7 @@ Panel Config:
     Clock Rate:
   data source:
   - metric_table:
-      id: 201
+      id: 3201
       title: System Speed-of-Light
       header:
         metric: Metric

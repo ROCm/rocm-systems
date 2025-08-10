@@ -24,7 +24,6 @@
 ##############################################################################
 
 
-import re
 from pathlib import Path
 
 # NB: Creating a new module to share global vars across modules
