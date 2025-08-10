@@ -1,5 +1,6 @@
 # TUI use only
-# NOTE: This is used as a TUI-only yaml file for the beta release of the new performance metric organizationPanel Config:
+# NOTE: This is used as a TUI-only yaml file for the beta release of the new performance metric organization
+Panel Config:
   id: 3300
   title: Compute Throughput
   metrics_description:
