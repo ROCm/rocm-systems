@@ -2,7 +2,7 @@
 # NOTE: This is used as a TUI-only yaml file for the beta release of the new performance metric organization
 Panel Config:
   id: 3200
-  title: System Speed-of-Light
+  title: GPU Speed-of-Light
   metrics_description:
     Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
       been loaded from, stored to, or atomically updated in the LDS per unit time
@@ -37,7 +37,7 @@ Panel Config:
   data source:
   - metric_table:
       id: 3201
-      title: System Speed-of-Light
+      title: GPU Speed-of-Light
       header:
         metric: Metric
         value: Avg
