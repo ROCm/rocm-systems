@@ -679,10 +679,10 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
       LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
-      "HWq=%p, id=%d, Barrier Header = "
+      "HWq=%p, id=%lu, Barrier Header = "
       "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
       "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
-      "rptr=%u, wptr=%u",
+      "rptr=%lu, wptr=%lu",
       queue_->public_handle()->base_address, queue_->public_handle()->id,
       kBarrierPacketHeader,
       extractAqlBits(kBarrierPacketHeader,
@@ -693,9 +693,13 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
                     HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
       extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0], barrier_packet.dep_signal[1], barrier_packet.dep_signal[2],
-      barrier_packet.dep_signal[3], barrier_packet.dep_signal[4],
-      barrier_packet.completion_signal, queue_->LoadReadIndexRelaxed(), write_index);
+      barrier_packet.dep_signal[0].handle, 
+      barrier_packet.dep_signal[1].handle,
+      barrier_packet.dep_signal[2].handle,
+      barrier_packet.dep_signal[3].handle, 
+      barrier_packet.dep_signal[4].handle,
+      barrier_packet.completion_signal.handle, 
+      queue_->LoadReadIndexRelaxed(), write_index);
 
       ++write_index;
 
@@ -897,11 +901,11 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                     kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 
   LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
-    "HWq=%p, id=%d, Dispatch Header = "
+    "HWq=%p, id=%lu, Dispatch Header = "
     "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
     "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "
     "group_seg_size=%zu, kernel_obj=0x%zx, kernarg_address=0x%zx, completion_signal=0x%zx "
-    "rptr=%u, wptr=%u",
+    "rptr=%lu, wptr=%lu",
     queue_->public_handle()->base_address, queue_->public_handle()->id,
     kDispatchPacketHeader,
     extractAqlBits(kDispatchPacketHeader,
@@ -912,11 +916,11 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
                    HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
     extractAqlBits(kDispatchPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                    HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-    packet.setup, packet.grid_size_x, packet.grid_size_y, packet.grid_size_z,
-    packet.workgroup_size_x, packet.workgroup_size_y, packet.workgroup_size_z,
-    packet.private_segment_size, packet.group_segment_size,
-    packet.kernel_object,packet.kernarg_address,
-    completion_signal, queue_->LoadReadIndexRelaxed(), index);
+    packet.setup, static_cast<size_t>(packet.grid_size_x), static_cast<size_t>(packet.grid_size_y), static_cast<size_t>(packet.grid_size_z),
+    static_cast<size_t>(packet.workgroup_size_x), static_cast<size_t>(packet.workgroup_size_y), static_cast<size_t>(packet.workgroup_size_z),
+    static_cast<size_t>(packet.private_segment_size), static_cast<size_t>(packet.group_segment_size),
+    packet.kernel_object,reinterpret_cast<uintptr_t>(packet.kernarg_address),
+    completion_signal.handle, queue_->LoadReadIndexRelaxed(), index);
 }
 
 BlitKernel::KernelArgs* BlitKernel::ObtainAsyncKernelCopyArg() {
