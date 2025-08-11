@@ -833,10 +833,9 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
     }
   }
 
-  ScopedAcquire<HybridMutex> scope_lock(&asyncInfo->control.lock);
-
   // Lazy initializer
   if (asyncInfo->control.async_events_thread_ == NULL) {
+    ScopedAcquire<HybridMutex> scope_lock(&asyncInfo->control.lock);
     // Create monitoring thread control signal
     auto err = HSA::hsa_signal_create(0, 0, NULL, &asyncInfo->control.wake);
     if (err != HSA_STATUS_SUCCESS) {
@@ -1580,8 +1579,8 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       return false;
     } else {
       if (hsa_events.size() <= unique_evts) {
-          hsa_events.resize(unique_evts + 10);
-          event_age.resize(unique_evts + 10);
+        hsa_events.resize(unique_evts + 10);
+        event_age.resize(unique_evts + 10);
       }
       if (init_age || hsa_events[unique_evts] != hsa_event ) {
         event_age[unique_evts] = runtime_singleton_->KfdVersion().supports_event_age ? 1 : 0;
@@ -1704,37 +1703,88 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
     // Insert new signals and find plain functions
     typedef std::pair<void (*)(void*), void*> func_arg_t;
     std::vector<func_arg_t> functions;
-    {
-      ScopedAcquire<HybridMutex> scope_lock(&async_events_control_.lock);
-      for (size_t i = 0; i < new_async_events_.Size(); i++) {
-        if (new_async_events_.signal_[i].handle == 0) {
-          functions.push_back(
-              func_arg_t((void (*)(void*))new_async_events_.handler_[i],
-                         new_async_events_.arg_[i]));
-          continue;
-        }
-        async_events_.PushBack(
-            new_async_events_.signal_[i], new_async_events_.cond_[i],
-            new_async_events_.value_[i], new_async_events_.handler_[i],
-            new_async_events_.arg_[i]);
+
+    // Get new events from the concurrent queue
+    // No need of explicit clear as GetAllEvents() will clear the queue
+    std::vector<AsyncEventItem> new_events = new_async_events_.GetAllEvents();
+    for (const auto& event : new_events) {
+      if (event.signal.handle == 0) {
+        functions.push_back(func_arg_t((void (*)(void*))event.handler, event.arg));
+        continue;
       }
-      new_async_events_.Clear();
+
+      {
+        ScopedAcquire<HybridMutex> scope_lock(&async_events_control_.lock);
+        async_events_.PushBack(
+          event.signal, event.cond, event.value, event.handler, event.arg);
+      }
+
     }
 
     // Call plain functions
-    for (size_t i = 0; i < functions.size(); i++)
+    for (size_t i = 0; i < functions.size(); i++) {
       functions[i].first(functions[i].second);
+    }
     functions.clear();
   }
 
   // Release wait count of all pending signals
-  for (size_t i = 1; i < async_events_.Size(); i++)
+  for (size_t i = 1; i < async_events_.Size(); i++) {
     hsa_signal_handle(async_events_.signal_[i])->Release();
+  }
   async_events_.Clear();
 
-  for (size_t i = 0; i < new_async_events_.Size(); i++)
-    hsa_signal_handle(new_async_events_.signal_[i])->Release();
-  new_async_events_.Clear();
+  // Release signals from the concurrent queue
+  // No need of explicit clear as GetAllEvents() will clear the queue
+  std::vector<AsyncEventItem> remaining_events = new_async_events_.GetAllEvents();
+  for (const auto& event : remaining_events) {
+    if (event.signal.handle != 0) {
+      hsa_signal_handle(event.signal)->Release();
+    }
+  }
+}
+
+void Runtime::ConcurrentAsyncEvents::PushBack(hsa_signal_t signal,
+                                             hsa_signal_condition_t cond,
+                                             hsa_signal_value_t value,
+                                             hsa_amd_signal_handler handler, void* arg) {
+  // Allocate memory for the new event item
+  AsyncEventItem* item = new AsyncEventItem(signal, cond, value, handler, arg);
+  event_queue_.enqueue(item);
+}
+
+void Runtime::ConcurrentAsyncEvents::Clear() {
+  // Dequeue all items to clear the queue
+  while (!event_queue_.empty()) {
+    AsyncEventItem* item = event_queue_.dequeue();
+    if (item != nullptr) {
+      delete item;
+    }
+  }
+}
+
+std::vector<Runtime::AsyncEventItem> Runtime::ConcurrentAsyncEvents::GetAllEvents() {
+  std::vector<AsyncEventItem> events;
+
+  // Dequeue all items from the queue
+  while (!event_queue_.empty()) {
+    AsyncEventItem* item = event_queue_.dequeue();
+    // Check if it's a valid event
+    if (item != nullptr) {
+      events.push_back(*item);
+      // Clean up the allocated memory
+      delete item;
+    }
+  }
+
+  return events;
+}
+
+void Runtime::ConcurrentAsyncEvents::AddEventsBack(const std::vector<AsyncEventItem>& events) {
+  for (const auto& event : events) {
+    AsyncEventItem* item = new AsyncEventItem(event);
+    event_queue_.enqueue(item);
+  }
 }
 
 void Runtime::BindErrorHandlers() {
@@ -3178,11 +3228,14 @@ hsa_status_t Runtime::VMemoryAddressReserve(void** va, size_t size, uint64_t add
   memFlags.ui32.FixedAddress = 1;
 
   /* Try to reserving the VA requested by user */
-  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS) {
+  if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr))
+      != HSAKMT_STATUS_SUCCESS) {
     memFlags.ui32.FixedAddress = 0;
     /* Could not reserved VA requested, allocate alternate VA */
-    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr)) != HSAKMT_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtAllocMemoryAlign(0, size, alignment, memFlags, &addr))
+      != HSAKMT_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
   }
 
   reserved_address_map_[addr] = AddressHandle(addr, size, true);
@@ -3204,7 +3257,9 @@ hsa_status_t Runtime::VMemoryAddressFree(void* va, size_t size) {
   if (it->second.use_count > 0) return HSA_STATUS_ERROR_RESOURCE_FREE;
 
   if (it->second.registered) {
-    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR;
+    if (HSAKMT_CALL(hsaKmtFreeMemory(it->second.os_addr, size)) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
   } else {
     if (munmap(it->second.os_addr, size)) return HSA_STATUS_ERROR;
   }
