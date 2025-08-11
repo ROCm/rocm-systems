@@ -1,0 +1,188 @@
+name: rocprofiler-systems Continuous Integration Containers
+run-name: ci-containers
+
+# nightly build
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: 0 5 * * *
+  push:
+    paths:
+      - 'projects/rocprofiler-systems/.github/workflows/containers.yml'
+      - 'projects/rocprofiler-systems/docker/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  rocprofiler-systems-ci:
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - distro: "ubuntu"
+            version: "20.04"
+          - distro: "ubuntu"
+            version: "22.04"
+          - distro: "ubuntu"
+            version: "24.04"
+          - distro: "opensuse"
+            version: "15.5"
+          - distro: "opensuse"
+            version: "15.6"
+          - distro: "rhel"
+            version: "8.10"
+          - distro: "rhel"
+            version: "9.3"
+          - distro: "rhel"
+            version: "9.4"
+          - distro: "rhel"
+            version: "9.5"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+          submodules: recursive
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build CI Container
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push --jobs 2 --elfutils-version 0.186 --boost-version 1.79.0
+            popd
+
+  rocprofiler-systems-release:
+
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ubuntu 20.04
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "6.3"
+          # ubuntu 22.04
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.4"
+          # ubuntu 24.04
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.3"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.4"
+          # opensuse 15.5
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "0.0"
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "6.3"
+          # opensuse 15.6
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "0.0"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.3"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.4"
+          # RHEL 8.10
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "8.10"
+            rocm-version: "6.4"
+          # RHEL 9.4
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.4"
+          # RHEL 9.5
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.3"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.4"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v2
+
+      - name: Login to DockerHub
+        uses: docker/login-action@v2
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build Base Container
+        timeout-minutes: 45
+        uses: nick-fields/retry@v3
+        with:
+          retry_wait_seconds: 60
+          timeout_minutes: 45
+          max_attempts: 3
+          command: |
+            pushd projects/rocprofiler-systems/docker
+            ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.DOCKERHUB_USERNAME }} --push
+            popd

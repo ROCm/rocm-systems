@@ -1,0 +1,5 @@
+pmc:  TA_BUFFER_READ_WAVEFRONTS_sum TA_BUFFER_WRITE_WAVEFRONTS_sum
+
+gpu:
+range:
+kernel:

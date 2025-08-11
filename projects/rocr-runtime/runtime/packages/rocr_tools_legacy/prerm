@@ -1,0 +1,19 @@
+#!/bin/bash
+
+set -e
+
+rm_ldconfig() {
+    rm -f /etc/ld.so.conf.d/rocr_tools_legacy.conf && ldconfig
+}
+
+case "$1" in
+   remove)
+       rm_ldconfig
+   ;;
+   purge)
+   ;;
+   *)
+       exit 0
+   ;;
+esac
+

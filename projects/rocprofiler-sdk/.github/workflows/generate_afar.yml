@@ -1,0 +1,70 @@
+name: Generate AFAR
+
+on:
+  workflow_dispatch:
+    inputs:
+      rocm-release:
+        description: 'ROCm Release Version'
+        required: true
+        type: string
+      build-number:
+        description: 'ROCm CI Build Number'
+        required: true
+        type: string
+      build-job-name:
+        description: 'ROCm CI Build Job Name'
+        required: true
+        type: string
+      rocprofiler-sdk-revision:
+        description: 'ROCProfiler-SDK Commit Hash'
+        default: 'amd-staging'
+        required: true
+        type: string
+      extra-cmake-args:
+        description: 'Extra Arguments to give to cmake configuration'
+        required: false
+        type: string
+      package-types:
+        description: 'Package types provided to `CPACK_GENERATOR`'
+        required: true
+        default: 'STGZ'
+        type: string
+
+jobs:
+  generate-packages-ubuntu-22:
+    runs-on: rocprof-azure-emu-runner-set
+
+    steps:
+
+    - uses: actions/checkout@v4
+      with:
+        ref: '${{ inputs.rocprofiler-sdk-revision }}'
+        path: 'rocprofiler-sdk'
+
+    - name: Install Requirements
+      timeout-minutes: 10
+      shell: bash
+      run: |
+        git config --global --add safe.directory '${{github.workspace}}/*'
+        apt-get update
+        amdgpu-repo --rocm-build=${{ inputs.build-job-name }}/${{ inputs.build-number }}
+        apt-get upgrade -y
+        apt-get install -y build-essential cmake rocm-llvm-dev python3-pip libdw-dev libsqlite3-dev
+        python3 -m pip install -r ${{github.workspace}}/rocprofiler-sdk/requirements.txt
+
+    - name: Building ROCProfiler-SDK Packages
+      shell: bash
+      run: |
+        cmake -B build-rocprofiler-sdk -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCPACK_GENERATOR="${{ inputs.package-types }}" -DROCPROFILER_BUILD_{TESTS,SAMPLES}=ON ${{ inputs.extra-cmake-args }} ${{github.workspace}}/rocprofiler-sdk
+        cmake --build build-rocprofiler-sdk --parallel 16
+        cmake --build build-rocprofiler-sdk --target package --parallel 16
+
+    - name: Archive Packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: Packages-${{ inputs.rocm-release }}
+        path: |
+          ${{github.workspace}}/build-*/*.sh
+          ${{github.workspace}}/build-*/*.deb
+          ${{github.workspace}}/build-*/*.rpm
+          ${{github.workspace}}/build-*/*.tar.gz

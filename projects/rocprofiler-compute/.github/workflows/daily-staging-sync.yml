@@ -1,0 +1,31 @@
+name: Sync Staging with Develop
+on:
+    workflow_dispatch:
+    schedule:
+      - cron: 0 0 * * *
+
+jobs:
+  promote-dev-to-stg:
+    if: github.repository == 'ROCm/rocprofiler-compute'
+    runs-on: ubuntu-latest
+    name: Promote Develop to Staging
+    steps:
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.ROCPROFILER_COMPUTE_RUNNER_APP_APP_ID }}
+          private-key: ${{ secrets.ROCPROFILER_COMPUTE_RUNNER_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+          fetch-depth: '0'
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Merge - Fast Forward Only
+        run: |
+          git checkout amd-staging
+          git merge origin/develop --ff-only
+          git push origin HEAD

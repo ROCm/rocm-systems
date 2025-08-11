@@ -1,0 +1,122 @@
+name: rocprofiler-sdk Documentation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/VERSION'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
+      - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
+      - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-sdk/*.md'
+      - 'projects/rocprofiler-sdk/VERSION'
+      - 'projects/rocprofiler-sdk/source/docs/**'
+      - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
+      - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
+      - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+
+jobs:
+  build-docs:
+    runs-on: ubuntu-latest
+    container: continuumio/miniconda3
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-sdk
+          submodules: true
+          set-safe-directory: true
+      - name: Create Docs Directory
+        run: |
+          git config --global --add safe.directory '*'
+          mkdir -p projects/rocprofiler-sdk/docs/_doxygen/rocprofiler-sdk
+          mkdir -p projects/rocprofiler-sdk/docs/_doxygen/roctx
+      - name: Install documentation dependencies
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          apt-get update
+          apt-get install -y doxygen graphviz build-essential cmake
+      - name: Build Docs
+        shell: bash -el {0}
+        working-directory: projects/rocprofiler-sdk/source/docs
+        run: |
+          conda init
+          conda env create -n rocprofiler-docs -f environment.yml
+          conda activate rocprofiler-docs
+          python3 -m pip install sphinx
+          python3 -m pip install doxysphinx rocm-docs-core
+          git config --global --add safe.directory '*'
+          ../scripts/update-docs.sh
+
+  build-docs-from-source:
+    runs-on: ubuntu-latest
+    container: rocm/dev-ubuntu-22.04:latest
+    steps:
+      - name: Install os essentials
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          sudo apt update
+          sudo apt install -y software-properties-common
+          sudo apt-add-repository ppa:git-core/ppa
+          sudo apt-get update
+          sudo apt-get install -y git
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-sdk
+          submodules: true
+          set-safe-directory: true
+      - name: Create Docs Directory
+        shell: bash
+        working-directory: projects/rocprofiler-sdk/
+        run: |
+          git config --global --add safe.directory '*'
+          mkdir -p source/docs/_doxygen/rocprofiler-sdk
+          mkdir -p source/docs/_doxygen/roctx
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        working-directory: projects/rocprofiler-sdk/
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
+          python3 -m pip install -r requirements.txt
+
+      - name: Configure, Build, Install, and Package
+        timeout-minutes: 60
+        shell: bash
+        working-directory: projects/rocprofiler-sdk/
+        run:
+          export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
+          git submodule update --init -- .;
+          cmake -B build
+            -DROCPROFILER_DEP_ROCMCORE=ON
+            -DROCPROFILER_BUILD_DOCS=ON
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
+            -DCPACK_GENERATOR='DEB;RPM;TGZ'
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
+            -DPython3_EXECUTABLE=$(which python3)
+            .;
+          cmake --build build --target docs --parallel 4;
+          cmake --build build --target all --parallel 12;
+          sudo cmake --build build --target install --parallel 12;
+          cmake --build build --target package --parallel 12

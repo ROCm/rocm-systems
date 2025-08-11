@@ -1,0 +1,5 @@
+# left-hand term originates from ENABLE_LDCONFIG = ON/OFF at package build
+if [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+  echo @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBDIR@ > /etc/ld.so.conf.d/libhsa-amd-aqlprofile64.conf
+  ldconfig
+fi

@@ -1,0 +1,10 @@
+---
+Panel Config:
+  id: 2100
+  title: PC Sampling
+  data source:
+    - pc_sampling_table:
+        id: 2101
+        title: PC Sampling
+        source: None # not support
+        comparable: false # enable it later

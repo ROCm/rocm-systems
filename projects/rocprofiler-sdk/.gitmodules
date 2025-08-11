@@ -1,0 +1,42 @@
+[submodule "external/googletest"]
+	path = external/googletest
+	url = https://github.com/google/googletest.git
+[submodule "external/glog"]
+	path = external/glog
+	url = https://github.com/google/glog.git
+[submodule "fmt"]
+	path = external/fmt
+	url = https://github.com/fmtlib/fmt.git
+[submodule "source/docs/doxygen-awesome-css"]
+	path = external/doxygen-awesome-css
+	url = https://github.com/jothepro/doxygen-awesome-css.git
+[submodule "external/ptl"]
+	path = external/ptl
+	url = https://github.com/jrmadsen/PTL
+[submodule "external/cereal"]
+	path = external/cereal
+	url = https://github.com/jrmadsen/cereal.git
+[submodule "external/filesystem"]
+	path = external/filesystem
+	url = https://github.com/gulrak/filesystem.git
+[submodule "external/perfetto"]
+	path = external/perfetto
+	url = https://github.com/google/perfetto
+[submodule "external/elfio"]
+	path = external/elfio
+	url = https://github.com/serge1/ELFIO.git
+[submodule "external/yaml-cpp"]
+	path = external/yaml-cpp
+	url = https://github.com/jbeder/yaml-cpp.git
+[submodule "external/json"]
+	path = external/json
+	url = https://github.com/nlohmann/json.git
+[submodule "external/sqlite"]
+	path = external/sqlite
+	url = https://github.com/sqlite/sqlite
+[submodule "external/pybind11"]
+	path = external/pybind11
+	url = https://github.com/pybind/pybind11.git
+[submodule "external/gotcha"]
+	path = external/gotcha
+	url = https://jrmadsen@github.com/jrmadsen/GOTCHA

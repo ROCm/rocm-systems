@@ -1,0 +1,48 @@
+
+ARG DISTRO
+ARG VERSION
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV LANG C.UTF-8
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ARG EXTRA_PACKAGES=""
+# ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
+# ARG BOOST_DOWNLOAD_VERSION="1.79.0"
+# ARG NJOBS="12"
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+
+ENV PATH /usr/local/bin:${PATH}
+ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
+ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
+ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
+
+
+RUN apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y autoconf autotools-dev bash-completion build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libtool locales lsb-release m4 python3-pip unzip wget zip zlib1g-dev && \
+    python3 -m pip install 'cmake==3.28.4' && \
+    apt-get autoclean && \
+    locale -a && \
+    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    bash miniconda.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c defaults -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c defaults -c conda-forge python=3.${i} pip numpy; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy pandas dataclasses; done && \
+    conda clean -a -y && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+
+ENV LC_ALL C.UTF-8
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

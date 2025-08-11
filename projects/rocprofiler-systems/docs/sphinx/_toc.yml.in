@@ -1,0 +1,78 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+  maxdepth: 6
+root: index
+subtrees:
+  - entries:
+    - file: what-is-rocprof-sys.rst
+
+  - caption: Install
+    entries:
+    - file: install/quick-start.rst
+      title: ROCm Systems Profiler quick start
+    - file: install/install.rst
+      title: ROCm Systems Profiler installation guide
+
+  - caption: How to
+    entries:
+    - file: how-to/configuring-validating-environment.rst
+      title: Configuring the environment
+      subtrees:
+      - entries:
+        - file: how-to/configuring-runtime-options.rst
+          title: Configuring runtime options
+    - file: how-to/general-tips-using-rocprof-sys.rst
+      title: Profiling
+      subtrees:
+      - entries:
+        - file: how-to/sampling-call-stack.rst
+          title: Sampling the call stack
+        - file: how-to/instrumenting-rewriting-binary-application.rst
+          title: Instrumenting and rewriting a binary application
+        - file: how-to/performing-causal-profiling.rst
+          title: Performing causal profiling
+        - file: how-to/profiling-python-scripts.rst
+          title: Profiling Python scripts
+        - file: how-to/nic-profiling.rst
+          title: Network performance profiling
+        - file: how-to/vcn-jpeg-sampling.rst
+          title: VCN and JPEG sampling and tracing
+    - file: how-to/understanding-rocprof-sys-output.rst
+      title: Understanding the output
+    - file: how-to/using-rocprof-sys-api.rst
+      title: Using the ROCm Systems Profiler API
+
+  - caption: Conceptual
+    entries:
+    - file: conceptual/rocprof-sys-feature-set.rst
+      title: Features and use cases
+    - file: conceptual/data-collection-modes.rst
+      title: Data collection modes
+
+  - caption: Reference
+    entries:
+    - file: reference/development-guide.rst
+      title: Development guide
+    - file: reference/rocprof-sys-glossary.rst
+      title: Glossary
+    - file: doxygen/html/files
+      title: API library
+    - file: doxygen/html/functions
+      title: Class member functions
+    - file: doxygen/html/globals
+      title: Globals
+    - file: doxygen/html/annotated
+      title: Classes, structures, and interfaces
+
+  - caption: Tutorials
+    entries:
+    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
+      title: GitHub examples
+    - file: tutorials/video-tutorials.rst
+      title: Video tutorials
+
+  - caption: About
+    entries:
+    - file: license.rst

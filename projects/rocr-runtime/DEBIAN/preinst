@@ -1,0 +1,23 @@
+#!/bin/bash
+
+echo "Pre-install check for ROCr."
+
+# Check for old installations...
+if ls /usr/lib/libhsa-runtime* 1> /dev/null 2>&1; then
+  echo "An old version of libhsa-runtime was found in /usr/lib."
+  echo "This must be uninstalled before proceeding with the installation"
+  echo "to avoid potential incompatibilities."
+
+  read -r -p "Do you want to uninstall the old version? [y/N] " response
+  if [ "$response" = "y" ]; then
+    if ! rm -rf /usr/lib/libhsa-runtime*; then
+      echo "Failed to remove /usr/lib/libhsa-runtime* files."
+      echo "Try to uninstall these files manually."
+      exit 1
+    fi
+    echo "Old version uninstalled."
+  else
+    echo "The old and new versions of ROCm are incompatible. Installation aborted."
+    exit 1
+  fi
+fi

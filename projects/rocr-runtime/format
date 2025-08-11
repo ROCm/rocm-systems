@@ -1,0 +1,6 @@
+#!/bin/bash
+root=`git rev-parse --show-toplevel`
+pushd . > /dev/null
+cd $root
+git diff -U0 HEAD^ | ./clang-format-diff.py -p1 -i -style=file
+popd > /dev/null

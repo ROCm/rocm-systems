@@ -1,0 +1,32 @@
+name: Apply Labels
+
+on:
+  workflow_dispatch:
+    inputs:
+      labelFile:
+        description: 'Path to YAML file with labels'
+        required: true
+        default: '.github/labels.yml'
+
+jobs:
+  apply-labels:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout super-repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.x
+
+      - name: Install dependencies
+        run: pip install PyYAML requests
+
+      - name: Apply labels to super-repo
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPO: ${{ github.repository }}
+        run: |
+          python .github/scripts/apply-labels.py "${{ github.event.inputs.labelFile }}"

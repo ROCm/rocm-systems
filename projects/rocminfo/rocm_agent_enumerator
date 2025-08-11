@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+import sys
+import time
+
+# get current working directory
+CWD = os.path.dirname(os.path.realpath(__file__))
+
+ISA_TO_ID = {
+  # Kaveri - Temporary
+  "gfx700" : [0x1304, 0x1305, 0x1306, 0x1307, 0x1309, 0x130a, 0x130b, 0x130c,
+              0x130d, 0x130e, 0x130f, 0x1310, 0x1311, 0x1312, 0x1313, 0x1315,
+              0x1316, 0x1317, 0x1318, 0x131b, 0x131c, 0x131d],
+  # Hawaii
+  "gfx701" : [0x67a0, 0x67a1, 0x67a2, 0x67a8, 0x67a9, 0x67aa, 0x67b0, 0x67b1,
+              0x67b8, 0x67b9, 0x67ba, 0x67be],
+  # Carrizo
+  "gfx801" : [0x9870, 0x9874, 0x9875, 0x9876, 0x9877, 0x98e4],
+  # Tonga
+  "gfx802" : [0x6920, 0x6921, 0x6928, 0x6929, 0x692b, 0x692f, 0x6930, 0x6938,
+              0x6939],
+  # Fiji
+  "gfx803" : [0x7300, 0x730f,
+  # Polaris10
+              0x67c0, 0x67c1, 0x67c2, 0x67c4, 0x67c7, 0x67c8, 0x67c9, 0x67ca,
+              0x67cc, 0x67cf, 0x6fdf,
+  # Polaris11
+              0x67d0, 0x67df, 0x67e0, 0x67e1, 0x67e3, 0x67e7, 0x67e8, 0x67e9,
+              0x67eb, 0x67ef, 0x67ff,
+  # Polaris12
+              0x6980, 0x6981, 0x6985, 0x6986, 0x6987, 0x6995, 0x6997, 0x699f,
+  # VegaM
+              0x694c, 0x694e, 0x694f],
+  # Vega10
+  "gfx900" : [0x6860, 0x6861, 0x6862, 0x6863, 0x6864, 0x6867, 0x6868, 0x6869,
+              0x6869, 0x686a, 0x686b, 0x686c, 0x686d, 0x686e, 0x686f, 0x687f],
+  # Raven
+  "gfx902" : [0x15dd, 0x15d8],
+  # Vega12
+  "gfx904" : [0x69a0, 0x69a1, 0x69a2, 0x69a3, 0x69af],
+  # Vega20
+  "gfx906" : [0x66a0, 0x66a1, 0x66a2, 0x66a3, 0x66a4, 0x66a7, 0x66af],
+  # Arcturus
+  "gfx908" : [0x738c, 0x7388, 0x738e, 0x7390],
+  # Aldebaran
+  "gfx90a" : [0x7408, 0x740c, 0x740f, 0x7410],
+  # Renoir
+  "gfx90c" : [0x15e7, 0x1636, 0x1638, 0x164c],
+
+  # Instinct MI300 series
+  "gfx942" : [0x74a1, 0x74a2, 0x74a5, 0x74a9, 0x74b5, 0x74b6, 0x74bd],
+
+  # Navi10
+  "gfx1010" : [0x7310, 0x7312, 0x7318, 0x7319, 0x731a, 0x731b, 0x731e, 0x731f],
+  # Navi12
+  "gfx1011" : [0x7360, 0x7362],
+  # Navi14
+  "gfx1012" : [0x7340, 0x7341, 0x7347, 0x734f],
+  # Cyan_Skillfish
+  "gfx1013" : [0x13f9, 0x13fa, 0x13fb, 0x13fc, 0x13f3],
+  # Sienna_Cichlid
+  "gfx1030" : [0x73a0, 0x73a1, 0x73a2, 0x73a3, 0x73a5, 0x73a8, 0x73a9, 0x73ab,
+               0x73ac, 0x73ad, 0x73ae, 0x73af, 0x73bf],
+  # Navy_Flounder
+  "gfx1031" : [0x73c0, 0x73c1, 0x73c3, 0x73da, 0x73db, 0x73dc, 0x73dd, 0x73de,
+               0x73df],
+  # Dimgray_Cavefish
+  "gfx1032" : [0x73e0, 0x73e1, 0x73e2, 0x73e3, 0x73e8, 0x73e9, 0x73ea, 0x73eb,
+               0x73ec, 0x73ed, 0x73ef, 0x73ff],
+  # Van Gogh
+  "gfx1033" : [0x163f],
+  # Beige_Goby
+  "gfx1034" : [0x7420, 0x7421, 0x7422, 0x7423, 0x743f],
+  # Yellow_Carp
+  "gfx1035" : [0x164d, 0x1681],
+
+  # Navi31
+  "gfx1100": [0x7448, 0x7449, 0x744a, 0x744c, 0x745e],
+  # Navi32
+  "gfx1101": [0x7470, 0x747e],
+  # Navi33
+  "gfx1102": [0x7480, 0x7483, 0x7489, 0x7499],
+}
+
+def staticVars(**kwargs):
+  def deco(func):
+    for k in kwargs:
+      setattr(func, k, kwargs[k])
+    return func
+  return deco
+
+@staticVars(search_term=re.compile(r"gfx[0-9a-fA-F]+(-[0-9a-fA-F]+)?(-generic)?"))
+def getGCNISA(line, match_from_beginning = False):
+ if match_from_beginning is True:
+   result = getGCNISA.search_term.match(line)
+ else:
+   result = getGCNISA.search_term.search(line)
+
+ if result is not None:
+   return result.group(0)
+ return None
+
+@staticVars(search_name=re.compile(r"gfx[0-9a-fA-F]+(-[0-9a-fA-F]+)?(-generic)?(:[-+:\w]+)?"))
+def getGCNArchName(line):
+ result = getGCNArchName.search_name.search(line)
+
+ if result is not None:
+   return result.group(0)
+ return None
+
+def readFromTargetLstFile():
+  target_list = []
+
+  # locate target.lst using environment variable or
+  # it should be placed at the same directory with this script
+  target_lst_path = os.environ.get("ROCM_TARGET_LST");
+  if target_lst_path == None:
+    target_lst_path = os.path.join(CWD, "target.lst")
+  if os.path.isfile(target_lst_path):
+    target_lst_file = open(target_lst_path, 'r')
+    for line in target_lst_file:
+      # for target.lst match from beginning so targets can be disabled by
+      # commenting it out
+      target = getGCNISA(line, match_from_beginning = True)
+      if target is not None:
+        target_list.append(target)
+
+  return target_list
+
+def readFromROCMINFO(search_arch_name = False):
+  target_list = []
+  # locate rocminfo binary which should be placed at the same directory with
+  # this script
+  rocminfo_executable = os.path.join(CWD, "rocminfo")
+
+  try:
+    t0 = time.time()
+    while 1:
+      t1 = time.time()
+      # quit after retrying rocminfo for a minute.
+      if t1 - t0 > 60.0:
+        print("Timeout querying rocminfo.  Are you compiling with more than 254 threads?")
+        break
+      # run rocminfo
+      rocminfo_output = subprocess.Popen(rocminfo_executable, stdout=subprocess.PIPE).communicate()[0].decode("utf-8").split('\n')
+      term1 = re.compile(r"Cannot allocate memory")
+      term2 = re.compile(r"HSA_STATUS_ERROR_OUT_OF_RESOURCES")
+      done = 1
+      for line in rocminfo_output:
+        if term1.search(line) is not None or term2.search(line) is not None:
+          done = 0
+          break
+      if done:
+        break
+  except:
+    rocminfo_output = []
+
+  # search AMDGCN gfx ISA
+  if search_arch_name is True:
+    line_search_term = re.compile(r"\A\s+Name:\s+(amdgcn-amd-amdhsa--gfx\d+)")
+  else:
+    line_search_term = re.compile(r"\A\s+Name:\s+(gfx\d+)")
+  for line in rocminfo_output:
+    if line_search_term.match(line) is not None:
+      if search_arch_name is True:
+        target = getGCNArchName(line)
+      else:
+        target = getGCNISA(line)
+      if target is not None:
+        target_list.append(target)
+
+  return target_list
+
+def readFromLSPCI():
+  target_list = []
+
+  try:
+    # run lspci
+    lspci_output = subprocess.Popen(["/usr/bin/lspci", "-n", "-d", "1002:"], stdout=subprocess.PIPE).communicate()[0].decode("utf-8").split('\n')
+  except:
+    lspci_output = []
+
+  target_search_term = re.compile(r"1002:\w+")
+  for line in lspci_output:
+    search_result = target_search_term.search(line)
+    if search_result is not None:
+      device_id = int(search_result.group(0).split(':')[1], 16)
+      # try lookup from ISA_TO_ID dict
+      for target in ISA_TO_ID.keys():
+        for target_device_id in ISA_TO_ID[target]:
+          if device_id == target_device_id:
+            target_list.append(target)
+            break
+
+  return target_list
+
+def readFromKFD():
+  target_list = []
+
+  topology_dir = '/sys/class/kfd/kfd/topology/nodes/'
+  if os.path.isdir(topology_dir):
+    for node in sorted(os.listdir(topology_dir)):
+      node_path = os.path.join(topology_dir, node)
+      if os.path.isdir(node_path):
+        prop_path = node_path + '/properties'
+        if os.path.isfile(prop_path) and os.access(prop_path, os.R_OK):
+          target_search_term = re.compile(r"gfx_target_version.+")
+          with open(prop_path) as f:
+            try:
+              line = f.readline()
+            except PermissionError:
+              # We may have a subsystem (e.g. scheduler) limiting device visibility which
+              # could cause a permission error.
+              line = ''
+            while line != '' :
+              search_result = target_search_term.search(line)
+              if search_result is not None:
+                device_id = int(search_result.group(0).split(' ')[1], 10)
+                if device_id != 0:
+                  gfx_override = os.environ.get("HSA_OVERRIDE_GFX_VERSION")
+                  if gfx_override is not None:
+                    try:
+                        override_tokens = gfx_override.split('.')
+                        major_ver=int(override_tokens[0])
+                        minor_ver=int(override_tokens[1])
+                        stepping_ver=int(override_tokens[2])
+                        if major_ver > 63 or minor_ver > 255 or stepping_ver > 255:
+                            print('Invalid HSA_OVERRIDE_GFX_VERSION value')
+                            major_ver = 0
+                            minor_ver = 0
+                            stepping_ver = 0
+                    except Exception as e:
+                        print('Invalid HSA_OVERRIDE_GFX_VERSION format expected \"1.2.3\"')
+                        major_ver = 0
+                        minor_ver = 0
+                        stepping_ver = 0
+                  else:
+                    major_ver = int((device_id / 10000) % 100)
+                    minor_ver = int((device_id / 100) % 100)
+                    stepping_ver = int(device_id % 100)
+
+                  target_list.append("gfx" + format(major_ver, 'd') + format(minor_ver, 'x') + format(stepping_ver, 'x'))
+              line = f.readline()
+
+  return target_list
+
+def main():
+  if len(sys.argv) == 2 and sys.argv[1] == '-name' :
+    """ Prints the list of available AMD GCN target names extracted from rocminfo, a tool
+        shipped with this script to enumerate GPU agents available on a working ROCm stack."""
+    target_list = readFromROCMINFO(True) 
+  else:
+    """Prints the list of available AMD GCN ISA
+
+    The program collects the list in 3 different ways, in the order of
+    precendence:
+
+    1. ROCM_TARGET_LST : a user defined environment variable, set to the path and
+                       filename where to find the "target.lst" file. This can be
+                       used in an install environment with sandbox, where
+                       execution of "rocminfo" is not possible.
+    2. target.lst : user-supplied text file. This is used in a container setting
+                  where ROCm stack may usually not available.
+    3. HSA topology : gathers the information from the HSA node topology in
+                      /sys/class/kfd/kfd/topology/nodes/
+    4. lspci : enumerate PCI bus and locate supported devices from a hard-coded
+               lookup table.
+    5. rocminfo : a tool shipped with this script to enumerate GPU agents
+                available on a working ROCm stack.
+    """
+    target_list = readFromTargetLstFile()
+
+    if len(target_list) == 0:
+      target_list = readFromKFD()
+
+    if len(target_list) == 0:
+      target_list = readFromLSPCI()
+
+    if len(target_list) == 0:
+      target_list = readFromROCMINFO()
+
+  for gfx in target_list:
+    print(gfx)
+
+if __name__ == "__main__":
+  main()

@@ -1,0 +1,56 @@
+
+ARG DISTRO
+ARG VERSION
+FROM ${DISTRO}:${VERSION}
+
+ENV HOME /root
+ENV LANG C.UTF-8
+ENV SHELL /bin/bash
+ENV BASH_ENV /etc/bash.bashrc
+ENV DEBIAN_FRONTEND noninteractive
+
+WORKDIR /tmp
+SHELL [ "/bin/bash", "-c" ]
+
+ARG EXTRA_PACKAGES=""
+ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
+ARG BOOST_DOWNLOAD_VERSION="1.79.0"
+ARG NJOBS="8"
+
+
+ENV PATH /usr/local/bin:${PATH}
+ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
+ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
+ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
+
+RUN apt-get update && \
+    apt-get dist-upgrade -y && \
+    apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
+        bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 gzip \
+        libiberty-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 \
+        python3-pip texinfo unzip wget vim zip zlib1g-dev iproute2 && \
+    apt-get autoclean && \
+    if [ "${OS_VERSION}" == "24.04" ]; then \
+        python3 -m pip install --break-system-packages 'cmake==3.21' perfetto \
+    else \
+        python3 -m pip install 'cmake==3.21' perfetto; \
+    fi
+
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
+
+RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh -O miniforge.sh && \
+    bash miniforge.sh -b -p /opt/conda && \
+    export PATH="/opt/conda/bin:${PATH}" && \
+    conda config --set always_yes yes --set changeps1 no && \
+    conda update -c conda-forge -n base conda && \
+    for i in ${PYTHON_VERSIONS}; do conda create -n py3.${i} -c conda-forge python=3.${i} pip numpy; done && \
+    for i in ${PYTHON_VERSIONS}; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done && \
+    conda clean -a -y && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+
+ENV LC_ALL C.UTF-8
+WORKDIR /home
+SHELL [ "/bin/bash", "--login", "-c" ]

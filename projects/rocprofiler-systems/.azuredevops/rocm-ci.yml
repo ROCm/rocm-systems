@@ -1,0 +1,46 @@
+resources:
+  repositories:
+  - repository: pipelines_repo
+    type: github
+    endpoint: ROCm
+    name: ROCm/ROCm
+
+variables:
+- group: common
+- template: /.azuredevops/variables-global.yml@pipelines_repo
+
+trigger:
+  batch: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - LICENSE
+    - VERSION
+    - .wordlist.txt
+
+pr:
+  autoCancel: true
+  branches:
+    include:
+    - amd-staging
+    - amd-mainline
+  paths:
+    exclude:
+    - .github
+    - docs
+    - '.*.y*ml'
+    - '*.md'
+    - LICENSE
+    - VERSION
+    - .wordlist.txt
+  drafts: false
+
+jobs:
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocprofiler-systems.yml@pipelines_repo
