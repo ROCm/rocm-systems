@@ -174,5 +174,17 @@ hsa_status_t SetPoolsTypical(BaseRocR* test);
 /// \returns HSA_STATUS_OK if not errors
 hsa_status_t hsa_memory_fill_workaround_gen(void* ptr, uint32_t value,
       size_t count, hsa_agent_t dst_ag, hsa_agent_t src_ag, BaseRocR* test);
+
+
+/// Helper function that iterates through hsa_agent_iterate_isas, selects the first ISA
+/// that does not contain “-generic”, chops the prefix up to the substring
+/// “gfx”, then truncates the token to `[0-9a-z]` characters that
+/// belong to the gfx ID (e.g. gfx940, gfx1200).
+/// \param[in]  agent     HSA agent whose ISA list will be scanned.
+/// \param[out] gfx_id   On success, receives the gfx name
+/// \returns true  – success, gfx_id is filled
+///          false – no ISA could be found or parsed
+///
+bool GetISAGfxString(hsa_agent_t agent, std::string& gfx_id);
 }  // namespace rocrtst
 #endif  // ROCRTST_COMMON_BASE_ROCR_UTILS_H_

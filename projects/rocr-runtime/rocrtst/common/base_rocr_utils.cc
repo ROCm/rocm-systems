@@ -53,6 +53,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string>
+#include <algorithm>
 #include "common/base_rocr.h"
 #include "common/helper_funcs.h"
 #include "common/os.h"
@@ -510,6 +511,61 @@ hsa_status_t AllocAndSetKernArgs(BaseRocR* test, void* args, size_t arg_size) {
   test->aql().kernarg_address = adj_kern_arg_buf;
 
   return HSA_STATUS_SUCCESS;
+}
+
+// Returns the first “gfx…” string for this GPU agent.
+// gfx_id – will get “gfx940”, “gfx1201” etc
+// return  – true  = found, false = nothing usable
+bool GetISAGfxString(const hsa_agent_t agent, std::string& gfx_id) {
+  // Iterate over every ISA for this agent
+  hsa_status_t status = hsa_agent_iterate_isas(
+      agent,
+      /* Callback lambda - invoked once per ISA*/
+      [](hsa_isa_t isa, void* data) -> hsa_status_t {
+        std::string* result = static_cast<std::string*>(data);
+
+        // Ask how long the ISA name is..
+        uint32_t len = 0;
+        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME_LENGTH, &len) != HSA_STATUS_SUCCESS)
+          return HSA_STATUS_SUCCESS;
+
+        std::string name(len + 1, '\0');
+        // Read full name..
+        if (hsa_isa_get_info_alt(isa, HSA_ISA_INFO_NAME, &name[0]) != HSA_STATUS_SUCCESS) {
+          std::cout << " hsa_isa_get_info_alt(HSA_ISA_INFO_NAME) failed" << std::endl;
+          return HSA_STATUS_SUCCESS;  // continue iterating
+        }
+
+        name.resize(len);
+
+        // Skip any "*-generic” entry
+
+        if (name.rfind("generic") != std::string::npos) return HSA_STATUS_SUCCESS;
+        // Found the ISA name - save and stop iterating
+        *result = std::move(name);
+        return HSA_STATUS_INFO_BREAK;
+      },
+      &gfx_id);
+
+  // If the walk itself failed, give up
+  if (status != HSA_STATUS_INFO_BREAK && status != HSA_STATUS_SUCCESS) return false;
+
+  // Nothing stored.. Also give up..
+  if (gfx_id.empty()) return false;
+
+  // Extract the "gfx.." part
+  std::size_t pos = gfx_id.rfind("gfx");
+  if (pos == std::string::npos) return false;  // no gfx or GFX found in the string
+
+  gfx_id.erase(0, pos);  // keep only the "gfxXYZ" part
+
+  // Keep letters/digits after “gfx”; stop at first separator
+  auto it_end = std::find_if_not(gfx_id.begin() + 3, gfx_id.end(), [](char c) {
+    return std::isalnum(static_cast<unsigned char>(c));
+  });
+  gfx_id.erase(it_end, gfx_id.end());
+
+  return !gfx_id.empty();  // true if something like “gfx940”
 }
 
 #undef RET_IF_HSA_UTILS_ERR

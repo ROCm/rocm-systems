@@ -60,10 +60,6 @@
 
 static const uint32_t kNumBufferElements = 256;
 
-
-
-
-
 #define RET_IF_HSA_ERR(err) { \
   if ((err) != HSA_STATUS_SUCCESS) { \
     const char* msg = 0; \
@@ -328,6 +324,7 @@ hsa_status_t CallbackSystemErrorHandling(const hsa_amd_event_t* event, void* dat
 void MemoryAllocateNegativeTest::FreeQueueRingBufferTest(void) {
   hsa_status_t err;
 
+  // Prepare a blank AQL dispatch packet and point it to empty_kernel
   memset(&aql(), 0, sizeof(hsa_kernel_dispatch_packet_t));
   set_kernel_file_name("dispatch_time_kernels.hsaco");
   set_kernel_name("empty_kernel");
@@ -346,15 +343,45 @@ void MemoryAllocateNegativeTest::FreeQueueRingBufferTest(void) {
   err = hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus);
   ASSERT_EQ(err, HSA_STATUS_SUCCESS);
 
-  for (unsigned int i = 0; i < gpus.size(); ++i) {
-    FreeQueueRingBufferTest(gpus[i]);
+  bool found_gpu = false;
+  for (hsa_agent_t gpuAgent : gpus) {
+    std::string gfx;
+    if (!rocrtst::GetISAGfxString(gpuAgent, gfx)) {
+      std::cout << "[FreeQueueRingBufferTest] Could not derive ISA for agent – skipping.."
+                << std::endl;
+      continue;
+    }
+
+    // The first three characters after "gfx" are digits.Convert them to int
+    // int ver = std::stoi(gfx.substr(3));
+    std::size_t p = 3;
+    while (p < gfx.size() && std::isdigit(static_cast<unsigned char>(gfx[p]))) ++p;
+    int ver = std::stoi(gfx.substr(3, p - 3));  // e.g. “940”, “1201”
+
+    // Skip everything older than gfx94x
+    if (ver < 940) {
+      if (verbosity() > 0) {
+        std::cout << "  Test not applicable for GPU: " << gfx << ". Skipping.\n"
+                  << kSubTestSeparator << std::endl;
+      }
+      continue;  // next GPU
+    }
+
+    // We found the gfx94x+ GPU. Run the negative test now.
+    found_gpu = true;
+
+    FreeQueueRingBufferTest(gpuAgent);
   }
 
   if (verbosity() > 0) {
-    std::cout << "subtest Passed" << std::endl;
+    if (found_gpu)
+      std::cout << "subtest Passed\n";  // atleast on GPU was tested
+    else
+      std::cout << "subtest Skipped – no GPU found\n";
     std::cout << kSubTestSeparator << std::endl;
   }
 }
+
 
 void MemoryAllocateNegativeTest::FreeQueueRingBufferTest(hsa_agent_t gpuAgent) {
   hsa_status_t err;
