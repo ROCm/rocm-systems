@@ -77,7 +77,10 @@ class KernelView(Container):
         """
         with VerticalScroll(id="top-container"):
             yield Label(
-                "Open a workload directory to run analysis and view individual kernel analysis results.",
+                (
+                    "Open a workload directory to run analysis and view individual "
+                    "kernel analysis results."
+                ),
                 classes="placeholder",
             )
 
@@ -177,7 +180,7 @@ class KernelView(Container):
         bottom_container.remove_children()
 
         bottom_container.mount(
-            Label(f"Toggle kernel selection to view detailed analysis.")
+            Label("Toggle kernel selection to view detailed analysis.")
         )
 
         if self.current_selection and self.current_selection in self.dfs:
