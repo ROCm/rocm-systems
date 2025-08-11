@@ -201,24 +201,30 @@ if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
 endif()
 set ( CMAKE_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX} CACHE STRING "Default installation directory." FORCE )
 
-# Installs binaries and exports the library usage data to ${HSAKMT_TARGET}Targets
-install ( TARGETS ${HSAKMT_TARGET} EXPORT ${HSAKMT_TARGET}Targets
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT asan )
-install ( TARGETS ${HSAKMT_TARGET}
-    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
-
 # Install public headers
 install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
   COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
 
-# Record our usage data for clients find_package calls.
-install ( EXPORT ${HSAKMT_TARGET}Targets
-  FILE ${HSAKMT_TARGET}Targets.cmake
-  NAMESPACE ${HSAKMT_TARGET}::
-  DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-  COMPONENT dev)
+# Option to build header path migration helpers.
+option(INCLUDE_PATH_COMPATIBILITY "Generate backward compatible headers and include paths.  Use of these headers will warn when included." OFF)
+
+if(INCLUDE_PATH_COMPATIBILITY)
+  # To enable/disable #error in wrapper header files
+  if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
+      if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
+          set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
+                  CACHE STRING "Header wrapper warnings as errors.")
+      else()
+          set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
+      endif()
+  endif()
+  if(ROCM_HEADER_WRAPPER_WERROR)
+      set(deprecated_error 1)
+  else()
+      set(deprecated_error 0)
+  endif()
+  include(hsakmt-backward-compat.cmake)
+endif()
 
 # Adds the target alias hsakmt::hsakmt to the local cmake cache.
 # This isn't necessary today.  It's harmless preparation for some
@@ -227,26 +233,6 @@ install ( EXPORT ${HSAKMT_TARGET}Targets
 # and target_link_library() without regard to whether a target is external or
 # a subdirectory of the current build.
 add_library( ${HSAKMT_TARGET}::${HSAKMT_TARGET} ALIAS ${HSAKMT_TARGET} )
-
-# Create cmake configuration files
-include(CMakePackageConfigHelpers)
-
-configure_package_config_file(${HSAKMT_TARGET}-config.cmake.in
-                            ${HSAKMT_TARGET}-config.cmake
-                            INSTALL_DESTINATION
-                            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET} )
-
-write_basic_package_version_file(${HSAKMT_TARGET}-config-version.cmake
-                 VERSION ${BUILD_VERSION_STRING}
-                 COMPATIBILITY
-                 AnyNewerVersion)
-
-install(FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
-        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
-        DESTINATION
-        ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
-        COMPONENT dev)
 
 # Optionally record the package's find module in the user's package cache.
 if ( NOT DEFINED EXPORT_TO_USER_PACKAGE_REGISTRY )
@@ -269,7 +255,26 @@ configure_file ( libhsakmt.pc.in libhsakmt.pc @ONLY )
 
 install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig COMPONENT dev)
 
-if ( NOT BUILD_SHARED_LIBS)
+if(NOT BUILD_SHARED_LIBS)
+  include(CMakePackageConfigHelpers)
+
+  configure_package_config_file(${HSAKMT_TARGET}-config.cmake.in
+                            ${HSAKMT_TARGET}-config.cmake
+                            INSTALL_DESTINATION
+                            ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET} )
+
+  write_basic_package_version_file(${HSAKMT_TARGET}-config-version.cmake
+                 VERSION ${BUILD_VERSION_STRING}
+                 COMPATIBILITY
+                 AnyNewerVersion)
+
+  install(FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config.cmake
+        ${CMAKE_CURRENT_BINARY_DIR}/${HSAKMT_TARGET}-config-version.cmake
+        DESTINATION
+        ${CMAKE_INSTALL_LIBDIR}/cmake/${HSAKMT_TARGET}
+        COMPONENT dev)
+
   ## Create separate target file for static builds
   ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
   add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")

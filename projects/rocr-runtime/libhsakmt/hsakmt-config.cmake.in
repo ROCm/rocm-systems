@@ -10,10 +10,7 @@ include( CMakeFindDependencyMacro )
 # find_dependencies as shown below.
 #find_dependency(Bar, 2.0)
 
-# If the option is ON link other dependent libraries dynamically
-# If the option is OFF, then link libdrm and libdrm_amdgpu statically
-if(@BUILD_SHARED_LIBS@)
-  include( "${CMAKE_CURRENT_LIST_DIR}/@HSAKMT_TARGET@Targets.cmake" )
-else()
-  include( "${CMAKE_CURRENT_LIST_DIR}/@HSAKMT_STATIC_DRM_TARGET@Targets.cmake" )
-endif()
+# If the "shared_libs" option is ON link other dependent libraries dynamically
+# If the "shared_libs" option is OFF, then link libdrm and libdrm_amdgpu statically
+include( "${CMAKE_CURRENT_LIST_DIR}/@HSAKMT_STATIC_DRM_TARGET@Targets.cmake" )
+

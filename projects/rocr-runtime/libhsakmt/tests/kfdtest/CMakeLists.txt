@@ -103,17 +103,17 @@ if( DEFINED ENV{LIBHSAKMT_PATH} )
     set ( LIBHSAKMT_PATH $ENV{LIBHSAKMT_PATH} )
     message ( "LIBHSAKMT_PATH environment variable is set" )
 else()
-    if ( ${ROCM_INSTALL_PATH} )
-       set ( ENV{PKG_CONFIG_PATH} ${ROCM_INSTALL_PATH}/share/pkgconfig )
-    else()
-       set ( ENV{PKG_CONFIG_PATH} /opt/rocm/share/pkgconfig )
-    endif()
+  find_path(LIBHSAKMT_PATH NAMES libhsakmt.a
+    PATHS ${CMAKE_CURRENT_BINARY_DIR}/../rocr/libhsakmt/archive
+    PATHS ${CMAKE_CURRENT_BINARY_DIR}/../rocr/libhsakmt )
+endif()
 
-    pkg_check_modules(HSAKMT libhsakmt)
-
-    if( NOT HSAKMT_FOUND )
-       set ( LIBHSAKMT_PATH $ENV{OUT_DIR} )
-    endif()
+if ( BUILD_SHARED_LIBS)
+find_path(LIBHSAKMT_PATH NAMES libhsakmt.a
+  PATHS ${CMAKE_CURRENT_BINARY_DIR}/../rocr/libhsakmt/archive)
+else()
+find_path(LIBHSAKMT_PATH NAMES libhsakmt-staticdrm.a
+  PATHS ${CMAKE_CURRENT_BINARY_DIR}/../rocr/libhsakmt/archive)
 endif()
 
 if( DEFINED LIBHSAKMT_PATH )
@@ -247,15 +247,19 @@ link_directories(${HSAKMT_LIBRARY_DIRS})
 
 add_executable(kfdtest ${SRC_FILES})
 
-target_link_libraries(kfdtest ${HSAKMT_LIBRARIES} ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} ${llvm_libs} pthread m stdc++ rt numa)
+if(BUILD_SHARED_LIBS)
+  target_link_libraries(kfdtest ${HSAKMT_LIBRARIES} ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} ${llvm_libs} pthread m stdc++ rt numa)
+else()
+  target_link_libraries(kfdtest  ${llvm_libs} pthread m stdc++ rt numa hsakmt-staticdrm::hsakmt-staticdrm)
+endif()
 
 configure_file ( scripts/kfdtest.exclude kfdtest.exclude COPYONLY )
 configure_file ( scripts/run_kfdtest.sh run_kfdtest.sh COPYONLY )
 
 install( PROGRAMS ${CMAKE_CURRENT_BINARY_DIR}/kfdtest ${CMAKE_CURRENT_BINARY_DIR}/run_kfdtest.sh
-	DESTINATION bin )
+        DESTINATION bin )
 install( FILES ${CMAKE_CURRENT_BINARY_DIR}/kfdtest.exclude
-	DESTINATION share/kfdtest )
+        DESTINATION share/kfdtest )
 # Remove dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON not given to cmake
 if(NOT ROCM_DEP_ROCMCORE)
     string(REGEX REPLACE ",? ?rocm-core" "" CPACK_RPM_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
