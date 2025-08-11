@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
@@ -41,7 +40,6 @@ class cli_analysis(OmniAnalyze_Base):
         if self.get_args().random_port:
             console_error("--gui flag is required to enable --random-port")
         for d in self.get_args().path:
-
             # create 'mega dataframe'
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
                 d[0],
