@@ -713,7 +713,12 @@ void BlitSdma<useGCR>::UpdateWriteAndDoorbellRegister(uint64_t curr_index, uint6
       // Ensure write pointer is visible to GPU before doorbell.
       std::atomic_thread_fence(std::memory_order_release);
 
-      *reinterpret_cast<uint64_t*>(queue_resource_.Queue_DoorBell) = new_index;
+      if (core::Runtime::runtime_singleton_->flag().enable_dtif()) {
+        HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_resource_.QueueId));
+      }
+      else {
+        *reinterpret_cast<uint64_t*>(queue_resource_.Queue_DoorBell) = new_index;
+      }
 
       atomic::Store(&cached_commit_index_, new_index, std::memory_order_release);
       break;
