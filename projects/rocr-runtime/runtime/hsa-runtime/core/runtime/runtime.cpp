@@ -79,6 +79,9 @@
 #include "core/util/memory.h"
 #include "core/util/os.h"
 #include "inc/hsa_ven_amd_aqlprofile.h"
+#ifdef HSAKMT_VIRTIO_ENABLED
+#include "hsakmt/hsakmt_virtio.h"
+#endif
 
 #ifndef HSA_VERSION_MAJOR
 #define HSA_VERSION_MAJOR 1
@@ -958,10 +961,19 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
     auto err = HSAKMT_CALL(hsaKmtQueryPointerInfo(ptr, &thunkInfo));
-    if (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN) {
-      retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
-      memcpy(info, &retInfo, retInfo.size);
-      return HSA_STATUS_SUCCESS;
+    bool isUnknown = (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN);
+
+#ifdef HSAKMT_VIRTIO_ENABLED
+    if (isUnknown) {
+        err = vhsaKmtQueryPointerInfo(ptr, &thunkInfo);
+        isUnknown = (err != HSAKMT_STATUS_SUCCESS || thunkInfo.Type == HSA_POINTER_UNKNOWN);
+    }
+#endif
+
+    if (isUnknown) {
+        retInfo.type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+        memcpy(info, &retInfo, retInfo.size);
+        return HSA_STATUS_SUCCESS;
     }
 
     if (returnListData) {
