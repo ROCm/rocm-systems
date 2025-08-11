@@ -102,6 +102,8 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
@@ -294,6 +296,8 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
