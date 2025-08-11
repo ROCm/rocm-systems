@@ -183,7 +183,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                             
                             shortened_name = shorten_kernel_name(kernel_name, args.kernel_verbose)
                             
-                            print(f"\nKernel {kernel_id}: {shortened_name[:60]}{'...' if len(shortened_name) > 60 else ''} ({kernel_pct:.1f}%)", file=output)
+                            print(f"\nKernel {kernel_id}: {shortened_name[:80]}{'...' if len(shortened_name) > 80 else ''} ({kernel_pct:.1f}%)", file=output)
 
                             base_indent = "  "
                             table_indent_prefix = f"{base_indent}|   "
@@ -534,3 +534,37 @@ def show_roof_plot(roof_plot):
             "roofline profiling data.",
             exit=False,
         )
+
+
+def show_kernel_stats(args, runs, archConfigs, output):	
+    """	
+    Show the kernels and dispatches from "Top Stats" section.	
+    """	
+
+    df = pd.DataFrame()	
+    for panel_id, panel in archConfigs.panel_configs.items():	
+        for data_source in panel["data source"]:	
+            for type, table_config in data_source.items():	
+                for run, data in runs.items():	
+                    df = pd.DataFrame()	
+                    single_df = data.dfs[table_config["id"]]	
+                    # NB:	
+                    #   For pmc_kernel_top.csv, have to sort here if not	
+                    #   sorted when load_table_data.	
+                    if table_config["id"] == 1:	
+                        print("\n" + "-" * 80, file=output)	
+                        print(	
+                            "Detected Kernels (sorted descending by duration)",	
+                            file=output,	
+                        )	
+                        df = pd.concat([df, single_df["Kernel_Name"]], axis=1)	
+
+                    if table_config["id"] == 2:	
+                        print("\n" + "-" * 80, file=output)	
+                        print("Dispatch list", file=output)	
+                        df = single_df	
+
+                    print(	
+                        get_table_string(df, transpose=False, decimal=args.decimal),	
+                        file=output,	
+                    )	
