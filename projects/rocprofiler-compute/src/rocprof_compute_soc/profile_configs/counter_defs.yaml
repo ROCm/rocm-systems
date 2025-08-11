@@ -10601,6 +10601,19 @@ rocprofiler-sdk:
       - gfx950
       block: SQ
       event: 337
+  - name: SQC_ICACHE_INFLIGHT_LEVEL
+    description: Total outstanding transactions in data cache (per-SQ, nondeterministic)
+    properties: []
+    definitions:
+    - architectures:
+      - gfx90a
+      - gfx908
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      block: SQ
+      event: 336
   - name: SQ_IFETCH_LEVEL_ACCUM
     description: Accumulate SQ_IFETCH_LEVEL
     properties: []
@@ -10673,3 +10686,15 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: accumulate(SQC_DCACHE_INFLIGHT_LEVEL, HIGH_RES)
+  - name: SQC_ICACHE_INFLIGHT_LEVEL_ACCUM
+    description: Accumulate SQC_ICACHE_INFLIGHT_LEVEL
+    properties: []
+    definitions:
+    - architectures:
+      - gfx908
+      - gfx90a
+      - gfx940
+      - gfx941
+      - gfx942
+      - gfx950
+      expression: accumulate(SQC_ICACHE_INFLIGHT_LEVEL, HIGH_RES)
