@@ -25,10 +25,13 @@
 
 #include <string.h>
 #include <stdlib.h>
-#include <limits.h> /* PATH_MAX */
 #include <stdio.h>
+#if defined(_WIN32) || defined(__CYGWIN__)
+// No Windows-specific includes.
+#else
 #include <link.h>
 #include <dlfcn.h>
+#endif
 #include "rocm_getpath.h"
 
 /* Macro for NULL CHECK */
@@ -39,7 +42,7 @@
 #define TARGET_LIB_INSTALL_DIR TARGET_LIBRARY_INSTALL_DIR
 
 /* Target Library Name Buf Size */
-#define LIBRARY_FILENAME_BUFSZ (PATH_MAX+1)
+#define LIBRARY_FILENAME_BUFSZ 4096
 
 /* Internal Function to get Base Path - Ref from Icarus Logic*/
 static int getROCmBase(char *buf);
@@ -91,7 +94,7 @@ PathErrors_t getROCmInstallPath( char** InstallPath, unsigned int *InstallPathLe
 
 /* General purpose function that fills the directory to find rocm related stuff */
 /* returns the offset into the buffer for the terminating NUL or -1 for error */
-/* The buffer should be at least PATH_MAX */
+/* The buffer should be at least LIBRARY_FILENAME_BUFSZ */
 static int getROCmBase(char *buf)
 {
   int len=0;
@@ -109,7 +112,7 @@ static int getROCmBase(char *buf)
          /* Already has at least one terminating */
          len--;
       }
-      if (len > PATH_MAX-1 ) {
+      if (len > LIBRARY_FILENAME_BUFSZ - 1) {
          return PathValuesTooLong;
       }
       strncpy(buf, envStr, len);
@@ -165,4 +168,3 @@ static int getROCmBase(char *buf)
   len = strlen(buf);
   return len;
 }
-

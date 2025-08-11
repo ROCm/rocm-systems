@@ -32,7 +32,13 @@
 extern "C" {
 #endif  /* __cplusplus */
 
-#define LIB_API_PUBLIC __attribute__ ((visibility ("default")))
+#if defined(_WIN32) || defined(__CYGWIN__)
+#define LIB_API_PUBLIC __declspec(dllexport)
+#define ATTRIBUTE_NON_NULL
+#else
+#define LIB_API_PUBLIC __attribute__((visibility("default")))
+#define ATTRIBUTE_NON_NULL __attribute__((nonnull))
+#endif
 
 /* Get Library Target Build Type */
 #cmakedefine01 BUILD_SHARED_LIBS
@@ -62,7 +68,7 @@ typedef enum {
 //      free(installPath); //caller must free allocated memory after usage.
 //    ...
 //  }
-LIB_API_PUBLIC PathErrors_t getROCmInstallPath(char **InstallPath, unsigned int *InstallPathLen) __attribute__((nonnull)) ;
+LIB_API_PUBLIC PathErrors_t getROCmInstallPath(char **InstallPath, unsigned int *InstallPathLen) ATTRIBUTE_NON_NULL ;
 
 #ifdef __cplusplus
 }  // end extern "C" block
