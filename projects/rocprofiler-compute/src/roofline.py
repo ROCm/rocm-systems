@@ -185,7 +185,7 @@ class Roofline:
             self.__mspec,
             self.__run_parameters.get("sort_type"),
             ret_df
-
+        )
         msg = "AI at each mem level:"
         for i in self.__ai_data:
             msg += "\n\t%s -> %s" % (i, self.__ai_data[i])
