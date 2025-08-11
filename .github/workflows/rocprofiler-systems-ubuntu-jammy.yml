@@ -9,26 +9,17 @@ on:
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-jammy.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
@@ -112,6 +103,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="" &&
@@ -303,6 +295,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="" &&
