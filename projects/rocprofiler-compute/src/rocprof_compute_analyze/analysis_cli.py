@@ -26,7 +26,7 @@
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
-from utils.logger import console_error, console_log, console_warning, demarcate
+from utils.logger import console_error, demarcate
 
 
 class cli_analysis(OmniAnalyze_Base):
@@ -50,7 +50,7 @@ class cli_analysis(OmniAnalyze_Base):
                 self.get_args().verbose,
                 self._profiling_config,
             )
-            
+
             if self.get_args().spatial_multiplexing:
                 workload.raw_pmc = self.spatial_multiplex_merge_counters(
                     workload.raw_pmc
@@ -71,7 +71,7 @@ class cli_analysis(OmniAnalyze_Base):
             kernel_name_shortener(
                 workload.raw_pmc, self.get_args().kernel_verbose
             )
-            
+
             #update path
             self._runs[d[0]].path = d[0]
 
@@ -105,14 +105,14 @@ class cli_analysis(OmniAnalyze_Base):
             workload_path = self.get_args().path[0][0]
             workload = self._runs[workload_path]
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
-            
+
             if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
                 roof_obj = self.get_socs()[gpu_arch].roofline_obj
-                
+
                 if roof_obj:
                     #store path in workload for calc_ai_analyze
                     workload.path = workload_path
-                    
+
                     # NOTE: using default data type
                     roof_plot = roof_obj.cli_generate_plot(
                         dtype=roof_obj.get_dtype()[0],
@@ -120,7 +120,7 @@ class cli_analysis(OmniAnalyze_Base):
                         config=self._profiling_config,
                         arch_config=self._arch_configs[gpu_arch]
                     )
-        
+
         tty.show_all(
             self.get_args(),
             self._runs,

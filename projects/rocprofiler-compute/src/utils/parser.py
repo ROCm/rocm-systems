@@ -195,7 +195,7 @@ def to_int(a):
     #     return int(a)
     else:
         raise Exception("to_int: unsupported type.")
-    
+
 def to_sum(a):
     if str(type(a)) == "<class 'NoneType'>":
         return np.nan

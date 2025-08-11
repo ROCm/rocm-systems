@@ -650,12 +650,12 @@ class Roofline:
                 config=config,
                 arch_config=arch_config
             )
-        
+
             self.__ceiling_data = constuct_roof(
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype
             )
-        
+
         else:
             pmc_perf_csv = base_path / "pmc_perf.csv"
             if not pmc_perf_csv.is_file():

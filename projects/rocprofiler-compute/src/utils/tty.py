@@ -31,7 +31,7 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser, kernel_name_shortener
+from utils import mem_chart, parser
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
@@ -160,19 +160,19 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 for data_source in panel["data source"]
                 for type in data_source
             )
-            
+
             if has_roofline_style and (not args.filter_metrics or "4" in args.filter_metrics):
                 print("\n" + "=" * 80, file=output)
                 print("4. Roofline", file=output)
                 print("=" * 80, file=output)
-                
+
                 for run_path, workload in runs.items():
                     if hasattr(workload, 'roofline_metrics') and workload.roofline_metrics:
                         print("\nPer-Kernel Roofline Metrics (4.1) and AI Plot Points (4.2)", file=output)
                         print("-" * 80, file=output)
-                        
+
                         kernel_top_df = workload.dfs.get(1, pd.DataFrame())
-                        
+
                         for i, (kernel_id, metrics) in enumerate(workload.roofline_metrics.items()):
                             if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
                                 kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
@@ -180,9 +180,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                             else:
                                 kernel_name = metrics.get('name', f'Kernel {kernel_id}')
                                 kernel_pct = 0
-                            
+
                             shortened_name = shorten_kernel_name(kernel_name, args.kernel_verbose)
-                            
+
                             print(f"\nKernel {kernel_id}: {shortened_name[:80]}{'...' if len(shortened_name) > 80 else ''} ({kernel_pct:.1f}%)", file=output)
 
                             base_indent = "  "
@@ -190,7 +190,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
 
                             table_order = [401, 402]
                             table_names = {401: "4.1 Roofline Rate Metrics:", 402: "4.2 Roofline AI Plot Points:"}
-                            
+
                             print(f"{base_indent}|")
 
                             for table_id in table_order:
@@ -200,10 +200,10 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                     df = metrics.get('ai_table', pd.DataFrame())
                                 else:
                                     continue
-                                
+
                                 if df.empty:
                                     continue
-                                
+
                                 connector = "├─ "
                                 print(f"{base_indent}{connector}{table_names.get(table_id, '')}", file=output)
 
@@ -212,16 +212,16 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                 for col in hidden_cols:
                                     if col in display_df.columns:
                                         display_df = display_df.drop(columns=[col])
-                                                                
+
                                 table_string = get_table_string(display_df, transpose=False, decimal=args.decimal)
-                                
+
                                 indented_table_string = textwrap.indent(table_string, table_indent_prefix)
-                                
+
                                 print(indented_table_string, file=output)
 
                     else:
                         print("\nNo per-kernel metrics available", file=output)
-                
+
                 # Show the roofline plot
                 if roof_plot:
                     show_roof_plot(roof_plot)
@@ -536,35 +536,35 @@ def show_roof_plot(roof_plot):
         )
 
 
-def show_kernel_stats(args, runs, archConfigs, output):	
+def show_kernel_stats(args, runs, archConfigs, output):
     """	
     Show the kernels and dispatches from "Top Stats" section.	
-    """	
+    """
 
-    df = pd.DataFrame()	
-    for panel_id, panel in archConfigs.panel_configs.items():	
-        for data_source in panel["data source"]:	
-            for type, table_config in data_source.items():	
-                for run, data in runs.items():	
-                    df = pd.DataFrame()	
-                    single_df = data.dfs[table_config["id"]]	
-                    # NB:	
-                    #   For pmc_kernel_top.csv, have to sort here if not	
-                    #   sorted when load_table_data.	
-                    if table_config["id"] == 1:	
-                        print("\n" + "-" * 80, file=output)	
-                        print(	
-                            "Detected Kernels (sorted descending by duration)",	
-                            file=output,	
-                        )	
-                        df = pd.concat([df, single_df["Kernel_Name"]], axis=1)	
+    df = pd.DataFrame()
+    for panel_id, panel in archConfigs.panel_configs.items():
+        for data_source in panel["data source"]:
+            for type, table_config in data_source.items():
+                for run, data in runs.items():
+                    df = pd.DataFrame()
+                    single_df = data.dfs[table_config["id"]]
+                    # NB:
+                    #   For pmc_kernel_top.csv, have to sort here if not
+                    #   sorted when load_table_data.
+                    if table_config["id"] == 1:
+                        print("\n" + "-" * 80, file=output)
+                        print(
+                            "Detected Kernels (sorted descending by duration)",
+                            file=output,
+                        )
+                        df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
 
-                    if table_config["id"] == 2:	
-                        print("\n" + "-" * 80, file=output)	
-                        print("Dispatch list", file=output)	
-                        df = single_df	
+                    if table_config["id"] == 2:
+                        print("\n" + "-" * 80, file=output)
+                        print("Dispatch list", file=output)
+                        df = single_df
 
-                    print(	
-                        get_table_string(df, transpose=False, decimal=args.decimal),	
-                        file=output,	
-                    )	
+                    print(
+                        get_table_string(df, transpose=False, decimal=args.decimal),
+                        file=output,
+                    )
