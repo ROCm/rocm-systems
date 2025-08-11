@@ -24,8 +24,7 @@
 
 from dataclasses import dataclass, field
 from decimal import Decimal
-from types import SimpleNamespace as NS
-from typing import Dict, Generator, List, Mapping
+from typing import Dict
 
 from plotille import Canvas
 
@@ -60,7 +59,8 @@ def make_format_spec(num, align=">"):
 
 def is_value_valid(value):
     """
-    Check if a value is valid and display N/A if not(to be valid, it needs to be not None, and be int or float)
+    Check if a value is valid and display N/A if not
+    (to be valid, it needs to be not None, and be int or float)
     """
     if value is None:
         return False
@@ -82,7 +82,8 @@ def format_text(
     value_align=">",
 ):
     """
-    Format a text string for canvas to display according to input key value pair and make proper aligment
+    Format a text string for canvas to display according to
+    input key value pair and make proper aligment
     For invalid value, it displays N/A
     All strings to be displayed on Canvas need to use this method
     """
@@ -102,12 +103,16 @@ def format_text(
         value_str = f"{'N/A':{align}{width}}"
 
     key_format = (
-        make_format_spec(key_step_prec_leftalign, key_align) if key is not None else None
+        make_format_spec(key_step_prec_leftalign, key_align)
+        if key is not None
+        else None
     )
     key_str = (
         "{key:{key_format}}".format(key=key, key_format=key_format)
         if key and isinstance(key, (int, float))
-        else str(key) if key else None
+        else str(key)
+        if key
+        else None
     )
 
     unit_string = post_description_with_space if not "N/A" in value_str else ""
@@ -913,7 +918,9 @@ class Fabric(RectFrame):
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 6.0, self.y_max - 2.0, "   " + self.label)
         canvas.text(self.x_min + 2.0, self.y_max - 4.0, "Latency (cycles)")
-        canvas.rect(self.x_min + 2.0, self.y_max - 9, self.x_max - 2.0, self.y_max - 4.5)
+        canvas.rect(
+            self.x_min + 2.0, self.y_max - 9, self.x_max - 2.0, self.y_max - 4.5
+        )
 
         i = 1
         for k, v in self.lat.items():
@@ -960,7 +967,9 @@ class Wire_Fabric_HBM(RectFrame):
                 value_step_prec_rightalign=4.0,
             ),
         )
-        canvas.text(self.x_min + self.text_x_offset - 2, self.y_max - 1.0, "<-----------")
+        canvas.text(
+            self.x_min + self.text_x_offset - 2, self.y_max - 1.0, "<-----------"
+        )
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max - 2.0,
@@ -971,7 +980,9 @@ class Wire_Fabric_HBM(RectFrame):
                 value_step_prec_rightalign=4.0,
             ),
         )
-        canvas.text(self.x_min + self.text_x_offset - 2, self.y_max - 3.0, "----------->")
+        canvas.text(
+            self.x_min + self.text_x_offset - 2, self.y_max - 3.0, "----------->"
+        )
 
 
 # HBM
@@ -1001,7 +1012,7 @@ class MemChart:
         # Fixme: this is temp solution to filter out non-numeric string
         for k, v in metric_dict.items():
             # print(k, type(v))
-            metric_dict[k] = None if type(v) == str else v
+            metric_dict[k] = None if isinstance(v, str) else v
 
         # Typically, the drawing order would be: left->right, top->down
 

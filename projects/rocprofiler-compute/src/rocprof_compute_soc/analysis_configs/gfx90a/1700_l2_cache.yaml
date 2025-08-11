@@ -288,13 +288,13 @@ Panel Config:
             != 0) else None))
           unit: pct
         Write and Atomic BW:
-          avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-            * 32)) / (End_Timestamp - Start_Timestamp)))
-          unit: Gbps
+          avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / $denom))
+          unit: (Bytes  + $normUnit)
         HBM Write and Atomic Traffic:
           avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
             != 0) else None))
