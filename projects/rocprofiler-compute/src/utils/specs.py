@@ -155,34 +155,35 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocm_version = get_rocm_ver().strip()
     # FIXME: use device
 
-    # Parse json from amd-smi
-    amd_smi_static_json = json.loads(
-        run(["amd-smi", "static", "--json"], exit_on_error=True)
+    # Load amd-smi static data for GPU 0
+    static_data = json.loads(
+        run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
     )
 
-    # NOTE: Need to obtain partition information explicitly from amd-smi partition
-    #       https://github.com/ROCm/amdsmi/commit/88473b7fd0d34790bca09fcc3607ea79e3a837e0
-    amd_smi_partition_json = json.loads(
-        run(["amd-smi", "partition", "--json"], exit_on_error=True)
+    # Extract GPU data
+    gpu_list = (
+        static_data
+        if isinstance(static_data, list)
+        else static_data.get("gpu_data", [])
     )
+    gpu_data = gpu_list[0] if gpu_list else {}
 
-    gpu_data = amd_smi_static_json.get("gpu_data", [])
-    vbios = gpu_data[0].get("vbios", {}).get("part_number", None) if gpu_data else None
+    vbios = gpu_data.get("vbios", {}).get("part_number")
 
-    partition_data = amd_smi_partition_json.get("current_partition", [])
-    compute_partition = (
-        partition_data[0].get("accelerator_type", None) if partition_data else None
-    )
-    memory_partition = partition_data[0].get("memory", None) if partition_data else None
+    # Get partition values with fallback for older amd-smi
+    compute_partition = gpu_data.get("partition", {}).get(
+        "accelerator_partition"
+    ) or gpu_data.get("partition", {}).get("compute_partition")
+    memory_partition = gpu_data.get("partition", {}).get("memory_partition")
 
+    # Apply defaults and warnings
     if compute_partition is None:
-        console_warning("Can not detect accelerator partition from amd-smi.")
+        console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
-        # Apply default compute partition
         compute_partition = "SPX"
 
     if memory_partition is None:
-        console_warning("Can not detect memory partition from amd-smi.")
+        console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
         "vbios is {}, compute partition is {}, memory partition is {}".format(
@@ -221,7 +222,9 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     # Load above SoC specs via module import
     try:
-        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + specs.gpu_arch)
+        soc_module = importlib.import_module(
+            "rocprof_compute_soc.soc_" + specs.gpu_arch
+        )
     except ModuleNotFoundError as e:
         console_error(
             "Arch %s marked as supported, but couldn't find class implementation %s."
@@ -678,7 +681,9 @@ class MachineSpecs:
                         if name == "version":
                             topstr += f"Output version: {value}\n"
                         else:
-                            console_error(f"Unknown out of table printing field: {name}")
+                            console_error(
+                                f"Unknown out of table printing field: {name}"
+                            )
                         continue
                     if "name" in class_field.metadata:
                         name = class_field.metadata["name"]
