@@ -125,6 +125,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
         TAG="" &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
@@ -337,6 +338,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
         cmake --version &&
         TAG="-rocm-${{ matrix.rocm-version }}" &&
@@ -473,6 +475,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
