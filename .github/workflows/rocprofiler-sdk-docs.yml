@@ -12,6 +12,7 @@ on:
       - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
+      - '.github/workflows/rocprofiler-sdk-docs.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/*.md'
@@ -20,6 +21,7 @@ on:
       - 'projects/rocprofiler-sdk/source/scripts/update-docs.sh'
       - 'projects/rocprofiler-sdk/source/include/rocprofiler-sdk/**'
       - 'projects/rocprofiler-sdk/.github/workflows/docs.yml'
+      - '.github/workflows/rocprofiler-sdk-docs.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -67,8 +69,7 @@ jobs:
           ../scripts/update-docs.sh
 
   build-docs-from-source:
-    runs-on: ubuntu-latest
-    container: rocm/dev-ubuntu-22.04:latest
+    runs-on: rocprofiler-mi3xx
     steps:
       - name: Install os essentials
         timeout-minutes: 10
@@ -107,7 +108,6 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run:
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
-          git submodule update --init -- .;
           cmake -B build
             -DROCPROFILER_DEP_ROCMCORE=ON
             -DROCPROFILER_BUILD_DOCS=ON
