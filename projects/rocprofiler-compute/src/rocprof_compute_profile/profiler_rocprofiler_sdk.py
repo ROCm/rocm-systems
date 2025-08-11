@@ -40,15 +40,25 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        app_cmd = shlex.split(self.get_args().remaining)
+        app_cmd = (
+            shlex.split(self.get_args().remaining) if not self.get_args().pid else ""
+        )
+
         rocm_libdir = str(Path(self.get_args().rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
             Path(rocm_libdir).joinpath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
         )
+        rocm_dir = str(Path(self.get_args().rocprofiler_sdk_library_path).parent.parent)
+        rocprofiler_attach_tool_path = str(
+            Path(rocm_dir).joinpath("libexec/rocprofiler-sdk/librocprofv3-attach.so")
+        )
+        
         ld_preload = [
             rocprofiler_sdk_tool_path,
             self.get_args().rocprofiler_sdk_library_path,
+            rocprofiler_attach_tool_path,
         ]
+        
         options = {
             "ROCPROFILER_LIBRARY_CTOR": "1",
             "LD_PRELOAD": ":".join(ld_preload),
@@ -58,6 +68,17 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_FORMAT": self.get_args().format_rocprof_output,
             "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
         }
+        
+        if not self.get_args().pid:
+            options = options + {
+                "ROCPROF_ATTACH_TOOL_LIBRARY" : rocprofiler_attach_tool_path,
+                "ROCPROF_ATTACH_PID" : self.get_args().pid,
+            }
+            
+            if self.get_args().attach_duration_msec:
+                options = options + {
+                    "ROCPROF_ATTACH_DURATION" : self.get_args().attach_duration_msec,
+                }
 
         if self.get_args().kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
@@ -89,7 +110,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
-        options["APP_CMD"] = app_cmd
+        if not self.get_args().pid:
+            options["APP_CMD"] = app_cmd
         return options
 
     # -----------------------

@@ -37,6 +37,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import ctypes
 from pathlib import Path as path
 from typing import Optional
 
@@ -749,16 +750,12 @@ def run_prof(
 
     if using_v3():
         if rocprof_cmd == "rocprofiler-sdk":
-            if is_mode_live_attach:
-                console_error(
-                    "The live attach/detach does not currently support direct call of rocprofiler-sdk"
-                )
             options["ROCPROF_AGENT_INDEX"] = "absolute"
         else:
             options = ["-A", "absolute"] + options
     else:
         if is_mode_live_attach:
-            console_error("The live attach/detach only supports rocprofv3")
+            console_error("The live attach/detach only supports rocprofv3 or rocprofiler-sdk")
 
     new_env = os.environ.copy()
 
@@ -811,14 +808,37 @@ def run_prof(
     time_1 = time.time()
 
     if rocprof_cmd == "rocprofiler-sdk":
-        app_cmd = options.pop("APP_CMD")
         for key, value in options.items():
             new_env[key] = value
         console_debug("rocprof sdk env vars: {}".format(new_env))
-        console_debug("rocprof sdk user provided command: {}".format(app_cmd))
-        success, output = capture_subprocess_output(
-            app_cmd, new_env=new_env, profileMode=True
-        )
+        
+        if not is_mode_live_attach:
+            app_cmd = options.pop("APP_CMD")
+            console_debug("rocprof sdk user provided command: {}".format(app_cmd))
+            success, output = capture_subprocess_output(
+                app_cmd, new_env=new_env, profileMode=True
+            )
+        else:    
+            libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
+            c_lib = ctypes.CDLL(libname)
+            if c_lib is None:
+                console_error(f"Error opening {libname}")
+            c_lib.attach.argtypes = [ctypes.c_uint]            
+
+            pid = options["ROCPROF_ATTACH_PID"]
+            if pid is None:
+                console_error(
+                    "Mode of attach/detach must have setup for process ID"
+                )
+
+            c_lib.attach(int(pid))
+            duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+            if duration is None:
+                input("Press Enter to detach...")
+            else:
+                time.sleep(int(duration) / 1000)
+            c_lib.detach()
+            
     else:
         console_debug("rocprof command: {}".format([rocprof_cmd] + options))
         # profile the app
