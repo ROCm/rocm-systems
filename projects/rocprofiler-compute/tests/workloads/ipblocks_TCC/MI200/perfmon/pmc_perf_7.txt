@@ -1,0 +1,5 @@
+pmc:  TCC_NORMAL_EVICT_sum TCC_ALL_TC_OP_INV_EVICT_sum TCC_TOO_MANY_EA_WRREQS_STALL_sum TCC_EA_ATOMIC_sum
+
+gpu:
+range:
+kernel:

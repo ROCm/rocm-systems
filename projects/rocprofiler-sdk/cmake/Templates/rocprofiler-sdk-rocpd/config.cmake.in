@@ -1,0 +1,73 @@
+# - Config file for @PACKAGE_NAME@ and its component libraries
+# It defines the following variables:
+#
+# @PACKAGE_NAME@_VERSION
+# @PACKAGE_NAME@_INCLUDE_DIR
+# @PACKAGE_NAME@_LIB_DIR
+# @PACKAGE_NAME@_LIBRARIES
+#
+# It provides the following interface libraries:
+#
+# @PACKAGE_NAME@::@PACKAGE_NAME@
+#
+
+# prevent "target already exists" error
+include_guard(DIRECTORY)
+
+# compute paths
+get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
+
+@PACKAGE_INIT@
+
+set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
+set_and_check(@PACKAGE_NAME@_LIB_DIR "@PACKAGE_LIB_INSTALL_DIR@")
+get_filename_component(@PACKAGE_NAME@_ROOT_DIR ${@PACKAGE_NAME@_INCLUDE_DIR} PATH)
+set_and_check(@PACKAGE_NAME@_ROOT "${@PACKAGE_NAME@_ROOT_DIR}")
+
+# extra validation
+foreach(_@PACKAGE_NAME@_SUBDIR @PROJECT_EXTRA_DIRS@)
+    set_and_check(_@PACKAGE_NAME@_SUBDIR_CHECK
+                  "${PACKAGE_PREFIX_DIR}/${_@PACKAGE_NAME@_SUBDIR}")
+    unset(_@PACKAGE_NAME@_SUBDIR_CHECK)
+endforeach()
+
+set(@PACKAGE_NAME@_LIBRARIES)
+
+# add interface library
+add_library(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE IMPORTED)
+
+if(@PACKAGE_NAME@_BUILD_TREE
+   AND EXISTS "${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-build-config.cmake")
+    include("${CMAKE_CURRENT_LIST_DIR}/@PACKAGE_NAME@-build-config.cmake")
+else()
+    include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-targets.cmake")
+
+    # Library dependencies
+    if(@PACKAGE_NAME@_FIND_COMPONENTS)
+        foreach(COMP ${@PACKAGE_NAME@_FIND_COMPONENTS})
+            set(TARG @PACKAGE_NAME@::@PACKAGE_NAME@-${COMP})
+            if(TARGET ${TARG})
+                set(@PACKAGE_NAME@_${COMP}_FOUND 1)
+                list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+                target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+            else()
+                set(@PACKAGE_NAME@_${COMP}_FOUND 0)
+            endif()
+        endforeach()
+    else()
+        foreach(TARG @PROJECT_BUILD_TARGETS@)
+            set(TARG @PACKAGE_NAME@::${TARG})
+            list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
+            target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
+        endforeach()
+    endif()
+endif()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(
+    @PACKAGE_NAME@
+    FOUND_VAR @PACKAGE_NAME@_FOUND
+    VERSION_VAR @PACKAGE_NAME@_VERSION
+    REQUIRED_VARS @PACKAGE_NAME@_ROOT_DIR @PACKAGE_NAME@_INCLUDE_DIR
+                  @PACKAGE_NAME@_LIB_DIR @PACKAGE_NAME@_LIBRARIES @PACKAGE_NAME@_VERSION
+    HANDLE_COMPONENTS HANDLE_VERSION_RANGE)

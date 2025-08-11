@@ -1,0 +1,3 @@
+#
+# LeakSanitizer suppressions file for rocprofiler-register project.
+#

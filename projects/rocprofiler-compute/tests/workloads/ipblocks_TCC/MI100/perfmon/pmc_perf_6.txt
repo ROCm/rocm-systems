@@ -1,0 +1,5 @@
+pmc:  TCC_EA_RDREQ_sum TCC_EA_RDREQ_32B_sum TCC_EA_RD_UNCACHED_32B_sum TCC_EA_RDREQ_DRAM_sum
+
+gpu:
+range:
+kernel:

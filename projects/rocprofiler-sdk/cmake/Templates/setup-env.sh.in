@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+
+BASEDIR=$(dirname ${BASH_SOURCE[0]})
+command -v realpath &> /dev/null && BASEDIR=$(realpath ${BASEDIR}/../..) || BASEDIR=$(cd ${BASEDIR}/../.. && pwd)
+
+if [ ! -d "${BASEDIR}" ]; then
+    echo "${BASEDIR} does not exist"
+    return 1
+fi
+
+@PACKAGE_NAME_UNDERSCORED@_get_python3_path()
+{
+    local PYTHON3_EXECUTABLE=$(command -v python3 2> /dev/null)
+    if [ -n "${PYTHON3_EXECUTABLE}" ]; then
+        local PYTHON3_VERSION=$(${PYTHON3_EXECUTABLE} -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2> /dev/null)
+        local @PACKAGE_NAME_UNDERSCORED@_PYTHONPATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@/python${PYTHON3_VERSION}/site-packages
+        if [ -d "${@PACKAGE_NAME_UNDERSCORED@_PYTHONPATH}" ]; then
+            echo ${BASEDIR}/@CMAKE_INSTALL_LIBDIR@/python${PYTHON3_VERSION}/site-packages
+        fi
+    fi
+}
+
+@PACKAGE_NAME_UNDERSCORED@_ROOT=${BASEDIR}
+@PACKAGE_NAME_UNDERSCORED@_DIR=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@/cmake/@PACKAGE_NAME@
+PATH=${BASEDIR}/bin:${PATH}
+LD_LIBRARY_PATH=${BASEDIR}/@CMAKE_INSTALL_LIBDIR@:${LD_LIBRARY_PATH}
+CMAKE_PREFIX_PATH=${BASEDIR}:${CMAKE_PREFIX_PATH}
+
+if [ -z "@CMAKE_INSTALL_PYTHONDIR@" ]; then
+    PYTHONPATH=$(@PACKAGE_NAME_UNDERSCORED@_get_python3_path):${PYTHONPATH}
+else
+    PYTHONPATH=${BASEDIR}/@CMAKE_INSTALL_PYTHONDIR@:${PYTHONPATH}
+fi
+
+unset @PACKAGE_NAME_UNDERSCORED@_get_python3_path
+
+export @PACKAGE_NAME_UNDERSCORED@_ROOT
+export @PACKAGE_NAME_UNDERSCORED@_DIR
+export PATH
+export LD_LIBRARY_PATH
+export CMAKE_PREFIX_PATH
+export PYTHONPATH

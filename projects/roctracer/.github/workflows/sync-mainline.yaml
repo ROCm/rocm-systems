@@ -1,0 +1,17 @@
+name: Sync amd-mainline to public repository
+
+on:
+  push:
+    branches: [ amd-mainline ]
+
+jobs:
+  git-mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: git-sync
+        uses: AMD-ROCm-Internal/rocprofiler-github-actions@git-sync-v3
+        with:
+          source_repo: "https://${{ secrets.TOKEN }}@github.com/AMD-ROCm-Internal/roctracer.git"
+          source_branch: "amd-mainline"
+          destination_repo: "https://${{ secrets.EXT_TOKEN }}@github.com/ROCm/roctracer.git"
+          destination_branch: "amd-mainline"

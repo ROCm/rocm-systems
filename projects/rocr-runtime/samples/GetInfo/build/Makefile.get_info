@@ -1,0 +1,107 @@
+include $(OPENCL_DEPTH)/hsadefs
+
+
+# Executable containing all the API core tests
+EXE_TARGET = HsaGetInfo
+
+#
+# Makefile construct to copy executable to Dist folder
+#
+DIST_BIN_TARGET = $(EXE_TARGET)
+ifdef ATI_OS_WINDOWS
+	DIST_BIN_TARGETS = $(EXE_TARGET)$(EXE_EXT)
+endif
+
+ifdef ATI_BITS_64
+    LIB_SUFFIX=64
+    BITS=64
+    CMPILERBITS=64
+else 
+    LIB_SUFFIX=
+    BITS=
+    ifdef ATI_OS_WINDOWS
+        CMPILERBITS=
+    else
+        CMPILERBITS=32
+    endif
+endif
+
+ifdef ATI_OS_WINDOWS
+    LFLAGS += /subsystem:console
+    CORE_LIB=dll
+    LIB_PREFIX=
+    DYN_LIB_EXT=$(LIB_EXT)
+	UTIL_EXT=win
+else
+    LIB_PREFIX=lib
+    CORE_LIB=so
+    DYN_LIB_EXT=$(DLL_EXT)
+	UTIL_EXT=
+endif
+
+LCXXDEFS += -DAMD_INTERNAL_BUILD
+
+vpath %.cpp $(COMPONENT_DEPTH) 
+CPPFILES := $(notdir $(wildcard $(COMPONENT_DEPTH)/*.cpp))
+
+TOOLS_TEST_COMMON=$(COMPONENT_DEPTH)/../common
+vpath %.cpp $(TOOLS_TEST_COMMON)
+CPPFILES += $(notdir $(wildcard $(TOOLS_TEST_COMMON)/*.cpp))
+
+
+ifdef ATI_OS_LINUX
+    GCXXOPTS := $(filter-out -fno-rtti,$(GCXXOPTS))
+    GCXXOPTS := $(filter-out -fno-exceptions,$(GCXXOPTS))
+    LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt -lstdc++ 
+    #LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt
+endif
+
+SC_DIR_NAME ?= finalizer
+export HT_DEPTH=$(OPENCL_DEPTH)/compiler/$(SC_DIR_NAME)/HSAIL/hsail-tools
+include $(HT_DEPTH)/htlibs
+
+#LCINCS := $(INCSWITCH) "$(OPENCL_DEPTH)/contrib/gtest-1.6.0/include"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/runtime"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/runtime/samples"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/contrib/elftoolchain/libelf"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/contrib/elftoolchain/common"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/runtime/inc"
+LCINCS += $(LIBHSAIL_INCS) $(LIBHSAIL_AMD_INCS)
+
+LCINCS += $(INCSWITCH) "$(OPENCL_PATH)/compiler/lib/include"
+LCINCS += $(INCSWITCH) "$(OPENCL_DEPTH)/runtime/samples/common"
+
+UTIL_BUILD=build/$(OS_TYPE)/util/$(UTIL_EXT)/$(BUILD_DIR)
+#LLLIBS += $(OPENCL_DEPTH)/runtime/core/$(UTIL_BUILD)/util$(UTIL_EXT)$(LIB_EXT)
+
+
+LIBELF_DIR=build/$(OS_TYPE)/$(BUILD_DIR)
+RUNTIME_BUILD=build/$(OS_TYPE)/$(CORE_LIB)/$(BUILD_DIR)
+ifdef ATI_OS_LINUX
+    GCXXOPTS := $(filter-out -fno-exceptions,$(GCXXOPTS))
+    LFLAGS += -L$(DIST_LIB_DEST) -lpthread $(LIBSTDCXX) -lm -ldl -lrt
+    LFLAGS += -L$(OPENCL_DEPTH)/contrib/elftoolchain/libelf/$(LIBELF_DIR) -lelf
+    LFLAGS += -L$(OPENCL_DEPTH)/runtime/core/$(RUNTIME_BUILD) -lhsa-runtime$(LIB_SUFFIX)
+    LFLAGS += -L$(OPENCL_DEPTH)/runtime/tools/$(RUNTIME_BUILD) -lhsa-runtime-tools$(LIB_SUFFIX)
+else
+		# Verify the extension of libelf is valid i.e. is not dll but instead is "lib"
+    #LLLIBS += -L$(OPENCL_DEPTH)/contrib/elftoolchain/libelf/$(LIBELF_DIR)/libelf
+    LLLIBS += $(OPENCL_DEPTH)/runtime/core/$(RUNTIME_BUILD)/hsa-runtime$(LIB_SUFFIX)$(LIB_EXT)
+    LLLIBS += $(OPENCL_DEPTH)/runtime/tools/$(RUNTIME_BUILD)/hsa-runtime-tools$(LIB_SUFFIX)$(LIB_EXT)
+endif
+LLLIBS += $(LIBHSAIL_USER_LIBS)
+
+#
+# Copy the Hsa ample to Hsa distribution folder
+#
+ifdef ATI_OS_LINUX
+  LOCAL_TARGETS = inst_sample_copy
+endif
+inst_sample_copy:
+	$(MKDIR) $(DIST_BIN_DEST)/../../samples/$(OS_TYPE)
+	-$(RM) -f $(DIST_BIN_DEST)/../../samples/$(OS_TYPE)/$(EXE_TARGET)
+	$(CP) $(BUILD_DIR)/$(EXE_TARGET) $(DIST_BIN_DEST)/../../samples/$(OS_TYPE)
+
+
+include $(OPENCL_DEPTH)/hsarules
+

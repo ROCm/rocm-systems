@@ -1,0 +1,316 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 300
+  title: Memory Chart
+  data source:
+    - metric_table:
+        id: 301
+        title: Memory Chart
+        header:
+          metric: Metric
+          #alias: #alias
+          value: Value
+          tips: Tips
+        metric:
+          # ----------------------------------------
+          # Instr Buff Block
+
+          #TODO: double check wave_occupancy
+          Wavefront Occupancy:
+            #alias: wave_occ_
+            value: ROUND(AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / $numActiveCUs), 0)
+            coll_level: SQ_LEVEL_WAVES
+            tips:
+          Wave Life:
+            #alias: wave_life_
+            value: ROUND(AVG(((4 * (SQ_WAVE_CYCLES / SQ_WAVES)) if (SQ_WAVES != 0) else 0)), 0)
+            tips:
+
+          # ----------------------------------------
+          # Instr Dispatch Block
+          SALU:
+            #alias: salu_
+            value: ROUND(AVG((SQ_INSTS_SALU / $denom)), 0)
+            tips:
+          SMEM:
+            #alias: smem_
+            value: ROUND(AVG((SQ_INSTS_SMEM / $denom)), 0)
+            tips:
+          VALU:
+            #alias: valu_
+            value: ROUND(AVG((SQ_INSTS_VALU / $denom)), 0)
+            tips:
+          MFMA:
+            #alias: mfma_
+            value: ROUND(AVG((SQ_INSTS_MFMA / $denom)), 0)
+            tips:
+          VMEM:
+            #alias: vmem_
+            value: ROUND(AVG((SQ_INSTS_VMEM / $denom)), 0)
+            tips:
+          LDS:
+            #alias: lds_
+            value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+            tips:
+          GWS:
+            #alias: gws_
+            value: ROUND(AVG((SQ_INSTS_GDS / $denom)), 0)
+            tips:
+          BR:
+            #alias: br_
+            value: ROUND(AVG((SQ_INSTS_BRANCH / $denom)), 0)
+            tips:
+
+          # ----------------------------------------
+          # Exec Block
+          Active CUs:
+            #alias: active_cu_
+            value: $numActiveCUs
+            tips:
+          Num CUs:
+            #alias: num_cu_
+            value: $cu_per_gpu
+            tips:
+          VGPR:
+            #alias: vgpr_
+            value: ROUND(AVG(Arch_VGPR), 0)
+            tips:
+          # Todo: add AGPRs
+          SGPR:
+            #alias: sgpr_
+            value: ROUND(AVG(SGPR), 0)
+            tips:
+          LDS Allocation:
+            #alias: lds_alloc_
+            value: ROUND(AVG(LDS_Per_Workgroup), 0)
+            tips:
+          Scratch Allocation:
+            #alias: scratch_alloc_
+            value: ROUND(AVG(Scratch_Per_Workitem), 0)
+            tips:
+          Wavefronts:
+            #alias: wavefronts_
+            value: ROUND(AVG(SPI_CSN_WAVE), 0)
+            tips:
+          Workgroups:
+            #alias: workgroups_
+            value: ROUND(AVG(SPI_CSN_NUM_THREADGROUPS), 0)
+            tips:
+
+          # ----------------------------------------
+          # LDS Block
+          LDS Req:
+            #alias: lds_req_
+            value: ROUND(AVG((SQ_INSTS_LDS / $denom)), 0)
+            tips:
+          LDS Util:
+            #alias: lds_util_
+            value:
+              ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))),
+              0)
+            tips:
+          LDS Latency:
+            #alias: lds_lat
+            value: ROUND(AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None)),0)
+            coll_level: SQ_INST_LEVEL_LDS
+            tips:
+
+          # ----------------------------------------
+          # Vector L1 Cache Block
+          VL1 Rd:
+            #alias: vl1_rd_
+            value: ROUND(AVG((TCP_TOTAL_READ_sum / $denom)), 0)
+            tips:
+          VL1 Wr:
+            #alias: vl1_wr_
+            value: ROUND(AVG((TCP_TOTAL_WRITE_sum / $denom)), 0)
+            tips:
+          VL1 Atomic:
+            #alias: vl1_atom_
+            value:
+              ROUND(AVG(((TCP_TOTAL_ATOMIC_WITH_RET_sum + TCP_TOTAL_ATOMIC_WITHOUT_RET_sum)
+              / $denom)), 0)
+            tips:
+
+          VL1 Hit:
+            #alias: vl1_hit_
+            value:
+              ROUND(AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
+              + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum))
+              / TCP_TOTAL_CACHE_ACCESSES_sum)) if (TCP_TOTAL_CACHE_ACCESSES_sum != 0) else
+              None )), 0)
+            tips:
+          VL1 Lat:
+            #alias: vl1_lat_
+            value:
+              ROUND(AVG(((TCP_TCP_LATENCY_sum / TCP_TA_TCP_STATE_READ_sum) if (TCP_TA_TCP_STATE_READ_sum
+              != 0) else None)), 0)
+            tips:
+          VL1 Coalesce:
+            #alias: vl1_coales_
+            value:
+              ROUND(AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
+              * 4)) if (TCP_TOTAL_ACCESSES_sum != None) else 0)), 0)
+            tips:
+          VL1 Stall:
+            #alias: vl1_stall_
+            value:
+              ROUND(AVG((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+              if (TCP_GATE_EN1_sum != 0) else None)), 0)
+            tips:
+
+          VL1_L2 Rd:
+            #alias: vl1_l2_rd_
+            value: ROUND(AVG((TCP_TCC_READ_REQ_sum / $denom)), 0)
+            tips:
+          VL1_L2 Wr:
+            #alias: vl1_l2_wr_
+            value: ROUND(AVG((TCP_TCC_WRITE_REQ_sum / $denom)), 0)
+            tips:
+          VL1_L2 Atomic:
+            #alias: vl1_l2_atom_
+            value:
+              ROUND(AVG(((TCP_TCC_ATOMIC_WITH_RET_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
+              / $denom)), 0)
+            tips:
+
+          # ----------------------------------------
+          # Scalar L1D Cache Block
+          VL1D Rd:
+            #alias: sl1_rd_
+            value: ROUND(AVG((SQC_DCACHE_REQ / $denom)), 0)
+            tips:
+          VL1D Hit:
+            #alias: sl1_hit_
+            value:
+              ROUND((AVG(((SQC_DCACHE_HITS / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ !=
+              0) else None)) * 100), 0)
+            tips:
+          VL1D Lat:
+            #alias: sl1_lat_
+            value:
+              ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_DCACHE_REQ) if (SQC_DCACHE_REQ !=
+              0) else None)) * 100), 0)
+            coll_level: SQC_DCACHE_INFLIGHT_LEVEL
+            tips:
+
+          VL1D_L2 Rd:
+            #alias: sl1_l2_rd_
+            value: ROUND(AVG((SQC_TC_DATA_READ_REQ / $denom)), 0)
+            tips:
+          VL1D_L2 Wr:
+            #alias: sl1_l2_wr_
+            value: ROUND(AVG((SQC_TC_DATA_WRITE_REQ / $denom)), 0)
+            tips:
+          VL1D_L2 Atomic:
+            #alias: sl1_l2_atom_
+            value: ROUND(AVG((SQC_TC_DATA_ATOMIC_REQ / $denom)), 0)
+            tips:
+
+          # ----------------------------------------
+          # Instr L1  Cache Block
+          IL1 Fetch:
+            #alias: il1_fetch_
+            value: ROUND(AVG((SQC_ICACHE_REQ / $denom)), 0)
+            tips:
+          IL1 Hit:
+            #alias: il1_hit_
+            value: ROUND((AVG((SQC_ICACHE_HITS / SQC_ICACHE_REQ)) * 100), 0)
+            tips:
+          IL1 Lat:
+            #alias: il1_lat_
+            value:
+              ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ !=
+              0) else None)) * 100), 0)
+            tips: # ??? coll_level: SQ_IFETCH_LEVEL
+          IL1_L2 Rd:
+            #alias: il1_l2_req_
+            value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
+            tips:
+
+          # ----------------------------------------
+          # L2 Cache Block(inside)
+          L2 Rd:
+            #alias: l2_rd_
+            value: ROUND(AVG((TCC_READ_sum / $denom)), 0)
+            tips:
+          L2 Wr:
+            #alias: l2_wr_
+            value: ROUND(AVG((TCC_WRITE_sum / $denom)), 0)
+            tips:
+          L2 Atomic:
+            #alias: l2_atom_
+            value: ROUND(AVG((TCC_ATOMIC_sum / $denom)), 0)
+            tips:
+          L2 Hit:
+            #alias: l2_hit_
+            value:
+              ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
+              + TCC_MISS_sum) != 0) else 0)), 0)
+            tips:
+          L2 Rd Lat:
+            #alias: l2_rd_lat_
+            value:
+              # ROUND(AVG(((TCP_TCC_READ_REQ_LATENCY_sum / (TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum))
+              # if ((TCP_TCC_READ_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum) != 0) else None)),
+              # 0)
+            tips:
+          L2 Wr Lat:
+            #alias: l2_wr_lat_
+            value:
+              # ROUND(AVG(((TCP_TCC_WRITE_REQ_LATENCY_sum / (TCP_TCC_WRITE_REQ_sum +
+              # TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)
+              # != 0) else None)), 0)
+            tips:
+
+          # ----------------------------------------
+          # Fabric Block
+          Fabric_L2 Rd:
+            #alias: l2_fabric_rd_
+            value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
+            tips:
+          Fabric_L2 Wr:
+            #alias: l2_fabric_wr_
+            value: ROUND(AVG((TCC_EA0_WRREQ_sum / $denom)), 0)
+            tips:
+          Fabric_L2 Atomic:
+            #alias: l2_fabric_atom_
+            value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
+            tips:
+
+          Fabric Rd Lat:
+            #alias: fabric_rd_lat_
+            value:
+              ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
+              != 0) else  0)), 0)
+            tips:
+          Fabric Wr Lat:
+            #alias: fabric_wr_lat_
+            value:
+              ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
+              != 0) else  0)), 0)
+            tips:
+          Fabric Atomic Lat:
+            #alias: fabric_atom_lat_
+            value:
+              ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
+              != 0) else  0)), 0)
+            tips:
+
+          HBM Rd:
+            #alias: hbm_rd_
+            value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
+            tips:
+          HBM Wr:
+            #alias: hbm_wr_
+            value: ROUND(AVG((TCC_EA0_WRREQ_DRAM_sum / $denom)), 0)
+            tips:
+
+        comparable: false # for now
+        cli_style: mem_chart
+        tui_style: mem_chart

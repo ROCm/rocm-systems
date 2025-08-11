@@ -1,0 +1,14 @@
+{
+    "jobs": [
+        {
+            "sys_trace": true,
+            "output_file": "json-input/out",
+            "output_format": [
+                "csv",
+                "json",
+                "pftrace",
+                "rocpd"
+            ]
+        }
+    ]
+}

@@ -1,0 +1,79 @@
+"project: aqlprofile":
+- changed-files:
+  - any-glob-to-any-file: 'projects/aqlprofile/**/*'
+
+"project: clr":
+- changed-files:
+  - any-glob-to-any-file: 'projects/clr/**/*'
+
+"project: hip":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hip/**/*'
+
+"project: hipother":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hipother/**/*'
+
+"project: hip-tests":
+- changed-files:
+  - any-glob-to-any-file: 'projects/hip-tests/**/*'
+
+"project: rdc":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rdc/**/*'
+
+"project: rocm-core":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocm-core/**/*'
+
+"project: rocminfo":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocminfo/**/*'
+
+"project: rocm-smi-lib":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocm-smi-lib/**/*'
+
+"project: rocprofiler":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprofiler/**/*'
+
+"project: rocprofiler-compute":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprofiler-compute/**/*'
+
+"project: rocprofiler-register":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprofiler-register/**/*'
+
+"project: rocprofiler-sdk":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprofiler-sdk/**/*'
+
+"project: rocprofiler-systems":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
+
+"project: roctracer":
+- changed-files:
+  - any-glob-to-any-file: 'projects/roctracer/**/*'
+
+documentation:
+- changed-files:
+  - any-glob-to-any-file:
+    - docs/**/*
+    - '**/docs/**/*'
+    - '*.md'
+
+External CI:
+- changed-files:
+  - any-glob-to-any-file:
+    - .azuredevops/**/*
+
+github action:
+- changed-files:
+  - any-glob-to-any-file:
+    - .github/workflows/**/*
+    - .github/scripts/**/*
+    - .github/*.json
+    - .github/*.yml

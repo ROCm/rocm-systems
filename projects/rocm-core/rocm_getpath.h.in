@@ -1,0 +1,72 @@
+////////////////////////////////////////////////////////////////////////////////
+////
+//// MIT License
+////
+//// Copyright (c) 2017 - 2024 Advanced Micro Devices, Inc. All rights Reserved.
+////
+//// Permission is hereby granted, free of charge, to any person obtaining a copy
+//// of this software and associated documentation files (the "Software"), to deal
+//// in the Software without restriction, including without limitation the rights
+//// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+//// copies of the Software, and to permit persons to whom the Software is
+//// furnished to do so, subject to the following conditions:
+////
+//// The above copyright notice and this permission notice shall be included in all
+//// copies or substantial portions of the Software.
+////
+//// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+//// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+//// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+//// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+//// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+//// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+////
+//////////////////////////////////////////////////////////////////////////////////
+
+
+#ifndef _ROCM_GETPATH_H_
+#define _ROCM_GETPATH_H_
+
+
+#ifdef __cplusplus
+extern "C" {
+#endif  /* __cplusplus */
+
+#define LIB_API_PUBLIC __attribute__ ((visibility ("default")))
+
+/* Get Library Target Build Type */
+#cmakedefine01 BUILD_SHARED_LIBS
+
+/* Return Status Flag Definitions*/
+typedef enum {
+        PathSuccess=0,
+        PathIncorrecPararmeters = -994,
+        PathValuesNotDefined = -995,
+        PathValuesTooLong = -996,
+        PathFailedToGetBase = -997,
+        PathLinuxRuntimeErrors = -998,
+        PathErrorMAX = -999               //This should always be last value in the enumerations
+} PathErrors_t;
+
+//  API for getting the ROCmInstallPath
+//  Return val :  PathErrors_t (API execution status)
+//  Argument1 (out) :  InstallPath (char** pointer which will return InstallPath found )
+//  Argument2 (out) :  InstallPathLen (Pointer to integer (size of InstallPath) returned)
+//  Usage :
+//      char *installPath=NULL;
+//      int installPathLen = 0;
+//      installStatus = getROCmInstallPath( &installPath, &installPathLen );
+//      if(installStatus !=PathSuccess ){  // error occured
+//	...
+//	}
+//      free(installPath); //caller must free allocated memory after usage.
+//    ...
+//  }
+LIB_API_PUBLIC PathErrors_t getROCmInstallPath(char **InstallPath, unsigned int *InstallPathLen) __attribute__((nonnull)) ;
+
+#ifdef __cplusplus
+}  // end extern "C" block
+#endif
+
+#endif  //_ROCM_GETPATH_H_  header guard
+

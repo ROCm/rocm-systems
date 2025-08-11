@@ -1,0 +1,5 @@
+pmc:  TA_ADDR_STALLED_BY_TC_CYCLES_sum TA_TOTAL_WAVEFRONTS_sum
+
+gpu:
+range:
+kernel:
