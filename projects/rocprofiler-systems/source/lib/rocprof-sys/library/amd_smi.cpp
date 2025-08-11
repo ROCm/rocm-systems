@@ -149,18 +149,59 @@ rocpd_initialize_smi_pmc(size_t gpu_id)
         trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
         trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
         COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0);
+}
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_vcn_activity>::value, "VCN_Act",
-        trait::name<category::amd_smi_vcn_activity>::description, LONG_DESCRIPTION,
-        COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+void rocpd_initialize_vnc_activity_pmc(size_t gpu_id, size_t vcn_idx, size_t vcn_size)
+{
+    auto& data_processor = get_data_processor();
+    // find the proper values for a following definitions
+    size_t      EVENT_CODE       = 0;
+    size_t      INSTANCE_ID      = 0;
+    const char* LONG_DESCRIPTION = "";
+    const char* COMPONENT        = "";
+    const char* BLOCK            = "";
+    const char* EXPRESSION       = "";
+    auto        ni               = node_info::get_instance();
+    const auto* TARGET_ARCH      = "GPU";
 
-    data_processor.insert_pmc_description(
-        ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-        trait::name<category::amd_smi_jpeg_activity>::value, "JPEG_Act",
-        trait::name<category::amd_smi_jpeg_activity>::description, LONG_DESCRIPTION,
-        COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+    auto& _agent_manager = agent_manager::get_instance();
+    auto  base_id = _agent_manager.get_agent_by_id(gpu_id, agent_type::GPU).base_id;
+
+    for(size_t index = 0; index < vcn_size ; ++index) {
+        auto name = "VCN_Activity_XCP_" + std::to_string(vcn_idx) + "_" + std::to_string(index);
+        data_processor.insert_pmc_description(
+            ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            name.c_str(), "VCN_Act",
+            trait::name<category::amd_smi_vcn_activity>::description, LONG_DESCRIPTION,
+            COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+    }
+}
+
+void rocpd_initialize_jpeg_activity_pmc(size_t gpu_id, size_t vcn_idx, size_t vcn_size)
+{
+    auto& data_processor = get_data_processor();
+    // find the proper values for a following definitions
+    size_t      EVENT_CODE       = 0;
+    size_t      INSTANCE_ID      = 0;
+    const char* LONG_DESCRIPTION = "";
+    const char* COMPONENT        = "";
+    const char* BLOCK            = "";
+    const char* EXPRESSION       = "";
+    auto        ni               = node_info::get_instance();
+    const auto* TARGET_ARCH      = "GPU";
+
+    auto& _agent_manager = agent_manager::get_instance();
+    auto  base_id = _agent_manager.get_agent_by_id(gpu_id, agent_type::GPU).base_id;
+
+    for(size_t index = 0; index < vcn_size ; ++index) {
+        auto name = "JPEG_Activity_XCP_" + std::to_string(vcn_idx) + "_" + std::to_string(index);
+        data_processor.insert_pmc_description(
+            ni.id, getpid(), base_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+            name.c_str(), "JPEG_Act",
+            trait::name<category::amd_smi_jpeg_activity>::description, LONG_DESCRIPTION,
+            COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0);
+    }
+
 }
 
 void
@@ -203,6 +244,8 @@ rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& 
     {
         for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
         {
+            rocpd_initialize_vnc_activity_pmc(device_id, xcp_idx, xcp_metrics[xcp_idx].vcn_busy.size());
+
             for(size_t i = 0; i < xcp_metrics[xcp_idx].vcn_busy.size(); ++i)
             {
                 std::string vcn_name = "VCN_Activity_XCP_" + std::to_string(xcp_idx) +
@@ -218,6 +261,7 @@ rocpd_process_smi_pmc_events(const uint32_t device_id, const amd_smi::settings& 
     {
         for(size_t xcp_idx = 0; xcp_idx < xcp_metrics.size(); ++xcp_idx)
         {
+            rocpd_initialize_jpeg_activity_pmc(device_id, xcp_idx, xcp_metrics[xcp_idx].jpeg_busy.size());
             for(size_t i = 0; i < xcp_metrics[xcp_idx].jpeg_busy.size(); ++i)
             {
                 std::string jpeg_name = "JPEG_Activity_XCP_" + std::to_string(xcp_idx) +

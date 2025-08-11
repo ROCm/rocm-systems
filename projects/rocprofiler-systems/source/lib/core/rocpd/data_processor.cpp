@@ -173,7 +173,7 @@ data_processor::insert_pmc_description(
     auto it = _pmc_descriptor_map.find({ agent_id, name });
     if(it != _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
+        ROCPROFSYS_WARNING(2,
                            "Insert PMC description failed! Error: PMC descriptor "
                            "(name:%s) (ID:%lu) already exist!\n",
                            name, agent_id);
@@ -210,7 +210,7 @@ data_processor::insert_pmc_event(size_t event_id, size_t agent_id, const char* p
     auto it = _pmc_descriptor_map.find({ agent_id, pmc_name });
     if(it == _pmc_descriptor_map.end())
     {
-        ROCPROFSYS_WARNING(0,
+        ROCPROFSYS_WARNING(1,
                            "Insert PMC event failed! Error: non-existing PMC description "
                            "agent id: %ld, pmc name: %s !\n",
                            agent_id, pmc_name);
@@ -232,7 +232,7 @@ data_processor::insert_sample(const char* track, uint64_t timestamp, size_t even
     auto it = _tracks.find(track);
     if(it == _tracks.end())
     {
-        ROCPROFSYS_WARNING(0, "Insert sample failed! Error: Unexisting track %s!\n",
+        ROCPROFSYS_WARNING(1, "Insert sample failed! Error: Unexisting track %s!\n",
                            track);
         return;
     }

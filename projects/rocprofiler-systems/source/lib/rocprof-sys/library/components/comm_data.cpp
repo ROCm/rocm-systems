@@ -108,7 +108,7 @@ rocpd_initialize_track()
     auto& n_info      = node_info::get_instance();
     auto  thread_id   = std::nullopt;
     auto  _init_track = [&](const char* label) {
-        ROCPROFSYS_VERBOSE(3, "INSERT_TRACK label: %s, node ID: %d, Process ID: %d",
+        ROCPROFSYS_VERBOSE(3, "INSERT_TRACK label: %s, node ID: %ld, Process ID: %d",
                             label, n_info.id, getpid());
         get_data_processor().insert_track(label, n_info.id, getpid(), thread_id);
     };
