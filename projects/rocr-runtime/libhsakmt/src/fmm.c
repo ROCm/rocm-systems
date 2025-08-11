@@ -1992,7 +1992,6 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 {
 	manageable_aperture_t *aperture;
 	vm_object_t *vm_obj = NULL;
-	int flags = MADV_DONTFORK;
 	uint64_t mmap_offset;
 	int32_t gpu_drm_fd;
 	uint32_t ioc_flags;
@@ -2000,11 +1999,6 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 	int gpu_mem_id = 0; /* default to g_first_gpu_mem */
 	uint64_t size;
 	void *mem;
-
-	/* set madvise flags to HUGEPAGE always for 2MB pages */
-	if (MemorySizeInBytes >= (2 * 1024 * 1024))
-		flags |= MADV_HUGEPAGE;
-
 
 	if (!g_first_gpu_mem)
 		return NULL;
@@ -2044,6 +2038,12 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 	 * memory is allocated from KFD
 	 */
 	if (!mflags.ui32.NonPaged && svm.userptr_for_paged_mem) {
+		int advice = MADV_NORMAL;
+
+		/* set madvise flags to HUGEPAGE always for 2MB pages */
+		if (MemorySizeInBytes >= (2 * 1024 * 1024))
+			advice = MADV_HUGEPAGE;
+
 		/* Allocate address space */
 		pthread_mutex_lock(&aperture->fmm_mutex);
 		mem = aperture_allocate_area_aligned(aperture, address, size, alignment);
@@ -2065,7 +2065,7 @@ static void *fmm_allocate_host_gpu(uint32_t gpu_id, uint32_t node_id, void *addr
 		 * fork. This avoids MMU notifiers and evictions due to user
 		 * memory mappings on fork.
 		 */
-		madvise(mem, MemorySizeInBytes, flags);
+		madvise(mem, MemorySizeInBytes, advice);
 
 		/* Create userptr BO */
 		mmap_offset = (uint64_t)mem;
