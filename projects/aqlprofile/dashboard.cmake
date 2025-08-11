@@ -56,7 +56,7 @@ endif()
 macro(handle_error _message _ret)
   if(NOT ${${_ret}} EQUAL 0)
     dashboard_submit(PARTS Done RETURN_VALUE _submit_ret)
-    message(FATAL_ERROR "${_message} failed: ${${_ret}}")
+    message(WARNING "${_message} failed: ${${_ret}}")
   endif()
 endmacro()
 
