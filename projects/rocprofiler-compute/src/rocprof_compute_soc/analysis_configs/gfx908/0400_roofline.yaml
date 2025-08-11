@@ -50,12 +50,8 @@ Panel Config:
       from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
       example for more detail). The peak empirically measured LDS bandwidth achievable
       on the specific accelerator is displayed alongside for comparison.
-    Total Flops: ''
-    Total VALU FLOPs: ''
-    Total HBM Data: ''
-    Total L2 Cache Data: ''
-    Total L1 Cache Data: ''
-    Total LDS Data: ''
+    AI L1: ''
+    AI L2: ''
     AI HBM: ''
     Performance GFLOPs: ''
   data source:
@@ -134,7 +130,7 @@ Panel Config:
           peak: $LDSBw_empirical_peak
   - metric_table:
       id: 402
-      title: Roofline Calculation Data
+      title: Roofline Plot Points
       cli_style: Roofline
       tui_style: Roofline
       header:

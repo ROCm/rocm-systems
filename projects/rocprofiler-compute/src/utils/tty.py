@@ -32,7 +32,7 @@ import pandas as pd
 from tabulate import tabulate
 
 import config
-from utils import mem_chart, parser
+from utils import mem_chart, parser, kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
@@ -108,6 +108,14 @@ def convert_time_columns(df, time_unit):
 
     return df_copy
 
+def shorten_kernel_name(kernel_name, verbosity_level):
+    """Helper function to shorten kernel names"""
+    if verbosity_level < 5:
+        temp_df = pd.DataFrame({'Kernel_Name': [kernel_name]})
+        utils.kernel_name_shortener(temp_df, verbosity_level)
+        return temp_df.loc[0, 'Kernel_Name']
+    return kernel_name
+
 
 def has_time_data(df):
     """
@@ -146,33 +154,77 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
         ss = ""  # store content of all data_source from one panel
 
         if panel_id == 400:
-            print("\n" + "=" * 80, "PANEL 400: Roofline", "=" * 80)
-            # Check for cli_style: Roofline in tables
-            has_roofline_style = False
-            for data_source in panel["data source"]:
-                if "metric_table" in data_source:
-                    if data_source["metric_table"].get("cli_style") == "Roofline":
-                        has_roofline_style = True
-                        break
-            print(has_roofline_style)
-            if has_roofline_style:
-                # Display per-kernel roofline tables
-                print(runs.items())
-                for run, workload in runs.items():
-                    
-                    if hasattr(workload, 'per_kernel_roofline'):
-                        display_per_kernel_roofline_tables(
-                            workload.per_kernel_roofline,
-                            args,
-                            output
-                        )
-                        break
+            has_roofline_style = any(
+                data_source.get(type, {}).get("cli_style") == "Roofline"
+                for data_source in panel["data source"]
+                for type in data_source
+            )
             
-            # Show roofline plot (uses same data)
-            if roof_plot:
-                show_roof_plot(roof_plot)
-            continue
+            if has_roofline_style and (not args.filter_metrics or "4" in args.filter_metrics):
+                print("\n" + "=" * 80, file=output)
+                print("4. Roofline", file=output)
+                print("=" * 80, file=output)
+                
+                for run_path, workload in runs.items():
+                    if hasattr(workload, 'roofline_metrics') and workload.roofline_metrics:
+                        print("\nPer-Kernel Roofline Metrics (4.1) and AI Plot Points (4.2)", file=output)
+                        print("-" * 80, file=output)
+                        
+                        kernel_top_df = workload.dfs.get(1, pd.DataFrame())
+                        
+                        for i, (kernel_id, metrics) in enumerate(workload.roofline_metrics.items()):
+                            if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
+                                kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
+                                kernel_pct = kernel_top_df.loc[kernel_id, "Pct"] if "Pct" in kernel_top_df.columns else 0
+                            else:
+                                kernel_name = metrics.get('name', f'Kernel {kernel_id}')
+                                kernel_pct = 0
+                            
+                            shortened_name = shorten_kernel_name(kernel_name, args.kernel_verbose)
+                            
+                            print(f"\nKernel {kernel_id}: {shortened_name[:60]}{'...' if len(shortened_name) > 60 else ''} ({kernel_pct:.1f}%)", file=output)
 
+                            base_indent = "  "
+                            table_indent_prefix = f"{base_indent}|   "
+
+                            table_order = [401, 402]
+                            table_names = {401: "4.1 Roofline Rate Metrics:", 402: "4.2 Roofline AI Plot Points:"}
+                            
+                            print(f"{base_indent}|")
+
+                            for table_id in table_order:
+                                if table_id == 402:
+                                    df = metrics.get('calc_table', pd.DataFrame())
+                                elif table_id == 401:
+                                    df = metrics.get('ai_table', pd.DataFrame())
+                                else:
+                                    continue
+                                
+                                if df.empty:
+                                    continue
+                                
+                                connector = "├─ "
+                                print(f"{base_indent}{connector}{table_names.get(table_id, '')}", file=output)
+
+                                display_df = df.copy()
+
+                                for col in hidden_cols:
+                                    if col in display_df.columns:
+                                        display_df = display_df.drop(columns=[col])
+                                                                
+                                table_string = get_table_string(display_df, transpose=False, decimal=args.decimal)
+                                
+                                indented_table_string = textwrap.indent(table_string, table_indent_prefix)
+                                
+                                print(indented_table_string, file=output)
+
+                    else:
+                        print("\nNo per-kernel metrics available", file=output)
+                
+                # Show the roofline plot
+                if roof_plot:
+                    show_roof_plot(roof_plot)
+                continue
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
@@ -457,98 +509,12 @@ def show_roof_plot(roof_plot):
     # TODO: short term solution to display roofline plot
     print("\n" + "-" * 80)
     print("4. Roofline")
-    print("4.1 Roofline")
+    print("4.3 Roofline Plot")
     if roof_plot:
         print(roof_plot)
     else:
         console_error(
-            "Cannot create roofline plot for CLI with incomplete/missing roofline profiling data.",
+            "Cannot create roofline plot for CLI with incomplete/missing "
+            "roofline profiling data.",
             exit=False,
         )
-
-
-def show_kernel_stats(args, runs, archConfigs, output):
-    """
-    Show the kernels and dispatches from "Top Stats" section.
-    """
-
-    df = pd.DataFrame()
-    for panel_id, panel in archConfigs.panel_configs.items():
-        for data_source in panel["data source"]:
-            for type, table_config in data_source.items():
-                for run, data in runs.items():
-                    df = pd.DataFrame()
-                    single_df = data.dfs[table_config["id"]]
-                    # NB:
-                    #   For pmc_kernel_top.csv, have to sort here if not
-                    #   sorted when load_table_data.
-                    if table_config["id"] == 1:
-                        print("\n" + "-" * 80, file=output)
-                        print(
-                            "Detected Kernels (sorted descending by duration)",
-                            file=output,
-                        )
-                        df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
-
-                    if table_config["id"] == 2:
-                        print("\n" + "-" * 80, file=output)
-                        print("Dispatch list", file=output)
-                        df = single_df
-
-                    print(
-                        get_table_string(df, transpose=False, decimal=args.decimal),
-                        file=output,
-                    )
-
-
-def display_per_kernel_roofline_tables(per_kernel_data, args, output):
-    print("Entering display_per_kernel_roofline_tables")
-    """Display per-kernel roofline metrics in two-section format."""
-    
-    print("\n" + "=" * 80, file=output)
-    print("Per-Kernel Roofline Analysis", file=output)
-    print("=" * 80, file=output)
-    
-    num_kernels = len(per_kernel_data['performance_rates'])
-    max_show = min(args.max_stat_num, num_kernels)
-    
-    for i in range(max_show):
-        perf = per_kernel_data['performance_rates'][i]
-        calc = per_kernel_data['calculation_data'][i]
-        
-        print(f"\n{'─' * 80}", file=output)
-        print(f"Kernel {perf['kernel_idx']}: {perf['kernel_name'][:60]}...", file=output)
-        print(f"{'─' * 80}", file=output)
-        
-        # Performance Rates table (with peaks)
-        perf_rows = []
-        for m in perf['metrics']:
-            if m['peak'] is not None:
-                pct = (m['value'] / m['peak'] * 100) if m['peak'] > 0 else 0
-                perf_rows.append([
-                    m['name'],
-                    f"{m['value']:.2f}",
-                    m['unit'],
-                    f"{m['peak']:.2f}",
-                    f"{pct:.2f}%"
-                ])
-        
-        if perf_rows:
-            print("\nPerformance Rates (with Empirical Peaks):", file=output)
-            df = pd.DataFrame(perf_rows, 
-                columns=['Metric', 'Value', 'Unit', 'Peak', '% of Peak'])
-            print(get_table_string(df), file=output)
-        
-        # Calculation Data table (no peaks)
-        calc_rows = []
-        for m in calc['metrics']:
-            calc_rows.append([
-                m['name'],
-                f"{m['value']:.2e}" if m['value'] > 1e6 else f"{m['value']:.2f}",
-                m['unit']
-            ])
-        
-        if calc_rows:
-            print("\nCalculation Data:", file=output)
-            df = pd.DataFrame(calc_rows, columns=['Metric', 'Value', 'Unit'])
-            print(get_table_string(df), file=output)

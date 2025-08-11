@@ -73,8 +73,8 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc, self.get_args().kernel_verbose
             )
             
-            if len(self.get_args().path) == 1:
-                self.calculate_per_kernel_roofline_tables(d[0])
+            #update path
+            self._runs[d[0]].path = d[0]
 
             # create the loaded table
             parser.load_table_data(
@@ -84,87 +84,6 @@ class cli_analysis(OmniAnalyze_Base):
                 args=self.get_args(),
                 config=self._profiling_config,
             )
-
-
-    def calculate_per_kernel_roofline_tables(self, run_dir):
-        """
-        Calculate per-kernel roofline metrics using the eval_metric engine.
-        """
-        workload = self._runs[run_dir]
-        arch = workload.sys_info.iloc[0]["gpu_arch"]
-        
-        # Check for architecture and panel compatibility
-        if arch not in self._arch_configs or 400 not in self._arch_configs[arch].panel_configs:
-            return
-            
-        arch_config = self._arch_configs[arch]
-        roofline_panel = arch_config.panel_configs[400]
-
-        # Find the two roofline tables from the config
-        roofline_tables = {}
-        for data_source in roofline_panel.get("data source", []):
-            if "metric_table" in data_source:
-                table_config = data_source["metric_table"]
-                if table_config.get("cli_style") == "Roofline":
-                    roofline_tables[table_config["id"]] = table_config
-        
-        if not roofline_tables:
-            return
-
-        console_log("Calculating per-kernel roofline metrics...")
-        
-        workload.per_kernel_roofline = {'performance_rates': [], 'calculation_data': []}
-        
-        # We need a function to get the top kernels list. Assuming one exists in file_io.
-        # Let's define a helper for this.
-        kernel_top_df = file_io.create_df_from_file(run_dir, "pmc_kernel_top.csv")
-        if kernel_top_df.empty:
-            console_warning("pmc_kernel_top.csv not found for per-kernel roofline. Skipping.")
-            return
-
-        unique_kernels = kernel_top_df.head(self.get_args().max_stat_num)
-
-        # MAIN LOOP: Iterate through each kernel
-        for kernel_idx, kernel_row in unique_kernels.iterrows():
-            kernel_name = kernel_row['Kernel_Name']
-            
-            single_kernel_pmc_df = workload.raw_pmc[workload.raw_pmc['pmc_perf']['Kernel_Name'] == kernel_name]
-            if single_kernel_pmc_df.empty:
-                continue
-
-            perf_results, calc_results = {}, {}
-            for table_id, table_config in roofline_tables.items():
-                temp_df = workload.dfs[table_id].copy()
-                
-                parser.eval_metric(
-                    {table_id: temp_df}, {table_id: "metric_table"},
-                    workload.sys_info.iloc[0],
-                    workload.roofline_peaks, # <-- This comes from the base class now!
-                    single_kernel_pmc_df,
-                    self.get_args().debug, self._profiling_config,
-                )
-
-                if table_id == 401: perf_results = temp_df.set_index('Metric').to_dict('index')
-                elif table_id == 402: calc_results = temp_df.set_index('Metric').to_dict('index')
-            
-            # Structure results for TTY
-            perf_metrics_for_tty = [
-                {'name': name, 'value': data['Value'], 'unit': data['Unit'], 'peak': data.get('Peak (Empirical)')}
-                for name, data in perf_results.items()
-            ]
-            calc_metrics_for_tty = [
-                {'name': name, 'value': data['Value'], 'unit': data['Unit']}
-                for name, data in calc_results.items()
-            ]
-            
-            workload.per_kernel_roofline['performance_rates'].append({
-                'kernel_idx': kernel_idx, 'kernel_name': kernel_name, 'metrics': perf_metrics_for_tty
-            })
-            workload.per_kernel_roofline['calculation_data'].append({
-                'kernel_idx': kernel_idx, 'kernel_name': kernel_name, 'metrics': calc_metrics_for_tty
-            })
-
-        console_log(f"Finished calculating per-kernel roofline for {len(unique_kernels)} kernels.")
 
     @demarcate
     def run_analysis(self):
@@ -183,25 +102,31 @@ class cli_analysis(OmniAnalyze_Base):
         else:
             roof_plot = None
             # 1. check if not baseline && compatible soc:
-            if len(self.get_args().path) == 1:
-                workload = self._runs[self.get_args().path[0][0]]
-                arch = workload.sys_info.iloc[0]["gpu_arch"]
-                
-                if arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
-                    roof_obj = self.get_socs()[arch].roofline_obj
-                    
-                    if roof_obj:
-                        roof_obj._workload = workload
-                        roof_obj._arch_config = self._arch_configs[arch]
-                        roof_obj._profiling_config = self._profiling_config
-                        
-                        roof_plot = roof_obj.cli_generate_plot(roof_obj.get_dtype()[0])
+        if (len(self.get_args().path)) == 1:
+            workload_path = self.get_args().path[0][0]
+            workload = self._runs[workload_path]
+            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
             
-            tty.show_all(
-                self.get_args(),
-                self._runs,
-                self._arch_configs[workload.sys_info.iloc[0]["gpu_arch"]],
-                self._output,
-                self._profiling_config,
-                roof_plot=roof_plot,
-            )
+            if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
+                roof_obj = self.get_socs()[gpu_arch].roofline_obj
+                
+                if roof_obj:
+                    #store path in workload for calc_ai_analyze
+                    workload.path = workload_path
+                    
+                    # NOTE: using default data type
+                    roof_plot = roof_obj.cli_generate_plot(
+                        dtype=roof_obj.get_dtype()[0],
+                        workload=workload,
+                        config=self._profiling_config,
+                        arch_config=self._arch_configs[gpu_arch]
+                    )
+        
+        tty.show_all(
+            self.get_args(),
+            self._runs,
+            self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
+            self._output,
+            self._profiling_config,
+            roof_plot=roof_plot,
+        )

@@ -49,7 +49,7 @@ from utils.roofline_calc import (
     MFMA_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
-    calc_ai,
+    calc_ai_analyze,
     calc_ai_profile,
     constuct_roof,
 )
@@ -609,7 +609,7 @@ class Roofline:
 
         return fig
 
-    def cli_generate_plot(self, dtype):
+    def cli_generate_plot(self, dtype, workload=None, config=None, arch_config=None):
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
@@ -628,6 +628,41 @@ class Roofline:
                 exit=False,
             )
             return
+
+        #if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
+        if workload is not None:
+            self.__ai_data = calc_ai_analyze(
+                workload=workload,
+                mspec=self.__mspec,
+                sort_type=self.__run_parameters.get("sort_type"),
+                config=config,
+                arch_config=arch_config
+            )
+        
+            self.__ceiling_data = constuct_roof(
+                roofline_parameters=self.__run_parameters,
+                dtype=dtype
+            )
+        
+        else:
+            pmc_perf_csv = base_path / "pmc_perf.csv"
+            if not pmc_perf_csv.is_file():
+                console_error("roofline", "{} does not exist".format(pmc_perf_csv))
+            t_df = OrderedDict()
+            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
+
+            self.__ai_data = calc_ai_profile(
+                self.__mspec,
+                self.__run_parameters["sort_type"],
+                t_df
+            )
+            self.__ceiling_data = constuct_roof(
+                roofline_parameters=self.__run_parameters,
+                dtype=dtype
+            )
+
+        console_debug(f"AI data: {self.__ai_data}")
+        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
         # Normalize workload_dir to get the base directory
         workload_dir = self.__run_parameters.get("workload_dir")
@@ -674,11 +709,6 @@ class Roofline:
             console_log("roofline", "{} does not exist".format(roofline_csv))
             return
 
-        pmc_perf_csv = base_path / "pmc_perf.csv"
-        if not pmc_perf_csv.is_file():
-            console_error("roofline", "{} does not exist".format(pmc_perf_csv))
-        t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
         profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
         if profiling_config.get("format_rocprof_output") == "rocpd":
             t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
@@ -701,11 +731,6 @@ class Roofline:
             5: "atom",
         }
 
-        self.__ceiling_data = constuct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-        )
-        self.__ai_data = calc_ai(self.__mspec, self.__run_parameters["sort_type"], t_df)
 
         plt.clf()
         plt.plotsize(plt.tw(), plt.th())
