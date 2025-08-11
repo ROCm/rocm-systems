@@ -1,5 +1,11 @@
 macro(dashboard_submit)
-  ctest_submit()
+  ctest_submit(${ARGN}
+               RETRY_COUNT 3
+               RETRY_DELAY 10
+               CAPTURE_CMAKE_ERROR _cdash_submit_err)
+  if(NOT _cdash_submit_err EQUAL 0)
+    message(AUTHOR_WARNING "CDash submission failed: ${_cdash_submit_err}")
+  endif()
 endmacro()
 
 set(CTEST_PROJECT_NAME "aqlprofile")
