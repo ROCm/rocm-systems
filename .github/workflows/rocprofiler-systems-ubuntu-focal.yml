@@ -123,10 +123,9 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
-      working-directory: projects/rocprofiler-systems/
       run:
-        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
+        cd projects/rocprofiler-systems/ &&
         TAG="" &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
         append-tagname ${{ matrix.lto }} lto &&
@@ -336,10 +335,9 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
-      working-directory: projects/rocprofiler-systems/
       run:
-        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
+        cd projects/rocprofiler-systems/ &&
         cmake --version &&
         TAG="-rocm-${{ matrix.rocm-version }}" &&
         TAG="$(echo ${TAG} | sed 's/debian/latest/g')" &&
@@ -473,10 +471,9 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
-      working-directory: projects/rocprofiler-systems/
       run:
-        export GIT_DISCOVERY_ACROSS_FILESYSTEM=1 &&
         git config --global --add safe.directory '*' &&
+        cd projects/rocprofiler-systems/ &&
         cmake --version &&
         python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-focal-codecov-mpi-python-ompt-papi
