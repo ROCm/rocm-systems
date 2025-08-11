@@ -43,7 +43,8 @@ const std::vector<const char*> ShaderList = {
     ReadMemoryIsa,
     GwsInitIsa,
     GwsAtomicIncreaseIsa,
-    CheckCuMaskIsa
+    CheckCuMaskIsa,
+    InitWaveMemoryIsa
 };
 
 /**
@@ -1188,3 +1189,108 @@ const char *WatchWriteIsa =
     WATCH_START
     "flat_store_dword v[0:1], v4"
     WATCH_END;
+
+const char *InitWaveMemoryIsa =
+    SHADER_START
+    SHADER_MACROS_U32
+    SHADER_MACROS_FLAT
+    R"(
+        .if (.amdgcn.gfx_generation_number < 12)
+            s_branch WAVE_EXIT // only support GFX 12+ testing for now
+        .endif
+        s_mov_b32		exec_lo, 0xffffffff
+        s_mov_b32		exec_hi, 0xffffffff
+        s_mov_b32		m0, 0x0
+        // Base buffer addr[laneID] in v[0:1] per laneId lane
+        v_mbcnt_lo_u32_b32	v0, -1, 0
+        v_mbcnt_hi_u32_b32 	v0, -1, v0
+        v_lshlrev_b32           v0, 2, v0
+        V_ADD_CO_U32            v0, s0, v0
+        v_mov_b32               v1, s1
+        V_ADD_CO_CI_U32         v1, v1, 0
+        // 2nd Base buffer addr[waveId] in all lanes
+        v_mov_b32		v2, ttmp9
+        v_lshlrev_b32           v2, 2, v2
+        V_ADD_CO_U32            v2, s2, v2
+        v_mov_b32               v3, s3
+        V_ADD_CO_CI_U32         v3, v3, 0
+        // Get LDS alloc size
+        s_getreg_b32		s4, hwreg(HW_REG_LDS_ALLOC)
+        s_and_b32		s4, s4, 0x7ff000
+        s_cbranch_scc0		VGPR_STORE // lds is zero
+        s_lshr_b32		s4, s4, 3 // LDS size in 512 bytes units. lshift 3 for BYTEs
+        v_mov_b32		v4, 0x12345678
+        // Init LDS words
+        LDS_STORE:
+        ds_write_addtid_b32	v4
+        s_add_u32		m0, m0, 128 // 32 lanes  * bytes
+        s_cmp_lt_u32		m0, s4
+        s_cbranch_scc1		LDS_STORE
+        // Get VGPR alloc size
+        VGPR_STORE:
+        s_getreg_b32		s4, hwreg(HW_REG_GPR_ALLOC)
+        s_and_b32		s4, s4, 0xff000
+        s_lshr_b32		s4, s4, 12
+        s_add_u32		s4, s4, 1
+        s_lshl_b32		s4, s4, 2
+        s_mov_b32		s5, 0xffff0000
+        // Init VGPR words
+        v_mbcnt_lo_u32_b32	v4, -1, 0
+        v_mbcnt_hi_u32_b32 	v4, -1, v4
+        v_or_b32		v4, v4, s5
+        v_mov_b32		v5, v4
+        v_mov_b32		v6, v4
+        v_mov_b32		v7, v4
+        s_mov_b32		m0, 0x4
+        VGPR_STORE_LOOP:
+        v_movreld_b32		v4, v4
+        v_movreld_b32		v5, v5
+        v_movreld_b32		v6, v6
+        v_movreld_b32		v7, v7
+        s_add_u32		m0, m0, 4
+        s_cmp_lt_u32		m0, s4
+        s_cbranch_scc1		VGPR_STORE_LOOP
+        // Init SGPR words
+        s_mov_b32		s4, 0x87654321
+        s_mov_b32		s5, s4
+        s_mov_b32		s6, s4
+        s_mov_b32		s7, s4
+        s_mov_b32		m0, 0x4
+        SGPR_STORE:
+        s_movreld_b32		s4, s4
+        s_movreld_b32		s5, s5
+        s_movreld_b32		s6, s6
+        s_movreld_b32		s7, s7
+        s_add_u32		m0, m0, 4
+        s_cmp_lt_u32		m0, 100	//fixed sgpr size blocks of 4
+        s_cbranch_scc1		SGPR_STORE
+        s_movreld_b32		s4, s4 // trailing 2 SGPRs (s104 & s105)
+        s_movreld_b32		s5, s5
+        s_mov_b32		exec_lo, 0x1010101
+        s_mov_b32		exec_hi, 0x2020202
+        FLAT_STORE_DWORD_NSS v[0:1], v4 scope:SCOPE_SYS // hints exec to test
+        FLAT_STORE_DWORD_NSS v[2:3], v4 scope:SCOPE_SYS // issues all waves ready to test
+        s_wait_idle
+        // Wait on test to CWSR and check save area
+        WAIT_ON_TEST:
+        s_sleep			0x10
+        FLAT_LOAD_DWORD_NSS	v4, v[0:1] scope:SCOPE_SYS
+        s_wait_idle
+        V_CMP_EQ_U32		v4, 0
+        s_cbranch_vccz		WAIT_ON_TEST
+        // retest user arg buffers saved in v0-v3
+        s_mov_b32		exec_lo, 0xffffffff
+        s_mov_b32		exec_hi, 0xffffffff
+        FLAT_LOAD_DWORD_NSS	v4, v[0:1] scope:SCOPE_SYS
+        FLAT_LOAD_DWORD_NSS	v4, v[2:3] scope:SCOPE_SYS
+        s_wait_idle
+        //retest user arg buffers saved in s0-s3
+        v_mov_b32 v0, s0
+        v_mov_b32 v1, s1
+        v_mov_b32 v2, s2
+        v_mov_b32 v3, s3
+        FLAT_LOAD_DWORD_NSS	v4, v[0:1] scope:SCOPE_SYS
+        FLAT_LOAD_DWORD_NSS	v4, v[2:3] scope:SCOPE_SYS
+        s_wait_idle
+        s_endpgm
+)";

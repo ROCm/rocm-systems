@@ -55,6 +55,7 @@ extern const char *CheckCuMaskIsa;
 
 /* KFDCWSRTest */
 extern const char *PersistentIterateIsa;
+extern const char *InitWaveMemoryIsa;
 
 /* KFDEvictTest */
 extern const char *ReadMemoryIsa;

@@ -48,7 +48,32 @@ class Dispatch {
     
     void SetPriv(bool priv);
 
+    HSAKMT_STATUS SetNumVgprs(unsigned int numVgprs, unsigned int *maxSize, unsigned int *blockSize);
+
+    HSAKMT_STATUS SetLdsSize(size_t ldsSizeInBytes, size_t *maxSize, size_t *blockSize);
+
+    void SetWave32(bool isWave32);
+
     HsaEvent *GetHsaEvent() { return m_pEop; }
+
+    struct WaveMemInfo {
+        bool isWave32;
+        unsigned int numVgpr;
+        unsigned int maxNumVgpr;
+        unsigned int vgprBlockSize;
+        unsigned int numSgpr;
+        unsigned int maxNumSgpr;
+        unsigned int sgprBlockSize;
+        unsigned int numUserSgpr;
+        unsigned int numTtemps;
+        size_t numBytesLds;
+        size_t maxBytesLds;
+        size_t ldsBlockSize;
+    };
+
+    struct WaveMemInfo GetWaveMemInfo() { return m_WaveMemInfo; }
+
+    void SetPacketAddrLo(uint32_t addrLo);
 
  private:
     void BuildIb();
@@ -74,6 +99,8 @@ class Dispatch {
     unsigned int m_SpiPriority;
     unsigned int  m_FamilyId;
     bool  m_NeedCwsrWA;
+    struct WaveMemInfo m_WaveMemInfo;
+    uint32_t m_PacketAddrLo;
 };
 
 #endif  // __KFD_DISPATCH__H__

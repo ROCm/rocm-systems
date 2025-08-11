@@ -35,7 +35,8 @@
 Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
     :m_IsaBuf(isaBuf), m_IndirectBuf(PACKETTYPE_PM4, PAGE_SIZE / sizeof(unsigned int), isaBuf.Node()),
     m_DimX(1), m_DimY(1), m_DimZ(1), m_pArg1(NULL), m_pArg2(NULL), m_pEop(NULL), m_ScratchEn(false),
-    m_ComputeTmpringSize(0), m_scratch_base(0ll), m_SpiPriority(0) {
+    m_ComputeTmpringSize(0), m_scratch_base(0ll), m_SpiPriority(0), m_WaveMemInfo({0}),
+    m_PacketAddrLo(0) {
     HsaEventDescriptor eventDesc;
     eventDesc.EventType = HSA_EVENTTYPE_SIGNAL;
     eventDesc.NodeId = isaBuf.Node();
@@ -46,6 +47,22 @@ Dispatch::Dispatch(const HsaMemoryBuffer& isaBuf, const bool eventAutoReset)
 
     m_FamilyId  = g_baseTest->GetFamilyIdFromNodeId(isaBuf.Node());
     m_NeedCwsrWA = g_baseTest->NeedCwsrWA(isaBuf.Node());
+
+    m_WaveMemInfo.isWave32 = true;
+    m_WaveMemInfo.numVgpr = 32;
+    m_WaveMemInfo.numBytesLds = 0;
+    m_WaveMemInfo.numTtemps = 16;
+
+    // For VGPR & LDS test setting.  Support GFX12 only for now.
+    if (m_FamilyId == FAMILY_GFX12) {
+        m_WaveMemInfo.maxNumVgpr = 256;
+        m_WaveMemInfo.vgprBlockSize = 8;
+        m_WaveMemInfo.maxNumSgpr = 128;
+        m_WaveMemInfo.sgprBlockSize = 128;
+        m_WaveMemInfo.numUserSgpr = 106;
+        m_WaveMemInfo.maxBytesLds = 16384;
+        m_WaveMemInfo.ldsBlockSize = 512;
+    }
 }
 
 Dispatch::~Dispatch() {
@@ -76,6 +93,54 @@ void Dispatch::SetSpiPriority(unsigned int priority) {
 
 void Dispatch::SetPriv(bool priv) {
     m_NeedCwsrWA = priv;
+}
+
+HSAKMT_STATUS Dispatch::SetNumVgprs(unsigned int numVgprs, unsigned int *maxSize, unsigned int *blockSize) {
+    *maxSize = 0;
+    *blockSize = 0;
+    unsigned int vgprMaxSize = m_WaveMemInfo.maxNumVgpr;
+    unsigned int vgprBlockSize = m_WaveMemInfo.vgprBlockSize;
+
+    if (!(vgprMaxSize && vgprBlockSize))
+        return HSAKMT_STATUS_UNAVAILABLE;
+
+    *maxSize = vgprMaxSize;
+    *blockSize = vgprBlockSize;
+
+    if (numVgprs > *maxSize || !!(numVgprs % *blockSize))
+        return HSAKMT_STATUS_MEMORY_ALIGNMENT;
+
+    m_WaveMemInfo.numVgpr = numVgprs;
+
+    return HSAKMT_STATUS_SUCCESS;
+}
+
+HSAKMT_STATUS Dispatch::SetLdsSize(size_t ldsSizeInBytes, size_t *maxSize, size_t *blockSize) {
+    *maxSize = 0;
+    *blockSize = 0;
+    size_t ldsMaxSize = m_WaveMemInfo.maxBytesLds;
+    size_t ldsBlockSize = m_WaveMemInfo.ldsBlockSize;
+
+    if (!(ldsMaxSize && ldsBlockSize))
+        return HSAKMT_STATUS_UNAVAILABLE;
+
+    *maxSize = ldsMaxSize;
+    *blockSize = ldsBlockSize;
+
+    if (ldsSizeInBytes > *maxSize || !!(ldsSizeInBytes % *blockSize))
+        return HSAKMT_STATUS_MEMORY_ALIGNMENT;
+
+    m_WaveMemInfo.numBytesLds = ldsSizeInBytes;
+    return HSAKMT_STATUS_SUCCESS;
+}
+
+void Dispatch::SetWave32(bool isWave32) {
+    m_WaveMemInfo.isWave32 = isWave32;
+    m_WaveMemInfo.vgprBlockSize = isWave32 ? 8 : 4;
+}
+
+void Dispatch::SetPacketAddrLo(uint32_t addrLo) {
+    m_PacketAddrLo = addrLo;
 }
 
 void Dispatch::Submit(BaseQueue& queue) {
@@ -133,12 +198,18 @@ void Dispatch::BuildIb() {
      */
     const bool priv = m_NeedCwsrWA;
 
+    // Wave32/Wave64 VGPR range is 0-63 where:
+    // Wave32 => 8,16,24,...,256
+    // Wave64 => 4,8,12,...,256
+    const unsigned int numVgpr = (m_WaveMemInfo.numVgpr >>
+                                 (m_WaveMemInfo.isWave32 ? 3 : 2)) - 1;
+
     unsigned int pgmRsrc1 =
         (0xc0 << COMPUTE_PGM_RSRC1__FLOAT_MODE__SHIFT) |
         ((m_SpiPriority & 3) << COMPUTE_PGM_RSRC1__PRIORITY__SHIFT) |
         (priv << COMPUTE_PGM_RSRC1__PRIV__SHIFT) |
         ((m_FamilyId < FAMILY_GFX12) ? (0x2 << COMPUTE_PGM_RSRC1__SGPRS__SHIFT) : 0) |
-        (0x4 << COMPUTE_PGM_RSRC1__VGPRS__SHIFT);  // 4 * 8 = 32 VGPRs
+        (numVgpr << COMPUTE_PGM_RSRC1__VGPRS__SHIFT);
 
     unsigned int pgmRsrc2 = 0;
     pgmRsrc2 |= (m_ScratchEn << COMPUTE_PGM_RSRC2__SCRATCH_EN__SHIFT)
@@ -151,6 +222,9 @@ void Dispatch::BuildIb() {
             & COMPUTE_PGM_RSRC2__TRAP_PRESENT_MASK;
     }
 
+    const size_t ldsSize = m_WaveMemInfo.ldsBlockSize ?
+                           m_WaveMemInfo.numBytesLds/m_WaveMemInfo.ldsBlockSize : 0;
+
     pgmRsrc2 |= (1 << COMPUTE_PGM_RSRC2__TGID_X_EN__SHIFT)
             & COMPUTE_PGM_RSRC2__TGID_X_EN_MASK;
     pgmRsrc2 |= (1 << COMPUTE_PGM_RSRC2__TIDIG_COMP_CNT__SHIFT)
@@ -159,6 +233,8 @@ void Dispatch::BuildIb() {
             & COMPUTE_PGM_RSRC2__EXCP_EN_MASK;
     pgmRsrc2 |= (1 << COMPUTE_PGM_RSRC2__EXCP_EN_MSB__SHIFT)
             & COMPUTE_PGM_RSRC2__EXCP_EN_MSB_MASK;
+    pgmRsrc2 |= (ldsSize << COMPUTE_PGM_RSRC2__LDS_SIZE__SHIFT)
+	    & COMPUTE_PGM_RSRC2__LDS_SIZE_MASK;
 
     const unsigned int COMPUTE_PGM_RSRC[] = {
         pgmRsrc1,
@@ -223,11 +299,15 @@ void Dispatch::BuildIb() {
     };
 
     const unsigned int DISPATCH_INIT_VALUE = 0x00000021 | (hsakmt_is_dgpu() ? 0 : 0x1000) |
-                ((m_FamilyId >= FAMILY_NV) ? 0x8000 : 0);
+                ((m_FamilyId >= FAMILY_NV && m_WaveMemInfo.isWave32) ? 0x8000 : 0);
     // {COMPUTE_SHADER_EN=1, PARTIAL_TG_EN=0, FORCE_START_AT_000=0, ORDERED_APPEND_ENBL=0,
     // ORDERED_APPEND_MODE=0, USE_THREAD_DIMENSIONS=1, ORDER_MODE=0, DISPATCH_CACHE_CNTL=0,
     // SCALAR_L1_INV_VOL=0, VECTOR_L1_INV_VOL=0, DATA_ATC=?, RESTORE=0}
     // Set CS_W32_EN for wave32 workloads for gfx10 since all the shaders used in KFDTest is 32 bit .
+
+    const unsigned int COMPUTE_DISPATCH_PKT_ADDR_LO[] = {
+        m_PacketAddrLo,
+    };
 
     m_IndirectBuf.AddPacket(PM4AcquireMemoryPacket(m_FamilyId));
 
@@ -255,6 +335,10 @@ void Dispatch::BuildIb() {
 
     m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_USER_DATA_0, COMPUTE_USER_DATA_VALUES,
                                                   ARRAY_SIZE(COMPUTE_USER_DATA_VALUES)));
+
+    //COMPUTE_TBA_LO is deprecated and is now replaced by mmCOMPUTE_DISPATCH_PKT_ADDR_LO
+    m_IndirectBuf.AddPacket(PM4SetShaderRegPacket(mmCOMPUTE_TBA_LO, COMPUTE_DISPATCH_PKT_ADDR_LO,
+                                                  ARRAY_SIZE(COMPUTE_DISPATCH_PKT_ADDR_LO)));
 
     m_IndirectBuf.AddPacket(PM4DispatchDirectPacket(m_DimX, m_DimY, m_DimZ, DISPATCH_INIT_VALUE));
 
