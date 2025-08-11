@@ -558,9 +558,9 @@ rocp_invoke_registrations(bool invoke_all)
 
 void load_environment_buffer(const char* environment_buffer)
 {
-    // Environment_buffer is a null-character delimited list of name value pairs.
+    // environment_buffer is a null-character delimited list of name value pairs.
     // Each name and value is delimited separately.
-    // The first 4 bytes contain an uint32_t count of pairs
+    // The first 4 bytes contain a uint32_t count of pairs.
 
     if (!environment_buffer)
     {
@@ -578,7 +578,7 @@ void load_environment_buffer(const char* environment_buffer)
         position += strlen(value) + 1;
 
         LOG(INFO) << "Attachment adding environment variable: " << name << "=" << value;
-        setenv(name, value, 1);        
+        setenv(name, value, 1);
     }
 }
 
@@ -600,7 +600,7 @@ rocprofiler_prestore_dispatch_table_t create_prestore_dispatch_table(void* prest
     {
         return table;
     }
-    
+
     table.version = version;
     table.rocprofiler_prestore_get_version = get_version;
     table.rocprofiler_prestore_set_api_table = reinterpret_cast<rocprofiler_prestore_set_api_table_t>(dlsym(prestore_lib, rocprofiler_prestore_set_api_table_entrypoint));
@@ -727,9 +727,7 @@ rocprofiler_register_library_api_table(
     }
     else if(
         _import_match->library_idx == ROCP_REG_HSA &&
-        // TODO: default to false for release
-        // TODO: finalize envvar name
-        common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
+        common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", false))
     {
         void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
         if (!prestorelibrary)
@@ -740,7 +738,7 @@ rocprofiler_register_library_api_table(
         rocprofiler_prestore_set_api_table_t rocprofiler_prestore_set_api_table_fn;
         *(void**) (&rocprofiler_prestore_set_api_table_fn) =
             dlsym(prestorelibrary, rocprofiler_prestore_lib_register_entrypoint);
-        
+
         if (!rocprofiler_prestore_set_api_table_fn)
         {
             LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library's entry point was not found. The attaching profiler will not be able to profile anything that requires proxy queues.";
@@ -795,6 +793,8 @@ rocprofiler_register_iterate_registration_info(
     return ROCP_REG_SUCCESS;
 }
 
+//
+//  This function can be invoked by ptrace
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_nonpropagated_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
 
@@ -804,6 +804,8 @@ rocprofiler_register_invoke_nonpropagated_registrations()
     return rocp_invoke_registrations(false);
 }
 
+//
+//  This function can be invoked by ptrace
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
 
@@ -835,7 +837,7 @@ rocprofiler_register_attach(const char* environment_buffer)
     rocprofv3_attach_t rocprofv3_attach_fn;
     *(void**) (&rocprofv3_attach_fn) =
         dlsym(toollibrary, rocprofiler_tool_lib_attach_entrypoint);
-    
+
     if (rocprofv3_attach_fn)
     {
         void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
@@ -874,7 +876,7 @@ rocprofiler_register_detach()
     rocprofv3_detach_t rocprofv3_detach_fn;
     *(void**) (&rocprofv3_detach_fn) =
         dlsym(toollibrary, rocprofiler_tool_lib_detach_entrypoint);
-    
+
     if (rocprofv3_detach_fn)
     {
         LOG(INFO) << "detachment starting";
