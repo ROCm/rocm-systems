@@ -824,6 +824,7 @@ void GpuAgent::InitDma() {
 
       auto ret = CreateBlitSdma(use_xgmi, rec_eng);
       if (ret != nullptr) return ret;
+      LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS, "Failed to create SDMA queue. Will fallback to blit-copies");
     }
 
     // pending_copy_stat_check_ref_ will prevent unnecessary compute queue creation
@@ -1921,9 +1922,9 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
       return;
 
     // Attempt to trim the maximum number of concurrent waves to allow scratch to fit.
-    if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-      debug_print("Failed to map requested scratch (%ld) - reducing queue occupancy.\n",
-                  scratch.main_size);
+    LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS,
+          "Failed to map requested scratch (%ld) - reducing queue occupancy.\n",
+          scratch.main_size);
     const uint64_t num_cus = properties_.NumFComputeCores / properties_.NumSIMDPerCU;
     const uint64_t se_per_xcc = properties_.NumShaderBanks / properties_.NumXcc;
 
@@ -1943,8 +1944,8 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
         scratch.large = true;
         scratch_used_large_ += scratch.main_size;
         scratch_cache_.insertMain(scratch);
-        if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-          debug_print("  %ld scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
+        LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS,
+                      "%ld scratch mapped, %.2f%% occupancy.\n", scratch.main_size,
                       float(waves_per_cu * num_cus) / scratch.dispatch_slots * 100.0f);
         return;
       }
@@ -1962,8 +1963,8 @@ void GpuAgent::AcquireQueueMainScratch(ScratchInfo& scratch) {
 
     // Failed to allocate minimal scratch
     assert(scratch.main_queue_base == nullptr && "bad scratch data");
-    if (core::Runtime::runtime_singleton_->flag().enable_queue_fault_message())
-      debug_print("  Could not allocate scratch for one wave per CU.\n");
+    LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS,
+              "Could not allocate scratch for one wave per CU.\n");
     return;
   }();
 

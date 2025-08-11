@@ -770,6 +770,9 @@ void AqlQueue::AsyncReclaimMainScratch() {
   assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
           "This version of CP FW should support async scratch, but flag is not set");
 
+  LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS, "Reclaiming main scratch (HWq=%p id=%d)",
+                  public_handle()->base_address, public_handle()->id);
+
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
@@ -841,6 +844,9 @@ void AqlQueue::AsyncReclaimAltScratch() {
 
   assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
           "This version of CP FW should support async scratch, but flag is not set");
+
+  LogPrint(HSA_AMD_LOG_FLAG_PERF_WARNINGS, "Reclaiming alf scratch (HWq=%p id=%d)",
+                  public_handle()->base_address, public_handle()->id);
 
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);

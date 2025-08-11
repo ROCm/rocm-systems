@@ -3648,6 +3648,9 @@ hsa_status_t hsa_amd_queue_get_info(hsa_queue_t* queue, hsa_queue_info_attribute
 typedef enum hsa_amd_log_flag_s {
    /* Log AQL packets internally enqueued by HSA for Blit Kernels */
   HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS = 0,
+   /* Log situations that may cause performance warnings */
+  HSA_AMD_LOG_FLAG_PERF_WARNINGS = 1,
+
 } hsa_amd_log_flag_t;
 
 /**
