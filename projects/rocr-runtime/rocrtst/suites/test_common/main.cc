@@ -408,6 +408,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   RunCustomTestEpilog(&vmt);
 }
 
+TEST(rocrtstFunc, PcSampling) {
+  AgentPropTest propTest;
+  RunCustomTestProlog(&propTest);
+  propTest.PcSampling();
+  RunCustomTestEpilog(&propTest);
+}
+
 TEST(rocrtstNeg, Memory_Negative_Tests) {
   MemoryAllocateNegativeTest mt;
   RunCustomTestProlog(&mt);
