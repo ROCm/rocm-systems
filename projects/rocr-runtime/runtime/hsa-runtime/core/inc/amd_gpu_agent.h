@@ -354,6 +354,9 @@ class GpuAgent : public GpuAgentInt {
   // @brief Override from AMD::GpuAgentInt.
   void InvalidateCodeCaches(void* ptr, size_t size) override;
 
+  // @brief Inform the agent to flush its code cache.
+  void ShouldFlushCodeCache();
+
   // @brief Override from AMD::GpuAgentInt.
   bool current_coherency_type(hsa_amd_coherency_type_t type) override;
 
@@ -664,6 +667,9 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief HDP flush registers
   hsa_amd_hdp_flush_t HDP_flush_ = {nullptr, nullptr};
+
+  // @brief Flag to determine whether to flush code caches
+  std::atomic<bool> flush_code_caches_;
 
  private:
   // @brief Query the driver to get the region list owned by this agent.

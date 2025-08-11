@@ -342,6 +342,11 @@ void RegionMemory::Free()
   ptr_ = nullptr;
   host_ptr_ = nullptr;
   size_ = 0;
+  core::Agent* agent = region_->owner();
+  const bool isGpuDevice = (agent->device_type() == core::Agent::kAmdGpuDevice);
+  if (is_code_ && isGpuDevice) {
+    reinterpret_cast<AMD::GpuAgent*>(agent)->ShouldFlushCodeCache();
+  }
 }
 
 bool RegionMemory::Freeze() {

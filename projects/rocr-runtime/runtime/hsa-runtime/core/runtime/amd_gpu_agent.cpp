@@ -117,7 +117,8 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
-      large_bar_enabled_(false){
+      large_bar_enabled_(false),
+      flush_code_caches_(true) {
   const bool is_apu_node = (properties_.NumCPUCores > 0);
   profile_ = (is_apu_node) ? HSA_PROFILE_FULL : HSA_PROFILE_BASE;
 
@@ -2285,6 +2286,10 @@ void GpuAgent::BindTrapHandler() {
 }
 
 void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
+  bool expected = true;
+  if (!flush_code_caches_.compare_exchange_strong(expected, false)) {
+    return;
+  }
   // Check for microcode cache invalidation support.
   // This is deprecated in later microcode builds.
   if (isa_->GetMajorVersion() == 7) {
@@ -2340,6 +2345,10 @@ void GpuAgent::InvalidateCodeCaches(void *ptr, size_t size) {
 
   // Submit the command to the utility queue and wait for it to complete.
   queues_[QueueUtility]->ExecutePM4(cache_inv, cache_inv_size_dw * sizeof(uint32_t));
+}
+
+void GpuAgent::ShouldFlushCodeCache() {
+  flush_code_caches_.store(true, std::memory_order_release);
 }
 
 lazy_ptr<core::Blit>& GpuAgent::GetBlitObject(uint32_t engine_offset) {
