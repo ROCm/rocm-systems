@@ -737,7 +737,7 @@ def run_prof(
 
     console_debug("pmc file: %s" % path(fname).name)
 
-    is_mode_live_attach = "--pid" in profiler_options
+    is_mode_live_attach = "--pid" in profiler_options or profiler_options["ROCPROF_ATTACH_PID"] is not None
 
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
@@ -834,7 +834,7 @@ def run_prof(
             c_lib.attach(int(pid))
             duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
             if duration is None:
-                input("Press Enter to detach...")
+                input(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
             else:
                 time.sleep(int(duration) / 1000)
             c_lib.detach()
@@ -857,7 +857,7 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if not success:
+    if not is_mode_live_attach and not success:
         if loglevel > logging.INFO:
             for line in output.splitlines():
                 console_error(output, exit=False)

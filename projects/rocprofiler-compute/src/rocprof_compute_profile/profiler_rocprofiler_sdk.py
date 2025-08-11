@@ -69,16 +69,16 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
         }
         
-        if not self.get_args().pid:
-            options = options + {
-                "ROCPROF_ATTACH_TOOL_LIBRARY" : rocprofiler_attach_tool_path,
-                "ROCPROF_ATTACH_PID" : self.get_args().pid,
-            }
-            
+        if self.get_args().pid:
+            options.update({
+                "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,
+                "ROCPROF_ATTACH_PID": self.get_args().pid,
+            })
+
             if self.get_args().attach_duration_msec:
-                options = options + {
-                    "ROCPROF_ATTACH_DURATION" : self.get_args().attach_duration_msec,
-                }
+                options.update({
+                    "ROCPROF_ATTACH_DURATION": self.get_args().attach_duration_msec,
+                })
 
         if self.get_args().kokkos_trace:
             # NOTE: --kokkos-trace feature is incomplete and is disabled for now.
