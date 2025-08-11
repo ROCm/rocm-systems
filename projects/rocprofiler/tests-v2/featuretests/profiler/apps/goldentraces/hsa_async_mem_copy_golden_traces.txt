@@ -1,0 +1,12 @@
+ROCProfilerV2: Collecting the following counters:
+- GRBM_COUNT
+Enabling Counter Collection
+CPU is "AMD Eng Sample: 100-000000248-08_35/21_N"
+GPU1 is "gfx90a"
+GPU2 is "gfx90a"
+Copying 4096 bytes from gpu1 memory to system memory...
+Success!
+Copying 4096 bytes from system memory to gpu1 memory...
+Success!
+Copying 4096 bytes from gpu1 memory to gpu2 memory...
+Success!

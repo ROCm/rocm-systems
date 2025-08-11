@@ -1,0 +1,7 @@
+/build*
+/_build
+/_doxygen
+/.gitinfo
+/*.dox
+/.sass-cache
+/_toc.yml

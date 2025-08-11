@@ -1,0 +1,103 @@
+name: "Pre-commit Format & Lint"
+on:
+  pull_request:
+    branches:
+      - testbranch
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+#      - name: Generate a token
+#        id: generate-token
+#        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e
+#        with:
+#          app-id: ${{ secrets.APP_ID }}
+#          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+#          owner: ${{ github.repository_owner }}
+
+      - name: Checkout code (initial)
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pydantic requests pre-commit
+          sudo apt-get update
+          sudo apt-get install -y clang-format
+
+      - name: Configure Git
+        run: |
+          git config user.name "systems-assistant[bot]"
+          git config user.email "systems-assistant[bot]@users.noreply.github.com"
+
+      - name: Detect changed subtrees
+        id: detect
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python .github/scripts/pr_detect_changed_subtrees.py \
+            --repo "${{ github.repository }}" \
+            --pr "${{ github.event.pull_request.number }}" \
+            --config ".github/repos-config.json"
+
+      - name: Checkout full repo with changed subtrees
+        if: steps.detect.outputs.subtrees
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          sparse-checkout: |
+            .github
+            ${{ steps.detect.outputs.subtrees }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+          submodules: false
+
+      - name: Get list of changed files
+        id: changed-files
+        shell: bash
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
+          changed=$(git diff --name-only FETCH_HEAD HEAD)
+          files=$(echo "$changed" | tr '\n' ' ' | sed 's/ *$//')
+          echo "all_modified_files=$files" >> $GITHUB_OUTPUT
+
+      - name: Show changed-files output
+        run: |
+          echo "Changed files are: ${{ steps.changed-files.outputs.all_modified_files }}"
+
+      - name: Disable submodule recursion
+        run: git config submodule.recurse false
+
+      - name: Run and auto-commit pre-commit fixes
+        env:
+          GIT_AUTHOR_NAME: "systems-assistant[bot]"
+          GIT_AUTHOR_EMAIL: "systems-assistant[bot]@users.noreply.github.com"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          var="${{ steps.changed-files.outputs.all_modified_files }}"
+          read -r -a files <<<"$var"
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No files changed, skipping pre-commit."
+            exit 0
+          fi
+          echo "Running pre-commit on these files:"
+          printf "  %s\n" "${files[@]}"
+          set +e
+          pre-commit run --files "${files[@]}" --show-diff-on-failure
+          set -e
+          git add "${files[@]}"
+          git fetch origin "${{github.head_ref}}"
+          if ! git diff --cached --quiet; then
+            git commit -m "ci: apply pre-commit fixes"
+            git push --force-with-lease origin HEAD:${{ github.head_ref }}
+          fi

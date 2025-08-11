@@ -1,0 +1,565 @@
+Omniperf version: 2.0.0-RC1
+Profiler choice: rocprofv1
+Path: /home1/josantos/omniperf/tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200
+Target: MI200
+Command: ./tests/vcopy -n 1048576 -b 256 -i 3
+Kernel Selection: None
+Dispatch Selection: None
+IP Blocks: ['sq', 'spi', 'ta', 'tcc', 'cpf']
+
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Collecting Performance Counters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_IFETCH_LEVEL.txt
+   |-> [rocprof] RPL: on '240321_161122' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_IFETCH_LEVEL.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161122_4088195'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161122_4088195/input0_results_240321_161122'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161122_4088195/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 6 metrics
+   |-> [rocprof] GRBM_COUNT, GRBM_GUI_ACTIVE, SQ_WAVES, SQ_IFETCH, SQ_IFETCH_LEVEL, SQ_ACCUM_PREV_HIRES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161122_4088195/input0_results_240321_161122
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/SQ_IFETCH_LEVEL.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_LDS.txt
+   |-> [rocprof] RPL: on '240321_161123' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_LDS.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161123_4088396'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161123_4088396/input0_results_240321_161123'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161123_4088396/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 3 metrics
+   |-> [rocprof] SQ_INSTS_LDS, SQ_INST_LEVEL_LDS, SQ_ACCUM_PREV_HIRES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161123_4088396/input0_results_240321_161123
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/SQ_INST_LEVEL_LDS.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt
+   |-> [rocprof] RPL: on '240321_161123' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_SMEM.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161123_4088598'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161123_4088598/input0_results_240321_161123'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161123_4088598/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 3 metrics
+   |-> [rocprof] SQ_INSTS_SMEM, SQ_INST_LEVEL_SMEM, SQ_ACCUM_PREV_HIRES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161123_4088598/input0_results_240321_161123
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/SQ_INST_LEVEL_SMEM.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt
+   |-> [rocprof] RPL: on '240321_161124' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_INST_LEVEL_VMEM.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161124_4088793'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161124_4088793/input0_results_240321_161124'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161124_4088793/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 3 metrics
+   |-> [rocprof] SQ_INSTS_VMEM, SQ_INST_LEVEL_VMEM, SQ_ACCUM_PREV_HIRES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161124_4088793/input0_results_240321_161124
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/SQ_INST_LEVEL_VMEM.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_LEVEL_WAVES.txt
+   |-> [rocprof] RPL: on '240321_161124' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/SQ_LEVEL_WAVES.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161124_4088996'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161124_4088996/input0_results_240321_161124'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161124_4088996/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 9 metrics
+   |-> [rocprof] GRBM_COUNT, GRBM_GUI_ACTIVE, CPC_ME1_BUSY_FOR_PACKET_DECODE, SQ_CYCLES, SQ_WAVES, SQ_WAVE_CYCLES, SQ_BUSY_CYCLES, SQ_LEVEL_WAVES, SQ_ACCUM_PREV_HIRES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161124_4088996/input0_results_240321_161124
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/SQ_LEVEL_WAVES.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_0.txt
+   |-> [rocprof] RPL: on '240321_161125' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_0.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161125_4089180'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161125_4089180/input0_results_240321_161125'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161125_4089180/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 20 metrics
+   |-> [rocprof] SQ_CYCLES, SQ_BUSY_CYCLES, SQ_WAVES, SQ_INSTS_VALU_CVT, SQ_INSTS_VMEM_WR, SQ_INSTS_VMEM_RD, SQ_INSTS_VMEM, SQ_INSTS_SALU, GRBM_COUNT, GRBM_GUI_ACTIVE, TA_TA_BUSY_sum, TA_BUFFER_WAVEFRONTS_sum, SPI_CSN_WINDOW_VALID, SPI_CSN_BUSY, CPF_CPF_STAT_BUSY, CPF_CPF_STAT_STALL, TCC_CYCLE_sum, TCC_BUSY_sum, TCC_PROBE_sum, TCC_PROBE_ALL_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161125_4089180/input0_results_240321_161125
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_0.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_1.txt
+   |-> [rocprof] RPL: on '240321_161125' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_1.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161125_4089372'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161125_4089372/input0_results_240321_161125'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161125_4089372/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 19 metrics
+   |-> [rocprof] SQ_INSTS_VSKIPPED, SQ_INSTS, SQ_INSTS_VALU, SQ_INSTS_VALU_ADD_F16, SQ_INSTS_VALU_MUL_F16, SQ_INSTS_VALU_FMA_F16, SQ_INSTS_VALU_TRANS_F16, SQ_INSTS_VALU_ADD_F32, GRBM_SPI_BUSY, TA_BUFFER_READ_WAVEFRONTS_sum, TA_BUFFER_WRITE_WAVEFRONTS_sum, SPI_CSN_NUM_THREADGROUPS, SPI_CSN_WAVE, CPF_CPF_TCIU_BUSY, CPF_CPF_TCIU_STALL, TCC_NC_REQ_sum, TCC_UC_REQ_sum, TCC_CC_REQ_sum, TCC_RW_REQ_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161125_4089372/input0_results_240321_161125
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_1.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_10.txt
+   |-> [rocprof] RPL: on '240321_161126' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_10.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161126_4089556'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161126_4089556/input0_results_240321_161126'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161126_4089556/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 8 metrics
+   |-> [rocprof] SQC_TC_DATA_WRITE_REQ, SQC_TC_DATA_ATOMIC_REQ, SQC_TC_STALL, SQC_TC_REQ, SQC_DCACHE_REQ_READ_16, SQC_ICACHE_REQ, SQC_ICACHE_HITS, SQC_ICACHE_MISSES
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161126_4089556/input0_results_240321_161126
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_10.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_11.txt
+   |-> [rocprof] RPL: on '240321_161126' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_11.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161126_4089740'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161126_4089740/input0_results_240321_161126'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161126_4089740/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 8 metrics
+   |-> [rocprof] SQC_ICACHE_MISSES_DUPLICATE, SQC_DCACHE_INPUT_VALID_READYB, SQC_DCACHE_ATOMIC, SQC_DCACHE_REQ_READ_8, SQC_DCACHE_REQ, SQC_DCACHE_HITS, SQC_DCACHE_MISSES, SQC_DCACHE_MISSES_DUPLICATE
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161126_4089740/input0_results_240321_161126
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_11.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_12.txt
+   |-> [rocprof] RPL: on '240321_161127' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_12.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161127_4089932'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161127_4089932/input0_results_240321_161127'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161127_4089932/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 3 metrics
+   |-> [rocprof] SQC_DCACHE_REQ_READ_1, SQC_DCACHE_REQ_READ_2, SQC_DCACHE_REQ_READ_4
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161127_4089932/input0_results_240321_161127
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_12.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_2.txt
+   |-> [rocprof] RPL: on '240321_161127' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_2.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161127_4090115'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161127_4090115/input0_results_240321_161127'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161127_4090115/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 18 metrics
+   |-> [rocprof] SQ_INSTS_VALU_MUL_F32, SQ_INSTS_VALU_FMA_F32, SQ_INSTS_VALU_TRANS_F32, SQ_INSTS_VALU_ADD_F64, SQ_INSTS_VALU_MUL_F64, SQ_INSTS_VALU_FMA_F64, SQ_INSTS_VALU_TRANS_F64, SQ_INSTS_VALU_INT32, TA_BUFFER_ATOMIC_WAVEFRONTS_sum, TA_BUFFER_TOTAL_CYCLES_sum, SPI_RA_REQ_NO_ALLOC, SPI_RA_REQ_NO_ALLOC_CSN, CPF_CPF_STAT_IDLE, CPF_CPF_TCIU_IDLE, TCC_REQ_sum, TCC_STREAMING_REQ_sum, TCC_HIT_sum, TCC_MISS_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161127_4090115/input0_results_240321_161127
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_2.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_3.txt
+   |-> [rocprof] RPL: on '240321_161128' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_3.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161128_4090305'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161128_4090305/input0_results_240321_161128'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161128_4090305/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 17 metrics
+   |-> [rocprof] SQ_INSTS_VALU_INT64, SQ_INSTS_SMEM, SQ_INSTS_FLAT, SQ_INSTS_LDS, SQ_INSTS_GDS, SQ_INSTS_EXP_GDS, SQ_INSTS_BRANCH, SQ_INSTS_SENDMSG, TA_BUFFER_COALESCED_READ_CYCLES_sum, TA_BUFFER_COALESCED_WRITE_CYCLES_sum, SPI_RA_RES_STALL_CSN, SPI_RA_TMP_STALL_CSN, CPF_CMP_UTCL1_STALL_ON_TRANSLATION, TCC_READ_sum, TCC_WRITE_sum, TCC_ATOMIC_sum, TCC_WRITEBACK_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161128_4090305/input0_results_240321_161128
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_3.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_4.txt
+   |-> [rocprof] RPL: on '240321_161128' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_4.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161128_4090506'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161128_4090506/input0_results_240321_161128'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161128_4090506/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 16 metrics
+   |-> [rocprof] SQ_WAVE_CYCLES, SQ_WAIT_ANY, SQ_WAIT_INST_ANY, SQ_ACTIVE_INST_ANY, SQ_BUSY_CU_CYCLES, SQ_ACTIVE_INST_VMEM, SQ_ACTIVE_INST_LDS, SQ_ACTIVE_INST_VALU, TA_ADDR_STALLED_BY_TC_CYCLES_sum, TA_TOTAL_WAVEFRONTS_sum, SPI_RA_WAVE_SIMD_FULL_CSN, SPI_RA_VGPR_SIMD_FULL_CSN, TCC_EA_WRREQ_sum, TCC_EA_WRREQ_64B_sum, TCC_EA_WR_UNCACHED_32B_sum, TCC_EA_WRREQ_DRAM_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161128_4090506/input0_results_240321_161128
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_4.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_5.txt
+   |-> [rocprof] RPL: on '240321_161129' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_5.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161129_4090696'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161129_4090696/input0_results_240321_161129'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161129_4090696/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 16 metrics
+   |-> [rocprof] SQ_ACTIVE_INST_SCA, SQ_ACTIVE_INST_EXP_GDS, SQ_ACTIVE_INST_MISC, SQ_ACTIVE_INST_FLAT, SQ_INST_CYCLES_VMEM_WR, SQ_INST_CYCLES_VMEM_RD, SQ_INST_CYCLES_SMEM, SQ_INST_CYCLES_SALU, TA_ADDR_STALLED_BY_TD_CYCLES_sum, TA_DATA_STALLED_BY_TC_CYCLES_sum, SPI_RA_SGPR_SIMD_FULL_CSN, SPI_RA_LDS_CU_FULL_CSN, TCC_EA_WRREQ_STALL_sum, TCC_EA_RDREQ_sum, TCC_EA_RDREQ_32B_sum, TCC_EA_RD_UNCACHED_32B_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161129_4090696/input0_results_240321_161129
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_5.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_6.txt
+   |-> [rocprof] RPL: on '240321_161129' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_6.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161129_4090887'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161129_4090887/input0_results_240321_161129'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161129_4090887/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 16 metrics
+   |-> [rocprof] SQ_THREAD_CYCLES_VALU, SQ_IFETCH, SQ_LDS_BANK_CONFLICT, SQ_LDS_ADDR_CONFLICT, SQ_LDS_UNALIGNED_STALL, SQ_WAVES_EQ_64, SQ_WAVES_LT_64, SQ_WAVES_LT_48, TA_FLAT_WAVEFRONTS_sum, TA_FLAT_READ_WAVEFRONTS_sum, SPI_RA_BAR_CU_FULL_CSN, SPI_RA_TGLIM_CU_FULL_CSN, TCC_EA_RDREQ_DRAM_sum, TCC_TAG_STALL_sum, TCC_NORMAL_WRITEBACK_sum, TCC_ALL_TC_OP_WB_WRITEBACK_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161129_4090887/input0_results_240321_161129
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_6.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_7.txt
+   |-> [rocprof] RPL: on '240321_161130' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_7.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161130_4091070'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161130_4091070/input0_results_240321_161130'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161130_4091070/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 16 metrics
+   |-> [rocprof] SQ_WAVES_LT_32, SQ_WAVES_LT_16, SQ_ITEMS, SQ_LDS_MEM_VIOLATIONS, SQ_LDS_ATOMIC_RETURN, SQ_LDS_IDX_ACTIVE, SQ_WAVES_RESTORED, SQ_WAVES_SAVED, TA_FLAT_WRITE_WAVEFRONTS_sum, TA_FLAT_ATOMIC_WAVEFRONTS_sum, SPI_RA_WVLIM_STALL_CSN, SPI_SWC_CSC_WR, TCC_NORMAL_EVICT_sum, TCC_ALL_TC_OP_INV_EVICT_sum, TCC_TOO_MANY_EA_WRREQS_STALL_sum, TCC_EA_ATOMIC_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161130_4091070/input0_results_240321_161130
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_7.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_8.txt
+   |-> [rocprof] RPL: on '240321_161130' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_8.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161130_4091259'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161130_4091259/input0_results_240321_161130'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161130_4091259/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 13 metrics
+   |-> [rocprof] SQ_INSTS_SMEM_NORM, SQ_INSTS_MFMA, SQ_INSTS_VALU_MFMA_I8, SQ_INSTS_VALU_MFMA_F16, SQ_INSTS_VALU_MFMA_BF16, SQ_INSTS_VALU_MFMA_F32, SQ_INSTS_VALU_MFMA_F64, SQ_VALU_MFMA_BUSY_CYCLES, SPI_VWC_CSC_WR, SPI_RA_BULKY_CU_FULL_CSN, TCC_EA_RDREQ_LEVEL_sum, TCC_EA_WRREQ_LEVEL_sum, TCC_EA_ATOMIC_LEVEL_sum
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161130_4091259/input0_results_240321_161130
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_8.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_9.txt
+   |-> [rocprof] RPL: on '240321_161130' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/pmc_perf_9.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161130_4091462'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161130_4091462/input0_results_240321_161130'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161130_4091462/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 8 metrics
+   |-> [rocprof] SQ_INSTS_FLAT_LDS_ONLY, SQ_INSTS_VALU_MFMA_MOPS_I8, SQ_INSTS_VALU_MFMA_MOPS_F16, SQ_INSTS_VALU_MFMA_MOPS_BF16, SQ_INSTS_VALU_MFMA_MOPS_F32, SQ_INSTS_VALU_MFMA_MOPS_F64, SQC_TC_INST_REQ, SQC_TC_DATA_READ_REQ
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161130_4091462/input0_results_240321_161130
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/pmc_perf_9.csv' is generating
+   |-> [rocprof]
+[profiling] Current input file: tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/timestamps.txt
+   |-> [rocprof] RPL: on '240321_161131' from '/opt/rocm-6.0.2' in '/home1/josantos/omniperf'
+   |-> [rocprof] RPL: profiling '""./tests/vcopy -n 1048576 -b 256 -i 3""'
+   |-> [rocprof] RPL: input file 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/perfmon/timestamps.txt'
+   |-> [rocprof] RPL: output dir '/tmp/rpl_data_240321_161131_4091651'
+   |-> [rocprof] RPL: result dir '/tmp/rpl_data_240321_161131_4091651/input0_results_240321_161131'
+   |-> [rocprof] ROCProfiler: input from "/tmp/rpl_data_240321_161131_4091651/input0.xml"
+   |-> [rocprof] gpu_index =
+   |-> [rocprof] kernel =
+   |-> [rocprof] range =
+   |-> [rocprof] 0 metrics
+   |-> [rocprof] vcopy testing on GCD 0
+   |-> [rocprof] Finished allocating vectors on the CPU
+   |-> [rocprof] Finished allocating vectors on the GPU
+   |-> [rocprof] Finished copying vectors to the GPU
+   |-> [rocprof] sw thinks it moved 1.000000 KB per wave
+   |-> [rocprof] Total threads: 1048576, Grid Size: 4096 block Size:256, Wavefronts:16384:
+   |-> [rocprof] Launching the  kernel on the GPU
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished executing kernel
+   |-> [rocprof] Finished copying the output vector from the GPU to the CPU
+   |-> [rocprof] Releasing GPU memory
+   |-> [rocprof] Releasing CPU memory
+   |-> [rocprof]
+   |-> [rocprof] ROCPRofiler: 3 contexts collected, output directory /tmp/rpl_data_240321_161131_4091651/input0_results_240321_161131
+   |-> [rocprof] File 'tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200/timestamps.csv' is generating
+   |-> [rocprof]
+[roofline] Checking for roofline.csv in tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200
+[roofline] No roofline data found. Generating...

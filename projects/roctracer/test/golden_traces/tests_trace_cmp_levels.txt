@@ -1,0 +1,24 @@
+# dummy
+MatrixTranspose_dryrun_trace --check-none
+copy_dryrun_trace --check-none
+MatrixTranspose_ctest_trace --check-count .*
+MatrixTranspose_test_trace --check-count .* --ignore-count KernelExecution
+MatrixTranspose_hipaact_test_trace --check-count .* --ignore-count KernelExecution|hipMemcpy|__hipPushCallConfiguration|hipLaunchKernel|__hipPopCallConfiguration
+MatrixTranspose_mgpu_trace --check-events .*
+MatrixTranspose_sys_trace --check-count .* --ignore-count matrixTranspose|hsa_.*
+MatrixTranspose_sys_hsa_trace --check-count .* --ignore-count hsa_.*
+MatrixTranspose_hip_period_trace --check-events .* --ignore-event hipMalloc|hipFree
+MatrixTranspose_hip_flush_trace --check-count .* --ignore-count matrixTranspose
+MatrixTranspose_kfd_trace --check-events .*
+MatrixTranspose_hip_input_trace --check-events .*
+copy_hsa_trace --check-events .*
+copy_hsa_input_trace --check-events .*
+load_unload_reload_trace --check-order .* --ignore-count hsa_agent_get_info
+code_obj_trace --check-none
+trace_buffer --check-none
+memory_pool --check-none
+activity_and_callback_trace --check-order .*
+multi_pool_activities_trace --check-order .*
+roctx_test_trace --check-count .*
+backward_compat_test_trace --check-none
+dlopen --check-none

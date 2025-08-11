@@ -1,0 +1,142 @@
+---
+# Add description/tips for each metric in this section.
+# So it could be shown in hover.
+Metric Description:
+
+# Define the panel properties and properties of each metric in the panel.
+Panel Config:
+  id: 700
+  title: Wavefront
+  data source:
+    - metric_table:
+        id: 701
+        title: Wavefront Launch Stats
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Grid Size:
+            avg: AVG(Grid_Size)
+            min: MIN(Grid_Size)
+            max: MAX(Grid_Size)
+            unit: Work Items
+            tips:
+          Workgroup Size:
+            avg: AVG(Workgroup_Size)
+            min: MIN(Workgroup_Size)
+            max: MAX(Workgroup_Size)
+            unit: Work Items
+            tips:
+          Total Wavefronts:
+            avg: AVG(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            min: MIN(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            max: MAX(SPI_CS0_WAVE + SPI_CS1_WAVE + SPI_CS2_WAVE + SPI_CS3_WAVE)
+            unit: Wavefronts
+            tips:
+          Saved Wavefronts:
+            avg: AVG(SQ_WAVES_SAVED)
+            min: MIN(SQ_WAVES_SAVED)
+            max: MAX(SQ_WAVES_SAVED)
+            unit: Wavefronts
+            tips:
+          Restored Wavefronts:
+            avg: AVG(SQ_WAVES_RESTORED)
+            min: MIN(SQ_WAVES_RESTORED)
+            max: MAX(SQ_WAVES_RESTORED)
+            unit: Wavefronts
+            tips:
+          VGPRs:
+            avg: AVG(Arch_VGPR)
+            min: MIN(Arch_VGPR)
+            max: MAX(Arch_VGPR)
+            unit: Registers
+            tips:
+          AGPRs:
+            avg: AVG(Accum_VGPR)
+            min: MIN(Accum_VGPR)
+            max: MAX(Accum_VGPR)
+            unit: Registers
+            tips:
+          SGPRs:
+            avg: AVG(SGPR)
+            min: MIN(SGPR)
+            max: MAX(SGPR)
+            unit: Registers
+            tips:
+          LDS Allocation:
+            avg: AVG(LDS_Per_Workgroup)
+            min: MIN(LDS_Per_Workgroup)
+            max: MAX(LDS_Per_Workgroup)
+            unit: Bytes
+            tips:
+          Scratch Allocation:
+            avg: AVG(Scratch_Per_Workitem)
+            min: MIN(Scratch_Per_Workitem)
+            max: MAX(Scratch_Per_Workitem)
+            unit: Bytes/Workitem
+            tips:
+
+    - metric_table:
+        id: 702
+        title: Wavefront Runtime Stats
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Kernel Time (Nanosec):
+            avg: AVG((End_Timestamp - Start_Timestamp))
+            min: MIN((End_Timestamp - Start_Timestamp))
+            max: MAX((End_Timestamp - Start_Timestamp))
+            unit: ns
+            tips:
+          Kernel Time (Cycles):
+            avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
+            min: MIN($GRBM_GUI_ACTIVE_PER_XCD)
+            max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
+            unit: Cycle
+            tips:
+          Instructions per wavefront:
+            avg: AVG((SQ_INSTS / SQ_WAVES))
+            min: MIN((SQ_INSTS / SQ_WAVES))
+            max: MAX((SQ_INSTS / SQ_WAVES))
+            unit: Instr/wavefront
+            tips:
+          Wave Cycles:
+            avg: AVG(((4 * SQ_WAVE_CYCLES) / $denom))
+            min: MIN(((4 * SQ_WAVE_CYCLES) / $denom))
+            max: MAX(((4 * SQ_WAVE_CYCLES) / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Dependency Wait Cycles:
+            avg: AVG(((4 * SQ_WAIT_ANY) / $denom))
+            min: MIN(((4 * SQ_WAIT_ANY) / $denom))
+            max: MAX(((4 * SQ_WAIT_ANY) / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Issue Wait Cycles:
+            avg: AVG(((4 * SQ_WAIT_INST_ANY) / $denom))
+            min: MIN(((4 * SQ_WAIT_INST_ANY) / $denom))
+            max: MAX(((4 * SQ_WAIT_INST_ANY) / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Active Cycles:
+            avg: AVG(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            min: MIN(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            max: MAX(((4 * SQ_ACTIVE_INST_ANY) / $denom))
+            unit: (Cycles + $normUnit)
+            tips:
+          Wavefront Occupancy:
+            avg: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+            min: MIN((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+            max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+            unit: Wavefronts
+            coll_level: SQ_LEVEL_WAVES
+            tips:

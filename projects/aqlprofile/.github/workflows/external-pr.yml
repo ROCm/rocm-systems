@@ -1,0 +1,82 @@
+name: Mirror External PR to Internal Repo
+
+on:
+  pull_request_target:
+    types: [opened, synchronize]
+    branches:
+      - amd-staging
+
+jobs:
+  mirror_pr:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name != 'AMD-ROCm-Internal/aqlprofile'
+
+    steps:
+      - name: Checkout PR base
+        uses: actions/checkout@v4
+
+      - name: Setup Git User
+        run: |
+          git config --global user.name 'External PR Mirror Bot'
+          git config --global user.email 'bot@users.noreply.github.com'
+
+      - uses: wei/git-sync@v3
+        name: Push branch to Internal Repository
+        with:
+          source_repo: "https://${{ secrets.EXTERNAL_REPO_TOKEN }}@github.com/ROCm/aqlprofile.git"
+          source_branch: "${{ github.event.pull_request.head.ref }}"
+          destination_repo: "https://${{ secrets.INTERNAL_REPO_TOKEN }}@github.com/AMD-ROCm-Internal/aqlprofile.git"
+          destination_branch: "external-pr/${{ github.event.pull_request.number }}"
+
+      - name: Create Pull Request in Internal Repository
+        if: ${{ github.event.action == 'opened' }}
+        id: create_internal_pr
+        env:
+          GH_TOKEN: ${{ secrets.INTERNAL_REPO_TOKEN }}
+          INTERNAL_REPO: "AMD-ROCm-Internal/aqlprofile"
+          INTERNAL_BASE_BRANCH: "amd-staging"
+          HEAD_BRANCH: "external-pr/${{ github.event.pull_request.number }}"
+          PR_TITLE: "Mirror: ${{ github.event.pull_request.title }} (Ext PR #${{ github.event.pull_request.number }})"
+          PR_BODY: |
+            This PR mirrors changes from external pull request: ${{ github.event.pull_request.html_url }}
+
+            Original PR Body:
+            -------------------
+            ${{ github.event.pull_request.body }}
+        run: |
+          # Create PR and capture its URL
+          INTERNAL_PR_URL=$(gh pr create \
+            --repo "$INTERNAL_REPO" \
+            --base "$INTERNAL_BASE_BRANCH" \
+            --head "$HEAD_BRANCH" \
+            --title "$PR_TITLE" \
+            --body "$PR_BODY")
+
+          if [ -z "$INTERNAL_PR_URL" ]; then
+            echo "Failed to create internal PR. URL is empty."
+            # Check if PR already exists (gh pr create might not fail if branch has open PR)
+            EXISTING_PR_URL=$(gh pr list --repo "$INTERNAL_REPO" --head "$HEAD_BRANCH" --json url -q '.[0].url')
+            if [ -n "$EXISTING_PR_URL" ]; then
+              echo "Internal PR already exists: $EXISTING_PR_URL"
+              echo "INTERNAL_PR_URL=$EXISTING_PR_URL" >> $GITHUB_OUTPUT
+            else
+              echo "::error::Failed to create or find existing internal PR."
+              exit 1
+            fi
+          fi
+
+
+      - name: Comment on and Close External PR
+        if: steps.create_internal_pr.outputs.INTERNAL_PR_URL != ''
+        env:
+          GH_TOKEN: ${{ secrets.EXTERNAL_REPO_TOKEN }}
+          EXTERNAL_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXTERNAL_REPO: ${{ github.repository }}
+        run: |
+          COMMENT_BODY="This pull request has been mirrored to our internal repository for review and integration. Thank you for your contribution!"
+
+          gh pr comment "$EXTERNAL_PR_NUMBER" \
+            --repo "$EXTERNAL_REPO" \
+            --body "$COMMENT_BODY"
+
+          echo "Commented on external PR #${EXTERNAL_PR_NUMBER}"

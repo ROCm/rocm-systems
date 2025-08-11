@@ -1,0 +1,26 @@
+[submodule "external/timemory"]
+	path = external/timemory
+	url = https://github.com/ROCm/timemory.git
+	branch = rocprofiler-systems
+[submodule "external/perfetto"]
+	path = external/perfetto
+	url = https://github.com/google/perfetto.git
+[submodule "external/elfio"]
+	path = external/elfio
+	url = https://github.com/jrmadsen/ELFIO.git
+[submodule "external/dyninst"]
+	path = external/dyninst
+	url = https://github.com/ROCm/dyninst.git
+	branch = dyninst_13
+[submodule "external/PTL"]
+	path = external/PTL
+	url = https://github.com/jrmadsen/PTL.git
+[submodule "external/kokkos"]
+	path = examples/lulesh/external/kokkos
+	url = https://github.com/kokkos/kokkos.git
+[submodule "external/papi"]
+	path = external/papi
+	url = https://github.com/icl-utk-edu/papi.git
+[submodule "external/pybind11"]
+	path = external/pybind11
+	url = https://github.com/jrmadsen/pybind11.git

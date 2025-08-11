@@ -1,0 +1,25 @@
+name: Sync Mainline with Staging
+on:
+    workflow_dispatch:
+
+jobs:
+  promote-stg-to-main:
+    if: github.repository == 'ROCm/rocprofiler-systems'
+    runs-on: ubuntu-latest
+    name: Promote Staging to Mainline
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+            ref: amd-mainline
+            fetch-depth: '0'
+
+      - name: Merge - Fast Forward Only
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git checkout amd-mainline
+          git checkout -b promote-staging-$(date +%F)
+          git merge --ff-only origin/amd-staging
+          git push -u origin HEAD
+          gh pr create --base amd-mainline --title "Promote \`amd-staging\` to \`amd-mainline\`" --fill --label "automerge"

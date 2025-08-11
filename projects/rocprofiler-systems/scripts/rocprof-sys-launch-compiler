@@ -1,0 +1,106 @@
+#!/bin/bash -e
+#
+#   This script allows CMAKE_CXX_COMPILER to be a standard
+#   C++ compiler and rocprofiler-systems sets RULE_LAUNCH_COMPILE and
+#   RULE_LAUNCH_LINK in CMake so that all compiler and link
+#   commands are prefixed with this script followed by the
+#   C++ compiler. Thus if $1 == $2 then we know the command
+#   was intended for the C++ compiler and we discard both
+#   $1 and $2 and redirect the command to linker.
+#   If $1 != $2 then we know that the command was not intended
+#   for the C++ compiler and we just discard $1 and launch
+#   the original command. Examples of when $2 will not equal
+#   $1 are 'ar', 'cmake', etc. during the linking phase
+#
+
+# emit a message about the underlying command executed
+: ${DEBUG:=0}
+: ${ROCPROFSYS_DEBUG_LAUNCH_COMPILER:=${DEBUG}}
+
+debug-message()
+{
+    if [ "${ROCPROFSYS_DEBUG_LAUNCH_COMPILER}" -ne 0 ]; then
+        echo -e "##### $(basename ${BASH_SOURCE[0]}) executing: \"$@\"... #####"
+    fi
+}
+
+# if rocprofiler-systems compiler is not passed, someone is probably trying to invoke it directly
+if [ -z "${1}" ]; then
+    echo -e "\n${BASH_SOURCE[0]} was invoked without the rocprofiler-systems compiler as the first argument."
+    echo "This script is not indended to be directly invoked by any mechanism other"
+    echo -e "than through a RULE_LAUNCH_COMPILE or RULE_LAUNCH_LINK property set in CMake.\n"
+    exit 1
+fi
+
+# if rocprofiler-systems compiler is not passed, someone is probably trying to invoke it directly
+if [ -z "${2}" ]; then
+    echo -e "\n${BASH_SOURCE[0]} was invoked without the C++ compiler as the second argument."
+    echo "This script is not indended to be directly invoked by any mechanism other"
+    echo -e "than through a RULE_LAUNCH_COMPILE or RULE_LAUNCH_LINK property set in CMake.\n"
+    exit 1
+fi
+
+# if there aren't two args, this isn't necessarily invalid, just a bit strange
+if [ -z "${3}" ]; then exit 0; fi
+
+# store the rocprofiler-systems compiler
+ROCPROFSYS_COMPILER=${1}
+
+# remove the rocprofiler-systems compiler from the arguments
+shift
+
+# store the expected C++ compiler
+CXX_COMPILER=${1}
+
+# remove the expected C++ compiler from the arguments
+shift
+
+# discards the clang-tidy arguments
+if [ "$(basename ${1})" = "cmake" ] && [ "${2}" = "-E" ] && [ "${3}" = "__run_co_compile" ]; then
+    c=1
+    n=1
+    for i in "${@}"
+    do
+        if [ "${i}" = "--" ]; then
+            break;
+        fi
+        if [ "${c}" -gt 3 ]; then
+            n=$((${n} + 1))
+        fi
+        c=$((${c} + 1))
+    done
+
+    if [[ $# -gt ${c} ]]; then
+        n=$((${n} + 3)) # add three because of the first 3 args
+        for i in $(seq 1 1 ${n})
+        do
+            shift
+        done
+    fi
+fi
+
+if [[ "${CXX_COMPILER}" != "${1}" ]]; then
+    debug-message $@
+    # the command does not depend on rocprofiler-systems so just execute the command w/o re-directing to ${ROCPROFSYS_COMPILER}
+    eval $@
+else
+    # the executable is the C++ compiler, so we need to re-direct to ${ROCPROFSYS_COMPILER}
+    if [ ! -f "${ROCPROFSYS_COMPILER}" ]; then
+        echo -e "\nError: the compiler redirect for rocprofiler-systems was not found at ${ROCPROFSYS_COMPILER}\n"
+        exit 1
+    fi
+
+    # discard the compiler from the command
+    shift
+
+    if [ -n "$(basename ${ROCPROFSYS_COMPILER} | egrep 'amdclang|amdllvm')" ]; then
+        # this ensures the libomptarget-amdgpu-gfx*.bc files are found
+        LLVM_LIB_DIR=$(cd $(dirname $(realpath ${ROCPROFSYS_COMPILER}))/../lib && pwd)
+        debug-message export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
+        export LIBRARY_PATH=${LLVM_LIB_DIR}:${LIBRARY_PATH}
+    fi
+
+    debug-message ${ROCPROFSYS_COMPILER} $@
+    # execute ${ROCPROFSYS_COMPILER} (again, usually nvcc_wrapper)
+    ${ROCPROFSYS_COMPILER} $@
+fi

@@ -1,0 +1,26 @@
+name: Keywords Scan
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [ amd-staging, amd-mainline ]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  keyword-search:
+    strategy:
+      fail-fast: true
+      matrix:
+        runner: [rocprof-azure-docker-emu-runner-set]
+
+    runs-on: ${{ matrix.runner }}
+    env:
+      KEYWORDS: ${{ vars.KEYWORDS }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: find-keywords
+        shell: bash
+        run: ./source/scripts/scan-script.sh

@@ -1,0 +1,50 @@
+defaults:
+  rocprofv3:
+    # keys such as "runtime", "kernel", etc. below can be used with --filter-rocprofv3 option
+    runtime: [--runtime-trace]
+    sys: [--sys-trace]
+    kernel: [--kernel-trace]
+    hip: [--hip-trace]
+    hsa: [--hsa-trace]
+    memcpy: [--memory-copy-trace]
+    malloc: [--memory-allocation-trace]
+    scratch: [--scratch-memory-trace]
+    counters: [--pmc, SQ_WAVES]
+  benchmark:
+    - baseline
+    - disabled-sdk-contexts
+    - sdk-buffer-overhead
+    - sdk-callback-overhead
+    - tool-runtime-overhead
+  group:
+    - examples
+  environment:
+    ROCR_VISIBLE_DEVICES: "0,2"
+    HIP_VISIBLE_DEVICES: "0,2"
+
+jobs:
+  # explicitly specifies name, group, and command. inherits default rocprofv3 commands and benchmark modes
+  - name: hip-in-libraries
+    group: [examples, multigpu, multistream]
+    command: [hip-in-libraries]
+
+  # explicitly specifies name, group, command, and rocprofv3. inherits default benchmark modes
+  - name: transpose
+    group: [examples, multithreaded, multigpu, multistream]
+    command: [transpose, 4, 500, 10]
+    launcher: [mpirun, -n, 1]
+    rocprofv3:
+      - [-r, --pmc, SQ_WAVES]
+      - [--kernel-trace]
+      - [--hip-trace]
+
+  # explicitly specifies name, command, rocprofv3, and benchmark. inherits default group(s)
+  - name: hip-graph
+    command: [hip-graph, 8, 500]
+    rocprofv3:
+      - [--kernel-trace]
+      - [--hip-trace]
+      - [--hsa-trace]
+    benchmark:
+      - baseline
+      - disabled-sdk-contexts

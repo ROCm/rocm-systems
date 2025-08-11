@@ -1,0 +1,17 @@
+{
+    "jobs": [
+        {
+            "hsa_trace": true,
+            "kernel_trace": true,
+            "memory_copy_trace": true,
+            "marker_trace": true,
+            "output_file": "json-input/out",
+            "output_format": [
+                "csv",
+                "json",
+                "pftrace",
+                "rocpd"
+            ]
+        }
+    ]
+}

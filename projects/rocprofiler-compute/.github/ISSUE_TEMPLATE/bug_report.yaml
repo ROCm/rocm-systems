@@ -1,0 +1,131 @@
+name: Bug Report
+description: Report a bug you've encountered for further investigation
+title: "[Bug]: "
+labels: ["bug", "triage"]
+assignees:
+  - njobypet
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please complete the following form.
+
+  - type: textarea
+    id: bug-description
+    attributes:
+      label: Describe the bug
+      description: A clear and concise description of what the bug is.
+      placeholder: e.g. I found the following error when trying to...
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Development Environment
+
+  - type: input
+    id: linux-distro
+    attributes:
+      label: Linux Distribution
+      description: |
+        What operating system are you using? Hint:
+        ```shell
+        echo "OS:" && cat /etc/os-release | grep -E "^(NAME=|VERSION=)"
+        ```
+      placeholder: e.g. Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: input
+    id: rocprofiler-compute-version
+    attributes:
+      label: ROCm Compute Profiler Version
+      description: |
+        What version of ROCm Compute Profiler are you using? Hint:
+        ```shell
+        rocprof-compute --version
+        ```
+      placeholder: e.g. 2.1.0
+    validations:
+      required: true
+
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: |
+        What GPU(s) did you encounter the issue on? Hint:
+        ```shell
+        echo "GPU:" && /opt/rocm/bin/rocminfo | grep -E "^\s*(Name|Marketing Name)"
+        ```
+      placeholder: e.g. AMD MI250, AMD MI300X
+    validations:
+      required: true
+
+  - type: input
+    id: rocm-version
+    attributes:
+      label: ROCm Version
+      description: |
+        What version(s) of ROCm did you encounter the issue on? Deduce from:
+        ```shell
+        readlink -f $(which rocprof)
+        ```
+      placeholder: e.g. ROCm 6.0.2
+
+  - type: input
+    id: cluster
+    attributes:
+      label: Cluster name (if applicable)
+      description: What is the name of the cluster you are using?
+      placeholder: e.g. Frontier, El Capitan, etc.
+
+  - type: markdown
+    attributes:
+      value: |
+        ## To Reproduce
+
+  - type: textarea
+    id: reproducer
+    attributes:
+      label: Reproducer
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Run '...'
+        2. Go to '...'
+        3. Click on '....'
+        4. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behav
+    attributes:
+      label: Expected behavior
+      description: A clear and concise description of what you expected to happen.
+      placeholder: e.g. I expected the following to happen...
+
+  - type: markdown
+    attributes:
+      value: |
+        ## Other
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: Please copy and paste rocprofiler-compute's `log.txt` file. This will be automatically formatted into code, so no need for backticks.
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: If applicable, add screenshots to help explain your problem.
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Add any other context about the problem here.

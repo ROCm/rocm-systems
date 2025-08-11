@@ -1,0 +1,154 @@
+
+ROCPROFV3 HSA_API SUMMARY:
+
+|                   NAME                    |    DOMAIN    |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|-------------------------------------------|--------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| hsa_queue_create                          | HSA_API      |               4 |       280077621 |       7.002e+07 |     75.372632 |        55026812 |       113288760 |       2.885e+07 |
+| hsa_amd_memory_async_copy_on_engine       | HSA_API      |              24 |        55617052 |       2.317e+06 |     14.967292 |            7580 |        55195188 |       1.126e+07 |
+| hsa_amd_memory_pool_allocate              | HSA_API      |              67 |        26428438 |       3.945e+05 |      7.112246 |            1510 |          857592 |       1.782e+05 |
+| hsa_amd_memory_pool_free                  | HSA_API      |              72 |         5176173 |       7.189e+04 |      1.392977 |             290 |          170374 |       3.903e+04 |
+| hsa_executable_freeze                     | HSA_API      |               2 |          964125 |       4.821e+05 |      0.259459 |          437471 |          526654 |       6.306e+04 |
+| hsa_signal_wait_scacquire                 | HSA_API      |              26 |          853122 |       3.281e+04 |      0.229587 |            2530 |          100782 |       3.394e+04 |
+| hsa_executable_load_agent_code_object     | HSA_API      |               2 |          616175 |       3.081e+05 |      0.165821 |          254476 |          361699 |       7.582e+04 |
+| hsa_amd_agents_allow_access               | HSA_API      |              35 |          430680 |       1.231e+04 |      0.115902 |            4830 |           55182 |       9.939e+03 |
+| hsa_signal_store_screlease                | HSA_API      |              56 |          381491 |       6.812e+03 |      0.102664 |            1560 |           41831 |       7.895e+03 |
+| hsa_signal_create                         | HSA_API      |             107 |          160889 |       1.504e+03 |      0.043297 |              80 |            5650 |       1.475e+03 |
+| hsa_code_object_reader_create_from_memory | HSA_API      |               2 |          151314 |       7.566e+04 |      0.040721 |           32121 |          119193 |       6.157e+04 |
+| hsa_signal_load_relaxed                   | HSA_API      |            1296 |          137626 |       1.062e+02 |      0.037037 |              20 |            2930 |       2.712e+02 |
+| hsa_signal_destroy                        | HSA_API      |             618 |          111224 |       1.800e+02 |      0.029932 |              40 |            1540 |       2.429e+02 |
+| hsa_agent_get_info                        | HSA_API      |              65 |           77472 |       1.192e+03 |      0.020849 |              30 |           47121 |       6.341e+03 |
+| hsa_amd_signal_create                     | HSA_API      |             512 |           61290 |       1.197e+02 |      0.016494 |              40 |             930 |       1.559e+02 |
+| hsa_amd_signal_async_handler              | HSA_API      |              24 |           52641 |       2.193e+03 |      0.014166 |            1180 |            4020 |       9.252e+02 |
+| hsa_executable_iterate_symbols            | HSA_API      |              14 |           52521 |       3.752e+03 |      0.014134 |            2740 |            6940 |       1.105e+03 |
+| hsa_amd_memory_copy_engine_status         | HSA_API      |              18 |           47370 |       2.632e+03 |      0.012748 |             260 |            7990 |       2.274e+03 |
+| hsa_iterate_agents                        | HSA_API      |               1 |           41391 |       4.139e+04 |      0.011139 |           41391 |           41391 |       0.000e+00 |
+| hsa_executable_create_alt                 | HSA_API      |               2 |           40470 |       2.024e+04 |      0.010891 |            7530 |           32940 |       1.797e+04 |
+| hsa_isa_get_info_alt                      | HSA_API      |               2 |           30391 |       1.520e+04 |      0.008179 |            2490 |           27901 |       1.797e+04 |
+| hsa_signal_silent_store_relaxed           | HSA_API      |              48 |           24920 |       5.192e+02 |      0.006706 |              20 |            4570 |       7.120e+02 |
+| hsa_amd_agent_iterate_memory_pools        | HSA_API      |               5 |           20221 |       4.044e+03 |      0.005442 |            2561 |            8600 |       2.574e+03 |
+| hsa_queue_add_write_index_screlease       | HSA_API      |              56 |            7270 |       1.298e+02 |      0.001956 |              30 |            2310 |       3.471e+02 |
+| hsa_amd_profiling_set_profiler_enabled    | HSA_API      |               4 |            5600 |       1.400e+03 |      0.001507 |            1370 |            1470 |       4.690e+01 |
+| hsa_executable_symbol_get_info            | HSA_API      |             152 |            5470 |       3.599e+01 |      0.001472 |              30 |             340 |       3.563e+01 |
+| hsa_queue_load_read_index_relaxed         | HSA_API      |              56 |            4560 |       8.143e+01 |      0.001227 |              20 |            1310 |       1.863e+02 |
+| hsa_executable_get_symbol_by_name         | HSA_API      |              14 |            4500 |       3.214e+02 |      0.001211 |             110 |            1510 |       4.732e+02 |
+| hsa_queue_load_read_index_scacquire       | HSA_API      |              56 |            3040 |       5.429e+01 |      0.000818 |              30 |             690 |       8.705e+01 |
+| hsa_amd_memory_pool_get_info              | HSA_API      |              43 |            1770 |       4.116e+01 |      0.000476 |              30 |             270 |       3.640e+01 |
+| hsa_system_get_info                       | HSA_API      |               4 |            1750 |       4.375e+02 |      0.000471 |              40 |             830 |       3.544e+02 |
+| hsa_amd_agent_memory_pool_get_info        | HSA_API      |              13 |            1140 |       8.769e+01 |      0.000307 |              30 |             640 |       1.664e+02 |
+| hsa_agent_iterate_isas                    | HSA_API      |               1 |             700 |       7.000e+02 |      0.000188 |             700 |             700 |       0.000e+00 |
+| hsa_system_get_major_extension_table      | HSA_API      |               1 |             190 |       1.900e+02 |      0.000051 |             190 |             190 |       0.000e+00 |
+
+
+ROCPROFV3 HIP_API SUMMARY:
+
+|                   NAME                   |    DOMAIN    |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|------------------------------------------|--------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| hipStreamCreateWithFlags                 | HIP_API      |               8 |       406507215 |       5.081e+07 |     71.307804 |          735979 |       233800881 |       7.889e+07 |
+| hipGetDeviceCount                        | HIP_API      |               1 |        76707894 |       7.671e+07 |     13.455780 |        76707894 |        76707894 |       0.000e+00 |
+| hipMemcpyAsync                           | HIP_API      |              24 |        56109444 |       2.338e+06 |      9.842485 |           11640 |        55299811 |       1.128e+07 |
+| hipHostMalloc                            | HIP_API      |              24 |        13007523 |       5.420e+05 |      2.281726 |          416631 |          866382 |       1.206e+05 |
+| hipMallocAsync                           | HIP_API      |              24 |         7304847 |       3.044e+05 |      1.281386 |          275397 |          353719 |       2.207e+04 |
+| hipHostFree                              | HIP_API      |              24 |         2786484 |       1.161e+05 |      0.488793 |           72242 |          221646 |       4.606e+04 |
+| hipStreamDestroy                         | HIP_API      |               8 |         2137924 |       2.672e+05 |      0.375026 |          221596 |          377469 |       5.489e+04 |
+| hipLaunchKernel                          | HIP_API      |              32 |         2080214 |       6.501e+04 |      0.364902 |            8850 |         1608721 |       2.819e+05 |
+| hipFree                                  | HIP_API      |              24 |         1572948 |       6.554e+04 |      0.275920 |            2130 |          186994 |       4.815e+04 |
+| hipStreamSynchronize                     | HIP_API      |              24 |         1452706 |       6.053e+04 |      0.254828 |           20810 |          135803 |       3.469e+04 |
+| __hipRegisterFunction                    | HIP_API      |               4 |          294207 |       7.355e+04 |      0.051609 |             210 |          291807 |       1.455e+05 |
+| hipDeviceSynchronize                     | HIP_API      |               4 |           50663 |       1.267e+04 |      0.008887 |             510 |           23621 |       9.554e+03 |
+| __hipRegisterFatBinary                   | HIP_API      |               1 |           43811 |       4.381e+04 |      0.007685 |           43811 |           43811 |       0.000e+00 |
+| __hipPushCallConfiguration               | HIP_API      |              32 |            6250 |       1.953e+02 |      0.001096 |              60 |            3640 |       6.308e+02 |
+| __hipPopCallConfiguration                | HIP_API      |              32 |            4780 |       1.494e+02 |      0.000838 |              60 |            2520 |       4.340e+02 |
+| hipGetLastError                          | HIP_API      |              32 |            4471 |       1.397e+02 |      0.000784 |              60 |            2381 |       4.092e+02 |
+| hipSetDevice                             | HIP_API      |               1 |            2570 |       2.570e+03 |      0.000451 |            2570 |            2570 |       0.000e+00 |
+
+
+ROCPROFV3 KERNEL_DISPATCH SUMMARY:
+
+|                                   NAME                                    |     DOMAIN      |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|---------------------------------------------------------------------------|-----------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| void addition_kernel<float>(float*, float const*, float const*, int, int) | KERNEL_DISPATCH |               8 |          184324 |       2.304e+04 |     40.681542 |           11200 |           98802 |       3.062e+04 |
+| divide_kernel(float*, float const*, float const*, int, int)               | KERNEL_DISPATCH |               8 |           94482 |       1.181e+04 |     20.852811 |           10240 |           13520 |       1.061e+03 |
+| multiply_kernel(float*, float const*, float const*, int, int)             | KERNEL_DISPATCH |               8 |           91763 |       1.147e+04 |     20.252709 |            9800 |           12800 |       9.417e+02 |
+| subtract_kernel(float*, float const*, float const*, int, int)             | KERNEL_DISPATCH |               8 |           82521 |       1.032e+04 |     18.212938 |            8320 |           12920 |       1.436e+03 |
+
+
+ROCPROFV3 MEMORY_COPY SUMMARY:
+
+|                   NAME                   |    DOMAIN    |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|------------------------------------------|--------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| MEMORY_COPY_HOST_TO_DEVICE               | MEMORY_COPY  |              16 |         3691929 |       2.307e+05 |     85.494053 |           74842 |          284487 |       6.265e+04 |
+| MEMORY_COPY_DEVICE_TO_HOST               | MEMORY_COPY  |               8 |          626417 |       7.830e+04 |     14.505947 |           74842 |           98603 |       8.207e+03 |
+
+
+ROCPROFV3 MEMORY_ALLOCATION SUMMARY:
+
+|                   NAME                   |      DOMAIN       |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|------------------------------------------|-------------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| MEMORY_ALLOCATION_ALLOCATE               | MEMORY_ALLOCATION |              67 |        26314096 |       3.927e+05 |     83.661617 |             950 |          856812 |       1.785e+05 |
+| MEMORY_ALLOCATION_FREE                   | MEMORY_ALLOCATION |              72 |         5138913 |       7.137e+04 |     16.338383 |              20 |          166234 |       3.882e+04 |
+
+
+ROCPROFV3 SUMMARY:
+
+|                                   NAME                                    |      DOMAIN       |      CALLS      | DURATION (nsec) | AVERAGE (nsec)  | PERCENT (INC) |   MIN (nsec)    |   MAX (nsec)    |     STDDEV      |
+|---------------------------------------------------------------------------|-------------------|-----------------|-----------------|-----------------|---------------|-----------------|-----------------|-----------------|
+| hipStreamCreateWithFlags                                                  | HIP_API           |               8 |       406507215 |       5.081e+07 |     41.569873 |          735979 |       233800881 |       7.889e+07 |
+| hsa_queue_create                                                          | HSA_API           |               4 |       280077621 |       7.002e+07 |     28.641044 |        55026812 |       113288760 |       2.885e+07 |
+| hipGetDeviceCount                                                         | HIP_API           |               1 |        76707894 |       7.671e+07 |      7.844233 |        76707894 |        76707894 |       0.000e+00 |
+| hipMemcpyAsync                                                            | HIP_API           |              24 |        56109444 |       2.338e+06 |      5.737813 |           11640 |        55299811 |       1.128e+07 |
+| hsa_amd_memory_async_copy_on_engine                                       | HSA_API           |              24 |        55617052 |       2.317e+06 |      5.687461 |            7580 |        55195188 |       1.126e+07 |
+| hsa_amd_memory_pool_allocate                                              | HSA_API           |              67 |        26428438 |       3.945e+05 |      2.702601 |            1510 |          857592 |       1.782e+05 |
+| MEMORY_ALLOCATION_ALLOCATE                                                | MEMORY_ALLOCATION |              67 |        26314096 |       3.927e+05 |      2.690908 |             950 |          856812 |       1.785e+05 |
+| hipHostMalloc                                                             | HIP_API           |              24 |        13007523 |       5.420e+05 |      1.330164 |          416631 |          866382 |       1.206e+05 |
+| hipMallocAsync                                                            | HIP_API           |              24 |         7304847 |       3.044e+05 |      0.747002 |          275397 |          353719 |       2.207e+04 |
+| hsa_amd_memory_pool_free                                                  | HSA_API           |              72 |         5176173 |       7.189e+04 |      0.529321 |             290 |          170374 |       3.903e+04 |
+| MEMORY_ALLOCATION_FREE                                                    | MEMORY_ALLOCATION |              72 |         5138913 |       7.137e+04 |      0.525511 |              20 |          166234 |       3.882e+04 |
+| MEMORY_COPY_HOST_TO_DEVICE                                                | MEMORY_COPY       |              16 |         3691929 |       2.307e+05 |      0.377541 |           74842 |          284487 |       6.265e+04 |
+| hipHostFree                                                               | HIP_API           |              24 |         2786484 |       1.161e+05 |      0.284949 |           72242 |          221646 |       4.606e+04 |
+| hipStreamDestroy                                                          | HIP_API           |               8 |         2137924 |       2.672e+05 |      0.218626 |          221596 |          377469 |       5.489e+04 |
+| hipLaunchKernel                                                           | HIP_API           |              32 |         2080214 |       6.501e+04 |      0.212725 |            8850 |         1608721 |       2.819e+05 |
+| hipFree                                                                   | HIP_API           |              24 |         1572948 |       6.554e+04 |      0.160851 |            2130 |          186994 |       4.815e+04 |
+| hipStreamSynchronize                                                      | HIP_API           |              24 |         1452706 |       6.053e+04 |      0.148555 |           20810 |          135803 |       3.469e+04 |
+| hsa_executable_freeze                                                     | HSA_API           |               2 |          964125 |       4.821e+05 |      0.098592 |          437471 |          526654 |       6.306e+04 |
+| hsa_signal_wait_scacquire                                                 | HSA_API           |              26 |          853122 |       3.281e+04 |      0.087241 |            2530 |          100782 |       3.394e+04 |
+| MEMORY_COPY_DEVICE_TO_HOST                                                | MEMORY_COPY       |               8 |          626417 |       7.830e+04 |      0.064058 |           74842 |           98603 |       8.207e+03 |
+| hsa_executable_load_agent_code_object                                     | HSA_API           |               2 |          616175 |       3.081e+05 |      0.063011 |          254476 |          361699 |       7.582e+04 |
+| hsa_amd_agents_allow_access                                               | HSA_API           |              35 |          430680 |       1.231e+04 |      0.044042 |            4830 |           55182 |       9.939e+03 |
+| hsa_signal_store_screlease                                                | HSA_API           |              56 |          381491 |       6.812e+03 |      0.039012 |            1560 |           41831 |       7.895e+03 |
+| __hipRegisterFunction                                                     | HIP_API           |               4 |          294207 |       7.355e+04 |      0.030086 |             210 |          291807 |       1.455e+05 |
+| void addition_kernel<float>(float*, float const*, float const*, int, int) | KERNEL_DISPATCH   |               8 |          184324 |       2.304e+04 |      0.018849 |           11200 |           98802 |       3.062e+04 |
+| hsa_signal_create                                                         | HSA_API           |             107 |          160889 |       1.504e+03 |      0.016453 |              80 |            5650 |       1.475e+03 |
+| hsa_code_object_reader_create_from_memory                                 | HSA_API           |               2 |          151314 |       7.566e+04 |      0.015474 |           32121 |          119193 |       6.157e+04 |
+| hsa_signal_load_relaxed                                                   | HSA_API           |            1296 |          137626 |       1.062e+02 |      0.014074 |              20 |            2930 |       2.712e+02 |
+| hsa_signal_destroy                                                        | HSA_API           |             618 |          111224 |       1.800e+02 |      0.011374 |              40 |            1540 |       2.429e+02 |
+| divide_kernel(float*, float const*, float const*, int, int)               | KERNEL_DISPATCH   |               8 |           94482 |       1.181e+04 |      0.009662 |           10240 |           13520 |       1.061e+03 |
+| multiply_kernel(float*, float const*, float const*, int, int)             | KERNEL_DISPATCH   |               8 |           91763 |       1.147e+04 |      0.009384 |            9800 |           12800 |       9.417e+02 |
+| subtract_kernel(float*, float const*, float const*, int, int)             | KERNEL_DISPATCH   |               8 |           82521 |       1.032e+04 |      0.008439 |            8320 |           12920 |       1.436e+03 |
+| hsa_agent_get_info                                                        | HSA_API           |              65 |           77472 |       1.192e+03 |      0.007922 |              30 |           47121 |       6.341e+03 |
+| hsa_amd_signal_create                                                     | HSA_API           |             512 |           61290 |       1.197e+02 |      0.006268 |              40 |             930 |       1.559e+02 |
+| hsa_amd_signal_async_handler                                              | HSA_API           |              24 |           52641 |       2.193e+03 |      0.005383 |            1180 |            4020 |       9.252e+02 |
+| hsa_executable_iterate_symbols                                            | HSA_API           |              14 |           52521 |       3.752e+03 |      0.005371 |            2740 |            6940 |       1.105e+03 |
+| hipDeviceSynchronize                                                      | HIP_API           |               4 |           50663 |       1.267e+04 |      0.005181 |             510 |           23621 |       9.554e+03 |
+| hsa_amd_memory_copy_engine_status                                         | HSA_API           |              18 |           47370 |       2.632e+03 |      0.004844 |             260 |            7990 |       2.274e+03 |
+| __hipRegisterFatBinary                                                    | HIP_API           |               1 |           43811 |       4.381e+04 |      0.004480 |           43811 |           43811 |       0.000e+00 |
+| hsa_iterate_agents                                                        | HSA_API           |               1 |           41391 |       4.139e+04 |      0.004233 |           41391 |           41391 |       0.000e+00 |
+| hsa_executable_create_alt                                                 | HSA_API           |               2 |           40470 |       2.024e+04 |      0.004139 |            7530 |           32940 |       1.797e+04 |
+| hsa_isa_get_info_alt                                                      | HSA_API           |               2 |           30391 |       1.520e+04 |      0.003108 |            2490 |           27901 |       1.797e+04 |
+| hsa_signal_silent_store_relaxed                                           | HSA_API           |              48 |           24920 |       5.192e+02 |      0.002548 |              20 |            4570 |       7.120e+02 |
+| hsa_amd_agent_iterate_memory_pools                                        | HSA_API           |               5 |           20221 |       4.044e+03 |      0.002068 |            2561 |            8600 |       2.574e+03 |
+| hsa_queue_add_write_index_screlease                                       | HSA_API           |              56 |            7270 |       1.298e+02 |      0.000743 |              30 |            2310 |       3.471e+02 |
+| __hipPushCallConfiguration                                                | HIP_API           |              32 |            6250 |       1.953e+02 |      0.000639 |              60 |            3640 |       6.308e+02 |
+| hsa_amd_profiling_set_profiler_enabled                                    | HSA_API           |               4 |            5600 |       1.400e+03 |      0.000573 |            1370 |            1470 |       4.690e+01 |
+| hsa_executable_symbol_get_info                                            | HSA_API           |             152 |            5470 |       3.599e+01 |      0.000559 |              30 |             340 |       3.563e+01 |
+| __hipPopCallConfiguration                                                 | HIP_API           |              32 |            4780 |       1.494e+02 |      0.000489 |              60 |            2520 |       4.340e+02 |
+| hsa_queue_load_read_index_relaxed                                         | HSA_API           |              56 |            4560 |       8.143e+01 |      0.000466 |              20 |            1310 |       1.863e+02 |
+| hsa_executable_get_symbol_by_name                                         | HSA_API           |              14 |            4500 |       3.214e+02 |      0.000460 |             110 |            1510 |       4.732e+02 |
+| hipGetLastError                                                           | HIP_API           |              32 |            4471 |       1.397e+02 |      0.000457 |              60 |            2381 |       4.092e+02 |
+| hsa_queue_load_read_index_scacquire                                       | HSA_API           |              56 |            3040 |       5.429e+01 |      0.000311 |              30 |             690 |       8.705e+01 |
+| hipSetDevice                                                              | HIP_API           |               1 |            2570 |       2.570e+03 |      0.000263 |            2570 |            2570 |       0.000e+00 |
+| hsa_amd_memory_pool_get_info                                              | HSA_API           |              43 |            1770 |       4.116e+01 |      0.000181 |              30 |             270 |       3.640e+01 |
+| hsa_system_get_info                                                       | HSA_API           |               4 |            1750 |       4.375e+02 |      0.000179 |              40 |             830 |       3.544e+02 |
+| hsa_amd_agent_memory_pool_get_info                                        | HSA_API           |              13 |            1140 |       8.769e+01 |      0.000117 |              30 |             640 |       1.664e+02 |
+| hsa_agent_iterate_isas                                                    | HSA_API           |               1 |             700 |       7.000e+02 |      0.000072 |             700 |             700 |       0.000e+00 |
+| hsa_system_get_major_extension_table                                      | HSA_API           |               1 |             190 |       1.900e+02 |      0.000019 |             190 |             190 |       0.000e+00 |
+

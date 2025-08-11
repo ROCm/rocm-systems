@@ -1,0 +1,29 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: False
+root: index
+subtrees:
+- caption: Install
+  entries:
+  - file: install/install
+    title: Installing RDC
+
+- caption: How to
+  entries:
+  - file: how-to/using_RDC
+  - file: how-to/using_RDC_features
+  - file: how-to/integration
+
+- caption: API reference
+  entries:
+  - file: reference/api_intro
+  - file: reference/api_ref
+
+- caption: Tutorial
+  entries:
+  - file: tutorial/job_stats_sample
+
+- caption: About
+  entries:
+  - file: license

@@ -1,0 +1,4 @@
+# List of metrics
+<metric
+  name=SQ:4,SQ_WAVES,SQ_INSTS_SMEM,SQ_INSTS_VALU,TA_FLAT_WRITE_WAVEFRONTS[0],TA_FLAT_WRITE_WAVEFRONTS[1],GPUBusy,VALUBusy,SALUBusy,MemUnitBusy,SFetchInsts,FetchSize,VWriteInsts
+></metric>
