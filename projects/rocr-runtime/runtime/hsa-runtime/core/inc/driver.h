@@ -440,12 +440,334 @@ public:
   /// Unique identifier for supported kernel-mode drivers.
   const DriverType kernel_driver_type_;
 
-protected:
- HsaVersionInfo version_{std::numeric_limits<uint32_t>::max(),
-                         std::numeric_limits<uint32_t>::max()};
+  /// @brief Creates an operating system event associated with a HSA event ID
+  /// @param[in] event_desc Pointer to the event descriptor that describes the event
+  /// @param[in] manual_reset if true, the event is manually reset; otherwise, it is automatically
+  /// reset
+  /// @param[in] IsSignaled if true, the event is initially signaled
+  /// @param[out] event pointer to the created HsaEvent object
+  /// @return HSA_STATUS_SUCCESS if the event was successfully created, or an error code
+  static hsa_status_t CreateEvent(HsaEventDescriptor* event_desc, bool manual_reset,
+                                  bool IsSignaled, HsaEvent** event) {
+    auto create_event = function_table_.create_event;
+    if (create_event == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
 
- const std::string devnode_name_;
- int fd_ = -1;
+    if (create_event(event_desc, manual_reset, IsSignaled, event) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Destroys an operating system event associated with a HSA event ID
+  /// @param[in] event pointer to the HsaEvent object to be destroyed
+  /// @return HSA_STATUS_SUCCESS if the event was successfully destroyed, or an error code
+  static hsa_status_t DestroyEvent(HsaEvent* event) {
+    auto destroy_event = function_table_.destroy_event;
+    if (destroy_event == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (destroy_event(event) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Sets the specified event object to the signaled state
+  /// @param[in] event pointer to the HsaEvent object to be set
+  /// @return HSA_STATUS_SUCCESS if the event was successfully set, or an error code
+  static hsa_status_t SetEvent(HsaEvent* event) {
+    auto set_event = function_table_.set_event;
+    if (set_event == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (set_event(event) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Checks the current state of the event object. If the object's state is
+  /// signaled, the function returns immediately.
+  /// @param[in] event pointer to the HsaEvent object to be queried
+  /// @param[in] milliseconds time in milliseconds to wait for the event to be signaled
+  /// @param[out] event_age pointer to a variable that will hold the event age
+  /// @return HSA_STATUS_SUCCESS if the event was successfully queried, or an error code
+  static hsa_status_t WaitEventExt(HsaEvent* event, uint32_t milliseconds, uint64_t* event_age) {
+    auto wait_event_ext = function_table_.wait_event_ext;
+    if (wait_event_ext == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (wait_event_ext(event, milliseconds, event_age) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Checks the current state of multiple event objects.
+  /// @param[in] events array of pointers to HsaEvent objects to be queried
+  /// @param[in] num_events number of events in the array
+  /// @param[in] wait_on_all if true, the function waits for all events to be signaled;
+  /// @param[in] milliseconds time in milliseconds to wait for the events to be signaled
+  /// @param[out] event_age pointer to an array that will hold the event ages
+  /// @return
+  static hsa_status_t WaitEventsExt(HsaEvent* events[], uint32_t num_events, bool wait_on_all,
+                                    uint32_t milliseconds, uint64_t* event_age) {
+    auto wait_events_ext = function_table_.wait_events_ext;
+    if (wait_events_ext == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (wait_events_ext(events, num_events, wait_on_all, milliseconds, event_age) !=
+        HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Allocates memory aligned to a specified boundary. Normally used for CPU virtual address
+  /// reserve.
+  /// @param[in] node_id Node ID of the agent
+  /// @param[in] size Size of the memory to be allocated
+  /// @param[in] alignment Alignment of the memory to be allocated
+  /// @param[in] mem_flags Memory flags for the allocation
+  /// @param[out] mem Pointer to store the allocated memory address
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully allocated, or an error code
+  static hsa_status_t VirtualAddressReserve(uint32_t node_id, uint64_t size, uint64_t alignment,
+                                            HsaMemFlags mem_flags, void** mem) {
+    auto alloc_mem_align = function_table_.alloc_mem_align;
+    if (alloc_mem_align == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (alloc_mem_align(node_id, size, alignment, mem_flags, mem) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Frees memory allocated by the driver. Normally used for free a reserved CPU virtual
+  /// address.
+  /// @param[in] mem Pointer to the memory to be freed
+  /// @param[in] size Size of the memory to be freed
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully freed, or an error code
+  static hsa_status_t VirtualAddressFree(void* mem, size_t size) {
+    auto free_memory = function_table_.free_memory;
+    if (free_memory == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (free_memory(mem, size) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Unmaps the memory associated with the InterOP/IPC handle.
+  /// @param[in] mem Pointer to the memory to be unmapped.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully unmapped, or an error code.
+  static hsa_status_t ShareableMemoryUnmap(void* mem) {
+    auto unmap_mem = function_table_.unmap_mem;
+    if (unmap_mem == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (unmap_mem(mem) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Deregisters the memory associated with the InterOP/IPC handle.
+  /// @param[in] mem Pointer to the memory to be deregistered.
+  /// @return HSA_STATUS_SUCCESS if the memory was successfully deregistered, or an error code.
+  static hsa_status_t ShareableMemoryDeregister(void* mem) {
+    auto deregister_mem = function_table_.deregister_mem;
+    if (deregister_mem == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (deregister_mem(mem) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Registers a graphics handle.
+  /// @param[in] handle Handle to the graphics resource.
+  /// @param[in] info Pointer to the graphics resource info.
+  /// @param[in] num_nodes Number of nodes to register the graphics resource on.
+  /// @param[in] nodes Array of node IDs to register the graphics resource on.
+  /// @return HSA_STATUS_SUCCESS if the graphics handle was successfully registered, or an error
+  /// code.
+  static hsa_status_t RegisterGraphicsHandle(uint64_t handle, HsaGraphicsResourceInfo* info,
+                                             uint64_t num_nodes, uint32_t* nodes) {
+    auto register_graphics_handle = function_table_.register_graphics_handle;
+    if (register_graphics_handle == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (register_graphics_handle(handle, info, num_nodes, nodes) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Registers a graphics handle with additional flags.
+  /// @param[in] handle Handle to the graphics resource.
+  /// @param[in] info Pointer to the graphics resource info.
+  /// @param[in] num_nodes Number of nodes to register the graphics resource on.
+  /// @param[in] nodes Array of node IDs to register the graphics resource on.
+  /// @param[in] flags Flags for the graphics resource.
+  /// @return HSA_STATUS_SUCCESS if the graphics handle was successfully registered, or an error
+  /// code.
+  static hsa_status_t RegisterGraphicsHandleExt(uint64_t handle, HsaGraphicsResourceInfo* info,
+                                                uint64_t num_nodes, uint32_t* nodes,
+                                                HSA_REGISTER_MEM_FLAGS flags) {
+    auto register_graphics_handle_ext = function_table_.register_graphics_handle_ext;
+    if (register_graphics_handle_ext == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (register_graphics_handle_ext(handle, info, num_nodes, nodes, flags) !=
+        HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Queries information about a pointer.
+  /// @param[in] ptr Pointer to query information about.
+  /// @param[out] info Pointer to the pointer info.
+  /// @return HSA_STATUS_SUCCESS if the pointer info was successfully queried, or an error code.
+  static hsa_status_t QueryPointerInfo(const void* ptr, HsaPointerInfo* info) {
+    auto query_pointer_info = function_table_.query_pointer_info;
+    if (query_pointer_info == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (query_pointer_info(ptr, info) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Sets user data for a pointer.
+  /// @param[in] ptr Pointer to set user data for.
+  /// @param[in] user_data User data to set.
+  /// @return HSA_STATUS_SUCCESS if the user data was successfully set, or an error code.
+  static hsa_status_t SetMemoryUserData(const void* ptr, void* user_data) {
+    auto set_memory_user_data = function_table_.set_memory_user_data;
+    if (set_memory_user_data == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (set_memory_user_data(ptr, user_data) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Sets SVM attributes for a pointer.
+  /// @param[in] ptr Pointer to set SVM attributes for.
+  /// @param[in] size Size of the memory to set SVM attributes for.
+  /// @param[in] nattr Number of attributes to set.
+  /// @param[in] attrs Array of attributes to set.
+  /// @return HSA_STATUS_SUCCESS if the SVM attributes were successfully set, or an error code.
+  static hsa_status_t SVMSetAttr(void* ptr, uint64_t size, unsigned int nattr,
+                                 HSA_SVM_ATTRIBUTE* attrs) {
+    auto svm_set_attr = function_table_.svm_set_attr;
+    if (svm_set_attr == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (svm_set_attr(ptr, size, nattr, attrs) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+  /// @brief Gets SVM attributes for a pointer.
+  /// @param[in] ptr Pointer to get SVM attributes for.
+  /// @param[in] size Size of the memory to get SVM attributes for.
+  /// @param[in] nattr Number of attributes to get.
+  /// @param[out] attrs Array of attributes to get.
+  /// @return HSA_STATUS_SUCCESS if the SVM attributes were successfully got, or an error code.
+  static hsa_status_t SVMGetAttr(void* ptr, uint64_t size, unsigned int nattr,
+                                 HSA_SVM_ATTRIBUTE* attrs) {
+    auto svm_get_attr = function_table_.svm_get_attr;
+    if (svm_get_attr == nullptr) {
+      return HSA_STATUS_ERROR_NOT_INITIALIZED;
+    }
+
+    if (svm_get_attr(ptr, size, nattr, attrs) != HSAKMT_STATUS_SUCCESS) {
+      return HSA_STATUS_ERROR;
+    }
+
+    return HSA_STATUS_SUCCESS;
+  }
+
+ protected:
+  HsaVersionInfo version_{std::numeric_limits<uint32_t>::max(),
+                          std::numeric_limits<uint32_t>::max()};
+
+  const std::string devnode_name_;
+  int fd_ = -1;
+
+  using create_event_fn = HSAKMT_STATUS (*)(HsaEventDescriptor*, bool, bool, HsaEvent**);
+  using destroy_event_fn = HSAKMT_STATUS (*)(HsaEvent*);
+  using set_event_fn = HSAKMT_STATUS (*)(HsaEvent*);
+  using wait_event_ext_fn = HSAKMT_STATUS (*)(HsaEvent*, uint32_t, uint64_t*);
+  using wait_events_ext_fn = HSAKMT_STATUS (*)(HsaEvent*[], uint32_t, bool, uint32_t, uint64_t*);
+  using alloc_mem_align_fn = HSAKMT_STATUS (*)(uint32_t, uint64_t, uint64_t, HsaMemFlags, void**);
+  using free_memory_fn = HSAKMT_STATUS (*)(void*, size_t);
+  using unmap_mem_fn = HSAKMT_STATUS (*)(void*);
+  using deregister_mem_fn = HSAKMT_STATUS (*)(void*);
+  using register_graphics_handle_fn = HSAKMT_STATUS (*)(uint64_t, HsaGraphicsResourceInfo*,
+                                                        uint64_t, uint32_t*);
+  using register_graphics_handle_ext_fn = HSAKMT_STATUS (*)(uint64_t, HsaGraphicsResourceInfo*,
+                                                            uint64_t, uint32_t*,
+                                                            HSA_REGISTER_MEM_FLAGS);
+  using query_pointer_info_fn = HSAKMT_STATUS (*)(const void*, HsaPointerInfo*);
+  using set_memory_user_data_fn = HSAKMT_STATUS (*)(const void*, void*);
+  using svm_set_attr_fn = HSAKMT_STATUS (*)(void*, uint64_t, unsigned int, HSA_SVM_ATTRIBUTE*);
+  using svm_get_attr_fn = HSAKMT_STATUS (*)(void*, uint64_t, unsigned int, HSA_SVM_ATTRIBUTE*);
+
+  struct DriverFunctionTable {
+    create_event_fn create_event;
+    destroy_event_fn destroy_event;
+    set_event_fn set_event;
+    wait_event_ext_fn wait_event_ext;
+    wait_events_ext_fn wait_events_ext;
+    alloc_mem_align_fn alloc_mem_align;
+    free_memory_fn free_memory;
+    unmap_mem_fn unmap_mem;
+    deregister_mem_fn deregister_mem;
+    register_graphics_handle_fn register_graphics_handle;
+    register_graphics_handle_ext_fn register_graphics_handle_ext;
+    query_pointer_info_fn query_pointer_info;
+    set_memory_user_data_fn set_memory_user_data;
+    svm_set_attr_fn svm_set_attr;
+    svm_get_attr_fn svm_get_attr;
+  };
+
+  static DriverFunctionTable function_table_;
 };
 
 } // namespace core

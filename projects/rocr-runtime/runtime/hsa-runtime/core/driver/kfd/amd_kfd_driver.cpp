@@ -113,6 +113,23 @@ hsa_status_t KfdDriver::Init() {
   bool xnack_mode = BindXnackMode();
   core::Runtime::runtime_singleton_->XnackEnabled(xnack_mode);
 
+  function_table_.create_event = HSAKMT_CALL(hsaKmtCreateEvent);
+  function_table_.destroy_event = HSAKMT_CALL(hsaKmtDestroyEvent);
+  function_table_.set_event = HSAKMT_CALL(hsaKmtSetEvent);
+  function_table_.wait_event_ext = HSAKMT_CALL(hsaKmtWaitOnEvent_Ext);
+  function_table_.wait_events_ext = HSAKMT_CALL(hsaKmtWaitOnMultipleEvents_Ext);
+  function_table_.alloc_mem_align = HSAKMT_CALL(hsaKmtAllocMemoryAlign);
+  function_table_.free_memory = HSAKMT_CALL(hsaKmtFreeMemory);
+  function_table_.unmap_mem = HSAKMT_CALL(hsaKmtUnmapMemoryToGPU);
+  function_table_.deregister_mem = HSAKMT_CALL(hsaKmtDeregisterMemory);
+  function_table_.register_graphics_handle = HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodes);
+  function_table_.register_graphics_handle_ext =
+      HSAKMT_CALL(hsaKmtRegisterGraphicsHandleToNodesExt);
+  function_table_.query_pointer_info = HSAKMT_CALL(hsaKmtQueryPointerInfo);
+  function_table_.set_memory_user_data = HSAKMT_CALL(hsaKmtSetMemoryUserData);
+  function_table_.svm_set_attr = HSAKMT_CALL(hsaKmtSVMSetAttr);
+  function_table_.svm_get_attr = HSAKMT_CALL(hsaKmtSVMGetAttr);
+
   return HSA_STATUS_SUCCESS;
 }
 

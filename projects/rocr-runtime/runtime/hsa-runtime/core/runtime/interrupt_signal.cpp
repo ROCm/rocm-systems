@@ -76,8 +76,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
   event_descriptor.NodeId = 0;
 
   HsaEvent* ret = NULL;
-  if (HSAKMT_STATUS_SUCCESS ==
-      HSAKMT_CALL(hsaKmtCreateEvent(&event_descriptor, manual_reset, false, &ret))) {
+  if (HSA_STATUS_SUCCESS == Driver::CreateEvent(&event_descriptor, manual_reset, false, &ret)) {
     if (type == HSA_EVENTTYPE_MEMORY) {
       memset(&ret->EventData.EventData.MemoryAccessFault.Failure, 0,
              sizeof(HsaAccessAttributeFailure));
@@ -89,7 +88,7 @@ HsaEvent* InterruptSignal::CreateEvent(HSA_EVENTTYPE type, bool manual_reset) {
   return ret;
 }
 
-void InterruptSignal::DestroyEvent(HsaEvent* evt) { HSAKMT_CALL(hsaKmtDestroyEvent(evt)); }
+void InterruptSignal::DestroyEvent(HsaEvent* evt) { Driver::DestroyEvent(evt); }
 
 InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use_event)
     : LocalSignal(initial_value, false), Signal(signal()) {
@@ -194,7 +193,7 @@ hsa_signal_value_t InterruptSignal::WaitRelaxed(hsa_signal_condition_t condition
       static_cast<uint32_t>(signal_abort_timeout ? signal_abort_timeout * 1000 : 0xFFFFFFFFUL)
     );
 
-    HSAKMT_CALL(hsaKmtWaitOnEvent_Ext(event_, wait_ms, &event_age));
+    Driver::WaitEventExt(event_, wait_ms, &event_age);
   }
 }
 
