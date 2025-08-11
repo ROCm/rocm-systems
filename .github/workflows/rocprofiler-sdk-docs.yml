@@ -75,11 +75,11 @@ jobs:
         timeout-minutes: 10
         shell: bash
         run: |
-          sudo apt update
-          sudo apt install -y software-properties-common
-          sudo apt-add-repository ppa:git-core/ppa
-          sudo apt-get update
-          sudo apt-get install -y git
+          apt update
+          apt install -y software-properties-common
+          apt-add-repository ppa:git-core/ppa
+          apt-get update
+          apt-get install -y git
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -98,8 +98,8 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk/
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
+          apt-get update
+          apt-get install -y cmake gcc g++ libdw-dev libsqlite3-dev rpm
           python3 -m pip install -r requirements.txt
 
       - name: Configure, Build, Install, and Package
@@ -118,5 +118,5 @@ jobs:
             .;
           cmake --build build --target docs --parallel 4;
           cmake --build build --target all --parallel 12;
-          sudo cmake --build build --target install --parallel 12;
+          cmake --build build --target install --parallel 12;
           cmake --build build --target package --parallel 12
