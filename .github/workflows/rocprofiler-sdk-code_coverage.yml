@@ -55,7 +55,6 @@ env:
 
 jobs:
   code-coverage:
-    if: ${{ contains(github.event_name, 'pull_request') }}
     strategy:
       # fail-fast: false
       matrix:
