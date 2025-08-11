@@ -92,6 +92,7 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 115
       shell: bash
+      working-directory: projects/rocprofiler-systems/
       env:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
