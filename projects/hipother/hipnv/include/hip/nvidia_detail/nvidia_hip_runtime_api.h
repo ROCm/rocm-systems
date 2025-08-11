@@ -3287,6 +3287,10 @@ inline static hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* fla
   return hipCUDAErrorTohipError(cudaStreamGetFlags(stream, flags));
 }
 
+inline static hipError_t hipStreamGetId(hipStream_t stream, unsigned long long *streamId) {
+  return hipCUDAErrorTohipError(cudaStreamGetId(stream, streamId));
+}
+
 inline static hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
   return hipCUDAErrorTohipError(cudaStreamGetPriority(stream, priority));
 }
