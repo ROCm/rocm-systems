@@ -60,7 +60,11 @@ hsa_status_t hsa_amd_queue_intercept_create(
 
 hsa_status_t hsa_amd_runtime_queue_create_register(hsa_amd_runtime_queue_notifier callback,
                                                    void* user_data);
-}   //  namespace amd
+
+namespace tool {
+  hsa_status_t hsa_amd_tool_signal_copy_profiling_data(hsa_signal_t dst, hsa_signal_t src);
+} // namespace rocr::AMD::tool
+} // namespace AMD
 
 namespace core {
 
@@ -90,7 +94,7 @@ void HsaApiTable::Init() {
   constexpr size_t expected_amd_ext_table_size = 608;
   constexpr size_t expected_image_ext_table_size = 128;
   constexpr size_t expected_finalizer_ext_table_size = 64;
-  constexpr size_t expected_tools_table_size = 64;
+  constexpr size_t expected_tools_table_size = 72;
   constexpr size_t expected_pc_sampling_ext_table_size = 72;
 
   static_assert(sizeof(CoreApiTable) == expected_core_api_table_size,
@@ -490,6 +494,7 @@ void HsaApiTable::UpdateTools() {
   tools_api.hsa_amd_tool_scratch_event_free_end_fn = nullptr;
   tools_api.hsa_amd_tool_scratch_event_async_reclaim_start_fn = nullptr;
   tools_api.hsa_amd_tool_scratch_event_async_reclaim_end_fn = nullptr;
+  tools_api.hsa_amd_tool_signal_copy_profiling_data_fn = rocr::AMD::tool::hsa_amd_tool_signal_copy_profiling_data;
 }
 
 void LoadInitialHsaApiTable() {

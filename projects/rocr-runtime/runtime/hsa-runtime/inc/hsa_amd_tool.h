@@ -87,5 +87,6 @@ typedef union {
 
 typedef hsa_status_t (*hsa_amd_tool_event)(hsa_amd_tool_event_t);
 
+hsa_status_t HSA_API hsa_amd_tool_signal_copy_profiling_data(hsa_signal_t dst, hsa_signal_t src);
 
 #endif

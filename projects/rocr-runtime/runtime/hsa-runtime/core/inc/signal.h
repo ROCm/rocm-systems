@@ -189,6 +189,14 @@ struct SharedSignal {
     end = amd_signal.end_ts;
   }
 
+  void __forceinline CopyProfilingData(SharedSignal* src) {
+    sdma_start_ts = src->sdma_start_ts;
+    sdma_end_ts = src->sdma_end_ts;
+
+    amd_signal.start_ts = src->amd_signal.start_ts;
+    amd_signal.end_ts = src->amd_signal.end_ts;
+  }
+
   static __forceinline SharedSignal* Convert(hsa_signal_t signal) {
     SharedSignal* ret = reinterpret_cast<SharedSignal*>(static_cast<uintptr_t>(signal.handle) -
                                                         offsetof(SharedSignal, amd_signal));
@@ -472,6 +480,12 @@ class Signal {
   // Set FetchCopyTs = true when reading time stamps from a copy operation.
   void GetRawTs(bool FetchCopyTs, uint64_t& start, uint64_t& end) {
     core::SharedSignal::Convert(Convert(this))->GetRawTs(FetchCopyTs, start, end);
+  }
+
+  __forceinline void CopyProfilingData(hsa_signal_t src) {
+    async_copy_agent_ = Convert(src)->async_copy_agent_;
+
+    core::SharedSignal::Convert(Convert(this))->CopyProfilingData(core::SharedSignal::Convert(src));
   }
 
   /// @brief Structure which defines key signal elements like type and value.

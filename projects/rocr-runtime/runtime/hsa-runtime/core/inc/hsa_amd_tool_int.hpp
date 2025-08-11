@@ -136,6 +136,17 @@ __forceinline void notify_event_scratch_async_reclaim_end(const hsa_queue_t* que
       hsa_amd_tool_event_t{.scratch_async_reclaim_end = &event});
 }
 
+hsa_status_t hsa_amd_tool_signal_copy_profiling_data(hsa_signal_t dst, hsa_signal_t src) {
+  assert(dst.handle && src.handle);
+
+  core::Signal* dst_signal = core::Signal::Convert(dst);
+  core::Signal* src_signal = core::Signal::Convert(src);
+
+  dst_signal->CopyProfilingData(src);
+
+  return HSA_STATUS_SUCCESS;
+}
+
 // }  // namespace rocr::AMD::tool
 }  // namespace rocr
 }  // namespace AMD

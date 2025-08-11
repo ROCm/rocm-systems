@@ -147,6 +147,8 @@ struct ToolsApiTable {
   hsa_amd_tool_event hsa_amd_tool_scratch_event_free_end_fn;
   hsa_amd_tool_event hsa_amd_tool_scratch_event_async_reclaim_start_fn;
   hsa_amd_tool_event hsa_amd_tool_scratch_event_async_reclaim_end_fn;
+
+  decltype(hsa_amd_tool_signal_copy_profiling_data)* hsa_amd_tool_signal_copy_profiling_data_fn;
 };
 
 // Table to export HSA Finalizer Extension Apis
