@@ -511,7 +511,7 @@ struct __hip_fp6x2_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_fp6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
@@ -527,9 +527,9 @@ struct __hip_fp6x2_e2m3 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
-    auto fp32x2 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E2M3, true>(__x & 0xFFu, 0),
@@ -571,7 +571,7 @@ struct __hip_fp6x2_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_bf16x32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_bf16_bf6(in, 1.0f /* scale */);
     u.bf16x2 = {out[0], out[1]};
 #else
@@ -587,9 +587,9 @@ struct __hip_fp6x2_e3m2 {
     __amd_fp6x32_storage_t in;
     __amd_floatx32_storage_t out;
     in[0] = __x & 0x3Fu;          // first 6 bits
-    in[0] |= (__x & FC00u) >> 2;  // next 6 bits
+    in[0] |= (__x & 0xFC00u) >> 2;  // next 6 bits
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
-    auto fp32x2 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2 = {out[0], out[1]};
 #else
     using namespace fcbx;
     auto fp32x2 = __amd_floatx2_storage_t{to_float<float, Encoding::E3M2, true>(__x & 0xFFu, 0),
@@ -632,8 +632,8 @@ struct __hip_fp6x4_e2m3 {
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_fp6(in, 1.0f /* scale */);
-    auto fp32x2_1 = {out[0], out[1]};
-    auto fp32x2_2 = {out[2], out[3]};
+    __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
     using namespace fcbx;
     auto fp32x2_1 =
@@ -680,8 +680,8 @@ struct __hip_fp6x4_e3m2 {
     in[0] |= ((__x >> 16) & 0x3Fu) << 12;
     in[0] |= ((__x >> 24) & 0x3Fu) << 18;
     out = __builtin_amdgcn_cvt_scalef32_pk32_f32_bf6(in, 1.0f /* scale */);
-    auto fp32x2_1 = {out[0], out[1]};
-    auto fp32x2_2 = {out[2], out[3]};
+    __amd_floatx2_storage_t fp32x2_1 = {out[0], out[1]};
+    __amd_floatx2_storage_t fp32x2_2 = {out[2], out[3]};
 #else
     using namespace fcbx;
     auto fp32x2_1 =
