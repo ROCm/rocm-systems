@@ -63,6 +63,8 @@
 #include "core/util/small_heap.h"
 #include "pcs/pcs_runtime.h"
 
+#include <simde/x86/sse2.h>
+
 namespace rocr {
 namespace AMD {
 class MemoryRegion;
@@ -439,9 +441,9 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
-      _mm_sfence();
+      simde_mm_sfence();
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
-      _mm_mfence();
+      simde_mm_mfence();
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }

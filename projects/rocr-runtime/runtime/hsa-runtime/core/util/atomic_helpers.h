@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
+//
 // Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -55,11 +55,12 @@
 #define ALWAYS_CONSERVATIVE 0
 
 #if !ALWAYS_CONSERVATIVE
-#if defined(__x86_64__) || defined(_M_X64)
-#define X64_ORDER_WC 1
+#if defined(__x86_64__) || defined(_M_X64) || defined(__aarch64__) ||          \
+    defined(_M_ARM64)
+#define ORDER_WC 1
 #endif
-#if X64_ORDER_WC
-#include <xmmintrin.h>
+#if ORDER_WC
+#include <simde/x86/sse2.h>
 #endif
 #endif
 
@@ -70,7 +71,7 @@ static constexpr int c11ToBuiltInFlags(std::memory_order order)
 {
 #if ALWAYS_CONSERVATIVE
   return __ATOMIC_RELAXED;
-#elif X64_ORDER_WC
+#elif ORDER_WC
   return __ATOMIC_RELAXED;
 #else
   return (order == std::memory_order_relaxed) ? __ATOMIC_RELAXED :
@@ -92,12 +93,12 @@ static __forceinline void PreFence(std::memory_order order) {
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
     default:;
   }
-#elif X64_ORDER_WC
+#elif ORDER_WC
   switch (order) {
     case std::memory_order_release:
     case std::memory_order_seq_cst:
     case std::memory_order_acq_rel:
-      _mm_sfence();
+      simde_mm_sfence();
     default:;
   }
 #endif
@@ -112,13 +113,13 @@ static __forceinline void PostFence(std::memory_order order) {
       __atomic_thread_fence(__ATOMIC_SEQ_CST);
     default:;
   }
-#elif X64_ORDER_WC
+#elif ORDER_WC
   switch (order) {
     case std::memory_order_seq_cst:
-      return _mm_mfence();
+      return simde_mm_mfence();
     case std::memory_order_acq_rel:
     case std::memory_order_acquire:
-      return _mm_lfence();
+      return simde_mm_lfence();
     default:;
   }
 #endif
@@ -127,15 +128,15 @@ static __forceinline void PostFence(std::memory_order order) {
 static __forceinline void Fence(std::memory_order order=std::memory_order_seq_cst) {
 #if ALWAYS_CONSERVATIVE
   __atomic_thread_fence(__ATOMIC_SEQ_CST);
-#elif X64_ORDER_WC
+#elif ORDER_WC
   switch (order) {
     case std::memory_order_seq_cst:
     case std::memory_order_acq_rel:
-      return _mm_mfence();
+      return simde_mm_mfence();
     case std::memory_order_acquire:
-      return _mm_lfence();
+      return simde_mm_lfence();
     case std::memory_order_release:
-      return _mm_sfence();
+      return simde_mm_sfence();
     default:;
   }
 #else
@@ -507,8 +508,8 @@ static __forceinline T
 }   //  namespace atomic
 }   //  namespace rocr
 
-#ifdef X64_ORDER_WC
-#undef X64_ORDER_WC
+#ifdef ORDER_WC
+#undef ORDER_WC
 #endif
 
 #ifdef ALWAYS_CONSERVATIVE

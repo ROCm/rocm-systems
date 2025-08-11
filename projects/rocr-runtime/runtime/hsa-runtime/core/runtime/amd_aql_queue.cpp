@@ -470,7 +470,7 @@ void AqlQueue::StoreRelaxed(hsa_signal_value_t value) {
     HSAKMT_CALL(hsaKmtQueueRingDoorbell(queue_id_));
   } else {
     // Hardware doorbell supports AQL semantics.
-    _mm_sfence();
+    simde_mm_sfence();
     *(signal_.hardware_doorbell_ptr) = uint64_t(value);
     /* signal_ is allocated as uncached so we do not need read-back to flush WC */
   }
@@ -1552,10 +1552,10 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   // Overwrite the AQL invalid header (first dword) last.
   // This prevents the slot from being read until it's fully written.
   memcpy(&queue_slot[1], &slot_data[1], slot_size_b - sizeof(uint32_t));
-  if (IsDeviceMemRingBuf() && needsPcieOrdering()) {
-    // Ensure the packet body is written as header may get reordered when writing over PCIE
-    _mm_sfence();
-  }
+  // Ensure the packet body is written as header may get reordered when
+  // writing over PCIE by doing absolutely nothing since the atomic::Store
+  // helper already takes care of inserting the SFENCE when ORDER_WC is
+  // defined.
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 
   // Submit the packet slot.

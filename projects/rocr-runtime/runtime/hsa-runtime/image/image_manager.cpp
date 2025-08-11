@@ -53,8 +53,9 @@
 #include <cmath>
 
 #if (defined(WIN32) || defined(_WIN32))
+#include <simde/x86/sse.h>
 #define NOMINMAX
-__inline long int lrintf(float f) { return _mm_cvtss_si32(_mm_load_ss(&f)); }
+__inline long int lrintf(float f) { return simde_mm_cvtss_si32(simde_mm_load_ss(&f)); }
 #endif
 
 namespace rocr {
