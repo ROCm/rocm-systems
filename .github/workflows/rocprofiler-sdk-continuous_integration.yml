@@ -57,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi300a']
+        runner: ['navi4', 'navi3', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
@@ -66,7 +66,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi300a
+      CORE_EXT_RUNNER: mi3xx
 
     steps:
     - name: Checkout
