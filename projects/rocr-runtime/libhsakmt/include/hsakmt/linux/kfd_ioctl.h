@@ -1608,6 +1608,41 @@ struct kfd_ioctl_pc_sample_args {
 	__u32 reserved;
 };
 
+/**
+ * kfd_ais_ops - AIS ioctl operations
+ *
+ * @KFD_IOC_AIS_READ:  Direct IO read from a file into VRAM
+ * @KFD_IOC_AIS_WRITE: Direct IO write into a file into VRAM
+ */
+enum kfd_ais_ops {
+	KFD_IOC_AIS_READ  = 1,
+	KFD_IOC_AIS_WRITE = 2,
+};
+
+/**
+ * kfd_ioctl_ais_args
+ *
+ * Arguments for AMDKFD_IOC_AIS_OP
+ * AIS (GPU Direct Storage) operations.
+ *
+ * @op            (IN) - kfd_ais_ops
+ * @handle        (IN) - memory handle returned by alloc. Should be mapped to
+ *                            the GPU with AMDKFD_IOC_MAP_MEMORY_TO_GPU.
+ * @handle_offset (IN) - offset in the allocated memory to read/write
+ * @fd            (IN) - file descriptor of the file to read/write
+ * @file_offset   (IN) - offset in the file to read/write
+ * @size          (IN) - size in bytes to read/write
+ */
+
+struct kfd_ioctl_ais_args {
+	__u32 op;             /* to KFD */
+	__u32 fd;             /* to KFD */
+	__u64 handle;         /* to KFD */
+	__u64 handle_offset;  /* to KFD */
+	__u64 file_offset;    /* to KFD */
+	__u64 size;           /* to KFD */
+};
+
 #define AMDKFD_IOCTL_BASE 'K'
 #define AMDKFD_IO(nr)			_IO(AMDKFD_IOCTL_BASE, nr)
 #define AMDKFD_IOR(nr, type)		_IOR(AMDKFD_IOCTL_BASE, nr, type)
@@ -1747,7 +1782,11 @@ struct kfd_ioctl_pc_sample_args {
 #define AMDKFD_IOC_PC_SAMPLE		\
 		AMDKFD_IOWR(0x85, struct kfd_ioctl_pc_sample_args)
 
+#define AMDKFD_IOC_AIS_OP                       \
+		AMDKFD_IOWR(0x87, struct kfd_ioctl_ais_args)
+
+
 #define AMDKFD_COMMAND_START_2		0x80
-#define AMDKFD_COMMAND_END_2		0x86
+#define AMDKFD_COMMAND_END_2		0x88
 
 #endif
