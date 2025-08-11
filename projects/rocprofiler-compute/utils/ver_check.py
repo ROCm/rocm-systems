@@ -20,7 +20,6 @@ tag = args.tag
 print("Current repository version = %s" % repoVer)
 print("-->  tagname               = %s" % tag)
 
-
 if repoCheck == tag:
     print("OK: exact match")
     exit(0)

@@ -42,17 +42,13 @@ include(ExternalProject)
 include(GNUInstallDirs)
 
 # version control info
-find_package(Git)
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-    execute_process(
-        COMMAND git log --pretty=format:%h -n 1
-        OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
-    set(GIT_CLONE TRUE)
-else()
-    set(GIT_CLONE FALSER)
-endif()
+execute_process(
+    COMMAND git log --pretty=format:%h -n 1
+    OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
+configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+                ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -92,9 +88,9 @@ if(CHECK_PYTHON_DEPS)
         if(${ARGV0} STREQUAL "pyyaml")
             set(PACKAGE "yaml")
         endif()
-        # Skip check for textual-fspicker
-        if(${package} STREQUAL "textual-fspicker")
-            message(STATUS "Skipping check for textual-fspicker")
+        # Skip check for textual_fspicker
+        if(${package} STREQUAL "textual_fspicker")
+            message(STATUS "Skipping check for textual_fspicker")
             return()
         endif()
         execute_process(
@@ -160,12 +156,6 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
          ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
          ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
-endif()
-
-# git versioning file
-if(${GIT_CLONE})
-    configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-                   ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 endif()
 
 # Setup testing collateral
