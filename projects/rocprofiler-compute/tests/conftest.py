@@ -23,14 +23,15 @@
 
 ##############################################################################
 
-
 import subprocess
 from importlib.machinery import SourceFileLoader
 from unittest.mock import patch
 
 import pytest
 
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 
 def pytest_addoption(parser):
@@ -52,7 +53,12 @@ def pytest_addoption(parser):
 @pytest.fixture
 def binary_handler_profile_rocprof_compute(request):
     def _handler(
-        config, workload_dir, options=[], check_success=True, roof=False, app_name="app_1"
+        config,
+        workload_dir,
+        options=[],
+        check_success=True,
+        roof=False,
+        app_name="app_1",
     ):
         if request.config.getoption("--rocprofiler-sdk-library-path"):
             options.extend(

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-
 """Main entry point for rocprof-compute"""
 
 ##############################################################################bl
@@ -80,11 +79,10 @@ def verify_deps():
     dependencies are not available."""
 
     # Check which version of python is being used
-    if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
-        print(
-            "[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
-            f" The current version is {sys.version_info[0]}.{sys.version_info[1]}."
-        )
+    if sys.version_info[0] < 3 or (sys.version_info[0] == 3
+                                   and sys.version_info[1] < 8):
+        print("[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
+              f" The current version is {sys.version_info[0]}.{sys.version_info[1]}.")
         sys.exit(1)
 
     bindir = str(Path(__file__).resolve().parent)
@@ -112,17 +110,14 @@ def verify_deps():
                     localVersion = metadata.distribution(package).version
                 except metadata.PackageNotFoundError:
                     error = True
-                    print(
-                        f"[ERROR] The '{dependency}' package was not found "
-                        "in the current execution environment."
-                    )
+                    print(f"[ERROR] The '{dependency}' package was not found "
+                          "in the current execution environment.")
 
                 # check version requirement
                 if not error:
                     if desiredVersion:
-                        if not verify_deps_version(
-                            localVersion, desiredVersion, operator
-                        ):
+                        if not verify_deps_version(localVersion, desiredVersion,
+                                                   operator):
                             print(
                                 f"[ERROR] the '{dependency}' distribution does "
                                 "not meet version requirements to use rocprofiler-compute."
@@ -132,10 +127,8 @@ def verify_deps():
 
             if error:
                 print("")
-                print(
-                    "Please verify all of the python dependencies called out "
-                    "in the requirements file"
-                )
+                print("Please verify all of the python dependencies called out "
+                      "in the requirements file")
                 print("are installed locally prior to running rocprofiler-compute.")
                 print("")
                 print(f"See: {checkFile}")

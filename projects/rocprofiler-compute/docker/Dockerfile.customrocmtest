@@ -44,6 +44,7 @@ RUN DEBIAN_FRONTEND=noninteractive TZ="America/Toronto" amdgpu-install --yes --u
 # Install any dependencies specified in requirements.txt
 # Run interactive bash shell
 CMD ["/bin/bash", "-c", "\
-    python3.10 -m pip install -r requirements.txt -r requirements-test.txt \
+    cd /app/projects/rocprofiler-compute \
+    && python3.10 -m pip install -r requirements.txt -r requirements-test.txt \
     && exec /bin/bash \
 "]

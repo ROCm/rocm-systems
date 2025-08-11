@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import logging
 import os
 import sys
@@ -97,7 +96,9 @@ class ColoredFormatter(logging.Formatter):
     def format(self, record):
         levelname = record.levelname
         if levelname in COLORS:
-            levelname_color = COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
+            levelname_color = (
+                COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
+            )
             record.levelname = levelname_color
         return logging.Formatter.format(self, record)
 
@@ -107,9 +108,12 @@ class ColoredFormatterAll(logging.Formatter):
         levelname = record.levelname
         if levelname in COLORS:
             if levelname == "INFO":
-                log_fmt = f"%(message)s"
+                log_fmt = "%(message)s"
             else:
-                log_fmt = f"{COLOR_SEQ % (30 + COLORS[levelname])}%(levelname)s: %(message)s{RESET_SEQ}"
+                log_fmt = (
+                    f"{COLOR_SEQ % (30 + COLORS[levelname])}"
+                    f"%(levelname)s: %(message)s{RESET_SEQ}"
+                )
             formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
@@ -171,7 +175,6 @@ def setup_file_handler(loglevel, workload_dir):
 
 # Setup logger priority - called after argument parsing
 def setup_logging_priority(verbosity, quietmode, appmode, guimode):
-
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, logging.TRACE]
 
@@ -197,7 +200,9 @@ def setup_logging_priority(verbosity, quietmode, appmode, guimode):
         elif loglevel in {"ERROR", "error"}:
             loglevel = logging.ERROR
         else:
-            print("Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" % loglevel)
+            print(
+                "Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" % loglevel
+            )
             sys.exit(1)
 
     # update console loglevel based on command-line args/env settings
