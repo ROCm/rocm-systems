@@ -348,6 +348,16 @@ static __forceinline std::string& rtrim(std::string& s) {
   return s;
 }
 
+#define CACHOP_HIT_WRITEBACK_INVALIDATE_D 0x9
+static inline void loongarch_clflush(const void* addr) {
+  __asm__ __volatile__ (
+    "cacop %0, %1, 0\n"
+    :
+    : "i"(CACHOP_HIT_WRITEBACK_INVALIDATE_D), "r"(addr)
+    : "memory"
+  );
+}
+
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
 /// @brief: Flush the cachelines associated with the
@@ -372,7 +382,11 @@ inline void FlushCpuCache(const void* base, size_t offset, size_t len) {
   cur += offset;
   uintptr_t lastline = (uintptr_t)(cur + len - 1) | (cacheline_size - 1);
   do {
+#if defined(__loongarch_lp64)
+    loongarch_clflush(cur);
+#else
     _mm_clflush((const void*)cur);
+#endif
     cur += cacheline_size;
   } while (cur <= (const char*)lastline);
 }

@@ -439,9 +439,17 @@ class GpuAgent : public GpuAgentInt {
   /// @brief Force a WC flush on PCIe devices by doing a write and then read-back
   __forceinline void PcieWcFlush(void *ptr, size_t size) const {
     if (!xgmi_cpu_gpu_) {
+#if defined(__loongarch_lp64)
+      asm("dbar 0xa");
+#else
       _mm_sfence();
+#endif
       *((uint8_t*)ptr + size - 1) = *((uint8_t*)ptr + size - 1);
+if defined(__loongarch_lp64)
+      asm("dbar 0");
+#else
       _mm_mfence();
+#endif
       auto readback = *(reinterpret_cast<volatile uint8_t*>(ptr) + size - 1);
       UNUSED(readback);
     }
