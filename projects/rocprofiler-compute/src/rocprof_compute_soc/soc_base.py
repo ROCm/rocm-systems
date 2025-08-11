@@ -58,6 +58,7 @@ from utils.utils import (
 
 
 class OmniSoC_Base:
+
     def __init__(
         self, args, mspec
     ):  # new info field will contain rocminfo or sysinfo to populate properties
@@ -160,23 +161,19 @@ class OmniSoC_Base:
                 break
 
         self._mspec.sqc_per_gpu = str(
-            total_sqc(
-                self._mspec.gpu_arch, self._mspec.cu_per_gpu, self._mspec.se_per_gpu
-            )
-        )
+            total_sqc(self._mspec.gpu_arch, self._mspec.cu_per_gpu,
+                      self._mspec.se_per_gpu))
 
         # Parse json from amd-smi static --clock
-        amd_smi_mclk = run(
-            ["amd-smi", "static", "--clock", "--json"], exit_on_error=True
-        )
+        amd_smi_mclk = run(["amd-smi", "static", "--clock", "--json"],
+                           exit_on_error=True)
         amd_smi_mclk = json.loads(amd_smi_mclk)
 
         if isinstance(amd_smi_mclk, dict):
             # The output of `amd-smi static --clock --json` is a dict with
             # amd-smi>=26.0.0.
             amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"][
-                "frequency_levels"
-            ]
+                "frequency_levels"]
         else:
             # For backward compatibility: the output of `amd-smi static --clock --json`
             # used to be a list for amd-smi<26.0.0.
@@ -196,9 +193,8 @@ class OmniSoC_Base:
 
         self._mspec.gpu_series = mi_gpu_specs.get_gpu_series(self._mspec.gpu_arch)
         # specify gpu model name for gfx942 hardware
-        self._mspec.gpu_model = mi_gpu_specs.get_gpu_model(
-            self._mspec.gpu_arch, self._mspec.gpu_chip_id
-        )
+        self._mspec.gpu_model = mi_gpu_specs.get_gpu_model(self._mspec.gpu_arch,
+                                                           self._mspec.gpu_chip_id)
 
         if not self._mspec.gpu_model:
             self._mspec.gpu_model = self.detect_gpu_model(self._mspec.gpu_arch)
@@ -208,8 +204,7 @@ class OmniSoC_Base:
                 self._mspec.gpu_arch,
                 self._mspec.gpu_model,
                 self._mspec.compute_partition,
-            )
-        )
+            ))
 
     @demarcate
     def detect_gpu_model(self, gpu_arch):
@@ -299,10 +294,12 @@ class OmniSoC_Base:
             sets_info = parse_sets_yaml(self.__arch)
             if set_selected not in set(sets_info.keys()):
                 console_error(
-                    f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
+                    f"argument --set: invalid choice: '{set_selected}' "
+                    f"(choose from {sets_info.keys()})"
                 )
             self.__args.filter_blocks = [
-                next(iter(metric.keys())) for metric in sets_info[set_selected]["metric"]
+                next(iter(metric.keys()))
+                for metric in sets_info[set_selected]["metric"]
             ]
 
         if not self.get_args().filter_blocks:
@@ -315,12 +312,8 @@ class OmniSoC_Base:
 
             # File id filtering
             if file_id not in config_filename_dict:
-                console_warning(
-                    (
-                        f"Skipping {block_id}: file id {file_id} not found in "
-                        f"{config_root_dir}"
-                    )
-                )
+                console_warning((f"Skipping {block_id}: file id {file_id} not found in "
+                                 f"{config_root_dir}"))
                 continue
             with open(config_filename_dict[file_id], "r") as stream:
                 file_config = yaml.safe_load(stream)
@@ -337,11 +330,8 @@ class OmniSoC_Base:
             }
             if panel_id not in panel_dict:
                 console_warning(
-                    (
-                        f"Skipping {block_id}: metric table {panel_id} not found in "
-                        f"{config_filename_dict[file_id]}"
-                    )
-                )
+                    (f"Skipping {block_id}: metric table {panel_id} not found in "
+                     f"{config_filename_dict[file_id]}"))
                 continue
             if metric_id is None:
                 # If no metric id level filtering, then read the whole panel
@@ -354,11 +344,8 @@ class OmniSoC_Base:
             }
             if metric_id not in metric_dict:
                 console_warning(
-                    (
-                        f"Skipping {block_id}: metric id {metric_id} not found in "
-                        f"panel id {panel_id}"
-                    )
-                )
+                    (f"Skipping {block_id}: metric id {metric_id} not found in "
+                     f"panel id {panel_id}"))
                 continue
             texts.append(yaml.dump(metric_dict[metric_id], sort_keys=False))
 
@@ -385,10 +372,8 @@ class OmniSoC_Base:
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
         """Filter default performance counter set based on user arguments"""
-        if (
-            roofline_perfmon_only
-            and Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()
-        ):
+        if (roofline_perfmon_only
+                and Path(self.get_args().path).joinpath("pmc_perf.csv").is_file()):
             return
 
         if roofline_perfmon_only:
@@ -437,8 +422,7 @@ class OmniSoC_Base:
         # get hw counters and variables for all supported denominators
         for formula in supported_denom.values():
             hw_counter_matches_denom, variable_matches_denom = self.parse_counters_text(
-                formula
-            )
+                formula)
             hw_counter_matches.update(hw_counter_matches_denom)
             variable_matches.update(variable_matches_denom)
 
@@ -465,8 +449,7 @@ class OmniSoC_Base:
         # and should not end with underscore
         # he counter name can either optionally end with '[' or '_sum'
         hw_counter_regex = (
-            r"(?:SQ|SQC|TA|TD|TCP|TCC|CPC|CPF|SPI|GRBM)_[0-9A-Z_]*[0-9A-Z](?:\[|_sum)*"
-        )
+            r"(?:SQ|SQC|TA|TD|TCP|TCC|CPC|CPF|SPI|GRBM)_[0-9A-Z_]*[0-9A-Z](?:\[|_sum)*")
         # only capture the variable name after $ using capturing group
         variable_regex = r"\$([0-9A-Za-z_]*[0-9A-Za-z])"
         hw_counter_matches = set(re.findall(hw_counter_regex, text))
@@ -479,13 +462,11 @@ class OmniSoC_Base:
         rocprof_cmd = detect_rocprof(self.get_args())
 
         if rocprof_cmd != "rocprofiler-sdk":
-            console_warning(
-                "rocprof v1/v2/v3 interfaces will be removed in favor of "
-                "rocprofiler-sdk interface in a future release. To use "
-                "rocprofiler-sdk, set ROCPROF to 'rocprofiler-sdk' and "
-                "optionally provide the path to librocprofiler-sdk.so via "
-                "--rocprofiler-sdk-library-path."
-            )
+            console_warning("rocprof v1/v2/v3 interfaces will be removed in favor of "
+                            "rocprofiler-sdk interface in a future release. To use "
+                            "rocprofiler-sdk, set ROCPROF to 'rocprofiler-sdk' and "
+                            "optionally provide the path to librocprofiler-sdk.so via "
+                            "--rocprofiler-sdk-library-path.")
 
         rocprof_counters = set()
 
@@ -495,9 +476,8 @@ class OmniSoC_Base:
             # return code should be 1 so success should be False
             if success:
                 console_error(
-                    "Failed to list rocprof supported counters using command: %s"
-                    % command
-                )
+                    "Failed to list rocprof supported counters using command: %s" %
+                    command)
             for line in output.splitlines():
                 if "gpu-agent" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
@@ -508,9 +488,8 @@ class OmniSoC_Base:
             # return code should be 1 so success should be False
             if success:
                 console_error(
-                    "Failed to list rocprof supported counters using command: %s"
-                    % command
-                )
+                    "Failed to list rocprof supported counters using command: %s" %
+                    command)
             for line in output.splitlines():
                 if "gpu-agent" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[1].strip())
@@ -522,36 +501,27 @@ class OmniSoC_Base:
             # return code should be 1 so success should be False
             if success:
                 console_error(
-                    "Failed to list rocprof supported counters using command: %s"
-                    % command
-                )
+                    "Failed to list rocprof supported counters using command: %s" %
+                    command)
             for line in output.splitlines():
                 if "gfx" in line:
                     counters, _ = self.parse_counters_text(line.split(":")[2].strip())
                     rocprof_counters.update(counters)
-        elif (
-            str(rocprof_cmd).endswith("rocprofv3")
-            or str(rocprof_cmd) == "rocprofiler-sdk"
-        ):
+        elif (str(rocprof_cmd).endswith("rocprofv3")
+              or str(rocprof_cmd) == "rocprofiler-sdk"):
             # Point to counter definition
             old_rocprofiler_metrics_path = os.environ.get("ROCPROFILER_METRICS_PATH")
             os.environ["ROCPROFILER_METRICS_PATH"] = str(
-                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs"
-            )
+                config.rocprof_compute_home / "rocprof_compute_soc" / "profile_configs")
             sys.path.append(
                 str(
-                    Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                    / "bin"
-                )
-            )
+                    Path(self.get_args().rocprofiler_sdk_library_path).parent.parent /
+                    "bin"))
             from rocprofv3_avail_module import avail
 
             avail.loadLibrary.libname = str(
-                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent
-                / "lib"
-                / "rocprofiler-sdk"
-                / "librocprofv3-list-avail.so"
-            )
+                Path(self.get_args().rocprofiler_sdk_library_path).parent.parent /
+                "lib" / "rocprofiler-sdk" / "librocprofv3-list-avail.so")
             counters = avail.get_counters()
             rocprof_counters = {
                 counter.name
@@ -565,10 +535,8 @@ class OmniSoC_Base:
                 os.environ["ROCPROFILER_METRICS_PATH"] = old_rocprofiler_metrics_path
 
         else:
-            console_error(
-                "Incompatible profiler: %s. Supported profilers include: %s"
-                % (rocprof_cmd, get_submodules("rocprof_compute_profile"))
-            )
+            console_error("Incompatible profiler: %s. Supported profilers include: %s" %
+                          (rocprof_cmd, get_submodules("rocprof_compute_profile")))
 
         return rocprof_counters
 
@@ -584,10 +552,8 @@ class OmniSoC_Base:
         if hasattr(self.get_args(), "path"):
             if self.get_args().path == str(Path(os.getcwd()).joinpath("workloads")):
                 workload_dir = str(
-                    Path(self.get_args().path).joinpath(
-                        self.get_args().name, self._mspec.gpu_model
-                    )
-                )
+                    Path(self.get_args().path).joinpath(self.get_args().name,
+                                                        self._mspec.gpu_model))
             else:
                 workload_dir = self.get_args().path
 
@@ -611,19 +577,15 @@ class OmniSoC_Base:
             for counter in counters
         } - rocprof_counters
         if not_supported_counters:
-            console_warning(
-                "Following counters might not be supported by rocprof: %s"
-                % ", ".join(not_supported_counters)
-            )
+            console_warning("Following counters might not be supported by rocprof: %s" %
+                            ", ".join(not_supported_counters))
         # We might be providing definitions of unsupported counters, so still try to
         # collect them
         if not counters:
             console_error(
                 "profiling",
-                (
-                    "No performance counters to collect, "
-                    "please check the provided profiling filters"
-                ),
+                ("No performance counters to collect, "
+                 "please check the provided profiling filters"),
             )
         else:
             console_debug(f"Collecting following counters: {', '.join(counters)} ")
@@ -634,15 +596,11 @@ class OmniSoC_Base:
         # Create separate perfmon file for LEVEL counters without _sum suffix
         # TCC LEVEL counters are handled channel wise, so ignore them
         for counter in counters.copy():
-            if (
-                "LEVEL" in counter
-                and not counter.endswith("_sum")
-                and not is_tcc_channel_counter(counter)
-            ):
+            if ("LEVEL" in counter and not counter.endswith("_sum")
+                    and not is_tcc_channel_counter(counter)):
                 counters.remove(counter)
-                output_files.append(
-                    CounterFile(counter + ".txt", self.__perfmon_config)
-                )
+                output_files.append(CounterFile(counter + ".txt",
+                                                self.__perfmon_config))
                 output_files[-1].add(counter)
                 if using_v3():
                     # v3 does not support SQ_ACCUM_PREV_HIRES. Use custom counters
@@ -670,18 +628,15 @@ class OmniSoC_Base:
                     added = True
                     # Store all channels for a TCC channel counter in the same file
                     if is_tcc_channel_counter(ctr):
-                        tcc_channel_counter_file_map[ctr.split("[")[0]] = output_files[
-                            i
-                        ]
+                        tcc_channel_counter_file_map[ctr.split("[")
+                                                     [0]] = output_files[i]
                     break
 
             # All files are full, create a new file
             if not added:
                 output_files.append(
-                    CounterFile(
-                        "pmc_perf_{}.txt".format(file_count), self.__perfmon_config
-                    )
-                )
+                    CounterFile("pmc_perf_{}.txt".format(file_count),
+                                self.__perfmon_config))
                 file_count += 1
                 output_files[-1].add(ctr)
 
@@ -703,8 +658,7 @@ class OmniSoC_Base:
             old_group_num = file_count + accu_file_count
             new_bucket_count = node_count * gpu_count
             groups_per_bucket = math.ceil(
-                old_group_num / new_bucket_count
-            )  # It equals to file num per node
+                old_group_num / new_bucket_count)  # It equals to file num per node
             max_groups_per_node = groups_per_bucket * gpu_count
 
             group_start = node_idx * max_groups_per_node
@@ -712,40 +666,31 @@ class OmniSoC_Base:
 
             console_debug(
                 "profiling",
-                (
-                    "spatial_multiplexing node_idx %s, node_count %s, gpu_count: %s,\n"
-                    "old_group_num %s, new_bucket_count %s, groups_per_bucket %s,\n"
-                    "max_groups_per_node %s, group_start %s, group_end %s"
-                )
-                % (
-                    node_idx,
-                    node_count,
-                    gpu_count,
-                    old_group_num,
-                    new_bucket_count,
-                    groups_per_bucket,
-                    max_groups_per_node,
-                    group_start,
-                    group_end,
-                ),
+                ("spatial_multiplexing node_idx %s, node_count %s, gpu_count: %s,\n"
+                 "old_group_num %s, new_bucket_count %s, groups_per_bucket %s,\n"
+                 "max_groups_per_node %s, group_start %s, group_end %s") % (
+                     node_idx,
+                     node_count,
+                     gpu_count,
+                     old_group_num,
+                     new_bucket_count,
+                     groups_per_bucket,
+                     max_groups_per_node,
+                     group_start,
+                     group_end,
+                 ),
             )
 
             for f_idx in range(groups_per_bucket):
                 file_name = str(
-                    Path(workload_perfmon_dir).joinpath(
-                        "pmc_perf_"
-                        + "node_"
-                        + str(node_idx)
-                        + "_"
-                        + str(f_idx)
-                        + ".txt"
-                    )
-                )
+                    Path(workload_perfmon_dir).joinpath("pmc_perf_" + "node_" +
+                                                        str(node_idx) + "_" +
+                                                        str(f_idx) + ".txt"))
 
                 pmc = []
                 for g_idx in range(
-                    group_start + f_idx * gpu_count,
-                    min(group_end, group_start + (f_idx + 1) * gpu_count),
+                        group_start + f_idx * gpu_count,
+                        min(group_end, group_start + (f_idx + 1) * gpu_count),
                 ):
                     gpu_idx = g_idx % gpu_count
                     for block_name in output_files[g_idx].blocks.keys():
@@ -763,18 +708,15 @@ class OmniSoC_Base:
             # Output to files
             for f in output_files:
                 file_name_txt = str(
-                    Path(workload_perfmon_dir).joinpath(f.file_name_txt)
-                )
+                    Path(workload_perfmon_dir).joinpath(f.file_name_txt))
                 file_name_yaml = str(
-                    Path(workload_perfmon_dir).joinpath(f.file_name_yaml)
-                )
+                    Path(workload_perfmon_dir).joinpath(f.file_name_yaml))
 
                 pmc = []
                 counter_def = dict()
                 for ctr in [
-                    ctr
-                    for block_name in f.blocks
-                    for ctr in f.blocks[block_name].elements
+                        ctr for block_name in f.blocks
+                        for ctr in f.blocks[block_name].elements
                 ]:
                     pmc.append(ctr)
                     if using_v3():
@@ -784,15 +726,11 @@ class OmniSoC_Base:
                             idx = int(ctr.split("[")[1].split("]")[0])
                             xcd_idx = idx // int(self._mspec._l2_banks)
                             channel_idx = idx % int(self._mspec._l2_banks)
-                            expression = (
-                                f"select({counter_name},"
-                                f"[DIMENSION_XCC=[{xcd_idx}], "
-                                f"DIMENSION_INSTANCE=[{channel_idx}]])"
-                            )
-                            description = (
-                                f"{counter_name} on {xcd_idx}th XCC and "
-                                f"{channel_idx}th channel"
-                            )
+                            expression = (f"select({counter_name},"
+                                          f"[DIMENSION_XCC=[{xcd_idx}], "
+                                          f"DIMENSION_INSTANCE=[{channel_idx}]])")
+                            description = (f"{counter_name} on {xcd_idx}th XCC and "
+                                           f"{channel_idx}th channel")
                             counter_def = add_counter_extra_config_input_yaml(
                                 counter_def,
                                 ctr,
@@ -846,6 +784,7 @@ class OmniSoC_Base:
 
 # Set with limited size
 class LimitedSet:
+
     def __init__(self, maxsize) -> None:
         self.avail = maxsize
         self.elements = []
@@ -867,6 +806,7 @@ class LimitedSet:
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
 class CounterFile:
+
     def __init__(self, name, perfmon_config) -> None:
         name_no_extension = name.split(".")[0]
         self.file_name_txt = name_no_extension + ".txt"

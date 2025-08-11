@@ -957,11 +957,10 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                         print("~" * 40)
                                     except TypeError:
                                         console_warning(
-                                            "Skipping entry. Encountered a missing "
-                                            "counter\n{} has been assigned to None\n{}"
-                                            .format(
-                                                expr,
-                                                np.nan,
+                                            (
+                                                "Skipping entry. Encountered a missing"
+                                                "counter\n{} has been assigned to None"
+                                                "\n{}".format(expr, np.nan)
                                             )
                                         )
                                     except AttributeError as ae:
@@ -1043,8 +1042,8 @@ def apply_filters(workload, dir, is_gui, debug):
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
-                        "{} is an invalid kernel id. Please enter an id between 0-{}"
-                        .format(
+                        "{} is an invalid kernel id. "
+                        "Please enter an id between 0-{}".format(
                             kernel_id,
                             len(kernels_df["Kernel_Name"]) - 1,
                         )
