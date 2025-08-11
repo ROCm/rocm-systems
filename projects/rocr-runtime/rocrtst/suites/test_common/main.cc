@@ -58,6 +58,7 @@
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
+#include "suites/functional/pc_sampling.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #include "suites/performance/memory_async_copy_numa.h"
@@ -406,6 +407,13 @@ TEST(rocrtstFunc, VirtMemory_Interprocess_Test) {
   VirtMemoryTestInterProcess vmt;
   RunCustomTestProlog(&vmt);
   RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, PcSampling_Test) {
+  PcSamplingTest pcs;
+  RunCustomTestProlog(&pcs);
+  pcs.PcSampling();
+  RunCustomTestEpilog(&pcs);
 }
 
 TEST(rocrtstNeg, Memory_Negative_Tests) {
