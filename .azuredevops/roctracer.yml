@@ -1,3 +1,4 @@
+
 variables:
 - group: common
 - template: /.azuredevops/variables-global.yml@pipelines_repo
