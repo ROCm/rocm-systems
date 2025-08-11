@@ -41,6 +41,18 @@ void KFDNegativeTest::TearDown() {
     ROUTINE_END
 }
 
+#ifndef AMDGPU_IDS_FLAGS_MODE_MASK
+/*
+ *  Query h/w info: Flag identifying VF/PF/PT mode
+ *
+ */
+#define AMDGPU_IDS_FLAGS_MODE_MASK      0x300
+#define AMDGPU_IDS_FLAGS_MODE_SHIFT     0x8
+#define AMDGPU_IDS_FLAGS_MODE_PF        0x0
+#define AMDGPU_IDS_FLAGS_MODE_VF        0x1
+#define AMDGPU_IDS_FLAGS_MODE_PT        0x2
+#endif
+
 /**
  *  Basic Pipe Reset Test
  *
@@ -59,6 +71,35 @@ TEST_F(KFDNegativeTest, BasicPipeReset) {
 
     int defaultGPUNode = m_NodeInfo.HsaDefaultGPUNode();
     ASSERT_GE(defaultGPUNode, 0) << "failed to get default GPU Node";
+
+    int rn = FindDRMRenderNode(defaultGPUNode);
+    if (rn < 0) {
+        LOG() << "Skipping test: Could not find render node for default GPU." << std::endl;
+        return;
+    }
+
+    struct drm_amdgpu_info_hw_ip info;
+
+    ASSERT_SUCCESS(amdgpu_query_hw_ip_info(m_RenderNodes[rn].device_handle, AMDGPU_HW_IP_GFX, 0, &info));
+
+    struct drm_amdgpu_info_device dev_info;
+    bool is_vf = false;
+    bool no_supported = false;
+
+    ASSERT_SUCCESS(amdgpu_query_info(m_RenderNodes[rn].device_handle, AMDGPU_INFO_DEV_INFO,
+                              sizeof(dev_info), &dev_info));
+
+
+    is_vf = dev_info.ids_flags & ((AMDGPU_IDS_FLAGS_MODE_VF <<
+                AMDGPU_IDS_FLAGS_MODE_SHIFT) &
+                AMDGPU_IDS_FLAGS_MODE_MASK);
+
+    no_supported = (info.hw_ip_version_major == 9) && is_vf;
+
+    if (no_supported) {
+         LOG() << "Skipping test: Pipe Reset is not supported." << std::endl;
+        return;
+    }
 
     const HsaNodeProperties *nodeProps = m_NodeInfo.GetNodeProperties(defaultGPUNode);
     bool perQueueResetSupported = nodeProps->Capability.ui32.PerQueueResetSupported;
