@@ -538,6 +538,9 @@ typedef struct EventDescriptor_ {
 EventHandle CreateOsEvent(bool auto_reset, bool init_state) {
   EventDescriptor* eventDescrp;
   eventDescrp = (EventDescriptor*)malloc(sizeof(EventDescriptor));
+  if (!eventDescrp)
+    throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
+                                 "OS Event allocation failed.\n");
 
   pthread_mutex_init(&eventDescrp->mutex, NULL);
   pthread_cond_init(&eventDescrp->event, NULL);

@@ -805,6 +805,7 @@ hsa_status_t hsa_queue_destroy(hsa_queue_t* queue) {
   core::Queue* cmd_queue = core::Queue::Convert(queue);
   IS_VALID(cmd_queue);
   cmd_queue->Destroy();
+  delete cmd_queue;
   return HSA_STATUS_SUCCESS;
   CATCH;
 }
