@@ -70,7 +70,7 @@ External CI:
   - any-glob-to-any-file:
     - .azuredevops/**/*
 
-github action:
+github actions:
 - changed-files:
   - any-glob-to-any-file:
     - .github/workflows/**/*
