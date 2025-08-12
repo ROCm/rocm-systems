@@ -44,19 +44,16 @@ def check_function_availability(connection, function_name):
     Returns:
         bool: True if the function exists, False otherwise.
     """
-    try:
-        cursor = connection.cursor()
+    cursor = connection.cursor()
 
-        # Query pragma_function_list to check for the function
-        cursor.execute(
-            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?)",
-            (function_name,),
-        )
-        result = cursor.fetchone()[0]
+    # Query pragma_function_list to check for the function
+    cursor.execute(
+        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?)",
+        (function_name,),
+    )
+    result = cursor.fetchone()[0]
 
-        return bool(result)
-    except:
-        return False
+    return bool(result)
 
 
 def get_temp_view_names(connection: RocpdImportData) -> List[str]:
