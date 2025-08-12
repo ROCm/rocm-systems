@@ -45,11 +45,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi3xx']
-        os: ['ubuntu-22.04']
-        build-type: ['RelWithDebInfo']
+        system: [
+          {gpu: 'navi4', runner: 'rocprofiler-navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
+          {gpu: 'navi3', runner: 'rocprofiler-navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
+          {gpu: 'mi3xx', runner: 'rocprofiler-mi3xx', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
+        ]
 
-    runs-on: rocprofiler-${{ matrix.runner }}
+    runs-on: ${{ matrix.system.runner }}
 
     permissions:
       contents: read
@@ -92,7 +94,7 @@ jobs:
       run:
         LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""

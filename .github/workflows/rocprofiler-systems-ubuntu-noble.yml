@@ -1,37 +1,29 @@
-name: Ubuntu 24.04 (GCC, Python, ROCm)
+name: rocprofiler-systems Ubuntu 24.04 (GCC, Python, ROCm)
 run-name: ubuntu-noble
 
 on:
   push:
-    branches: [ amd-mainline, amd-staging, release/** ]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'source/docs/**'
-      - 'source/python/gui/**'
-      - '.github/workflows/docs.yml'
-      - '.github/workflows/cpack.yml'
-      - '.github/workflows/containers.yml'
-      - '.github/workflows/formatting.yml'
-      - '.github/workflows/weekly-mainline-sync.yml'
-      - 'docker/**'
-      - .wordlist.txt
-      - CMakePresets.json
+    paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
-    branches: [ amd-mainline, amd-staging, release/** ]
-    paths-ignore:
-      - '*.md'
-      - 'docs/**'
-      - 'source/docs/**'
-      - 'source/python/gui/**'
-      - '.github/workflows/docs.yml'
-      - '.github/workflows/cpack.yml'
-      - '.github/workflows/containers.yml'
-      - '.github/workflows/formatting.yml'
-      - '.github/workflows/weekly-mainline-sync.yml'
-      - 'docker/**'
-      - .wordlist.txt
-      - CMakePresets.json
+    paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
+      - 'projects/rocprofiler-systems/**'
+      - '!projects/rocprofiler-systems/*.md'
+      - '!projects/rocprofiler-systems/docs/**'
+      - '!projects/rocprofiler-systems/source/docs/**'
+      - '!projects/rocprofiler-systems/source/python/gui/**'
+      - '!projects/rocprofiler-systems/docker/**'
+      - '!projects/rocprofiler-systems/.wordlist.txt'
+      - '!projects/rocprofiler-systems/CMakePresets.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -60,6 +52,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
 
     - name: Install Packages
       timeout-minutes: 25
@@ -69,6 +63,7 @@ jobs:
         timeout_minutes: 25
         max_attempts: 5
         command: |
+          cd projects/rocprofiler-systems/
           apt-get -y update && apt-get upgrade -y &&
           apt-get install -y \
             libiberty-dev clang libomp-dev libopenmpi-dev libfabric-dev \
@@ -79,6 +74,7 @@ jobs:
       if: ${{ matrix.rocm-version > 0 }}
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-systems/
       run: |
         ROCM_VERSION=${{ matrix.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
@@ -93,7 +89,11 @@ jobs:
     - name: Configure
       timeout-minutes: 30
       shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run: |
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version
         USE_ROCM=OFF
@@ -118,4 +118,5 @@ jobs:
 
     - name: Build
       timeout-minutes: 115
+      working-directory: projects/rocprofiler-systems/
       run: cmake --build build --parallel 2

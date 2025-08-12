@@ -51,18 +51,18 @@
     {
       "name": "rocm-core",
       "url": "ROCm/rocm-core",
-      "branch": "master",
+      "branch": "amd-mainline",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocminfo",
       "url": "ROCm/rocminfo",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocm-smi-lib",
@@ -117,8 +117,8 @@
       "url": "ROCm/ROCR-Runtime",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "roctracer",

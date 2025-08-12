@@ -23,17 +23,11 @@
 * @ingroup perfDispatchTest
 */
 
+// #define ENABLE_DEBUG 1
+
 #include <hip_test_common.hh>
 #include <string.h>
 #include <complex>
-
-// Quiet pesky warnings
-#ifdef WIN_OS
-#define SNPRINTF sprintf_s
-#else
-#define SNPRINTF snprintf
-#endif
-#define CHAR_BUF_SIZE 512
 
 typedef struct {
     unsigned int iterations;
@@ -95,6 +89,8 @@ TEST_CASE("Perf_hipPerfDispatchSpeed") {
   unsigned int testListSize = sizeof(testList) / sizeof(testStruct);
   int numTests = (p_tests == -1) ? (2*2*testListSize - 1) : p_tests;
   int test = (p_tests == -1) ? 0 : p_tests;
+
+  DEBUG_PRINT("numTests %d", numTests);
 
   float* srcBuffer = NULL;
   unsigned int bufSize_ = 64*sizeof(float);
@@ -159,17 +155,14 @@ TEST_CASE("Perf_hipPerfDispatchSpeed") {
       n = "n";
       extraChar = " ";
     }
-    char buf[256];
     if (testList[openTest].flushEvery > 0) {
-      SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches %s%sing every %5d (us/disp) %3f",
-                test, testList[openTest].iterations,
-                waitType, n, testList[openTest].flushEvery, (float)perf);
+      CONSOLE_PRINT("HIPPerfDispatchSpeed[%3d] %7d dispatches %s%sing every %5d (us/disp) %3f",
+                    test, testList[openTest].iterations, waitType, n, testList[openTest].flushEvery,
+                    (float)perf);
     } else {
-      SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches (%s%s)              (us/disp) %3f",
-                test, testList[openTest].iterations,
-                waitType, extraChar, (float)perf);
+      CONSOLE_PRINT("HIPPerfDispatchSpeed[%3d] %7d dispatches (%s%s)              (us/disp) %3f",
+                    test, testList[openTest].iterations, waitType, extraChar, (float)perf);
     }
-    printf("%s\n", buf);
   }
   HIP_CHECK(hipFree(srcBuffer));
 }

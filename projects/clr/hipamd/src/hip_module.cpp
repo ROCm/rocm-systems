@@ -1093,9 +1093,47 @@ hipError_t hipLinkCreate(unsigned int num_options, hipJitOption* options_ptr,
   }
 
   if (num_options != 0) {
-    for (int i = 0; i < num_options; i++) {
-      if (options_ptr == nullptr || options_vals_pptr == nullptr) {
-        HIP_RETURN(hipErrorInvalidValue);
+    if (options_ptr == nullptr || options_vals_pptr == nullptr) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+
+    for (int i = 0; i < num_options; ++i) {
+      switch (options_ptr[i]) {
+        // CUDA only options
+        case hipJitOptionMaxRegisters:
+        case hipJitOptionThreadsPerBlock:
+        case hipJitOptionWallTime:
+        case hipJitOptionInfoLogBuffer:
+        case hipJitOptionInfoLogBufferSizeBytes:
+        case hipJitOptionErrorLogBuffer:
+        case hipJitOptionErrorLogBufferSizeBytes:
+        case hipJitOptionOptimizationLevel:
+        case hipJitOptionTargetFromContext:
+        case hipJitOptionTarget:
+        case hipJitOptionFallbackStrategy:
+        case hipJitOptionGenerateDebugInfo:
+        case hipJitOptionLogVerbose:
+        case hipJitOptionGenerateLineInfo:
+        case hipJitOptionCacheMode:
+        case hipJitOptionSm3xOpt:
+        case hipJitOptionFastCompile:
+        case hipJitOptionGlobalSymbolNames:
+        case hipJitOptionGlobalSymbolAddresses:
+        case hipJitOptionGlobalSymbolCount:
+        case hipJitOptionLto:
+        case hipJitOptionFtz:
+        case hipJitOptionPrecDiv:
+        case hipJitOptionPrecSqrt:
+        case hipJitOptionFma:
+        case hipJitOptionPositionIndependentCode:
+        case hipJitOptionMinCTAPerSM:
+        case hipJitOptionMaxThreadsPerBlock:
+        case hipJitOptionOverrideDirectiveValues:
+        case hipJitOptionNumOptions:
+          HIP_RETURN(hipErrorInvalidValue);
+        default:
+          // everything else is fine
+          break;
       }
     }
   }

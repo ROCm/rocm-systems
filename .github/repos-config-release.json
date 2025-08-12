@@ -53,7 +53,7 @@
       "url": "ROCm/rocm-core",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -61,7 +61,7 @@
       "url": "ROCm/rocminfo",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {
@@ -117,7 +117,7 @@
       "url": "ROCm/ROCR-Runtime",
       "branch": "release/rocm-rel-7.0",
       "category": "projects",
-      "auto_subtree_pull": true,
+      "auto_subtree_pull": false,
       "auto_subtree_push": false
     },
     {

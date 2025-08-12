@@ -719,6 +719,7 @@ hipError_t hipGetDeviceFlags(unsigned int* flags) {
 hipError_t hipSetDevice(int device) {
   HIP_INIT_API_NO_RETURN(hipSetDevice, device);
 
+  hip::tls.isSetDeviceCalled = true;
   // Check if the device is already set
   if (hip::tls.device_ != nullptr && hip::tls.device_->deviceId() == device) {
     HIP_RETURN(hipSuccess);
@@ -784,10 +785,31 @@ hipError_t hipSetDeviceFlags(unsigned int flags) {
 
 hipError_t hipSetValidDevices(int* device_arr, int len) {
   HIP_INIT_API(hipSetValidDevices, device_arr, len);
+  // HIP runtime will go ahead with the default behavior of trying devices
+  // from a default list sequentially, if the len passed is 0
+  if (len == 0) {
+    HIP_RETURN(hipSuccess);
+  }
+  int count = 0;
+  HIP_RETURN_ONFAIL(ihipDeviceGetCount(&count));
 
-  assert(0 && "Unimplemented");
+  if (device_arr == nullptr || len < 0 || len > count) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
 
-  HIP_RETURN(hipErrorNotSupported);
+  for (int i = 0; i < len; ++i) {
+    if (device_arr[i] < 0 || device_arr[i] >= count) {
+      HIP_RETURN(hipErrorInvalidDevice);
+    }
+  }
+
+  if (tls.isSetDeviceCalled) {
+    HIP_RETURN(hipSuccess);
+  }
+  tls.device_ = g_devices[device_arr[0]];
+  uint32_t preferredNumaNode = (tls.device_)->devices()[0]->getPreferredNumaNode();
+  amd::Os::setPreferredNumaNode(preferredNumaNode);
+  HIP_RETURN(hipSuccess);
 }
 } //namespace hip
 

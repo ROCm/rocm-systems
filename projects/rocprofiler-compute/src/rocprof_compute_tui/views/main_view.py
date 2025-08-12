@@ -57,7 +57,9 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.start_path = (
             # NOTE: is cwd the best choice?
-            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
+            Path.cwd()
+            if DEFAULT_START_PATH is None
+            else Path(DEFAULT_START_PATH)
         )
 
         self.logger = Logger()
@@ -169,15 +171,12 @@ class MainView(Horizontal):
 
                 sys_info_df = file_io.load_sys_info(sysinfo_path)
                 self.logger.info(f"Step 3: sys_info_df type = {type(sys_info_df)}")
-                self.logger.info(
-                    f"Step 3: sys_info_df shape = {
-                        (
-                            sys_info_df.shape
-                            if hasattr(sys_info_df, 'shape')
-                            else 'No shape attribute'
-                        )
-                    }"
+                shape_info = (
+                    sys_info_df.shape
+                    if hasattr(sys_info_df, "shape")
+                    else "No shape attribute"
                 )
+                self.logger.info(f"Step 3: sys_info_df shape = {shape_info}")
 
             except Exception as e:
                 self.logger.error(f"Step 3 failed - Error loading sys_info: {str(e)}")
