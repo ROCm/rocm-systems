@@ -33,6 +33,32 @@ from .query import export_sqlite_query
 from . import output_config
 
 
+def check_function_availability(connection, function_name):
+    """
+    Checks if a given function exists in the SQLite database.
+
+    Args:
+        connection (sqlite3 db connection): The SQLite database connection handler.
+        function_name (str): The name of the function to check.
+
+    Returns:
+        bool: True if the function exists, False otherwise.
+    """
+    try:
+        cursor = connection.cursor()
+
+        # Query pragma_function_list to check for the function
+        cursor.execute(
+            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?)",
+            (function_name,),
+        )
+        result = cursor.fetchone()[0]
+
+        return bool(result)
+    except sqlite3.Error as e:
+        return False
+
+
 def get_temp_view_names(connection: RocpdImportData) -> List[str]:
     """Return the names of all temporary views in the SQLite connection."""
     return [
@@ -264,7 +290,8 @@ def create_summary_views(connection: RocpdImportData, by_rank=False) -> None:
         if not required_columns.issubset(columns):
             continue
 
-        connection.create_function('SQRT', 1, math.sqrt)
+        if check_function_availability(connection, "SQRT") == False:
+            connection.create_function("SQRT", 1, math.sqrt)
 
         # Create regular summary view
         summary_view_name, summary_query = generate_summary_query(
@@ -302,7 +329,8 @@ def create_summary_region_views(
         if "MARKER" not in cat.upper()
     }
 
-    connection.create_function('SQRT', 1, math.sqrt)
+    if check_function_availability(connection, "SQRT") == False:
+        connection.create_function("SQRT", 1, math.sqrt)
 
     for k, v in category_map.items():
         if len(v) > 0:
