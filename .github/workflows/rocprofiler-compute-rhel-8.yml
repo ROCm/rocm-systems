@@ -1,0 +1,77 @@
+# This is a basic workflow to help you get started with Actions
+
+name: rocprofiler-compute RHEL 8/9
+
+# Controls when the workflow will run
+on:
+  push:
+    paths:
+      - 'projects/rocprofiler-compute/**'
+      - '!projects/rocprofiler-compute/*.md'
+      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/docker/**'
+  pull_request:
+    paths:
+      - 'projects/rocprofiler-compute/**'
+      - '!projects/rocprofiler-compute/*.md'
+      - '!projects/rocprofiler-compute/.github/**/*.md'
+      - '!projects/rocprofiler-compute/docs/**'
+      - '!projects/rocprofiler-compute/docker/**'
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  build:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os-release: [ '8.10', '9.3']
+        build-type: ['Release']
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      - name: Install baseline OS dependencies
+        run: |
+          yum clean all
+          yum makecache
+          yum -y install git
+          yum -y install python39
+          yum -y install cmake3
+          yum -y install which
+          yum -y install glibc-langpack-en
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-compute
+      - name: Install Python prereqs
+        working-directory: projects/rocprofiler-compute
+        run: |
+          python3.9 -m pip install -r requirements.txt
+          python3.9 -m pip install -r requirements-test.txt
+      - name: Configure and install
+        working-directory: projects/rocprofiler-compute
+        run: |
+          mkdir build
+          cd build
+          cmake -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-compute -DPYTEST_NUMPROCS=4 ..
+          make install
+      - name: CTest- Analyze Commands
+        working-directory: projects/rocprofiler-compute
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_commands
+      - name: CTest- Analyze Workloads
+        working-directory: projects/rocprofiler-compute
+        run: |
+          cd build
+          ctest --verbose -R test_analyze_workloads

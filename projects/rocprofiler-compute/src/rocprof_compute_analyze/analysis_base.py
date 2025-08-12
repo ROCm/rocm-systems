@@ -23,12 +23,10 @@
 
 ##############################################################################
 
-
 import copy
-import os
 import sys
 import textwrap
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
@@ -78,7 +76,9 @@ class OmniAnalyze_Base:
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info)
+        parser.build_dfs(
+            archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+        )
         self._arch_configs[arch] = ac
         return self._arch_configs
 
@@ -192,7 +192,9 @@ class OmniAnalyze_Base:
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:
-                w.sys_info = parser.correct_sys_info(mspec, self.__args.specs_correction)
+                w.sys_info = parser.correct_sys_info(
+                    mspec, self.__args.specs_correction
+                )
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
@@ -222,7 +224,7 @@ class OmniAnalyze_Base:
 
             # Todo: more err check
             if not (
-                self.__args.nodes != None
+                self.__args.nodes is not None
                 or self.__args.list_nodes
                 or self.__args.spatial_multiplexing
             ):
@@ -266,7 +268,9 @@ class OmniAnalyze_Base:
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
         self._output = (
-            open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
+            open(self.__args.output_file, "w+")
+            if self.__args.output_file
+            else sys.stdout
         )
 
         # Read profiling config

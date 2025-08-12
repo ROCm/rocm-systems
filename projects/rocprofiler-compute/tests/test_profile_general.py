@@ -23,17 +23,12 @@
 
 ##############################################################################
 
-
 import inspect
 import os
 import re
-import shutil
 import subprocess
 import sys
-import tempfile
-from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from unittest.mock import patch
 
 import pandas as pd
 import pytest
@@ -58,7 +53,6 @@ CHIP_IDS = {
     "30112": "MI350",
 }
 
-
 # --
 # Runtime config options
 # --
@@ -78,101 +72,98 @@ DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
-ALL_CSVS_MI100 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "sysinfo.csv",
-    ]
-)
+ALL_CSVS_MI100 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "pmc_perf_7.csv",
+    "sysinfo.csv",
+])
 
-ALL_CSVS_MI200 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
-ALL_CSVS_MI300 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
-ALL_CSVS_MI350 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "pmc_perf_10.csv",
-        "pmc_perf_11.csv",
-        "pmc_perf_12.csv",
-        "pmc_perf_13.csv",
-        "pmc_perf_14.csv",
-        "sysinfo.csv",
-    ]
-)
+ALL_CSVS_MI200 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
+ALL_CSVS_MI300 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
+ALL_CSVS_MI350 = sorted([
+    "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
+    "SQ_IFETCH_LEVEL.csv",
+    "SQ_INST_LEVEL_LDS.csv",
+    "SQ_INST_LEVEL_SMEM.csv",
+    "SQ_INST_LEVEL_VMEM.csv",
+    "SQ_LEVEL_WAVES.csv",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "pmc_perf_3.csv",
+    "pmc_perf_4.csv",
+    "pmc_perf_5.csv",
+    "pmc_perf_6.csv",
+    "pmc_perf_7.csv",
+    "pmc_perf_8.csv",
+    "pmc_perf_9.csv",
+    "pmc_perf_10.csv",
+    "pmc_perf_11.csv",
+    "pmc_perf_12.csv",
+    "pmc_perf_13.csv",
+    "sysinfo.csv",
+])
 
-ROOF_ONLY_FILES = sorted(
-    [
-        "empirRoof_gpu-0_FP32.pdf",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
-        "pmc_perf_2.csv",
-        "roofline.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
-    ]
-)
+ROOF_ONLY_FILES = sorted([
+    "empirRoof_gpu-0_FP32.pdf",
+    "pmc_perf.csv",
+    "pmc_perf_0.csv",
+    "pmc_perf_1.csv",
+    "pmc_perf_2.csv",
+    "roofline.csv",
+    "sysinfo.csv",
+    "timestamps.csv",
+])
 
 METRIC_THRESHOLDS = {
     "2.1.12": {"absolute": 0, "relative": 8},
@@ -296,7 +287,9 @@ def counter_compare(test_name, errors_pd, baseline_df, run_df, threshold=5):
                     # if 0 show absolute difference
                     diff = round(baseline_data - run_data, 2)
                     if diff > threshold:
-                        print(str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff))
+                        print(
+                            str(idx_1) + "[" + pmc_counter + "] diff is :" + str(diff)
+                        )
         differences["kernel_name"] = [kernel_name]
         differences["test_name"] = [test_name]
         differences["gpu-id"] = [gpu_id]
@@ -433,7 +426,13 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
             metric_info = re.findall(
                 r"(^"
                 + metric
-                + r")(?: *)([()0-9A-Za-z- ]+ )(?: *)([0-9.-]*)(?: *)([0-9.-]*)(?: *)\(([-0-9.]*)%\)(?: *)([-0-9.e]*)",
+                + (
+                    r")(?: *)([()0-9A-Za-z- ]+ )"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)([0-9.-]*)"
+                    r"(?: *)\(([-0-9.]*)%\)"
+                    r"(?: *)([-0-9.e]*)"
+                ),
                 captured_output,
                 flags=re.MULTILINE,
             )
@@ -493,20 +492,20 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                         # print("logging...")
                         # print(metric_info)
 
-                        new_error = pd.DataFrame.from_dict(
-                            {
-                                "Index": [metric_idx],
-                                "Metric": [metric_name],
-                                "Percent Difference": [relative_diff],
-                                "Absolute Difference": [absolute_diff],
-                                "Baseline": [baseline_val],
-                                "Current": [current_val],
-                                "Test Name": [test_name],
-                            }
-                        )
+                        new_error = pd.DataFrame.from_dict({
+                            "Index": [metric_idx],
+                            "Metric": [metric_name],
+                            "Percent Difference": [relative_diff],
+                            "Absolute Difference": [absolute_diff],
+                            "Baseline": [baseline_val],
+                            "Current": [current_val],
+                            "Test Name": [test_name],
+                        })
                         error_df = pd.concat([error_df, new_error])
                         counts = error_df.groupby(["Index"]).cumcount()
-                        reoccurring_metrics = error_df.loc[counts > MAX_REOCCURING_COUNT]
+                        reoccurring_metrics = error_df.loc[
+                            counts > MAX_REOCCURING_COUNT
+                        ]
                         reoccurring_metrics["counts"] = counts[
                             counts > MAX_REOCCURING_COUNT
                         ]
@@ -847,7 +846,7 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -864,10 +863,16 @@ def test_roofline_unsupported_datatype_error(binary_handler_profile_rocprof_comp
         pytest.skip("Skipping roofline test for MI100")
         return
 
-    options = ["--device", "0", "--roof-only", "--roofline-data-type", "UNSUPPORTED_TYPE"]
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--roofline-data-type",
+        "UNSUPPORTED_TYPE",
+    ]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -918,7 +923,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         return
 
     try:
-        import plotext as plt
+        import plotext as plt  # noqa: F401
 
         cli_available = True
     except ImportError:
@@ -928,7 +933,7 @@ def test_roof_cli_plot_generation(binary_handler_profile_rocprof_compute):
         options = ["--device", "0", "--roof-only"]
         workload_dir = test_utils.get_output_dir()
 
-        returncode = binary_handler_profile_rocprof_compute(
+        returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
             config, workload_dir, options, check_success=False, roof=True
         )
 
@@ -950,7 +955,7 @@ def test_roof_error_handling(binary_handler_profile_rocprof_compute):
     if os.path.exists(pmc_perf_path):
         os.remove(pmc_perf_path)
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -1076,7 +1081,7 @@ def test_roofline_ceiling_data_validation(binary_handler_profile_rocprof_compute
     options = ["--device", "0", "--roof-only", "--mem-level", "INVALID_LEVEL"]
     workload_dir = test_utils.get_output_dir()
 
-    returncode = binary_handler_profile_rocprof_compute(
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
 
@@ -1527,7 +1532,9 @@ def test_instmix_memchart_section(binary_handler_profile_rocprof_compute):
     assert test_utils.check_file_pattern(
         "- '10'", f"{workload_dir}/profiling_config.yaml"
     )
-    assert test_utils.check_file_pattern("- '3'", f"{workload_dir}/profiling_config.yaml")
+    assert test_utils.check_file_pattern(
+        "- '3'", f"{workload_dir}/profiling_config.yaml"
+    )
     assert test_utils.check_file_pattern(
         "TA_FLAT_WAVEFRONTS", f"{workload_dir}/pmc_perf.csv"
     )
@@ -1649,3 +1656,117 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
+
+
+@pytest.mark.sets_func
+class TestSetsIntegration:
+    def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "mem_thruput"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        memory_metrics = ["16.1.2", "17.1.0"]
+        for metric_id in memory_metrics:
+            assert (
+                metric_id in open(Path(workload_dir) / "log.txt", "r").read()
+            ), f"Expected memory metric {metric_id} not found"
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_launch_stats_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "launch_stats"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_util_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_util"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_compute_thruput_flops_set(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_flops"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=True,
+            roof=False,
+        )
+
+        assert test_utils.get_num_pmc_file(workload_dir) == 1
+
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_invalid_set_error_handling(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "nonexistent_set"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_set_and_block_mutual_exclusion(self, binary_handler_profile_rocprof_compute):
+        options = ["--set", "compute_thruput_util", "--block", "12"]
+        workload_dir = test_utils.get_output_dir()
+
+        returncode = binary_handler_profile_rocprof_compute(
+            config, workload_dir, options, check_success=False, roof=False
+        )
+
+        assert returncode == 1
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+    def test_list_sets_functionality(self, binary_handler_profile_rocprof_compute):
+        options = ["--list-sets"]
+        workload_dir = test_utils.get_output_dir()
+
+        binary_handler_profile_rocprof_compute(
+            config,
+            workload_dir,
+            options,
+            check_success=False,
+            roof=False,
+        )
+        # workload dir should be empty
+        assert not os.listdir(workload_dir)
+        test_utils.clean_output_dir(config["cleanup"], workload_dir)
