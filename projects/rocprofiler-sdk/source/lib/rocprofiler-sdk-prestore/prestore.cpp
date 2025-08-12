@@ -35,7 +35,7 @@ init_logging()
 // ensure that logging is always initialized when library is loaded
 bool init_logging_at_load = (init_logging(), true);
 
-extern "C" {
+ROCPROFILER_EXTERN_C_INIT
     
 int
 rocprofiler_prestore_set_api_table(
@@ -64,7 +64,7 @@ rocprofiler_prestore_set_api_table(
     rocprofiler::prestore::queue_registration_init(hsa_api_table);
     rocprofiler::prestore::code_object_registration_init(hsa_api_table);
 
-    return 0;
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 int rocprofiler_prestore_get_version()
@@ -73,4 +73,4 @@ int rocprofiler_prestore_get_version()
     return ROCPROFILER_PRESTORE_VERSION;
 }
 
-}
+ROCPROFILER_EXTERN_C_FINI

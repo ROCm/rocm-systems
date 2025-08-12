@@ -45,12 +45,12 @@ hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
     auto cor = CHECK_NOTNULL(get_code_object_registration());
+    cor->remove_code_object(executable);    
     auto status = cor->get_hsa_executable_destroy_fn()(executable);
     if (status)
     {
         return status;
     }
-    cor->remove_code_object(executable);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -101,7 +101,7 @@ void code_object_registration_init(HsaApiTable* table)
 
 }}
 
-extern "C" {
+ROCPROFILER_EXTERN_C_INIT
 
 int rocprofiler_prestore_export_all_code_objects(
     hsa_executable_t* executables,
@@ -116,13 +116,13 @@ int rocprofiler_prestore_export_all_code_objects(
     CHECK_NOTNULL(executables);
     CHECK_NOTNULL(num_executables);
     auto cos = CHECK_NOTNULL(rocprofiler::prestore::get_code_object_registration())->get_all_code_objects();
-    auto cos_out = executables;
     if (*num_executables < cos.size())
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    std::copy(cos.begin(), cos.end(), cos_out);
+    std::copy(cos.begin(), cos.end(), executables);
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
-}
+
+ROCPROFILER_EXTERN_C_FINI
