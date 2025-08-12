@@ -169,36 +169,27 @@ def test_rocpd_data(
     mapping = {
         "hip": (
             "hip_api",
-            (
-                "HIP_COMPILER_API",
-                "HIP_COMPILER_API_EXT",
-                "HIP_RUNTIME_API",
-                "HIP_RUNTIME_API_EXT",
-            ),
+            ("hip_api",),
         ),
         "hsa": (
             "hsa_api",
-            (
-                "HSA_CORE_API",
-                "HSA_AMD_EXT_API",
-                "HSA_IMAGE_EXT_API",
-                "HSA_FINALIZE_EXT_API",
-            ),
+            ("hsa_api",),
         ),
         "marker": (
             "marker_api",
+            ("marker_api",),
+        ),
+        "kernel": ("kernel_dispatch", ("kernel_dispatch",)),
+        "memory_copy": ("memory_copy", ("memory_copy")),
+        "memory_allocation": (
+            "memory_allocation",
             (
-                "MARKER_CORE_API",
-                "MARKER_CONTROL_API",
-                "MARKER_NAME_API",
-                "MARKER_CORE_RANGE_API",
+                "memory_allocation",
+                "scratch_memory",
             ),
         ),
-        "kernel": ("kernel_dispatch", ("KERNEL_DISPATCH")),
-        "memory_copy": ("memory_copy", ("MEMORY_COPY")),
-        "memory_allocation": ("memory_allocation", ("MEMORY_ALLOCATION")),
-        "rocdecode_api": ("rocdecode_api", ("ROCDECODE_API")),
-        "rocjpeg_api": ("rocjpeg_api", ("ROCJPEG_API")),
+        "rocdecode_api": ("rocdecode_api", ("rocdecode_api")),
+        "rocjpeg_api": ("rocjpeg_api", ("rocjpeg_api")),
     }
 
     view_mapping = {
