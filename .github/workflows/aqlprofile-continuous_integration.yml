@@ -10,12 +10,14 @@ on:
       - '!projects/aqlprofile/*.md'
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
   pull_request:
     paths:
       - 'projects/aqlprofile/**'
       - '!projects/aqlprofile/*.md'
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
