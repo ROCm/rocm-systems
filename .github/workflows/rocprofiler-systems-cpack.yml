@@ -112,7 +112,9 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/rocprofiler-systems
+          sparse-checkout: |
+            projects/rocprofiler-systems
+            .github
           submodules: recursive
 
       - name: Configure ROCm Version
