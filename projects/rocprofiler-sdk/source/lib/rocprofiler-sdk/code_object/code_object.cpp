@@ -34,7 +34,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include "lib/rocprofiler-sdk-prestore/code_object_registration.hpp"
+#include "lib/rocprofiler-sdk-prestore/table.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -1143,6 +1143,7 @@ shutdown(hsa_executable_t executable)
 
     return _unloaded;
 }
+
 }  // namespace
 
 void
@@ -1168,26 +1169,6 @@ initialize(HsaApiTable* table)
             << "infinite recursion";
         ROCP_FATAL_IF(get_destroy_function() == core_table.hsa_executable_destroy_fn)
             << "infinite recursion";
-    }
-
-    // If queue registration is enabled, we need to retrieve those queues and add them to our lists.
-    // This will ensure kernel names are correct in output traces
-    // TODO: default to false
-    // TODO: finalize name
-    if (common::get_env("ROCPROFILER_REGISTER_ATTACHMENT_QUEUES_ENABLED", true))
-    {
-        std::vector<hsa_executable_t> exported_executables;
-        uint64_t exported_executables_count;
-
-        ROCP_FATAL_IF(rocprofiler_prestore_export_all_code_objects(nullptr, &exported_executables_count) != 0);
-        exported_executables.resize(exported_executables_count);
-        ROCP_FATAL_IF(rocprofiler_prestore_export_all_code_objects(exported_executables.data(), &exported_executables_count) != 0);
-        ROCP_INFO << "Got " << exported_executables_count << " executables from the queue library";
-        for (auto& exec : exported_executables)
-        {
-            ROCP_INFO << "Adding code object for " << exec.handle;
-            executable_freeze_internal(exec);
-        }
     }
 }
 
@@ -1247,5 +1228,41 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
             },
             std::move(func));
 }
+
 }  // namespace code_object
 }  // namespace rocprofiler
+
+ROCPROFILER_EXTERN_C_INIT
+int rocprofiler_load_prestore_code_objects(void* incoming_table)
+{
+    if (!incoming_table)
+    {
+        ROCP_ERROR << "incoming table is nullptr";
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+    
+    uint32_t incoming_version = *(reinterpret_cast<uint32_t*>(incoming_table));
+
+    if (incoming_version != ROCPROFILER_PRESTORE_TABLE_CURRENT_VERSION)
+    {
+        ROCP_ERROR << "incoming table is blank or bad version";
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    auto prestore_table = reinterpret_cast<rocprofiler_prestore_dispatch_table_t*>(incoming_table);
+
+    std::vector<hsa_executable_t> exported_executables;
+    uint64_t exported_executables_count;
+
+    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(nullptr, &exported_executables_count) != 0);
+    exported_executables.resize(exported_executables_count);
+    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(exported_executables.data(), &exported_executables_count) != 0);
+    ROCP_INFO << "Got " << exported_executables_count << " executables from the prestore library";
+    for (auto& exec : exported_executables)
+    {
+        ROCP_INFO << "Adding code object for " << exec.handle;
+        rocprofiler::code_object::executable_freeze_internal(exec);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+ROCPROFILER_EXTERN_C_FINI
