@@ -18,48 +18,47 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
-#include <hip_test_kernels.hh>
 #include <hip_test_defgroups.hh>
 /**
- * @addtogroup hipMemsetD2D16 hipMemsetD2D16
+ * @addtogroup hipMemsetD2D8 hipMemsetD2D8
  * @{
  * @ingroup MemoryTest
- * `hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
- *                            size_t width, size_t height);` -
- * Fills 2D memory range of 'width' 16-bit values synchronously to the specified short value.
+ * `hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
+    size_t width, size_t height);` -
+ * Fills 2D memory range of 'width' 8-bit values synchronously to the specified char value.
  * Height specifies numbers of rows to set and dstPitch speicifies the number of bytes between each
  * row.
  */
 /**
  * Test Description
  * ------------------------
- * - Checks that allocated buffers have the expected value
+ *  - Checks that allocated buffers have the expected value
  * after setting it to a known constant.
  * Test source
  * ------------------------
- * - catch/unit/memory/hipMemsetD2D16.cc
+ *  - catch/unit/memory/hipMemsetD2D8.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
-  constexpr uint16_t memsetval = static_cast<uint16_t>(0xDEADBEEF);
+TEST_CASE("Unit_hipMemsetD2D8_BasicFunctional") {
+  constexpr char memsetval = 'c';
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
   size_t pitch_A;
-  size_t width = numW * sizeof(uint16_t);
+  size_t width = numW * sizeof(char);
   size_t sizeElements = width * numH;
   size_t elements = numW * numH;
-  uint16_t *A_d, *A_h;
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH,
-                             2 * sizeof(uint16_t)));
-  A_h = reinterpret_cast<uint16_t*>(malloc(sizeElements));
+  char *A_d, *A_h;
+  HIP_CHECK(
+      hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH, 4 * sizeof(char)));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
 
   for (size_t i = 0; i < elements; i++) {
     A_h[i] = 1;
   }
-  HIP_CHECK(hipMemsetD2D16(A_d, pitch_A, memsetval, width, numH));
+  HIP_CHECK(hipMemsetD2D8(A_d, pitch_A, memsetval, width, numH));
   HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < elements; i++) {
@@ -80,45 +79,51 @@ TEST_CASE("Unit_hipMemsetD2D16_BasicFunctional") {
  * after setting it to a known constant.
  * Test source
  * ------------------------
- * - catch/unit/memory/hipMemsetD2D16.cc
+ * - catch/unit/memory/hipMemsetD2D8.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
-  uint16_t *A_h, *B_h, *A_d;
+TEST_CASE("Unit_hipMemsetD2D8_UnEvenRowsCols") {
+  char *A_h, *B_h, *A_d;
   int rows, cols;
   rows = GENERATE(3, 4, 100);
-  cols = GENERATE(5, 6, 100);
+  cols = GENERATE(4, 5, 100);
   size_t devPitch;
-
-  A_h = reinterpret_cast<uint16_t*>(malloc(sizeof(uint16_t) * rows * cols));
-  B_h = reinterpret_cast<uint16_t*>(malloc(sizeof(uint16_t) * rows * cols));
+  constexpr char memsetval = 'c';
+  A_h = reinterpret_cast<char*>(malloc(sizeof(char) * rows * cols));
+  B_h = reinterpret_cast<char*>(malloc(sizeof(char) * rows * cols));
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
       A_h[i * cols + j] = 1;
     }
   }
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(uint16_t) * cols,
-                             rows, 2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(uint16_t) * cols, sizeof(uint16_t) * cols, rows,
+  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(char) * cols, rows,
+                             4 * sizeof(char)));
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(char) * cols, sizeof(char) * cols, rows,
                         hipMemcpyHostToDevice));
 
   HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipMemsetD2D16(A_d, devPitch, 5, sizeof(uint16_t) * cols, rows));
+  HIP_CHECK(hipMemsetD2D8(A_d, devPitch, memsetval, sizeof(char) * cols, rows));
   HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipMemcpy2D(B_h, sizeof(uint16_t) * cols, A_d, devPitch, sizeof(uint16_t) * cols, rows,
+  HIP_CHECK(hipMemcpy2D(B_h, sizeof(char) * cols, A_d, devPitch, sizeof(char) * cols, rows,
                         hipMemcpyDeviceToHost));
 
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
-      REQUIRE(B_h[i * cols + j] == 5);
+      REQUIRE(B_h[i * cols + j] == memsetval);
     }
   }
   HIP_CHECK(hipFree(A_d));
   free(A_h);
   free(B_h);
+}
+__global__ void copy_ker(char* Ad, char* Bd, size_t size) {
+  int myId = threadIdx.x + blockDim.x * blockIdx.x;
+  if (myId < size) {
+    Bd[myId] = Ad[myId];
+  }
 }
 /**
  * Test Description
@@ -127,56 +132,51 @@ TEST_CASE("Unit_hipMemsetD2D16_UnEvenRowsCols") {
  * after setting it to a known constant.
  * Test source
  * ------------------------
- * - catch/unit/memory/hipMemsetD2D16.cc
+ * - catch/unit/memory/hipMemsetD2D8.cc
  * Test requirements
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D16_KernelOperation") {
+TEST_CASE("Unit_hipMemsetD2D8_KernelOperation") {
   constexpr size_t size = 4096;
-  constexpr uint16_t memsetval = static_cast<uint16_t>(0x26);
+  constexpr char memsetval = 'c';
   constexpr unsigned blocksPerCU = 6;
   constexpr unsigned threadsPerBlock = 256;
-  uint16_t *C_h, *A_d, *B_d, *C_d;
+  char *C_h, *A_d, *C_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
-  size_t devPitchA, devPitchB, devPitchC;
-  size_t width = numW * sizeof(uint16_t);
+  size_t devPitchA, devPitchC;
+  size_t width = numW * sizeof(char);
   size_t sizeElements = width * numH;
 
-  C_h = reinterpret_cast<uint16_t*>(malloc(sizeElements));
+  C_h = reinterpret_cast<char*>(malloc(sizeElements));
   for (int i = 0; i < numH; i++) {
     for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = 0;
+      C_h[i * numH + j] = 'a';
     }
   }
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitchA, width, numH,
-                             2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&B_d), &devPitchB, width, numH,
-                             2 * sizeof(uint16_t)));
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&C_d), &devPitchC, width, numH,
-                             2 * sizeof(uint16_t)));
+  HIP_CHECK(
+      hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitchA, width, numH, 4 * sizeof(char)));
+  HIP_CHECK(
+      hipMemAllocPitch(reinterpret_cast<void**>(&C_d), &devPitchC, width, numH, 4 * sizeof(char)));
 
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMemsetD2D16(A_d, devPitchA, memsetval, numW, numH));
-  HIP_CHECK(hipMemsetD2D16(B_d, devPitchB, memsetval, numW, numH));
+  HIP_CHECK(hipMemsetD2D8(A_d, devPitchA, memsetval, numW, numH));
 
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, size);
 
-  hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, B_d,
-                     C_d, size);
+  hipLaunchKernelGGL(copy_ker, dim3(blocks), dim3(threadsPerBlock), 0, stream, A_d, C_d, size);
 
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipMemcpy2D(C_h, width, C_d, devPitchC, width, numH, hipMemcpyDeviceToHost));
   for (int i = 0; i < numH; i++) {
     for (int j = 0; j < numW; j++) {
-      C_h[i * numH + j] = memsetval + memsetval;
+      C_h[i * numH + j] = memsetval;
     }
   }
   HIP_CHECK(hipFree(A_d));
-  HIP_CHECK(hipFree(B_d));
   HIP_CHECK(hipFree(C_d));
   free(C_h);
   HIP_CHECK(hipStreamDestroy(stream));
@@ -187,46 +187,46 @@ TEST_CASE("Unit_hipMemsetD2D16_KernelOperation") {
  * - Checks function behaviour when provided invalid arguments.
  * Test source
  * ------------------------
- * - catch/unit/memory/hipMemsetD2D16.cc
+ * - catch/unit/memory/hipMemsetD2D8.cc
  * Test requirements
  * ------------------------
  * - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemsetD2D16_NegTsts") {
-  uint16_t* A_d;
+TEST_CASE("Unit_hipMemsetD2D8_NegTsts") {
+  char* A_d;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
-  size_t width = numW * sizeof(uint16_t);
+  size_t width = numW * sizeof(char);
   size_t devPitch;
-  constexpr uint16_t memsetval = static_cast<uint16_t>(0x26);
-  HIP_CHECK(hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, width, numH,
-                             2 * sizeof(uint16_t)));
+  constexpr char memsetval = 'c';
+  HIP_CHECK(
+      hipMemAllocPitch(reinterpret_cast<void**>(&A_d), &devPitch, width, numH, 4 * sizeof(char)));
   SECTION("nullptr destination") {
-    HIP_CHECK_ERROR(hipMemsetD2D16(nullptr, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(nullptr, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("OutOfBound destination") {
-    void* outOfBoundsDst{reinterpret_cast<uint16_t*>(A_d) + devPitch * numH + 1};
-    HIP_CHECK_ERROR(hipMemsetD2D16(outOfBoundsDst, devPitch, memsetval, numW, numH),
+    void* outOfBoundsDst{reinterpret_cast<char*>(A_d) + devPitch * numH + 1};
+    HIP_CHECK_ERROR(hipMemsetD2D8(outOfBoundsDst, devPitch, memsetval, numW, numH),
                     hipErrorInvalidValue);
   }
   SECTION("Dst pointer points to Source Memory") {
-    uint16_t* B_d;
-    std::unique_ptr<uint16_t[]> hostPtr;
-    hostPtr.reset(new uint16_t[numH * width]);
+    char* B_d;
+    std::unique_ptr<char[]> hostPtr;
+    hostPtr.reset(new char[numH * width]);
     B_d = hostPtr.get();
-    HIP_CHECK_ERROR(hipMemsetD2D16(B_d, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(B_d, devPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("Invalid Pitch") {
     size_t inValidPitch = 1;
-    HIP_CHECK_ERROR(hipMemsetD2D16(A_d, inValidPitch, memsetval, numW, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, inValidPitch, memsetval, numW, numH), hipErrorInvalidValue);
   }
   SECTION("Negative Values of Hight, Width") {
-    HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW, -10), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, -10, numH), hipErrorInvalidValue);
   }  // need to check on CUDA
   /*SECTION("OutOfbounds Hight, Width") {
-    HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, numW, numH+256), hipErrorInvalidValue);
-    HIP_CHECK_ERROR(hipMemsetD2D16(A_d, devPitch, memsetval, numW+256, numH), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW, numH+256), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemsetD2D8(A_d, devPitch, memsetval, numW+256, numH), hipErrorInvalidValue);
   }*/
   HIP_CHECK(hipFree(A_d));
 }
