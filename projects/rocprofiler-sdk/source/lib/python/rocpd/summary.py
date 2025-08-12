@@ -48,8 +48,9 @@ def check_function_availability(connection, function_name):
 
     # Query pragma_function_list to check for the function
     cursor.execute(
-        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name = ?)",
-        (function_name,),
+        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='{}')".format(
+            function_name
+        )
     )
     result = cursor.fetchone()[0]
 
@@ -287,9 +288,6 @@ def create_summary_views(connection: RocpdImportData, by_rank=False) -> None:
         if not required_columns.issubset(columns):
             continue
 
-        if check_function_availability(connection, "SQRT") is False:
-            connection.create_function("SQRT", 1, math.sqrt)
-
         # Create regular summary view
         summary_view_name, summary_query = generate_summary_query(
             view_name, name_column=NAME_COLUMN_MAP.get(view_name, "name")
@@ -325,9 +323,6 @@ def create_summary_region_views(
         for cat in region_categories
         if "MARKER" not in cat.upper()
     }
-
-    if check_function_availability(connection, "SQRT") is False:
-        connection.create_function("SQRT", 1, math.sqrt)
 
     for k, v in category_map.items():
         if len(v) > 0:
@@ -403,6 +398,11 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     output_path = kwargs.get("output_path", "./rocpd-output-data")
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
+
+    if check_function_availability(connection, "sqrt") is False:
+        connection.create_function(
+            "sqrt", 1, lambda x: math.sqrt(x) if x is not None and x >= 0 else None
+        )
 
     # create the temporary summary views
     create_summary_views(connection, by_rank)
