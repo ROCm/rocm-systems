@@ -3120,9 +3120,10 @@ rocprofv3_main(int argc, char** argv, char** envp)
     return ret;
 }
 
+ROCPROFILER_EXTERN_C_INIT
+
 void
-rocprofv3_attach() __attribute__((visibility("default")));
-;
+rocprofv3_attach() ROCPROFILER_PUBLIC_API;
 
 void
 rocprofv3_attach()
@@ -3132,8 +3133,7 @@ rocprofv3_attach()
 }
 
 void
-rocprofv3_detach() __attribute__((visibility("default")));
-;
+rocprofv3_detach() ROCPROFILER_PUBLIC_API;
 
 void
 rocprofv3_detach()
@@ -3141,3 +3141,5 @@ rocprofv3_detach()
     finalize_rocprofv3(__FUNCTION__);
 }
 }
+
+ROCPROFILER_EXTERN_C_FINI

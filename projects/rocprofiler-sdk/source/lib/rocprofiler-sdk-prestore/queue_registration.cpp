@@ -28,6 +28,10 @@
 namespace rocprofiler {
 namespace prestore {
 
+// This is the prestore library's WriteInterceptor that is provided to HSA.
+// Since the interceptor function cannot be changed later, this shim is provided immediately.
+// This shim will look up the associated queue and execute the user's write intercept function
+// if it has been previously provided. Otherwise, it will execute the packet write normally.
 void write_interceptor
     (const void* packets,
     uint64_t     pkt_count,
@@ -176,7 +180,7 @@ queue_registration_init(HsaApiTable* table)
 }}
 
 
-extern "C" {
+ROCPROFILER_EXTERN_C_INIT
 
 int
 rocprofiler_prestore_export_all_queues(
@@ -224,4 +228,4 @@ int rocprofiler_prestore_set_write_interceptor(
     return 0;
 }
 
-}
+ROCPROFILER_EXTERN_C_FINI

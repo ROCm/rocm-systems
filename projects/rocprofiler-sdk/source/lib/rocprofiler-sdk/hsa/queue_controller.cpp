@@ -32,8 +32,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <memory>
 
-#include <dlfcn.h>
-
 namespace rocprofiler
 {
 namespace hsa
@@ -246,18 +244,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     for(const auto* itr : agents)
     {
         const auto* cached_agent = agent::get_agent_cache(itr);
-        ROCP_INFO << fmt::format(
+        ROCP_TRACE << fmt::format(
             "RocP Agent {:x} has Cache Agent? {}", itr->id.handle, cached_agent ? "yes" : "no");
         if(cached_agent)
         {
-            ROCP_INFO << fmt::format("RocP Agent {:x} Type {}",
+            ROCP_TRACE << fmt::format("RocP Agent {:x} Type {}",
                                       itr->id.handle,
                                       (int) cached_agent->get_rocp_agent()->type);
         }
 
         if(cached_agent && cached_agent->get_rocp_agent()->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
-            ROCP_INFO << fmt::format("RocP Agent {:x} is added to cache", itr->id.handle);
+            ROCP_TRACE << fmt::format("RocP Agent {:x} is added to cache", itr->id.handle);
             get_supported_agents().emplace(cached_agent->index(), *cached_agent);
         }
     }
@@ -488,6 +486,7 @@ queue_controller_fini()
 }  // namespace rocprofiler
 
 ROCPROFILER_EXTERN_C_INIT
+
 int rocprofiler_load_prestore_queues(void* incoming_table)
 {
     if (!incoming_table)
@@ -555,4 +554,5 @@ int rocprofiler_load_prestore_queues(void* incoming_table)
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
 ROCPROFILER_EXTERN_C_FINI

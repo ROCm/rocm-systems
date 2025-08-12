@@ -26,8 +26,6 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
 
 #include <cstdint>
 #include <unordered_map>

@@ -717,6 +717,5 @@ Queue::set_state(queue_state state)
 {
     _state = state;
 }
-
 }  // namespace hsa
 }  // namespace rocprofiler
