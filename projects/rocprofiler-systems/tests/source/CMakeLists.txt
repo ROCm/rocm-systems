@@ -42,6 +42,18 @@ set(_thread_limit_environment
 )
 
 math(EXPR THREAD_LIMIT_TEST_VALUE "${ROCPROFSYS_MAX_THREADS} + 24")
+# Make sure the thread limit is set to the maximum thread size limit, which is
+# 4096, as indicated by the counters.hpp.
+set(ALLOWED_MAX_THREADS 4096)
+if(${THREAD_LIMIT_TEST_VALUE} GREATER_EQUAL ${ALLOWED_MAX_THREADS})
+    message(
+        WARNING
+        "THREAD_LIMIT_TEST_VALUE has reached or exceeded the max allowed threads (4096)."
+    )
+    # Establishing the maximum number of permitted threads index.
+    math(EXPR VALID_MAX_THREAD_INDEX "${ALLOWED_MAX_THREADS} - 1")
+    set(THREAD_LIMIT_TEST_VALUE ${VALID_MAX_THREAD_INDEX})
+endif()
 math(EXPR THREAD_LIMIT_TEST_VALUE_PLUS_ONE "${THREAD_LIMIT_TEST_VALUE} + 1")
 
 set(_thread_limit_pass_regex "\\|${THREAD_LIMIT_TEST_VALUE}>>>")
