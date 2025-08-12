@@ -400,11 +400,11 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         "write_perfetto",
         [](rocpd::RocpdImportData& data, const tool::output_config& output_cfg) -> bool {
             // ORDER BY expression for kernel dispatches
-            constexpr auto kernels_order_by =
-                "agent_absolute_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
-
-            constexpr auto region_order_by = "start ASC, end DESC";
-            constexpr auto sample_order_by = "timestamp ASC";
+            constexpr auto region_order_by   = "start ASC, end ASC";
+            constexpr auto sample_order_by   = "timestamp ASC";
+            constexpr auto kernels_order_by  = "stream_id ASC, queue_id ASC, start ASC, end ASC";
+            constexpr auto memcpy_order_by   = "stream_id ASC, queue_id ASC, start ASC, end ASC";
+            constexpr auto memalloc_order_by = "stream_id ASC, queue_id ASC, start ASC, end ASC";
 
             auto sqlgen_perf = common::simple_timer{
                 fmt::format("Perfetto generation from {} SQL database(s)", data.size())};
@@ -444,10 +444,10 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                         conn, select_guid_nid_pid("kernels"), kernels_order_by};
 
                     auto memory_allocations = rocpd::sql_generator<rocpd::types::memory_allocation>{
-                        conn, select_guid_nid_pid("memory_allocations")};
+                        conn, select_guid_nid_pid("memory_allocations"), memalloc_order_by};
 
                     auto memory_copies = rocpd::sql_generator<rocpd::types::memory_copies>{
-                        conn, select_guid_nid_pid("memory_copies")};
+                        conn, select_guid_nid_pid("memory_copies"), memcpy_order_by};
 
                     auto regions = rocpd::sql_generator<rocpd::types::region>{
                         conn, select_guid_nid_pid("regions"), region_order_by};
@@ -491,7 +491,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
             };
 
             constexpr auto kernels_order_by =
-                "agent_absolute_index ASC, stream_id ASC, queue_id ASC, start ASC, end DESC";
+                "agent_absolute_index ASC, stream_id ASC, queue_id ASC, start ASC, end ASC";
 
             // to initialise the OTF@ session properly we need to know:
             // (1) the process with the earliest start time
@@ -587,7 +587,7 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
                                                    where_extra_condition);
                             };
 
-                        constexpr auto region_order_by = "start ASC, end DESC";
+                        constexpr auto region_order_by = "start ASC, end ASC";
 
                         auto _sqlgen_otf2 = common::simple_timer{fmt::format(
                             "OTF2 generation from SQL for process {} (total)", pitr.pid)};
