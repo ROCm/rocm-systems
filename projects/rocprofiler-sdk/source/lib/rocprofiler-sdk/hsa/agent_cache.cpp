@@ -21,9 +21,11 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 
 #include <fmt/core.h>
+#include <cctype>
 #include <stdexcept>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -151,7 +153,34 @@ AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
         << "HSA Queue is not initialized";
 
     CHECK(ext.hsa_amd_queue_set_priority_fn) << "no hsa_amd_queue_set_priority_fn in api table";
-    ext.hsa_amd_queue_set_priority_fn(m_profile_queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
+
+    // allow to configure queue priority using an environment variable;
+    // accepted values (case-insensitive): "low", "normal", "high"; default: "high"
+    auto priority_str = rocprofiler::common::get_env("ROCPROFILER_DEVICE_COUNTING_QUEUE_PRIORITY",
+                                                     std::string{"high"});
+    for(auto& c : priority_str)
+        c = static_cast<char>(::tolower(static_cast<unsigned char>(c)));
+
+    hsa_amd_queue_priority_t priority = HSA_AMD_QUEUE_PRIORITY_HIGH;
+    if(priority_str == "low")
+        priority = HSA_AMD_QUEUE_PRIORITY_LOW;
+    else if(priority_str == "normal")
+        priority = HSA_AMD_QUEUE_PRIORITY_NORMAL;
+    else if(priority_str == "high")
+        priority = HSA_AMD_QUEUE_PRIORITY_HIGH;
+    else
+    {
+        ROCP_WARNING << "Unknown ROCPROFILER_DEVICE_COUNTING_QUEUE_PRIORITY=\"" << priority_str
+                     << "\"; defaulting to 'high'";
+    }
+
+    // informational logging of selected priority
+    const char* priority_name = (priority == HSA_AMD_QUEUE_PRIORITY_LOW)      ? "low"
+                                : (priority == HSA_AMD_QUEUE_PRIORITY_NORMAL) ? "normal"
+                                                                              : "high";
+    ROCP_INFO << "Device counting queue priority set to '" << priority_name << "'";
+
+    ext.hsa_amd_queue_set_priority_fn(m_profile_queue, priority);
 }
 
 AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,

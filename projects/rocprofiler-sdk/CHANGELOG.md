@@ -2,6 +2,12 @@
 
 Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
+## Unreleased
+
+### Added
+
+- Environment variable `ROCPROFILER_DEVICE_COUNTING_QUEUE_PRIORITY` to configure the HSA queue priority used by the device counting service (`low`|`normal`|`high`; default `high`).
+
 ## ROCprofiler-SDK for AFAR I
 
 ### Added
