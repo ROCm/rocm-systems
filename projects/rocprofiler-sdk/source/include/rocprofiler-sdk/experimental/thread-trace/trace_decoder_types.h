@@ -181,7 +181,7 @@ typedef struct rocprofiler_thread_trace_decoder_realtime_t
 {
     int64_t  shader_clock;    ///< Clock timestamp in gfx clock units
     uint64_t realtime_clock;  ///< Clock timestamp in realtime units
-    uint64_t _reserved;
+    uint64_t reserved;
 } rocprofiler_thread_trace_decoder_realtime_t;
 
 /**
