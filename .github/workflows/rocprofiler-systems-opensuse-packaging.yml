@@ -61,7 +61,7 @@ jobs:
         ROCM_VERSN=$(( (${ROCM_MAJOR}*10000)+(${ROCM_MINOR}*100) ))
         zypper install -y perl-File-BaseDir
         zypper --non-interactive --no-gpg-checks install https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/sle/${{ matrix.release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
-        zypper --non-interactive --no-gpg-checks install rocm-dev rocdecode-devel python3-devel
+        zypper --non-interactive --no-gpg-checks install rocm-dev rocdecode-devel
 
     - name: Build rocprofiler-systems
       timeout-minutes: 35
@@ -83,7 +83,7 @@ jobs:
         ROCM_VERSION=${{ matrix.rocm-version }}
         if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
         cpack -G RPM ${CPACK_ARGUMENTS}
-        zypper --non-interactive install *.rpm
+        zypper --non-interactive --no-gpg-checks install *.rpm
 
     - name: Verify Installation
       timeout-minutes: 15
@@ -91,4 +91,9 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         cd $INSTALL_DIR
-        echo "TO BE ADDED LATER"
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./rocprof-sys-python --help
+        ./rocprof-sys-run --help
+        ./rocprof-sys-sample --help
+        ./rocprof-sys-causal --help
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1

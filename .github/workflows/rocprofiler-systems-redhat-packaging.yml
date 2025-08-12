@@ -63,7 +63,7 @@ jobs:
         if [ "${OS_VERSION_MAJOR}" -eq 8 ]; then PERL_REPO=powertools; else PERL_REPO=crb; fi
         dnf -y --enablerepo=${PERL_REPO} install perl-File-BaseDir
         dnf install -y https://repo.radeon.com/amdgpu-install/${{ matrix.rocm-version }}/rhel/${{ matrix.release }}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.el${OS_VERSION_MAJOR}.noarch.rpm
-        dnf install -y rocm-dev rocdecode-devel python3-devel
+        dnf install -y rocm-dev rocdecode-devel
         if [ "${OS_VERSION_MAJOR}" -gt 8 ]; then dnf install -y libavcodec-free-devel libavformat-free-devel; fi
 
     - name: Build rocprofiler-systems
@@ -94,4 +94,9 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         cd $INSTALL_DIR
-        echo "TO BE ADDED LATER"
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./rocprof-sys-python --help
+        ./rocprof-sys-run --help
+        ./rocprof-sys-sample --help
+        ./rocprof-sys-causal --help
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1

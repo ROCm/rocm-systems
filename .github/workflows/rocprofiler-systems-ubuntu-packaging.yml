@@ -91,4 +91,9 @@ jobs:
       working-directory: projects/rocprofiler-systems/
       run: |
         cd $INSTALL_DIR
-        echo "TO BE ADDED LATER"
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./rocprof-sys-python --help
+        ./rocprof-sys-run --help
+        ./rocprof-sys-sample --help
+        ./rocprof-sys-causal --help
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1
