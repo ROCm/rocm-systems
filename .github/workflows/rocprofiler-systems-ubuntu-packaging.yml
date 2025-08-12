@@ -74,7 +74,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         cmake --preset release -B $BUILD_DIR -S ${PWD} -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR &&
