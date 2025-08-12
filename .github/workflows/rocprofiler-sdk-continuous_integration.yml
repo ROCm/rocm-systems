@@ -11,6 +11,7 @@ on:
       - '!projects/rocprofiler-sdk/**/README.md'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
@@ -18,6 +19,7 @@ on:
       - '!projects/rocprofiler-sdk/**/README.md'
       - '!projects/rocprofiler-sdk/CODEOWNERS'
       - '!projects/rocprofiler-sdk/source/docs/**'
+      - '.github/workflows/rocprofiler-sdk-continuous_integration.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -55,7 +57,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi300a']
+        runner: ['navi4', 'navi3', 'mi3xx']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 

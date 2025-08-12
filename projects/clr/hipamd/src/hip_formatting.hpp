@@ -923,3 +923,17 @@ inline std::ostream& operator<<(std::ostream& os, const hipIpcEventHandle_t* s) 
   //TODO fill in later
   return os;
 }
+
+inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr& p) {
+  os << "pitchPtr:" << std::hex << reinterpret_cast<uintptr_t>(p.ptr);
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr* p) {
+  if (p) {
+    os << *p;
+  } else {
+    os << "nullptr";
+  }
+  return os;
+}

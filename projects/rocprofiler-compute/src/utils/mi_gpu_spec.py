@@ -66,6 +66,8 @@ class MIGPUSpecs:
     # containing only one gpu model and
     # thus one compute partition
 
+    _all_gpu_models = []
+
     _initialized = False
 
     def __new__(cls):
@@ -144,6 +146,7 @@ class MIGPUSpecs:
                 cls._gpu_model_dict[curr_gpu_arch] = []
                 for models in archs["models"]:
                     curr_gpu_model = models["gpu_model"]
+                    cls._all_gpu_models.append(curr_gpu_model)
                     cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
                     cls._num_xcds_dict[curr_gpu_model] = (
                         models.get("partition_mode", {})
@@ -377,6 +380,10 @@ class MIGPUSpecs:
     @classmethod
     def get_gpu_arch_to_compute_partition_dict(cls):
         return cls._gpu_arch_to_compute_partition_dict
+
+    @classmethod
+    def get_all_gpu_models(cls):
+        return cls._all_gpu_models
 
 
 # pre-initialize the instance when module loads

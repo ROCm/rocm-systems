@@ -5,7 +5,7 @@ set-user-defaults()
     : ${USER:=$(whoami)}
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
-    : ${VERSIONS:=20.04}
+    : ${VERSIONS:=22.04}
     : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
@@ -26,7 +26,7 @@ declare -a MATRIX_ROCM_VERSIONS=()
 
 load-matrix()
 {
-    local workflow_file=".github/workflows/containers.yml"
+    local workflow_file="$(git rev-parse --show-toplevel)/.github/workflows/rocprofiler-systems-containers.yml"
     if [ ! -f "${workflow_file}" ]; then
         echo -e "\n Error: Cannot find ${workflow_file}"
         exit 1
@@ -335,9 +335,6 @@ do
                     ;;
                 22.04)
                     ROCM_REPO_DIST="jammy"
-                    ;;
-                20.04)
-                    ROCM_REPO_DIST="focal"
                     ;;
                 *)
                     ;;

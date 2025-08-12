@@ -44,6 +44,26 @@ THE SOFTWARE.
 
 #define HIP_PRINT_STATUS(status) INFO(hipGetErrorName(status) << " at line: " << __LINE__);
 
+#define CHAR_BUF_SIZE 512
+
+#define CONSOLE_PRINT(fmt, ...)                                                                    \
+  do {                                                                                             \
+    std::printf(fmt "\n", ##__VA_ARGS__);                                                          \
+  } while (0)
+
+// DEBUG_PRINT: If ENABLE_DEBUG is defined, prints immediately to console.
+// Otherwise, uses Catch2 INFO() - debug messages will only appear if the test fails.
+#if defined(ENABLE_DEBUG)
+#define DEBUG_PRINT(fmt, ...) CONSOLE_PRINT("[DEBUG]: " fmt, ##__VA_ARGS__)
+#else
+#define DEBUG_PRINT(fmt, ...)                                                                      \
+  do {                                                                                             \
+    char buf[CHAR_BUF_SIZE];                                                                       \
+    std::snprintf(buf, CHAR_BUF_SIZE, "[INFO]: " fmt, ##__VA_ARGS__);                              \
+    INFO(buf);                                                                                     \
+  } while (0)
+#endif
+
 // Not thread-safe
 #define HIP_CHECK(error)                                                                           \
   {                                                                                                \

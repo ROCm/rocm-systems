@@ -25,6 +25,7 @@
 """Get host/gpu specs."""
 
 import importlib
+import json
 import os
 import re
 import socket
@@ -154,32 +155,35 @@ def generate_machine_specs(args, sysinfo: dict = None):
     rocm_version = get_rocm_ver().strip()
     # FIXME: use device
 
-    amd_smi_output = run(["amd-smi", "static"], exit_on_error=True)
-    vbios_pattern = r"PART_NUMBER:\s*(\S+)"
-    compute_partition_pattern = r"COMPUTE_PARTITION:\s*(\S+)"
-    accelerator_partition_pattern = r"ACCELERATOR_PARTITION:\s*(\S+)"
-    memory_partition_pattern = r"MEMORY_PARTITION:\s*(\S+)"
+    # Load amd-smi static data for GPU 0
+    static_data = json.loads(
+        run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
+    )
 
-    vbios = search(vbios_pattern, amd_smi_output)
+    # Extract GPU data
+    gpu_list = (
+        static_data
+        if isinstance(static_data, list)
+        else static_data.get("gpu_data", [])
+    )
+    gpu_data = gpu_list[0] if gpu_list else {}
 
-    # Non-high-frequency System Patterns
-    compute_partition = search(compute_partition_pattern, amd_smi_output)
-    console_debug(f"amd-smi compute partition: {compute_partition}")
+    vbios = gpu_data.get("vbios", {}).get("part_number")
 
-    # High-frequency System Pattern using keyword accelerator
+    # Get partition values with fallback for older amd-smi
+    compute_partition = gpu_data.get("partition", {}).get(
+        "accelerator_partition"
+    ) or gpu_data.get("partition", {}).get("compute_partition")
+    memory_partition = gpu_data.get("partition", {}).get("memory_partition")
+
+    # Apply defaults and warnings
     if compute_partition is None:
-        compute_partition = search(accelerator_partition_pattern, amd_smi_output)
-        console_debug(f"amd-smi accelerator partition: {compute_partition}")
-
-    # Apply default compute partition is above fails
-    if compute_partition is None:
-        console_warning("Can not detect compute/accelerator partition from amd-smi.")
-        console_warning("Applying default compute partition: SPX")
+        console_warning("Cannot detect accelerator partition from amd-smi.")
+        console_warning("Applying default accelerator partition: SPX")
         compute_partition = "SPX"
 
-    memory_partition = search(memory_partition_pattern, amd_smi_output)
     if memory_partition is None:
-        memory_partition = "NA"
+        console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(
         "vbios is {}, compute partition is {}, memory partition is {}".format(
@@ -619,7 +623,7 @@ class MachineSpecs:
     )
 
     def get_hbm_channels(self):
-        if self.memory_partition.lower().startswith("nps"):
+        if self.memory_partition and self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
             if self.memory_partition.lower() == "nps4":
                 hbmchannels /= 4
