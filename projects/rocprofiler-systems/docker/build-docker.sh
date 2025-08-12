@@ -5,7 +5,7 @@ set-user-defaults()
     : ${USER:=$(whoami)}
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
-    : ${VERSIONS:=20.04}
+    : ${VERSIONS:=22.04}
     : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
@@ -335,9 +335,6 @@ do
                     ;;
                 22.04)
                     ROCM_REPO_DIST="jammy"
-                    ;;
-                20.04)
-                    ROCM_REPO_DIST="focal"
                     ;;
                 *)
                     ;;

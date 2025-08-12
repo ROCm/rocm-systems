@@ -27,8 +27,6 @@ jobs:
       matrix:
         include:
           - distro: "ubuntu"
-            version: "20.04"
-          - distro: "ubuntu"
             version: "22.04"
           - distro: "ubuntu"
             version: "24.04"
@@ -83,13 +81,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu 20.04
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "6.3"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
