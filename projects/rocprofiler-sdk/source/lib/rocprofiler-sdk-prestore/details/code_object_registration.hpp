@@ -29,13 +29,16 @@
 
 #include <cstdint>
 
-namespace rocprofiler {
-namespace prestore {
+namespace rocprofiler
+{
+namespace prestore
+{
 
-class CodeObjectRegistration {
-    using hsa_executable_freeze_t = decltype(CoreApiTable::hsa_executable_freeze_fn);
+class CodeObjectRegistration
+{
+    using hsa_executable_freeze_t  = decltype(CoreApiTable::hsa_executable_freeze_fn);
     using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
-    using code_object_prestore_t = hsa_executable_t;
+    using code_object_prestore_t   = hsa_executable_t;
     using code_object_collection_t = std::vector<code_object_prestore_t>;
 
 public:
@@ -49,17 +52,24 @@ public:
     void remove_code_object(code_object_prestore_t);
 
     const code_object_collection_t& get_all_code_objects() { return m_code_objects; };
-    hsa_executable_freeze_t get_hsa_executable_freeze_fn() const { return m_hsa_executable_freeze_fn; }
-    hsa_executable_destroy_t get_hsa_executable_destroy_fn() const { return m_hsa_executable_destroy_fn; }
+    hsa_executable_freeze_t         get_hsa_executable_freeze_fn() const
+    {
+        return m_hsa_executable_freeze_fn;
+    }
+    hsa_executable_destroy_t get_hsa_executable_destroy_fn() const
+    {
+        return m_hsa_executable_destroy_fn;
+    }
 
 private:
     code_object_collection_t m_code_objects;
 
-    hsa_executable_freeze_t m_hsa_executable_freeze_fn;
+    hsa_executable_freeze_t  m_hsa_executable_freeze_fn;
     hsa_executable_destroy_t m_hsa_executable_destroy_fn;
 };
 
 CodeObjectRegistration*
 get_code_object_registration();
 
-}}
+}  // namespace prestore
+}  // namespace rocprofiler

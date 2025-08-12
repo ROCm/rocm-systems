@@ -21,8 +21,8 @@
 // THE SOFTWARE.
 
 #include "prestore.hpp"
-#include "queue_registration.hpp"
 #include "code_object_registration.hpp"
+#include "queue_registration.hpp"
 
 #include "lib/common/logging.hpp"
 
@@ -36,27 +36,26 @@ init_logging()
 bool init_logging_at_load = (init_logging(), true);
 
 ROCPROFILER_EXTERN_C_INIT
-    
+
 int
-rocprofiler_prestore_set_api_table(
-    const char* name,
-    uint64_t    lib_version,
-    uint64_t    lib_instance,
-    void**      tables,
-    uint64_t    num_tables) 
+rocprofiler_prestore_set_api_table(const char* name,
+                                   uint64_t    lib_version,
+                                   uint64_t    lib_instance,
+                                   void**      tables,
+                                   uint64_t    num_tables)
 {
     ROCP_TRACE << "rocprofiler_prestore_set_api_table called for api " << name;
-    (void)lib_version; // unused
-    (void)lib_instance; // unused
+    (void) lib_version;   // unused
+    (void) lib_instance;  // unused
 
-    if (std::string_view{name} != "hsa")
+    if(std::string_view{name} != "hsa")
     {
         ROCP_ERROR << "rocprofiler_prestore_set_api_table was called with a table other than HSA";
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
 
-    ROCP_ERROR_IF(num_tables > 1)
-        << "rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
+    ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HSA library to pass 1 API table, not "
+                                  << num_tables;
 
     auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
 
@@ -67,7 +66,8 @@ rocprofiler_prestore_set_api_table(
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-int rocprofiler_prestore_get_version()
+int
+rocprofiler_prestore_get_version()
 {
     constexpr int ROCPROFILER_PRESTORE_VERSION = 1;
     return ROCPROFILER_PRESTORE_VERSION;

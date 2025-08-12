@@ -97,10 +97,10 @@ public:
                                               inst_pkt_t&,
                                               kernel_dispatch::profiling_time)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
-    
+
     // Used when creating a Queue from a previously created intercept queue.
-    // When the constructor with this parameter type is called, the provided function will be called with the intended
-    // Queue WriteInterceptor function (hsa_amd_queue_intercept_handler).
+    // When the constructor with this parameter type is called, the provided function will be called
+    // with the intended Queue WriteInterceptor function (hsa_amd_queue_intercept_handler).
     using set_write_interceptor_t = std::function<void(hsa_amd_queue_intercept_handler, void*)>;
 
     Queue(const AgentCache& agent, CoreApiTable table);
