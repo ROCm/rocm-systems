@@ -1796,8 +1796,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
         ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
                          "query record counter id");
 
-        serialized_records.emplace_back(
-            tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
+        serialized_records.emplace_back(tool::tool_counter_value_t{
+            _counter_id, record_data[count].id, record_data[count].counter_value});
     }
 
     if(!serialized_records.empty())
