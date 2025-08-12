@@ -125,8 +125,9 @@ TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
     HIP_CHECK(hipDeviceSynchronize());
   }
 
-  for (int device_index = 1; device_index < devices_number; device_index++) {
+  for (int device_index = 0; device_index < devices_number; device_index++) {
     REQUIRE(*devices_memories[device_index] == device_index);
+    HIP_CHECK(hipFree(devices_memories[device_index]));
     HIP_CHECK(hipCtxDestroy(devices_ctxs[device_index]));
   }
 }

@@ -234,7 +234,9 @@ TEMPLATE_TEST_CASE("Unit_hipHostRegister_DirectReferenceMultGpu", "", int, float
     HIP_CHECK(hipSetDevice(dev));
     HIP_CHECK(hipGetDeviceProperties(&prop, dev));
     std::string arch = prop.gcnArchName;
-    TEST_SKIP(arch, "Xnack+ is not supported. Skipping the test ...")
+    if (arch.find("xnack+") == std::string::npos) {
+      continue;  // Skip if xnack is not supported
+    }
     // Register host memory for each device
     if (register_once == 0) {
       HIP_CHECK(hipHostRegister(A, sizeBytes, 0));
