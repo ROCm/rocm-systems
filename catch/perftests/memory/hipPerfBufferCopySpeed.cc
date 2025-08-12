@@ -31,13 +31,12 @@ THE SOFTWARE.
 #include <iomanip>  // Add this at the top if not already included
 
 
-#define NUM_SIZES 1
+#define NUM_SIZES 9
 //  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
-// static const unsigned int Sizes[NUM_SIZES] = {4096,     8192,          65536,     1048576,
-// 4194304,
-//                                               16777216, 16777216 + 10, 134217728, 536870912};
-static const unsigned int Sizes[NUM_SIZES] = {134217728};
-static const unsigned int Iterations[2] = {10, 10};
+static const unsigned int Sizes[NUM_SIZES] = {4096,     8192,          65536,     1048576,  4194304,
+                                              16777216, 16777216 + 10, 134217728, 536870912};
+// static const unsigned int Sizes[NUM_SIZES] = {134217728};
+static const unsigned int Iterations[2] = {1, 100000};
 
 #define BUF_TYPES 5
 //  25 ways to combine 5 different buffer types
@@ -131,12 +130,26 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
                   << std::endl;
       }
+      HIP_CHECK(hipDeviceSynchronize());
       auto all_end = std::chrono::steady_clock::now();
       std::chrono::duration<double> elapsed_secs = all_end - all_start;
+      auto start_s =
+          std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
+              .count();
+      auto end_s =
+          std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
+              .count();
+
+      printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
+      printf("Elapsed seconds: %f\n", elapsed_secs.count());
       double bufSizeWithIter = static_cast<double>(bufSize_);
+      printf("%f\n", bufSizeWithIter);
       double perf_pre = bufSizeWithIter / elapsed_secs.count();
+      printf("%f\n", perf_pre);
       double perf = perf_pre * static_cast<double>(numIter);
+      printf("%f\n", perf_pre);
       perf *= static_cast<double>(1e-09);
+      printf("%f\n", perf);
       INFO("HIPPerfBufferCopySpeed[P2P] ( " << bufSize_ << ") s:dev0 d:dev1 i:" << numIter
                                             << " (GB/s) perf " << (float)perf);
       std::cout << "P2P," << bufSize_ << ",dev0,dev1," << numIter << "," << (float)perf
@@ -181,12 +194,26 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
                 << std::endl;
     }
+    HIP_CHECK(hipDeviceSynchronize());
     auto all_end = std::chrono::steady_clock::now();
+    auto start_s =
+        std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
+            .count();
+    auto end_s =
+        std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
+            .count();
+
+    printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
+    printf("Elapsed seconds: %f\n", elapsed_secs.count());
     double bufSizeWithIter = static_cast<double>(bufSize_);
+    printf("%f\n", bufSizeWithIter);
     double perf_pre = bufSizeWithIter / elapsed_secs.count();
+    printf("%f\n", perf_pre);
     double perf = perf_pre * static_cast<double>(numIter);
+    printf("%f\n", perf_pre);
     perf *= static_cast<double>(1e-09);
+    printf("%f\n", perf);
     INFO("HIPPerfBufferCopySpeed[IntraD2DNoCU] ( " << bufSize_ << ") s:dev0 d:dev0 i:" << numIter
                                                    << " (GB/s) perf " << (float)perf);
     std::cout << "NoCU," << bufSize_ << ",dev0,dev0," << numIter << "," << (float)perf << std::endl;
@@ -288,12 +315,27 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
                     << std::endl;
         }
+        HIP_CHECK(hipDeviceSynchronize());
         auto all_end = std::chrono::steady_clock::now();
+        auto start_s =
+            std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
+                .count();
+        auto end_s =
+            std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
+                .count();
+
+        printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
         std::chrono::duration<double> elapsed_secs = all_end - all_start;
+        printf("Elapsed seconds: %f\n", elapsed_secs.count());
         double bufSizeWithIter = static_cast<double>(bufSize_);
+        printf("%f\n", bufSizeWithIter);
         double perf_pre = bufSizeWithIter / elapsed_secs.count();
+        printf("%f\n", perf_pre);
+        printf("%f\n", perf_pre);
         double perf = perf_pre * static_cast<double>(numIter);
+        printf("%f\n", perf_pre);
         perf *= static_cast<double>(1e-09);
+        printf("%f\n", perf);
         const char* strSrc = NULL;
         const char* strDst = NULL;
         if (deviceMallocUncached[0])
