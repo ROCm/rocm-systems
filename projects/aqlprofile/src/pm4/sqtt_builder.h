@@ -44,11 +44,9 @@ enum ATT_OPCODES {
 };
 
 enum ATT_AGENT_INFO_TYPE {
-  ATT_AGENT_INFO_TYPE_RT_FREQ_KHZ = 0,
+  ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ = 0,
   ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY,
 };
-
-constexpr size_t ATT_AGENT_INFO_TYPE = 7;
 
 union att_decoder_packet_header_t {
   struct {
@@ -423,7 +421,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
     if (config->enable_rt_timestamp)
     {
-      packet.type = ATT_AGENT_INFO_TYPE_RT_FREQ_KHZ;
+      packet.type = ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
       packet.data20 = this->timestamp_freq / 1000;
       builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
     }
