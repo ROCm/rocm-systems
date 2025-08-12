@@ -440,7 +440,7 @@ class RocProfCompute_Base:
             options = self.get_profiler_options(fname, self._soc)
 
             # Only 1-run case is permitted for attach/detach
-            if ("--pid" in options or options["ROCPROF_ATTACH_PID"] is not None) and total_runs > 1:
+            if (("--pid" in options) or (options.get("ROCPROF_ATTACH_PID") is not None)) and total_runs > 1:
                 console_error(
                     "Attach/Detach can only work with 1 run of application. Current configuration needs {} times of replay of application".format(
                         total_runs
