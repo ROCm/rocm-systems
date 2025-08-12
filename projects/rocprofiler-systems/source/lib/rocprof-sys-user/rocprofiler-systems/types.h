@@ -55,25 +55,25 @@ extern "C"
         rocprofsys_annotated_region_func_t annotated_progress;
 
         /// @var start_trace
-        /// @brief callback for enabling user defined tracing globally
+        /// @brief Callback for enabling user defined tracing globally.
         /// @var stop_trace
-        /// @brief callback for disabling user defined tracing globally
+        /// @brief Callback for disabling user defined tracing globally.
         /// @var start_thread_trace
-        /// @brief callback for enabling user defined tracing on current thread
+        /// @brief Callback for enabling user defined tracing on the current thread.
         /// @var stop_thread_trace
-        /// @brief callback for disabling user defiend tracing on current thread
+        /// @brief Callback for disabling user defined tracing on the current thread.
         /// @var push_region
-        /// @brief callback for starting user defiend trace region
+        /// @brief Callback for starting a user defined trace region.
         /// @var pop_region
-        /// @brief callback for ending user defined trace region
+        /// @brief Callback for ending a user defined trace region.
         /// @var progress
-        /// @brief callback for marking an causal profiling event
+        /// @brief Callback for marking a causal profiling event.
         /// @var push_annotated_region
-        /// @brief callback for starting user defined trace region + annotations
+        /// @brief Callback for starting a user defined trace region with annotations.
         /// @var pop_annotated_region
-        /// @brief callback for ending user defined trace region + annotations
+        /// @brief Callback for ending a user defined trace region with annotations.
         /// @var annotated_progress
-        /// @brief callback for marking an causal profiling event + annotations
+        /// @brief Callback for marking a causal profiling event with annotations.
     } rocprofsys_user_callbacks_t;
 
     /// @enum ROCPROFSYS_USER_CONFIGURE_MODE
@@ -110,9 +110,7 @@ extern "C"
 
 #ifndef ROCPROFSYS_USER_CALLBACKS_INIT
 #    define ROCPROFSYS_USER_CALLBACKS_INIT                                               \
-        {                                                                                \
-            NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL                   \
-        }
+        { NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL }
 #endif
 
 #endif  // ROCPROFSYS_TYPES_H_
