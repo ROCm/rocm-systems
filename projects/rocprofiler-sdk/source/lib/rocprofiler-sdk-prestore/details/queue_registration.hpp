@@ -30,33 +30,37 @@
 #include <cstdint>
 #include <unordered_map>
 
-namespace rocprofiler {
-namespace prestore {
+namespace rocprofiler
+{
+namespace prestore
+{
 
 using callback_t = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
 
-struct queue_prestore_t {
-    hsa_agent_t agent;
-    hsa_queue_t* queue;
+struct queue_prestore_t
+{
+    hsa_agent_t         agent;
+    hsa_queue_t*        queue;
     write_interceptor_t user_write_interceptor_func;
-    void* user_write_interceptor_data;
+    void*               user_write_interceptor_data;
 };
 
-queue_prestore_t create_queue(
-    hsa_agent_t         agent,
-    uint32_t            size,
-    hsa_queue_type32_t  type,
-    callback_t          callback,
-    void*               data,
-    uint32_t            private_segment_size,
-    uint32_t            group_segment_size,
-    CoreApiTable        core_api,
-    AmdExtTable         ext_api);
+queue_prestore_t
+create_queue(hsa_agent_t        agent,
+             uint32_t           size,
+             hsa_queue_type32_t type,
+             callback_t         callback,
+             void*              data,
+             uint32_t           private_segment_size,
+             uint32_t           group_segment_size,
+             CoreApiTable       core_api,
+             AmdExtTable        ext_api);
 
 // Tracks and manages HSA queues to be profiled later when rocprof is loaded
 class QueueRegistration
 {
     using queue_collection_t = std::unordered_map<hsa_queue_t*, queue_prestore_t>;
+
 public:
     QueueRegistration()  = default;
     ~QueueRegistration() = default;
@@ -84,4 +88,5 @@ private:
 QueueRegistration*
 get_queue_registration();
 
-}}
+}  // namespace prestore
+}  // namespace rocprofiler

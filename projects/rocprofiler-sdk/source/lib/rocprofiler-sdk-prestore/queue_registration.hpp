@@ -30,32 +30,36 @@
 
 #include <cstdint>
 
-using hsa_amd_queue_intercept_packet_writer_t = void(*)(const void*, uint64_t);
-using write_interceptor_t = void(*)(const void*, uint64_t, uint64_t, void*, hsa_amd_queue_intercept_packet_writer_t);
+using hsa_amd_queue_intercept_packet_writer_t = void (*)(const void*, uint64_t);
+using write_interceptor_t =
+    void (*)(const void*, uint64_t, uint64_t, void*, hsa_amd_queue_intercept_packet_writer_t);
 
-namespace rocprofiler {
-namespace prestore {
-    
-struct queue_prestore_export_t {
-    hsa_agent_t agent;
+namespace rocprofiler
+{
+namespace prestore
+{
+
+struct queue_prestore_export_t
+{
+    hsa_agent_t  agent;
     hsa_queue_t* queue;
 };
 
 void
 queue_registration_init(HsaApiTable* table);
 
-}}
+}  // namespace prestore
+}  // namespace rocprofiler
 
 ROCPROFILER_EXTERN_C_INIT
 
 int
-rocprofiler_prestore_export_all_queues(
-    rocprofiler::prestore::queue_prestore_export_t* queues,
-    uint64_t* num_queues) ROCPROFILER_API;
+rocprofiler_prestore_export_all_queues(rocprofiler::prestore::queue_prestore_export_t* queues,
+                                       uint64_t* num_queues) ROCPROFILER_API;
 
-int rocprofiler_prestore_set_write_interceptor(
-    hsa_queue_t* queue,
-    write_interceptor_t func,
-    void* data) ROCPROFILER_API;
+int
+rocprofiler_prestore_set_write_interceptor(hsa_queue_t*        queue,
+                                           write_interceptor_t func,
+                                           void*               data) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI
