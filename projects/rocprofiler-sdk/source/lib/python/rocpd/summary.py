@@ -25,6 +25,7 @@
 
 import argparse
 import os
+import math
 
 from typing import Any, List, Tuple
 from .importer import RocpdImportData, execute_statement
@@ -263,6 +264,8 @@ def create_summary_views(connection: RocpdImportData, by_rank=False) -> None:
         if not required_columns.issubset(columns):
             continue
 
+        connection.create_function('SQRT', 1, math.sqrt)
+
         # Create regular summary view
         summary_view_name, summary_query = generate_summary_query(
             view_name, name_column=NAME_COLUMN_MAP.get(view_name, "name")
@@ -298,6 +301,8 @@ def create_summary_region_views(
         for cat in region_categories
         if "MARKER" not in cat.upper()
     }
+
+    connection.create_function('SQRT', 1, math.sqrt)
 
     for k, v in category_map.items():
         if len(v) > 0:
