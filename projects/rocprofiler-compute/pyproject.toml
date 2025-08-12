@@ -1,6 +1,6 @@
 [project]
 name = "rocprof_compute"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 
 [project.optional-dependencies]
 developer = [
