@@ -158,14 +158,18 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, {buffer_size_lo}});
 
     if(buffer_size_hi != 0)
+    {
         aql_params.push_back({static_cast<hsa_ven_amd_aqlprofile_parameter_name_t>(
                                   AQLPROFILE_ATT_PARAMETER_NAME_BUFFER_SIZE_HIGH),
                               {buffer_size_hi}});
+    }
 
-    // Bitwise NOT because aqlprofile receives the mask, not the exclude mask
     if(perf_exclude_mask)
+    {
+        // Bitwise NOT because aqlprofile receives the mask, not the exclude mask
         aql_params.push_back(
             {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_MASK, {~perf_exclude_mask}});
+    }
 
     if(params.no_detail_simd)
         aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_OCCUPANCY_MODE, {1}});
