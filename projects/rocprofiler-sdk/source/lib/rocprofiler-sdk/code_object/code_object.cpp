@@ -1143,7 +1143,6 @@ shutdown(hsa_executable_t executable)
 
     return _unloaded;
 }
-
 }  // namespace
 
 void
@@ -1228,11 +1227,11 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
             },
             std::move(func));
 }
-
 }  // namespace code_object
 }  // namespace rocprofiler
 
 ROCPROFILER_EXTERN_C_INIT
+
 int rocprofiler_load_prestore_code_objects(void* incoming_table)
 {
     if (!incoming_table)
@@ -1265,4 +1264,5 @@ int rocprofiler_load_prestore_code_objects(void* incoming_table)
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
 ROCPROFILER_EXTERN_C_FINI

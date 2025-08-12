@@ -25,18 +25,16 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
 
 #include <cstdint>
 
-extern "C" {
+ROCPROFILER_EXTERN_C_INIT
 
 int rocprofiler_prestore_export_all_code_objects(
     hsa_executable_t* executables,
-    uint64_t* num_executables) ROCPROFILER_PUBLIC_API;
+    uint64_t* num_executables) ROCPROFILER_API;
 
-}
+ROCPROFILER_EXTERN_C_FINI
 
 namespace rocprofiler {
 namespace prestore {

@@ -46,16 +46,16 @@ queue_registration_init(HsaApiTable* table);
 
 }}
 
-extern "C" {
+ROCPROFILER_EXTERN_C_INIT
 
 int
 rocprofiler_prestore_export_all_queues(
     rocprofiler::prestore::queue_prestore_export_t* queues,
-    uint64_t* num_queues) ROCPROFILER_PUBLIC_API;
+    uint64_t* num_queues) ROCPROFILER_API;
 
 int rocprofiler_prestore_set_write_interceptor(
     hsa_queue_t* queue,
     write_interceptor_t func,
-    void* data) ROCPROFILER_PUBLIC_API;
+    void* data) ROCPROFILER_API;
 
-}
+ROCPROFILER_EXTERN_C_FINI
