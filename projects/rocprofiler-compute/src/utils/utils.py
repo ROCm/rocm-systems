@@ -37,6 +37,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import sys
 import ctypes
 from pathlib import Path as path
 from typing import Optional
@@ -818,26 +819,38 @@ def run_prof(
             success, output = capture_subprocess_output(
                 app_cmd, new_env=new_env, profileMode=True
             )
-        else:    
-            libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
-            c_lib = ctypes.CDLL(libname)
-            if c_lib is None:
-                console_error(f"Error opening {libname}")
-            c_lib.attach.argtypes = [ctypes.c_uint]            
+        else:
+            from contextlib import contextmanager
+            @contextmanager
+            def temporary_env(env_vars):
+                original_env = os.environ.copy()
+                os.environ.update(env_vars)
+                try:
+                    yield
+                finally:
+                    os.environ.clear()
+                    os.environ.update(original_env)
+                
+            with temporary_env(new_env):
+                libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
+                c_lib = ctypes.CDLL(libname)
+                if c_lib is None:
+                    console_error(f"Error opening {libname}")
+                c_lib.attach.argtypes = [ctypes.c_uint]            
 
-            pid = options["ROCPROF_ATTACH_PID"]
-            if pid is None:
-                console_error(
-                    "Mode of attach/detach must have setup for process ID"
-                )
+                pid = options["ROCPROF_ATTACH_PID"]
+                if pid is None:
+                    console_error(
+                        "Mode of attach/detach must have setup for process ID"
+                    )
 
-            c_lib.attach(int(pid))
-            duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
-            if duration is None:
-                input(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
-            else:
-                time.sleep(int(duration) / 1000)
-            c_lib.detach()
+                c_lib.attach(int(pid))
+                duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
+                if duration is None:
+                    input(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
+                else:
+                    time.sleep(int(duration) / 1000)
+                c_lib.detach()
             
     else:
         console_debug("rocprof command: {}".format([rocprof_cmd] + options))
@@ -857,7 +870,7 @@ def run_prof(
     if new_env.get("ROCPROFILER_METRICS_PATH"):
         shutil.rmtree(new_env["ROCPROFILER_METRICS_PATH"], ignore_errors=True)
 
-    if not is_mode_live_attach and not success:
+    if (not is_mode_live_attach) and (not success):
         if loglevel > logging.INFO:
             for line in output.splitlines():
                 console_error(output, exit=False)
