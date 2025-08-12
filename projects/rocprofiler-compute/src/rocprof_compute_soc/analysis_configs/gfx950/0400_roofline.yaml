@@ -32,7 +32,9 @@ Panel Config:
       per second. Note: this does not include any 8-bit integer operations from VALU
       instructions. The peak empirically measured INT8 MFMA operations achievable
       on the specific accelerator is displayed alongside for comparison.'
-    HBM Bandwidth: ''
+    HBM Bandwidth: The total number of bytes read from and written to High-Bandwidth
+      Memory (HBM) per second. The peak empirically measured bandwidth achievable
+      on the specific accelerator is displayed alongside for comparison.
     L2 Cache Bandwidth: The number of bytes looked up in the L2 cache per unit time.
       The number of bytes is calculated as the number of cache lines requested multiplied
       by the cache line size. This value does not consider partial requests, so e.g.,
@@ -50,10 +52,22 @@ Panel Config:
       from, stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
       example for more detail). The peak empirically measured LDS bandwidth achievable
       on the specific accelerator is displayed alongside for comparison.
-    AI L1: ''
-    AI L2: ''
-    AI HBM: ''
-    Performance GFLOPs: ''
+    AI L1: The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio
+      of total floating-point operations (FLOPs) to total bytes transferred between
+      the L1 cache and the processing units. This value is used as the x-coordinate
+      for the L1 roofline.
+    AI L2: The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio
+      of total floating-point operations (FLOPs) to total bytes transferred between
+      the L2 cache and the L1 cache. This value is used as the x-coordinate for the
+      L2 roofline.
+    AI HBM: The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM).
+      It is the ratio of total floating-point operations (FLOPs) to total bytes transferred
+      between HBM and the L2 cache. This value is used as the x-coordinate for the
+      HBM roofline.
+    Performance GFLOPs: The overall achieved performance, measured in GigaFLOPs per
+      second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
+      operations divided by the total execution time. This value is used as the y-coordinate
+      for the kernel's point on the Roofline plot.
   data source:
   - metric_table:
       id: 401
