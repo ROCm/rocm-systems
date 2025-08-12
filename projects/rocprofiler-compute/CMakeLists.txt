@@ -63,7 +63,7 @@ if(CHECK_PYTHON_DEPS)
     # Python 3 is required
     message(STATUS "Detecting Python interpreter...")
     find_package(
-        Python3 3.8
+        Python3 3.9
         COMPONENTS Interpreter
         REQUIRED)
 
