@@ -287,7 +287,7 @@ def create_summary_views(connection: RocpdImportData, by_rank=False) -> None:
         if not required_columns.issubset(columns):
             continue
 
-        if check_function_availability(connection, "SQRT") == False:
+        if check_function_availability(connection, "SQRT") is False:
             connection.create_function("SQRT", 1, math.sqrt)
 
         # Create regular summary view
@@ -326,7 +326,7 @@ def create_summary_region_views(
         if "MARKER" not in cat.upper()
     }
 
-    if check_function_availability(connection, "SQRT") == False:
+    if check_function_availability(connection, "SQRT") is False:
         connection.create_function("SQRT", 1, math.sqrt)
 
     for k, v in category_map.items():
