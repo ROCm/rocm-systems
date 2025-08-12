@@ -26,7 +26,7 @@ declare -a MATRIX_ROCM_VERSIONS=()
 
 load-matrix()
 {
-    local workflow_file=".github/workflows/containers.yml"
+    local workflow_file="$(git rev-parse --show-toplevel)/.github/workflows/rocprofiler-systems-containers.yml"
     if [ ! -f "${workflow_file}" ]; then
         echo -e "\n Error: Cannot find ${workflow_file}"
         exit 1
