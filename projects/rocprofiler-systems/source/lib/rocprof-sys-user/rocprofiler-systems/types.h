@@ -55,23 +55,23 @@ extern "C"
         rocprofsys_annotated_region_func_t annotated_progress;
 
         /// @var start_trace
-        /// @brief callback for enabling tracing globally
+        /// @brief callback for enabling user defined tracing globally
         /// @var stop_trace
-        /// @brief callback for disabling tracing globally
+        /// @brief callback for disabling user defined tracing globally
         /// @var start_thread_trace
-        /// @brief callback for enabling tracing on current thread
+        /// @brief callback for enabling user defined tracing on current thread
         /// @var stop_thread_trace
-        /// @brief callback for disabling tracing on current thread
+        /// @brief callback for disabling user defiend tracing on current thread
         /// @var push_region
-        /// @brief callback for starting a trace region
+        /// @brief callback for starting user defiend trace region
         /// @var pop_region
-        /// @brief callback for ending a trace region
+        /// @brief callback for ending user defined trace region
         /// @var progress
         /// @brief callback for marking an causal profiling event
         /// @var push_annotated_region
-        /// @brief callback for starting a trace region + annotations
+        /// @brief callback for starting user defined trace region + annotations
         /// @var pop_annotated_region
-        /// @brief callback for ending a trace region + annotations
+        /// @brief callback for ending user defined trace region + annotations
         /// @var annotated_progress
         /// @brief callback for marking an causal profiling event + annotations
     } rocprofsys_user_callbacks_t;
