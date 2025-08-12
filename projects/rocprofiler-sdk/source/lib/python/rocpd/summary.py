@@ -55,7 +55,7 @@ def check_function_availability(connection, function_name):
         result = cursor.fetchone()[0]
 
         return bool(result)
-    except sqlite3.Error as e:
+    except:
         return False
 
 
