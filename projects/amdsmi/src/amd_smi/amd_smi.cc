@@ -1054,7 +1054,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint64_t>::max());
-    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint64_t>::max());
     fill_2d_array(violation_status->acc_low_utilization,
         std::numeric_limits<uint64_t>::max());
@@ -1063,7 +1063,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->per_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint64_t>::max());
-    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint64_t>::max());
     fill_2d_array(violation_status->per_low_utilization,
         std::numeric_limits<uint64_t>::max());
@@ -1072,7 +1072,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->active_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint8_t>::max());
-    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint8_t>::max());
     fill_2d_array(violation_status->active_low_utilization,
         std::numeric_limits<uint8_t>::max());
@@ -1184,7 +1184,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     };
     copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_pwr,
                     &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc);
-    copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_thrm,
+    copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_thm,
                     &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc);
     copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_low_utilization,
                     &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc);
@@ -1428,13 +1428,13 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         metric_members,
         {
             std::ref(violation_status->per_gfx_clk_below_host_limit_pwr),
-            std::ref(violation_status->per_gfx_clk_below_host_limit_thrm),
+            std::ref(violation_status->per_gfx_clk_below_host_limit_thm),
             std::ref(violation_status->per_low_utilization),
             std::ref(violation_status->per_gfx_clk_below_host_limit_total)
         },
         {
             std::ref(violation_status->active_gfx_clk_below_host_limit_pwr),
-            std::ref(violation_status->active_gfx_clk_below_host_limit_thrm),
+            std::ref(violation_status->active_gfx_clk_below_host_limit_thm),
             std::ref(violation_status->active_low_utilization),
             std::ref(violation_status->active_gfx_clk_below_host_limit_total)
         });

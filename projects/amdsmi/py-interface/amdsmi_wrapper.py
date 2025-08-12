@@ -871,15 +871,15 @@ struct_amdsmi_violation_status_t._fields_ = [
     ('active_gfx_clk_below_host_limit', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 2),
     ('acc_gfx_clk_below_host_limit_pwr', ctypes.c_uint64 * 8 * 8),
-    ('acc_gfx_clk_below_host_limit_thrm', ctypes.c_uint64 * 8 * 8),
+    ('acc_gfx_clk_below_host_limit_thm', ctypes.c_uint64 * 8 * 8),
     ('acc_low_utilization', ctypes.c_uint64 * 8 * 8),
     ('acc_gfx_clk_below_host_limit_total', ctypes.c_uint64 * 8 * 8),
     ('per_gfx_clk_below_host_limit_pwr', ctypes.c_uint64 * 8 * 8),
-    ('per_gfx_clk_below_host_limit_thrm', ctypes.c_uint64 * 8 * 8),
+    ('per_gfx_clk_below_host_limit_thm', ctypes.c_uint64 * 8 * 8),
     ('per_low_utilization', ctypes.c_uint64 * 8 * 8),
     ('per_gfx_clk_below_host_limit_total', ctypes.c_uint64 * 8 * 8),
     ('active_gfx_clk_below_host_limit_pwr', ctypes.c_ubyte * 8 * 8),
-    ('active_gfx_clk_below_host_limit_thrm', ctypes.c_ubyte * 8 * 8),
+    ('active_gfx_clk_below_host_limit_thm', ctypes.c_ubyte * 8 * 8),
     ('active_low_utilization', ctypes.c_ubyte * 8 * 8),
     ('active_gfx_clk_below_host_limit_total', ctypes.c_ubyte * 8 * 8),
     ('reserved', ctypes.c_uint64 * 8 * 8),
@@ -902,22 +902,22 @@ amdsmi_frequency_range_t = struct_amdsmi_frequency_range_t
 class union_amdsmi_bdf_t(Union):
     pass
 
-class struct_amdsmi_bdf_t(Structure):
+class struct_bdf_(Structure):
     pass
 
-struct_amdsmi_bdf_t._pack_ = 1 # source:False
-struct_amdsmi_bdf_t._fields_ = [
+struct_bdf_._pack_ = 1 # source:False
+struct_bdf_._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
     ('domain_number', ctypes.c_uint64, 48),
 ]
 
-class struct_bdf_(Structure):
+class struct_amdsmi_bdf_t(Structure):
     pass
 
-struct_bdf_._pack_ = 1 # source:False
-struct_bdf_._fields_ = [
+struct_amdsmi_bdf_t._pack_ = 1 # source:False
+struct_amdsmi_bdf_t._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
@@ -962,6 +962,21 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('max_pcie_interface_version', ctypes.c_uint32),
+    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 9),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -980,21 +995,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('max_pcie_interface_version', ctypes.c_uint32),
-    ('PADDING_1', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 9),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
