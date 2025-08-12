@@ -31,7 +31,13 @@ from collections import OrderedDict
 from pathlib import Path
 
 from utils import file_io, parser, schema
-from utils.logger import console_warning, console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
@@ -195,7 +201,7 @@ class OmniAnalyze_Base:
                     roofline_path = sysinfo_path.joinpath("roofline.csv")
                     roofline_df = file_io.load_roofline_peaks(roofline_path)
 
-                    # Use the original column names from roofline.csv directly
+                    #use original column names from roofline.csv directly
                     w.roofline_peaks = roofline_df
 
                 except FileNotFoundError:

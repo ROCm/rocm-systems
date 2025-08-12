@@ -670,7 +670,7 @@ class Roofline:
             base_dir = workload_dir
         # Convert to Path object for easier manipulation
         base_path = Path(base_dir)
-        
+
         roofline_csv = base_path / "roofline.csv"
         if not roofline_csv.is_file():
             console_log("roofline", "{} does not exist".format(roofline_csv))
