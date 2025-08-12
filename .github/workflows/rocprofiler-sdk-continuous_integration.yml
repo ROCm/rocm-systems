@@ -228,8 +228,7 @@ jobs:
         if [ "${OS_TYPE}" == "rhel-9" ]; then
           dnf makecache
           dnf groupinstall -y "Development Tools"
-          dnf remove -y gcc-c++
-          dnf install -y gcc-toolset-11-gcc-c++ llvm14-devel
+          dnf install -y llvm14-devel
         fi
         python3 -m pip install --upgrade pip
         python3 -m pip install -U --user -r requirements.txt
