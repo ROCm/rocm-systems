@@ -48,7 +48,7 @@ jobs:
       - name: Create Docs Directory
         run: |
           git config --global --add safe.directory '*'
-          git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           mkdir -p projects/rocprofiler-sdk/docs/_doxygen/rocprofiler-sdk
           mkdir -p projects/rocprofiler-sdk/docs/_doxygen/roctx
       - name: Install documentation dependencies
@@ -62,7 +62,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk/source/docs
         run: |
           git config --global --add safe.directory '*'
-          git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           conda init
           conda env create -n rocprofiler-docs -f environment.yml
           conda activate rocprofiler-docs
@@ -93,7 +93,7 @@ jobs:
         working-directory: projects/rocprofiler-sdk/
         run: |
           git config --global --add safe.directory '*'
-          git config --global --add safe.directory /__w/rocm-systems/rocm-systems
+          git config --global --add safe.directory ${GITHUB_WORKSPACE}
           mkdir -p source/docs/_doxygen/rocprofiler-sdk
           mkdir -p source/docs/_doxygen/roctx
       - name: Install requirements
