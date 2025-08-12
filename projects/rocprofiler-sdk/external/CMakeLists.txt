@@ -185,6 +185,8 @@ target_sources(
     rocprofiler-sdk-perfetto-static-library
     PRIVATE ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.h
             ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.cc)
+target_compile_definitions(rocprofiler-sdk-perfetto-static-library
+                           PRIVATE $<BUILD_INTERFACE:PERFETTO_DISABLE_LOG=1>)
 target_include_directories(
     rocprofiler-sdk-perfetto-static-library SYSTEM
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/perfetto/sdk>)
