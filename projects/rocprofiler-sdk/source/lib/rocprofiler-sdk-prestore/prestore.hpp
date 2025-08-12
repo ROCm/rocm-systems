@@ -33,9 +33,9 @@ rocprofiler_prestore_set_api_table(const char* name,
                                    uint64_t    lib_version,
                                    uint64_t    lib_instance,
                                    void**      tables,
-                                   uint64_t    num_tables) ROCPROFILER_API;
+                                   uint64_t    num_tables) ROCPROFILER_PUBLIC_API;
 
 int
-rocprofiler_prestore_get_version() ROCPROFILER_API;
+rocprofiler_prestore_get_version() ROCPROFILER_PUBLIC_API;
 
 ROCPROFILER_EXTERN_C_FINI
