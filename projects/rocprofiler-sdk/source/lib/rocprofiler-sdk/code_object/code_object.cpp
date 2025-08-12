@@ -1232,17 +1232,18 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
 
 ROCPROFILER_EXTERN_C_INIT
 
-int rocprofiler_load_prestore_code_objects(void* incoming_table)
+int
+rocprofiler_load_prestore_code_objects(void* incoming_table)
 {
-    if (!incoming_table)
+    if(!incoming_table)
     {
         ROCP_ERROR << "incoming table is nullptr";
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
-    
+
     uint32_t incoming_version = *(reinterpret_cast<uint32_t*>(incoming_table));
 
-    if (incoming_version != ROCPROFILER_PRESTORE_TABLE_CURRENT_VERSION)
+    if(incoming_version != ROCPROFILER_PRESTORE_TABLE_CURRENT_VERSION)
     {
         ROCP_ERROR << "incoming table is blank or bad version";
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1251,13 +1252,15 @@ int rocprofiler_load_prestore_code_objects(void* incoming_table)
     auto prestore_table = reinterpret_cast<rocprofiler_prestore_dispatch_table_t*>(incoming_table);
 
     std::vector<hsa_executable_t> exported_executables;
-    uint64_t exported_executables_count;
+    uint64_t                      exported_executables_count;
 
-    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(nullptr, &exported_executables_count) != 0);
+    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(
+                      nullptr, &exported_executables_count) != 0);
     exported_executables.resize(exported_executables_count);
-    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(exported_executables.data(), &exported_executables_count) != 0);
+    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(
+                      exported_executables.data(), &exported_executables_count) != 0);
     ROCP_INFO << "Got " << exported_executables_count << " executables from the prestore library";
-    for (auto& exec : exported_executables)
+    for(auto& exec : exported_executables)
     {
         ROCP_INFO << "Adding code object for " << exec.handle;
         rocprofiler::code_object::executable_freeze_internal(exec);

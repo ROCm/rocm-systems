@@ -22,23 +22,27 @@
 
 #pragma once
 
+#include "code_object_registration.hpp"
 #include "prestore.hpp"
 #include "queue_registration.hpp"
-#include "code_object_registration.hpp"
 
 constexpr uint32_t ROCPROFILER_PRESTORE_TABLE_CURRENT_VERSION = 1;
 
-using rocprofiler_prestore_get_version_t = decltype(::rocprofiler_prestore_get_version)*;
+using rocprofiler_prestore_get_version_t   = decltype(::rocprofiler_prestore_get_version)*;
 using rocprofiler_prestore_set_api_table_t = decltype(::rocprofiler_prestore_set_api_table)*;
-using rocprofiler_prestore_export_all_queues_t = decltype(::rocprofiler_prestore_export_all_queues)*;
-using rocprofiler_prestore_set_write_interceptor_t = decltype(::rocprofiler_prestore_set_write_interceptor)*;
-using rocprofiler_prestore_export_all_code_objects_t = decltype(::rocprofiler_prestore_export_all_code_objects)*;
+using rocprofiler_prestore_export_all_queues_t =
+    decltype(::rocprofiler_prestore_export_all_queues)*;
+using rocprofiler_prestore_set_write_interceptor_t =
+    decltype(::rocprofiler_prestore_set_write_interceptor)*;
+using rocprofiler_prestore_export_all_code_objects_t =
+    decltype(::rocprofiler_prestore_export_all_code_objects)*;
 
-struct rocprofiler_prestore_dispatch_table_t {
-    uint32_t version;
-    rocprofiler_prestore_get_version_t rocprofiler_prestore_get_version;
-    rocprofiler_prestore_set_api_table_t rocprofiler_prestore_set_api_table;
-    rocprofiler_prestore_export_all_queues_t rocprofiler_prestore_export_all_queues;
-    rocprofiler_prestore_set_write_interceptor_t rocprofiler_prestore_set_write_interceptor;
-    rocprofiler_prestore_export_all_code_objects_t rocprofiler_prestore_export_all_code_objects;    
+struct rocprofiler_prestore_dispatch_table_t
+{
+    uint32_t                                       version;
+    rocprofiler_prestore_get_version_t             rocprofiler_prestore_get_version;
+    rocprofiler_prestore_set_api_table_t           rocprofiler_prestore_set_api_table;
+    rocprofiler_prestore_export_all_queues_t       rocprofiler_prestore_export_all_queues;
+    rocprofiler_prestore_set_write_interceptor_t   rocprofiler_prestore_set_write_interceptor;
+    rocprofiler_prestore_export_all_code_objects_t rocprofiler_prestore_export_all_code_objects;
 };

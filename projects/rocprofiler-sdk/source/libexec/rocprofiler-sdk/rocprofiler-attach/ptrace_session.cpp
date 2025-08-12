@@ -47,7 +47,8 @@ static_assert(sizeof(void*) == 8);
 static_assert(false);
 #endif
 
-namespace {
+namespace
+{
 
 /* Copied from glibc's elf.h.  */
 typedef struct
@@ -138,7 +139,7 @@ get_auxv_entry(int pid, size_t& entry_addr)
     }
     ROCP_TRACE << "Entry address found to be " << entry_addr << " from " << filename;
 }
-} // namespace
+}  // namespace
 
 namespace rocprofiler
 {
@@ -271,15 +272,15 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     // Set register file for call
     struct user_regs_struct newregs = oldregs;
 
-    newregs.rax = 9;                           // calling convention: syscall ID for mmap
-    newregs.rdi = 0;                           // addr
-    newregs.rsi = length;                      // length
-    newregs.rdx = PROT_READ | PROT_WRITE;      // prot
-    newregs.r10 = MAP_PRIVATE | MAP_ANONYMOUS; // flags
-    newregs.r8  = -1;                          // fd (unused)
-    newregs.r9  = 0;                           // offset
+    newregs.rax = 9;                            // calling convention: syscall ID for mmap
+    newregs.rdi = 0;                            // addr
+    newregs.rsi = length;                       // length
+    newregs.rdx = PROT_READ | PROT_WRITE;       // prot
+    newregs.r10 = MAP_PRIVATE | MAP_ANONYMOUS;  // flags
+    newregs.r8  = -1;                           // fd (unused)
+    newregs.r9  = 0;                            // offset
     newregs.rip = entry_addr;
-    newregs.rsp = oldregs.rsp - 128;           // move sp by 128 to not clobber redlined functions
+    newregs.rsp = oldregs.rsp - 128;  // move sp by 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);
 
     // Set syscall registers
@@ -290,7 +291,7 @@ PTraceSession::simple_mmap(void*& addr, size_t length)
     // cc     int3
     std::vector<uint8_t> new_code({0x0f, 0x05, 0xcc});
     std::vector<uint8_t> old_code;
-    
+
     // Write in new opcodes
     if(!swap(entry_addr, new_code, old_code, 3))
     {
@@ -364,7 +365,7 @@ PTraceSession::simple_munmap(void*& addr, size_t length)
     newregs.rdi = reinterpret_cast<size_t>(addr);  // addr
     newregs.rsi = length;                          // length
     newregs.rip = entry_addr;
-    newregs.rsp = oldregs.rsp - 128;               // move sp by 128 to not clobber redlined functions
+    newregs.rsp = oldregs.rsp - 128;  // move sp by 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);
     // Set syscall registers
     PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
@@ -426,7 +427,9 @@ PTraceSession::call_function(const std::string& library, const std::string& symb
 // Correctly implementing this would require duplicating the x64 calling convention. Probably not
 // worth it.
 bool
-PTraceSession::call_function(const std::string& library, const std::string& symbol, void* first_param)
+PTraceSession::call_function(const std::string& library,
+                             const std::string& symbol,
+                             void*              first_param)
 {
     if(!attached)
     {
@@ -460,7 +463,7 @@ PTraceSession::call_function(const std::string& library, const std::string& symb
     newregs.rax                     = reinterpret_cast<size_t>(target_addr);  // target function
     newregs.rdi                     = reinterpret_cast<size_t>(first_param);  // first parameter
     newregs.rip                     = entry_addr;
-    newregs.rsp                     = oldregs.rsp - 128; // move sp by 128 to not clobber redlined functions
+    newregs.rsp = oldregs.rsp - 128;  // move sp by 128 to not clobber redlined functions
     newregs.rsp -= (newregs.rsp % 16);
 
     // x64 assembly to call a function by register and breakpoint when done
@@ -477,7 +480,8 @@ PTraceSession::call_function(const std::string& library, const std::string& symb
     // Set syscall registers
     PTRACE_CALL(PTRACE_SETREGS, pid, NULL, &newregs);
 
-    ROCP_TRACE << "Attempting to execute " << library << "::" << symbol << "(" << first_param << ")";
+    ROCP_TRACE << "Attempting to execute " << library << "::" << symbol << "(" << first_param
+               << ")";
     // Restart execution
     if(!cont())
     {

@@ -25,15 +25,17 @@
 
 #include "lib/common/static_object.hpp"
 
-namespace rocprofiler {
-namespace prestore {
+namespace rocprofiler
+{
+namespace prestore
+{
 
 hsa_status_t
 executable_freeze(hsa_executable_t executable, const char* options)
 {
-    auto cor = CHECK_NOTNULL(get_code_object_registration());
+    auto cor    = CHECK_NOTNULL(get_code_object_registration());
     auto status = cor->get_hsa_executable_freeze_fn()(executable, options);
-    if (status)
+    if(status)
     {
         return status;
     }
@@ -45,41 +47,41 @@ hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
     auto cor = CHECK_NOTNULL(get_code_object_registration());
-    cor->remove_code_object(executable);    
+    cor->remove_code_object(executable);
     auto status = cor->get_hsa_executable_destroy_fn()(executable);
-    if (status)
+    if(status)
     {
         return status;
     }
     return HSA_STATUS_SUCCESS;
 }
 
-void CodeObjectRegistration::init(CoreApiTable& core_table, AmdExtTable& ext_table)
+void
+CodeObjectRegistration::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 {
     ROCP_TRACE << "Initializing CodeObjectRegistration";
-    (void)ext_table; // unused
+    (void) ext_table;  // unused
 
-    m_hsa_executable_freeze_fn = core_table.hsa_executable_freeze_fn;
-    core_table.hsa_executable_freeze_fn = prestore::executable_freeze;
-    m_hsa_executable_destroy_fn = core_table.hsa_executable_destroy_fn;
+    m_hsa_executable_freeze_fn           = core_table.hsa_executable_freeze_fn;
+    core_table.hsa_executable_freeze_fn  = prestore::executable_freeze;
+    m_hsa_executable_destroy_fn          = core_table.hsa_executable_destroy_fn;
     core_table.hsa_executable_destroy_fn = prestore::executable_destroy;
 }
 
-void CodeObjectRegistration::add_code_object(code_object_prestore_t code_object)
+void
+CodeObjectRegistration::add_code_object(code_object_prestore_t code_object)
 {
     ROCP_TRACE << "adding code_object " << code_object.handle;
     m_code_objects.emplace_back(code_object);
 }
 
-void CodeObjectRegistration::remove_code_object(code_object_prestore_t code_object)
+void
+CodeObjectRegistration::remove_code_object(code_object_prestore_t code_object)
 {
     ROCP_TRACE << "removing code_object " << code_object.handle;
-    auto pred = [&](const code_object_prestore_t& a)
-    {
-        return a.handle == code_object.handle;
-    };
-    auto itr = std::find_if(m_code_objects.begin(), m_code_objects.end(), pred);
-    if (itr == m_code_objects.end())
+    auto pred = [&](const code_object_prestore_t& a) { return a.handle == code_object.handle; };
+    auto itr  = std::find_if(m_code_objects.begin(), m_code_objects.end(), pred);
+    if(itr == m_code_objects.end())
     {
         ROCP_INFO << "remove_code_object could not find " << code_object.handle;
         return;
@@ -94,29 +96,34 @@ get_code_object_registration()
     return registration;
 }
 
-void code_object_registration_init(HsaApiTable* table)
+void
+code_object_registration_init(HsaApiTable* table)
 {
     CHECK_NOTNULL(get_code_object_registration())->init(*table->core_, *table->amd_ext_);
 }
 
-}}
+}  // namespace prestore
+}  // namespace rocprofiler
 
 ROCPROFILER_EXTERN_C_INIT
 
-int rocprofiler_prestore_export_all_code_objects(
-    hsa_executable_t* executables,
-    uint64_t* num_executables)
+int
+rocprofiler_prestore_export_all_code_objects(hsa_executable_t* executables,
+                                             uint64_t*         num_executables)
 {
-    if (!executables && num_executables)
+    if(!executables && num_executables)
     {
-        *num_executables = CHECK_NOTNULL(rocprofiler::prestore::get_code_object_registration())->get_all_code_objects().size();
+        *num_executables = CHECK_NOTNULL(rocprofiler::prestore::get_code_object_registration())
+                               ->get_all_code_objects()
+                               .size();
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
     CHECK_NOTNULL(executables);
     CHECK_NOTNULL(num_executables);
-    auto cos = CHECK_NOTNULL(rocprofiler::prestore::get_code_object_registration())->get_all_code_objects();
-    if (*num_executables < cos.size())
+    auto cos = CHECK_NOTNULL(rocprofiler::prestore::get_code_object_registration())
+                   ->get_all_code_objects();
+    if(*num_executables < cos.size())
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
