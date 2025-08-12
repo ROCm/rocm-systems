@@ -55,7 +55,9 @@ if __name__ == "__main__":
     duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
 
     if duration is None:
-        input("Press Enter to detach...")
+        sys.stdout.write("Press Enter to detach...")
+        sys.stdout.flush() # Force the prompt to appear immediately
+        input()            # Now wait for input
     else:
         time.sleep(int(duration) / 1000)
 
