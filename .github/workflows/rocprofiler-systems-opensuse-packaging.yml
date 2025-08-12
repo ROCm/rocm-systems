@@ -12,7 +12,6 @@ on:
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
-      - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
       - '.github/workflows/rocprofiler-systems-opensuse-packaging.yml'
@@ -23,7 +22,6 @@ on:
       - '!projects/rocprofiler-systems/source/python/gui/**'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
-      - '!projects/rocprofiler-systems/CMakePresets.json'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,7 +47,7 @@ jobs:
     
     - name: Configure Env
       shell: bash
-      run:
+      run: |
         echo "/opt/rocm/bin" >> $GITHUB_PATH  &&
         echo "ROCM_PATH=/opt/rocm" >> $GITHUB_ENV &&
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV &&
@@ -61,7 +59,6 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
-        set -v
         ROCM_VERSION=${{ matrix.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
@@ -80,7 +77,7 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
-        cmake --preset release -B $BUILD_DIR -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR &&
+        cmake --preset release -B $BUILD_DIR -S ${PWD} -DCMAKE_INSTALL_PREFIX=$INSTALL_DIR -DCPACK_PACKAGING_INSTALL_PREFIX=$INSTALL_DIR &&
         cmake --build $BUILD_DIR --target all
 
     - name: Build and Install the Package
@@ -88,7 +85,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         cd $BUILD_DIR
         ROCM_VERSION=${{ matrix.rocm-version }}
         if [ ${ROCM_VERSION} = 6.4 ]; then CPACK_ARGUMENTS='-D CPACK_RPM_PACKAGE_AUTOREQ=0'; fi
@@ -100,5 +96,4 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         echo "TO BE ADDED LATER"
