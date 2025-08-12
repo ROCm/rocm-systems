@@ -32,6 +32,7 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart, parser
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
@@ -113,10 +114,9 @@ def shorten_kernel_name(kernel_name, verbosity_level):
     """Helper function to shorten kernel names"""
     if verbosity_level < 5:
         temp_df = pd.DataFrame({'Kernel_Name': [kernel_name]})
-        utils.kernel_name_shortener(temp_df, verbosity_level)
+        kernel_name_shortener(temp_df, verbosity_level)
         return temp_df.loc[0, 'Kernel_Name']
     return kernel_name
-
 
 def has_time_data(df):
     """
@@ -168,7 +168,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
 
                 for run_path, workload in runs.items():
                     if hasattr(workload, 'roofline_metrics') and workload.roofline_metrics:
-                        print("\nPer-Kernel Roofline Metrics (4.1) and AI Plot Points (4.2)", file=output)
+                        print("\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points", file=output)
                         print("-" * 80, file=output)
 
                         kernel_top_df = workload.dfs.get(1, pd.DataFrame())

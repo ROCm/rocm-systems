@@ -101,31 +101,31 @@ class cli_analysis(OmniAnalyze_Base):
         else:
             roof_plot = None
             # 1. check if not baseline && compatible soc:
-        if (len(self.get_args().path)) == 1:
-            workload_path = self.get_args().path[0][0]
-            workload = self._runs[workload_path]
-            gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+            if (len(self.get_args().path)) == 1:
+                workload_path = self.get_args().path[0][0]
+                workload = self._runs[workload_path]
+                gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
 
-            if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
-                roof_obj = self.get_socs()[gpu_arch].roofline_obj
+                if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
+                    roof_obj = self.get_socs()[gpu_arch].roofline_obj
 
-                if roof_obj:
-                    #store path in workload for calc_ai_analyze
-                    workload.path = workload_path
+                    if roof_obj:
+                        #store path in workload for calc_ai_analyze
+                        workload.path = workload_path
 
-                    # NOTE: using default data type
-                    roof_plot = roof_obj.cli_generate_plot(
-                        dtype=roof_obj.get_dtype()[0],
-                        workload=workload,
-                        config=self._profiling_config,
-                        arch_config=self._arch_configs[gpu_arch]
-                    )
+                        # NOTE: using default data type
+                        roof_plot = roof_obj.cli_generate_plot(
+                            dtype=roof_obj.get_dtype()[0],
+                            workload=workload,
+                            config=self._profiling_config,
+                            arch_config=self._arch_configs[gpu_arch]
+                        )
 
-        tty.show_all(
-            self.get_args(),
-            self._runs,
-            self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
-            self._output,
-            self._profiling_config,
-            roof_plot=roof_plot,
-        )
+            tty.show_all(
+                self.get_args(),
+                self._runs,
+                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
+                self._output,
+                self._profiling_config,
+                roof_plot=roof_plot,
+            )

@@ -641,6 +641,41 @@ class Roofline:
             )
             return
 
+        # Normalize workload_dir to get the base directory
+        workload_dir = self.__run_parameters.get("workload_dir")
+        if workload_dir is None:
+            console_error(
+                "workload_dir is not set",
+                exit=False,
+            )
+            return
+
+        # Extract base directory path regardless of-
+        # whether workload_dir is list or string
+        if isinstance(workload_dir, list):
+            if not workload_dir or not workload_dir[0]:
+                console_error(
+                    "workload_dir list is empty or contains invalid entries",
+                    exit=False,
+                )
+                return
+            # Handle nested list structure [0][0] or simple list [0]
+            base_dir = (
+                workload_dir[0][0]
+                if isinstance(workload_dir[0], (list, tuple))
+                else workload_dir[0]
+            )
+        else:
+            # workload_dir is a string
+            base_dir = workload_dir
+        # Convert to Path object for easier manipulation
+        base_path = Path(base_dir)
+        
+        roofline_csv = base_path / "roofline.csv"
+        if not roofline_csv.is_file():
+            console_log("roofline", "{} does not exist".format(roofline_csv))
+            return
+
         #if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
         if workload is not None:
             self.__ai_data = calc_ai_analyze(
@@ -676,37 +711,7 @@ class Roofline:
         console_debug(f"AI data: {self.__ai_data}")
         console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
-        # Normalize workload_dir to get the base directory
-        workload_dir = self.__run_parameters.get("workload_dir")
-        if workload_dir is None:
-            console_error(
-                "workload_dir is not set",
-                exit=False,
-            )
-            return
-
-        # Extract base directory path regardless of-
-        # whether workload_dir is list or string
-        if isinstance(workload_dir, list):
-            if not workload_dir or not workload_dir[0]:
-                console_error(
-                    "workload_dir list is empty or contains invalid entries",
-                    exit=False,
-                )
-                return
-            # Handle nested list structure [0][0] or simple list [0]
-            base_dir = (
-                workload_dir[0][0]
-                if isinstance(workload_dir[0], (list, tuple))
-                else workload_dir[0]
-            )
-        else:
-            # workload_dir is a string
-            base_dir = workload_dir
         self.roof_setup()
-
-        # Convert to Path object for easier manipulation
-        base_path = Path(base_dir)
 
         # Check proper datatype input - takes single str
         if not isinstance(dtype, str):
@@ -716,11 +721,6 @@ class Roofline:
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
-
-        roofline_csv = base_path / "roofline.csv"
-        if not roofline_csv.is_file():
-            console_log("roofline", "{} does not exist".format(roofline_csv))
-            return
 
         profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
         if profiling_config.get("format_rocprof_output") == "rocpd":
