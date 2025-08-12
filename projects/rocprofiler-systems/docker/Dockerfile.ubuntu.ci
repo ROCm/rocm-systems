@@ -26,7 +26,7 @@ ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
     apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
-        bzip2 chrpath cmake curl environment-modules flex gettext git git-core gnupg2 \
+        bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
         gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
         locales lsb-release m4 ninja-build python3-pip software-properties-common \
         texinfo unzip wget vim zip zlib1g-dev && \
