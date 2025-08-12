@@ -95,8 +95,8 @@ jobs:
       run: |
         cd $INSTALL_DIR
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
-        ./rocprof-sys-python --help
-        ./rocprof-sys-run --help
-        ./rocprof-sys-sample --help
-        ./rocprof-sys-causal --help
+        bin/rocprof-sys-python --help
+        bin/rocprof-sys-run --help
+        bin/rocprof-sys-sample --help
+        bin/rocprof-sys-causal --help
         ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1
