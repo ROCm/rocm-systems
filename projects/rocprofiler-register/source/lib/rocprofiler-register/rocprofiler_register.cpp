@@ -47,6 +47,8 @@
 extern "C" {
 #pragma weak rocprofiler_configure
 #pragma weak rocprofiler_set_api_table
+#pragma weak rocprofiler_load_prestore_queues
+#pragma weak rocprofiler_load_prestore_code_objects
 #pragma weak rocprofiler_prestore_get_version
 #pragma weak rocprofiler_prestore_set_api_table
 #pragma weak rocprofiler_prestore_export_all_queues
@@ -88,6 +90,12 @@ rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*)
 extern int
 rocprofiler_set_api_table(const char*, uint64_t, uint64_t, void**, uint64_t);
 
+extern void
+rocprofiler_load_prestore_queues(void*);
+
+extern void
+rocprofiler_load_prestore_code_objects(void*);
+
 extern int
 rocprofiler_prestore_get_version();
 
@@ -104,7 +112,7 @@ extern int
 rocprofiler_prestore_export_all_code_objects(void*, uint64_t*);
 
 extern void
-rocprofv3_attach(void*);
+rocprofv3_attach(void);
 
 extern void
 rocprofv3_detach(void);
@@ -139,6 +147,8 @@ namespace
 using namespace rocprofiler_register;
 using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
 using rocp_set_api_table_data_t   = std::tuple<void*, rocprofiler_set_api_table_t>;
+using rocprofiler_load_prestore_queues_t = decltype(::rocprofiler_load_prestore_queues)*;
+using rocprofiler_load_prestore_code_objects_t = decltype(::rocprofiler_load_prestore_code_objects)*;
 using rocprofv3_attach_t = decltype(::rocprofv3_attach)*;
 using rocprofv3_detach_t = decltype(::rocprofv3_detach)*;
 using rocprofiler_set_api_table_t = decltype(::rocprofiler_set_api_table)*;
@@ -165,6 +175,8 @@ static_assert(sizeof(bitset_t) ==
 
 constexpr auto rocprofiler_lib_name                = "librocprofiler-sdk.so";
 constexpr auto rocprofiler_lib_register_entrypoint = "rocprofiler_set_api_table";
+constexpr auto rocprofiler_load_prestore_queues_entry_point = "rocprofiler_load_prestore_queues";
+constexpr auto rocprofiler_load_prestore_code_objects_entry_point = "rocprofiler_load_prestore_code_objects";
 
 constexpr auto rocprofiler_prestore_lib_name                           = "librocprofiler-sdk-prestore.so";
 constexpr auto rocprofiler_prestore_get_version_entrypoint             = "rocprofiler_prestore_get_version";
@@ -175,8 +187,8 @@ constexpr auto rocprofiler_prestore_set_write_interceptor_entrypoint   = "rocpro
 constexpr auto rocprofiler_prestore_export_all_code_objects_entrypoint = "rocprofiler_prestore_export_all_code_objects";
 
 constexpr auto rocprofiler_tool_lib_name              = "rocprofiler-sdk/librocprofiler-sdk-tool.so";
-constexpr auto rocprofiler_tool_lib_attach_entrypoint = "rocprofv3_attach";
-constexpr auto rocprofiler_tool_lib_detach_entrypoint = "rocprofv3_detach";
+constexpr auto rocprofiler_tool_attach_entrypoint = "rocprofv3_attach";
+constexpr auto rocprofiler_tool_detach_entrypoint = "rocprofv3_detach";
 
 constexpr auto rocprofiler_register_lib_name =
     "librocprofiler-register.so." ROCPROFILER_REGISTER_SOVERSION;
@@ -818,6 +830,47 @@ rocprofiler_register_invoke_all_registrations()
 rocprofiler_register_error_code_t
 rocprofiler_register_attach(const char* environment_buffer) ROCPROFILER_REGISTER_PUBLIC_API;
 
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_prestore_loads()
+{
+    void* rocplibrary = rocp_load_lib(rocprofiler_lib_name);
+    if (!rocplibrary)
+    {
+        LOG(ERROR) << "couldn't dlopen rocprofiler library. reason: " << dlerror();
+        return ROCP_REG_NO_TOOLS;
+    }
+
+    void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
+    if (!prestorelibrary)
+    {
+        LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library was not found or able to be loaded. The attaching profiler will not be able to profile anything that requires proxy queues.";
+    }
+
+    auto table = create_prestore_dispatch_table(prestorelibrary);
+    rocprofiler_load_prestore_queues_t rocprofiler_load_prestore_queues_fn;
+    *(void**) (&rocprofiler_load_prestore_queues_fn) =
+        dlsym(rocplibrary, rocprofiler_load_prestore_queues_entry_point);
+    rocprofiler_load_prestore_code_objects_t rocprofiler_load_prestore_code_objects_fn;
+    *(void**) (&rocprofiler_load_prestore_code_objects_fn) =
+        dlsym(rocplibrary, rocprofiler_load_prestore_code_objects_entry_point);
+
+    if (!rocprofiler_load_prestore_queues_fn)
+    {
+        LOG(ERROR) << "Could not find " << rocprofiler_load_prestore_queues_entry_point << " symbol in " << rocprofiler_prestore_lib_name << ". Error: " << dlerror();
+        return ROCP_REG_NO_TOOLS;
+    }
+
+    if (!rocprofiler_load_prestore_code_objects_fn)
+    {
+        LOG(ERROR) << "Could not find " << rocprofiler_load_prestore_code_objects_entry_point << " symbol in " << rocprofiler_prestore_lib_name << ". Error: " << dlerror();
+        return ROCP_REG_NO_TOOLS;
+    }
+
+    rocprofiler_load_prestore_queues_fn(&table);
+    rocprofiler_load_prestore_code_objects_fn(&table);
+    return ROCP_REG_SUCCESS;
+}
+
 //
 //  This function can be invoked by ptrace
 rocprofiler_register_error_code_t
@@ -829,29 +882,36 @@ rocprofiler_register_attach(const char* environment_buffer)
     if (!toollibrary)
     {
         LOG(ERROR) << "couldn't dlopen tool library. reason: " << dlerror();
+        return ROCP_REG_NO_TOOLS;
     }
-
     // TODO: should save old environment variables if they get overwritten and restore them on detach
     load_environment_buffer(environment_buffer);
 
     rocprofv3_attach_t rocprofv3_attach_fn;
     *(void**) (&rocprofv3_attach_fn) =
-        dlsym(toollibrary, rocprofiler_tool_lib_attach_entrypoint);
+        dlsym(toollibrary, rocprofiler_tool_attach_entrypoint);
 
-    if (rocprofv3_attach_fn)
+    if (!rocprofv3_attach_fn)
     {
-        void* prestorelibrary = rocp_load_lib(rocprofiler_prestore_lib_name);
-        if (!prestorelibrary)
-        {
-            LOG(ERROR) << "Proxy queues for attachment are enabled, but the prestore library was not found or able to be loaded. The attaching profiler will not be able to profile anything that requires proxy queues.";
-        }
-        auto table = create_prestore_dispatch_table(prestorelibrary);
-
-        LOG(INFO) << "attachment starting";
-        rocprofv3_attach_fn(&table);
-        rocprofiler_register_invoke_all_registrations();
-    } else {
         LOG(ERROR) << "attach entry point is NULL";
+        return ROCP_REG_NO_TOOLS;
+    }
+
+    LOG(INFO) << "attachment starting";
+    rocprofv3_attach_fn();
+
+    auto status = rocprofiler_register_invoke_all_registrations();
+    if (status)
+    {
+        LOG(ERROR) << "error during invoke_all_registrations: " << status;
+        return status;
+    }
+
+    status = rocprofiler_register_invoke_prestore_loads();
+    if (status)
+    {
+        LOG(ERROR) << "error during invoke_prestore_loads: " << status;
+        return status;
     }
 
     return ROCP_REG_SUCCESS;
@@ -875,7 +935,7 @@ rocprofiler_register_detach()
 
     rocprofv3_detach_t rocprofv3_detach_fn;
     *(void**) (&rocprofv3_detach_fn) =
-        dlsym(toollibrary, rocprofiler_tool_lib_detach_entrypoint);
+        dlsym(toollibrary, rocprofiler_tool_detach_entrypoint);
 
     if (rocprofv3_detach_fn)
     {
