@@ -68,6 +68,10 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
         fs::create_directories(output_path);
     }
 
+    if(auto extpos = fname.rfind(_ext);
+       extpos < fname.size() && extpos + _ext.size() == fname.size())
+        fname = fname.substr(0, extpos);
+
     auto _ofname =
         tool::format_path(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
 
@@ -95,11 +99,11 @@ get_output_stream(const output_config& cfg,
     auto cfg_output_path = tool::format_path(cfg.output_path);
 
     if(stdout_names.count(cfg_output_path) > 0 || stdout_names.count(fname) > 0)
-        return {&std::cout, [](auto*&) {}};
+        return {"stdout", &std::cout, [](auto*&) {}};
     else if(stderr_names.count(cfg_output_path) > 0 || stderr_names.count(fname) > 0)
-        return {&std::cout, [](auto*&) {}};
+        return {"stderr", &std::cerr, [](auto*&) {}};
     else if(cfg_output_path.empty() || fname.empty())
-        return {&std::clog, [](auto*&) {}};
+        return {"stdlog", &std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(cfg, fname, ext);
     auto* _ofs        = new(std::nothrow) std::ofstream{output_file, mode};
@@ -110,7 +114,7 @@ get_output_stream(const output_config& cfg,
 
     ROCP_ERROR << "Opened result file: " << output_file;
 
-    return {_ofs, [](std::ostream*& v) {
+    return {std::move(output_file), _ofs, [](std::ostream*& v) {
                 if(v) dynamic_cast<std::ofstream*>(v)->close();
                 delete v;
                 v = nullptr;

@@ -49,6 +49,11 @@ struct output_stream
     : stream{_os}
     , dtor{_dtor}
     {}
+    output_stream(std::string&& _name, std::ostream* _os, ostream_dtor_t _dtor)
+    : name{std::move(_name)}
+    , stream{_os}
+    , dtor{_dtor}
+    {}
 
     ~output_stream() { close(); }
     output_stream(const output_stream&)     = delete;
@@ -68,10 +73,18 @@ struct output_stream
     {
         if(stream) (*stream) << std::flush;
         if(dtor) dtor(stream);
+        stream = nullptr;
+    }
+
+    bool is_open() const { return (stream != nullptr); }
+    void flush() const
+    {
+        if(stream) stream->flush();
     }
 
     bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
 
+    std::string    name   = {};
     std::ostream*  stream = nullptr;
     ostream_dtor_t dtor   = nullptr;
 };

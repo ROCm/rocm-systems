@@ -170,9 +170,6 @@ struct metadata
     node_info                                node_data                  = {};
     std::vector<std::string>                 command_line               = {};
 
-    // PMC event ids start at this number
-    uint64_t pmc_event_offset = 1;
-
     metadata() = default;
     metadata(inprocess);
 
