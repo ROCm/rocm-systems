@@ -1796,7 +1796,7 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::Command::EventWaitList waitList;
     auto* pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
     if (stream != pStream) {
-      amd::Command* cmd = pStream->getLastQueuedCommand(true);
+      amd::Command* cmd = pStream->getLastQueuedCommand(false);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
@@ -1931,7 +1931,7 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
     amd::Command::EventWaitList waitList;
     if (queueDevice != dstImage->GetDeviceById()) {
       pStream = hip::getNullStream(dstImage->GetDeviceById()->context());
-      amd::Command* cmd = stream->getLastQueuedCommand(true);
+      amd::Command* cmd = stream->getLastQueuedCommand(false);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
@@ -1978,7 +1978,7 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::Command::EventWaitList waitList;
     if (queueDevice != srcImage->GetDeviceById()) {
       pStream = hip::getNullStream(srcImage->GetDeviceById()->context());
-      amd::Command* cmd = stream->getLastQueuedCommand(true);
+      amd::Command* cmd = stream->getLastQueuedCommand(false);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
