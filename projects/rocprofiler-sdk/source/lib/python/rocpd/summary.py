@@ -76,9 +76,9 @@ def get_temp_view_names(connection: RocpdImportData) -> List[str]:
 
 def get_temp_view_columns(connection: RocpdImportData, view_name: str) -> List[str]:
     """Return the column names of a given temporary view."""
-    cursor = connection.cursor()
-    cursor.execute(f"PRAGMA table_xinfo('{view_name}')")
-    return [row[1] for row in cursor.fetchall()]
+    print(f"Retrieving columns for view: {view_name}")
+    cursor = connection.execute(f"SELECT * FROM '{view_name}' LIMIT 0")
+    return [desc[0] for desc in cursor.description]
 
 
 def export_query(

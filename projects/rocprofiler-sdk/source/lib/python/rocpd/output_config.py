@@ -125,6 +125,18 @@ def add_args(parser):
         required=False,
     )
 
+    agent_index_options = parser.add_argument_group("Agent index options")
+
+    agent_index_options.add_argument(
+        "--agent-index-value",
+        choices=("absolute", "relative", "type-relative"),
+        help="""Device identification format in CSV/Perfetto/OTF2 output (default: relative):
+        absolute: uses node_id (Agent-0, Agent-2, Agent-4) ignoring cgroups restrictions.
+        relative: uses logical_node_id (Agent-0, Agent-1, Agent-2) considering cgroups restrictions.
+        type-relative: uses logical_node_type_id (CPU-0, GPU-0, GPU-1) with numbering that resets for each device type.""",
+        default="relative",
+    )
+
     kernel_naming_options = parser.add_argument_group("Kernel naming options")
 
     kernel_naming_options.add_argument(
@@ -134,7 +146,7 @@ def add_args(parser):
         default=False,
     )
 
-    return ["output_file", "output_path", "kernel_rename"]
+    return ["output_file", "output_path", "agent_index_value", "kernel_rename"]
 
 
 def process_args(args, valid_args):
@@ -146,37 +158,7 @@ def process_args(args, valid_args):
             if itr == "output_format":
                 ret[itr] = val
             elif itr == "output_path" and val is not None:
-                ret[itr] = format_path(val)
+                ret[itr] = os.path.abspath(format_path(val))
             elif val is not None:
-                ret[itr] = val
-    return ret
-
-
-def add_generic_args(parser):
-    """Add generic arguments that apply to multiple output formats."""
-
-    generic_options = parser.add_argument_group("Generic options")
-
-    generic_options.add_argument(
-        "--agent-index-value",
-        choices=("absolute", "relative", "type-relative"),
-        help="""Device identification format in CSV/Perfetto/OTF2 output (default: relative):
-        absolute: uses node_id (Agent-0, Agent-2, Agent-4) ignoring cgroups restrictions.
-        relative: uses logical_node_id (Agent-0, Agent-1, Agent-2) considering cgroups restrictions.
-        type-relative: uses logical_node_type_id (CPU-0, GPU-0, GPU-1) with numbering that resets for each device type.""",
-        default="relative",
-    )
-
-    return [
-        "agent_index_value",
-    ]
-
-
-def process_generic_args(args, valid_args):
-    ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
                 ret[itr] = val
     return ret

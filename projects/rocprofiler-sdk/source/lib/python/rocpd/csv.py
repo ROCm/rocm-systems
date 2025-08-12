@@ -29,6 +29,7 @@ import re
 from .importer import RocpdImportData
 from .query import export_sqlite_query
 from .time_window import apply_time_window
+from .filter import apply_filter
 from . import output_config
 from . import libpyrocpd
 
@@ -413,11 +414,12 @@ def write_csv(importData, config):
     write_scratch_memory_csv(importData, config)
 
 
-def execute(input, config=None, window_args=None, **kwargs):
+def execute(input, config=None, window_args=None, filter_args=None, **kwargs):
 
     importData = RocpdImportData(input)
 
     apply_time_window(importData, **window_args)
+    apply_filter(importData, **filter_args)
 
     config = (
         output_config.output_config(**kwargs)
@@ -445,7 +447,8 @@ def main(argv=None):
     from .time_window import process_args as process_args_time_window
     from .output_config import add_args as add_args_output_config
     from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from .filter import add_args as add_args_filter
+    from .filter import process_args as process_args_filter
 
     parser = argparse.ArgumentParser(
         description="Convert rocPD to CSV files",
@@ -465,24 +468,23 @@ def main(argv=None):
     )
 
     valid_out_config_args = add_args_output_config(parser)
-    valid_generic_args = add_generic_args(parser)
+    valid_filter_args = add_args_filter(parser)
     valid_time_window_args = add_args_time_window(parser)
     valid_csv_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
     out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
+    filter_args = process_args_filter(args, valid_filter_args)
     window_args = process_args_time_window(args, valid_time_window_args)
     csv_args = process_args(args, valid_csv_args)
 
     all_args = {
         **out_cfg_args,
-        **generic_out_cfg_args,
         **csv_args,
     }
 
-    execute(args.input, window_args=window_args, **all_args)
+    execute(args.input, window_args=window_args, filter_args=filter_args, **all_args)
 
 
 if __name__ == "__main__":

@@ -42,6 +42,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
         if isinstance(input, RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
+            self.filters = input.filters
         else:
 
             def internal_init(_input, _output):
@@ -63,6 +64,7 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 raise ValueError(
                     f"input is unsupported type. Expected sqlite3.Connection, string, or (non-empty) list of strings. type={type(input).__name__}"
                 )
+            self.filters = {}
             self.table_info = _table_info
             super(RocpdImportData, self).__init__(_connection, _filenames)
 

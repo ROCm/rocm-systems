@@ -33,6 +33,7 @@ from . import output_config
 from . import libpyrocpd
 from .importer import RocpdImportData
 from .time_window import apply_time_window
+from .filter import apply_filter
 
 
 def export_sqlite_query(
@@ -462,11 +463,12 @@ def process_args(args, valid_args):
     return ret
 
 
-def execute(input, args, config=None, window_args=None, **kwargs):
+def execute(input, args, config=None, window_args=None, filter_args=None, **kwargs):
 
     importData = RocpdImportData(input)
 
     apply_time_window(importData, **window_args)
+    apply_filter(importData, **filter_args)
 
     config = (
         output_config.output_config(**kwargs)
@@ -528,7 +530,8 @@ def main(argv=None):
     from .time_window import process_args as process_args_time_window
     from .output_config import add_args as add_args_output_config
     from .output_config import process_args as process_args_output_config
-    from .output_config import add_generic_args, process_generic_args
+    from .filter import add_args as add_args_filter
+    from .filter import process_args as process_args_filter
 
     parser = argparse.ArgumentParser(
         description="Generate report for rocpd query", allow_abbrev=False
@@ -546,27 +549,27 @@ def main(argv=None):
     )
 
     valid_out_config_args = add_args_output_config(parser)
-    valid_generic_args = add_generic_args(parser)
+    valid_filter_args = add_args_filter(parser)
     valid_time_window_args = add_args_time_window(parser)
     valid_query_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
     out_cfg_args = process_args_output_config(args, valid_out_config_args)
-    generic_out_cfg_args = process_generic_args(args, valid_generic_args)
+    filter_args = process_args_filter(args, valid_filter_args)
     window_args = process_args_time_window(args, valid_time_window_args)
     query_args = process_args(args, valid_query_args)
 
     all_args = {
         **query_args,
         **out_cfg_args,
-        **generic_out_cfg_args,
     }
 
     execute(
         args.input,
         args,
         window_args=window_args,
+        filter_args=filter_args,
         **all_args,
     )
 

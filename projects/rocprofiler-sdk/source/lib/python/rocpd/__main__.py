@@ -44,6 +44,7 @@ def main(argv=None, config=None):
     from . import pftrace
     from . import query
     from . import summary
+    from . import filter
     from . import time_window
     from . import version_info
     from .importer import RocpdImportData
@@ -110,6 +111,18 @@ Example usage:
         help="Print the version information and exit",
     )
 
+    def add_required_args(_parser):
+        _required_params = _parser.add_argument_group("Required options")
+        _required_params.add_argument(
+            "-i",
+            "--input",
+            required=True,
+            type=output_config.check_file_exists,
+            nargs="+",
+            help="Input path and filename to one or more database(s), separated by spaces",
+        )
+        return _required_params
+
     subparsers = parser.add_subparsers(dest="command")
     converter = subparsers.add_parser(
         "convert",
@@ -138,16 +151,7 @@ Example usage:
     def get_output_type(val):
         return val.lower().replace("perfetto", "pftrace")
 
-    # add required options for each subparser
-    converter_required_params = converter.add_argument_group("Required options")
-    converter_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
+    converter_required_params = add_required_args(converter)
     converter_required_params.add_argument(
         "-f",
         "--output-format",
@@ -159,43 +163,28 @@ Example usage:
         required=True,
     )
 
-    query_required_params = query_reporter.add_argument_group("Required options")
-    query_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
-
-    summary_required_params = generate_summary.add_argument_group("Required options")
-    summary_required_params.add_argument(
-        "-i",
-        "--input",
-        required=True,
-        type=output_config.check_file_exists,
-        nargs="+",
-        help="Input path and filename to one or more database(s)",
-    )
+    query_required_params = add_required_args(query_reporter)
+    summary_required_params = add_required_args(generate_summary)
 
     # converter: add args from any sub-modules
     valid_out_config_args = output_config.add_args(converter)
-    valid_generic_args = output_config.add_generic_args(converter)
     valid_pftrace_args = pftrace.add_args(converter)
     valid_csv_args = csv.add_args(converter)
     valid_otf2_args = otf2.add_args(converter)
     valid_time_window_args = time_window.add_args(converter)
+    valid_filter_args = filter.add_args(converter)
 
     # query: subparser args
     valid_out_config_args = output_config.add_args(query_reporter)
     valid_query_args = query.add_args(query_reporter)
     valid_time_window_args = time_window.add_args(query_reporter)
+    valid_filter_args = filter.add_args(query_reporter)
 
     # summary: subparser args
     valid_io_args = summary.add_io_args(generate_summary)
     valid_summary_args = summary.add_args(generate_summary)
     valid_time_window_args = time_window.add_args(generate_summary)
+    valid_filter_args = filter.add_args(generate_summary)
 
     # parse the command line arguments
     args = parser.parse_args(argv)
@@ -216,13 +205,11 @@ Example usage:
     if args.command == "convert":
         # process the args
         out_cfg_args = output_config.process_args(args, valid_out_config_args)
-        generic_out_cfg_args = output_config.process_generic_args(
-            args, valid_generic_args
-        )
         pftrace_args = pftrace.process_args(args, valid_pftrace_args)
         csv_args = csv.process_args(args, valid_csv_args)
         otf2_args = otf2.process_args(args, valid_otf2_args)
         window_args = time_window.process_args(args, valid_time_window_args)
+        filter_args = filter.process_args(args, valid_filter_args)
 
         # now start processing the data.  Import the data and merge the views
         importData = RocpdImportData(args.input)
@@ -231,9 +218,13 @@ Example usage:
         if window_args is not None:
             time_window.apply_time_window(importData, **window_args)
 
+        # apply filtering if requested
+        if filter_args is not None:
+            filter.check_args(importData, **filter_args)
+            filter.apply_filter(importData, **filter_args)
+
         all_args = {
             **out_cfg_args,
-            **generic_out_cfg_args,
             **pftrace_args,
             **csv_args,
             **otf2_args,
@@ -254,7 +245,7 @@ Example usage:
 
         for out_format in args.output_format:
             if out_format in format_handlers:
-                print(f"Converting database(s) to {out_format} format:")
+                print(f"\nConverting database(s) to {out_format} format...")
                 format_handlers[out_format](importData, config)
             else:
                 print(f"Warning: Unsupported output format '{out_format}'")
@@ -265,13 +256,18 @@ Example usage:
         query_args = query.process_args(args, valid_query_args)
         out_cfg_args = output_config.process_args(args, valid_out_config_args)
         window_args = time_window.process_args(args, valid_time_window_args)
+        filter_args = filter.process_args(args, valid_filter_args)
 
-        all_args = {**query_args, **out_cfg_args}
+        all_args = {
+            **query_args,
+            **out_cfg_args,
+        }
 
         query.execute(
             args.input,
             args,
             window_args=window_args,
+            filter_args=filter_args,
             **all_args,
         )
 
@@ -281,6 +277,7 @@ Example usage:
         summary_args = summary.process_args(args, valid_summary_args)
         io_args = output_config.process_args(args, valid_io_args)
         window_args = time_window.process_args(args, valid_time_window_args)
+        filter_args = filter.process_args(args, valid_filter_args)
 
         # now start processing the data.  Import the data and merge the views
         importData = RocpdImportData(args.input)
@@ -288,6 +285,11 @@ Example usage:
         # adjust the time window view of the data
         if window_args is not None:
             time_window.apply_time_window(importData, **window_args)
+
+        # apply filtering if requested
+        if filter_args is not None:
+            filter.check_args(importData, **filter_args)
+            filter.apply_filter(importData, **filter_args)
 
         all_args = {**summary_args, **io_args}
         summary.generate_all_summaries(importData, **all_args)
