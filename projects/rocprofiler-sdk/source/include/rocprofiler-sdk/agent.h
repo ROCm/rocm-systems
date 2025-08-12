@@ -124,8 +124,10 @@ ROCPROFILER_CXX_CODE(
  * All fields are 32-bit unsigned integers representing the firmware version as reported by the
  * corresponding sysfs files in /sys/class/drm/renderD{}/device/fw_version/
  */
-typedef struct rocprofiler_agent_fw_info_t
+typedef struct rocprofiler_agent_fw_info_v0_t
 {
+    uint64_t size;  ///< set to sizeof(rocprofiler_agent_fw_info_v0_t) by rocprofiler. This can be used for
+                    ///< versioning and compatibility handling
     uint32_t mec2_fw_version;      ///< Firmware version for MEC2 engine
     uint32_t mec_fw_version;       ///< Firmware version for MEC engine
     uint32_t rlc_fw_version;       ///< Firmware version for RLC engine
@@ -139,8 +141,13 @@ typedef struct rocprofiler_agent_fw_info_t
     uint32_t ta_ras_fw_version;    ///< Firmware version for TA RAS microcontroller
     uint32_t ta_xgmi_fw_version;   ///< Firmware version for TA XGMI microcontroller
     uint32_t vcn_fw_version;       ///< Firmware version for VCN engine
-} rocprofiler_agent_fw_info_t;
+} rocprofiler_agent_fw_info_v0_t;
 
+/**
+ * @brief Typedef for the current ::rocprofiler_agent_fw_info_v0_t
+ *
+ */
+typedef rocprofiler_agent_fw_info_v0_t rocprofiler_agent_fw_info_t;
 
 /**
  * @brief Stores the properties of an agent (CPU, GPU, etc.)

@@ -35,6 +35,10 @@ namespace ioctl
 {
 using rocp_pcs_cfgs_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
 
+bool
+is_pc_sampling_firmware_version_correct(const rocprofiler_agent_t*       agent,
+                                        rocprofiler_pc_sampling_method_t method);
+
 rocprofiler_status_t
 ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs);
 
