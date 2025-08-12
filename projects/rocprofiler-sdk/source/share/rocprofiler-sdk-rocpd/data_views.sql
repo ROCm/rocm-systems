@@ -72,18 +72,16 @@ SELECT
     E.category_id,
     (
         SELECT
-            string
+            name
         FROM
-            `rocpd_string` RS
+            `rocpd_info_category` C
         WHERE
-            RS.id = E.category_id
-            AND RS.guid = E.guid
+            C.id = E.category_id
+            AND C.guid = E.guid
     ) AS category,
     E.stack_id,
     E.parent_stack_id,
     E.correlation_id,
-    E.call_stack,
-    E.line_info,
     E.extdata
 FROM
     `rocpd_event` E;
@@ -212,8 +210,6 @@ SELECT
     E.stack_id,
     E.parent_stack_id,
     E.correlation_id,
-    E.call_stack,
-    E.line_info,
     E.extdata
 FROM
     `rocpd_region` R
@@ -246,9 +242,7 @@ SELECT
     E.stack_id AS stack_id,
     E.parent_stack_id AS parent_stack_id,
     E.correlation_id,
-    E.extdata AS extdata,
-    E.call_stack AS call_stack,
-    E.line_info AS line_info
+    E.extdata AS extdata
 FROM
     `rocpd_sample` S
     INNER JOIN `tracks` T ON T.id = S.track_id
@@ -280,9 +274,7 @@ SELECT
     S.stack_id,
     S.parent_stack_id,
     S.correlation_id,
-    S.extdata,
-    S.call_stack,
-    S.line_info
+    S.extdata
 FROM
     `samples` S;
 
@@ -313,6 +305,7 @@ SELECT
     E.category,
     R.string AS region,
     S.display_name AS name,
+    T.agent_id,
     T.agent_absolute_index,
     T.agent_logical_index,
     T.agent_type_index,
@@ -332,9 +325,19 @@ SELECT
     K.grid_size_x AS grid_x,
     K.grid_size_y AS grid_y,
     K.grid_size_z AS grid_z,
+    -- (K.grid_size_x * K.grid_size_y * K.grid_size_z) AS grid_size,
     K.workgroup_size_x AS workgroup_x,
     K.workgroup_size_y AS workgroup_y,
     K.workgroup_size_z AS workgroup_z,
+    -- (K.workgroup_size_x * K.workgroup_size_y * K.workgroup_size_z) AS workgroup_size,
+    K.workgroup_size_x AS block_size_x,
+    K.workgroup_size_y AS block_size_y,
+    K.workgroup_size_z AS block_size_z,
+    -- (K.workgroup_size_x * K.workgroup_size_y * K.workgroup_size_z) AS block_size,
+    (K.grid_size_x / K.workgroup_size_x) AS grid_size_x,
+    (K.grid_size_y / K.workgroup_size_y) AS grid_size_y,
+    (K.grid_size_z / K.workgroup_size_z) AS grid_size_z,
+    -- (K.grid_size_x / K.workgroup_size_x) * (K.grid_size_y / K.workgroup_size_y) * (K.grid_size_z / K.workgroup_size_z) AS grid_size,
     K.group_segment_size AS lds_size,
     K.private_segment_size AS scratch_size,
     S.arch_vgpr_count AS vgpr_count,
@@ -342,9 +345,13 @@ SELECT
     S.sgpr_count,
     S.group_segment_size AS static_lds_size,
     S.private_segment_size AS static_scratch_size,
+    S.sgpr_count,
+    S.arch_vgpr_count,
+    S.accum_vgpr_count,
     E.stack_id,
     E.parent_stack_id,
-    E.correlation_id
+    E.correlation_id,
+    E.extdata
 FROM
     `rocpd_kernel_dispatch` K
     INNER JOIN `tracks` T ON T.id = K.track_id
@@ -397,12 +404,10 @@ SELECT
     PMC_I.name,
     PMC_I.symbol,
     PMC_E.value,
-    PMC_I.description,
     PMC_I.agent_id,
     PMC_I.target_arch,
     PMC_I.event_code,
     PMC_I.instance_id,
-    PMC_I.long_description,
     PMC_I.component,
     PMC_I.units,
     PMC_I.value_type,
@@ -410,6 +415,8 @@ SELECT
     PMC_I.expression,
     PMC_I.is_constant,
     PMC_I.is_derived,
+    PMC_I.description,
+    PMC_I.long_description,
     PMC_I.extdata AS pmc_info_extdata,
     PMC_E.extdata AS pmc_event_extdata
 FROM
@@ -442,12 +449,14 @@ SELECT
     T.stream_name,
     M.size,
     dst_agent.name AS dst_device,
+    dst_agent.id AS dst_agent_id,
     dst_agent.absolute_index AS dst_agent_absolute_index,
     dst_agent.logical_index AS dst_agent_logical_index,
     dst_agent.type_index AS dst_agent_type_index,
     dst_agent.type AS dst_agent_type,
     M.dst_address,
     src_agent.name AS src_device,
+    src_agent.id AS src_agent_id,
     src_agent.absolute_index AS src_agent_absolute_index,
     src_agent.logical_index AS src_agent_logical_index,
     src_agent.type_index AS src_agent_type_index,
@@ -455,7 +464,8 @@ SELECT
     M.src_address,
     E.stack_id,
     E.parent_stack_id,
-    E.correlation_id
+    E.correlation_id,
+    E.extdata
 FROM
     `rocpd_memory_copy` M
     INNER JOIN `events` E ON E.id = M.event_id
@@ -507,7 +517,8 @@ SELECT
     M.address,
     E.stack_id,
     E.parent_stack_id,
-    E.correlation_id
+    E.correlation_id,
+    E.extdata
 FROM
     `rocpd_memory_allocate` M
     INNER JOIN `events` E ON E.id = M.event_id
@@ -524,18 +535,6 @@ FROM
     AND DE.guid = M.guid;
 
 --
---
-CREATE VIEW IF NOT EXISTS
-    `scratch_memory` AS
-SELECT
-    M.*,
-    JSON_EXTRACT(M.extdata, '$.flags') AS alloc_flags
-FROM
-    `memory_allocations` M
-WHERE
-    M.level = 'SCRATCH';
-
---
 -- PMC events specific to kernels
 CREATE VIEW IF NOT EXISTS
     `kernel_pmc_events` AS
@@ -548,6 +547,7 @@ SELECT
     K.category,
     K.region,
     K.name,
+    K.agent_id,
     K.agent_absolute_index,
     K.agent_logical_index,
     K.agent_type_index,
@@ -564,6 +564,9 @@ SELECT
     K.duration,
     K.event_id,
     K.track_id,
+    K.stack_id,
+    K.parent_stack_id,
+    K.correlation_id,
     K.grid_x,
     K.grid_y,
     K.grid_z,
@@ -574,26 +577,26 @@ SELECT
     K.scratch_size,
     K.static_lds_size,
     K.static_scratch_size,
-    K.stack_id,
-    K.parent_stack_id,
-    K.correlation_id,
+    K.sgpr_count,
+    K.arch_vgpr_count,
+    K.accum_vgpr_count,
     E.pmc_id,
     E.name AS `pmc_name`,
     E.symbol AS `pmc_symbol`,
     E.value AS `pmc_value`,
-    E.description AS `pmc_description`,
     E.agent_id AS `pmc_agent_id`,
     E.target_arch AS `pmc_target_arch`,
     E.event_code AS `pmc_event_code`,
     E.instance_id AS `pmc_instance_id`,
-    E.long_description AS `pmc_long_description`,
     E.component AS `pmc_component`,
     E.units AS `pmc_units`,
     E.value_type AS `pmc_value_type`,
     E.block AS `pmc_block`,
     E.expression AS `pmc_expression`,
     E.is_constant AS `pmc_is_constant`,
-    E.is_derived AS `pmc_is_derived`
+    E.is_derived AS `pmc_is_derived`,
+    E.description AS `pmc_description`,
+    E.long_description AS `pmc_long_description`
 FROM
     `kernels` K
     INNER JOIN `pmc_events` E ON E.event_id = K.event_id;

@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
     );
 
+-- Stores all the categories for filtering
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_category{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "name" TEXT NOT NULL,
+        "extdata" JSONB DEFAULT "{}" NOT NULL
+    );
+
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_agent{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -122,6 +131,7 @@ CREATE TABLE IF NOT EXISTS
         "instance_id" INTEGER,
         "name" TEXT NOT NULL,
         "symbol" TEXT NOT NULL,
+        "qualifier" TEXT,
         "description" TEXT,
         "long_description" TEXT DEFAULT "",
         "component" TEXT,
@@ -178,6 +188,65 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (code_object_id) REFERENCES `rocpd_info_code_object{{uuid}}` (id) ON UPDATE CASCADE
     );
 
+-- Info related to address ranges
+-- This is used to store the base address, low address, and high address
+-- for a given address range. Base address is the runtime load offset of the binary.
+-- The address low and high are the range within the binary. If base address is non-zero,
+-- then the low and high addresses are base + offset within binary
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_address_range{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "address_base" BIGINT,
+        "address_low" BIGINT CHECK ("address_low" >= "address_base"),
+        "address_high" BIGINT CHECK ("address_high" >= "address_low"),
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- Info related to source code information
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_source_code{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "address_id" INTEGER,
+        "file" TEXT,
+        "line_number" INTEGER, -- starting line number
+        "lines" JSONB DEFAULT "[]" NOT NULL, -- put the source code lines here
+        "instructions" JSONB DEFAULT "[]" NOT NULL, -- put the instructions/assembly code here
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (address_id) REFERENCES `rocpd_info_address_range{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- Info related to program counter (PC) addresses
+-- This is used to store the function name, file, and line number
+-- for a given PC address
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_pc{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "function" TEXT NOT NULL,
+        "address_id" INTEGER,
+        "file" TEXT,
+        "line" INTEGER,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (address_id) REFERENCES `rocpd_info_address_range{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+--
+-- We need to find a place for storing the assembly / instructions in the above
+
 -- Stores repetitive info for samples
 CREATE TABLE IF NOT EXISTS
     `rocpd_track{{uuid}}` (
@@ -225,10 +294,8 @@ CREATE TABLE IF NOT EXISTS
         "stack_id" INTEGER,
         "parent_stack_id" INTEGER,
         "correlation_id" INTEGER,
-        "call_stack" JSONB DEFAULT "{}" NOT NULL,
-        "line_info" JSONB DEFAULT "{}" NOT NULL,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (category_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE
+        FOREIGN KEY (category_id) REFERENCES `rocpd_info_category{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- stores arguments for events
@@ -243,6 +310,33 @@ CREATE TABLE IF NOT EXISTS
         "value" TEXT, -- TODO: discuss make it value_id and integer, refer to string table --
         "extdata" JSONB DEFAULT "{}" NOT NULL,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- stores line information for events
+CREATE TABLE IF NOT EXISTS
+    `rocpd_line_info{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "event_id" INTEGER NOT NULL,
+        "source_code_id" INTEGER,
+        "pc_id" INTEGER,
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (source_code_id) REFERENCES `rocpd_info_source_code{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pc_id) REFERENCES `rocpd_info_pc{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- stores call stack information for events
+CREATE TABLE IF NOT EXISTS
+    `rocpd_call_stack{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "event_id" INTEGER NOT NULL,
+        "pc_id" INTEGER,
+        "depth" INTEGER NOT NULL, -- depth of the call stack entry, zero is the top of the stack
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pc_id) REFERENCES `rocpd_info_pc{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- Region with a start/stop on the same thread (CPU)
@@ -369,10 +463,3 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (region_name_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
-
-INSERT INTO
-    `rocpd_metadata{{uuid}}` ("tag", "value")
-VALUES
-    ("schema_version", "3"),
-    ("uuid", "{{uuid}}"),
-    ("guid", "{{guid}}");
