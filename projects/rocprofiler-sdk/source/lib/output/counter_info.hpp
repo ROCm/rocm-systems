@@ -40,21 +40,56 @@ namespace tool
 {
 constexpr uint32_t lds_block_size = 128 * 4;
 
+struct tool_counter_dimension_instance_info
+{
+    using parent_type = rocprofiler_counter_record_dimension_instance_info_t;
+
+    tool_counter_dimension_instance_info()  = default;
+    ~tool_counter_dimension_instance_info() = default;
+
+    explicit tool_counter_dimension_instance_info(parent_type _data)
+    : instance_id(_data.instance_id)
+    , counter_id(_data.counter_id)
+    {
+        if(_data.dimensions)
+        {
+            dimensions.reserve(_data.dimensions_count);
+            for(size_t i = 0; i < _data.dimensions_count; ++i)
+            {
+                if(_data.dimensions[i]) dimensions.emplace_back(*_data.dimensions[i]);
+            }
+        }
+    }
+
+    auto size() const { return dimensions.size(); }
+    auto begin() { return dimensions.begin(); }
+    auto begin() const { return dimensions.begin(); }
+    auto end() { return dimensions.end(); }
+    auto end() const { return dimensions.end(); }
+
+    rocprofiler_counter_instance_id_t                 instance_id = 0;
+    uint64_t                                          counter_id  = 0;
+    std::vector<rocprofiler_counter_dimension_info_t> dimensions  = {};
+};
+
 using counter_dimension_id_vec_t   = std::vector<rocprofiler_counter_dimension_id_t>;
 using counter_dimension_info_vec_t = std::vector<rocprofiler_counter_record_dimension_info_t>;
+using counter_dimension_instance_info_vec_t = std::vector<tool_counter_dimension_instance_info>;
 
 struct tool_counter_info : rocprofiler_counter_info_v1_t
 {
     using parent_type = rocprofiler_counter_info_v1_t;
 
-    tool_counter_info(rocprofiler_agent_id_t         _agent_id,
-                      parent_type                    _info,
-                      counter_dimension_id_vec_t&&   _dim_ids,
-                      counter_dimension_info_vec_t&& _dim_info)
+    tool_counter_info(rocprofiler_agent_id_t                  _agent_id,
+                      parent_type                             _info,
+                      counter_dimension_id_vec_t&&            _dim_ids,
+                      counter_dimension_info_vec_t&&          _dim_info,
+                      counter_dimension_instance_info_vec_t&& _dim_instances)
     : parent_type{_info}
     , agent_id{_agent_id}
     , dimension_ids{std::move(_dim_ids)}
     , dimensions{std::move(_dim_info)}
+    , dimension_instances{std::move(_dim_instances)}
     {}
 
     ~tool_counter_info()                            = default;
@@ -63,9 +98,10 @@ struct tool_counter_info : rocprofiler_counter_info_v1_t
     tool_counter_info& operator=(const tool_counter_info&) = default;
     tool_counter_info& operator=(tool_counter_info&&) noexcept = default;
 
-    rocprofiler_agent_id_t       agent_id      = {};
-    counter_dimension_id_vec_t   dimension_ids = {};
-    counter_dimension_info_vec_t dimensions    = {};
+    rocprofiler_agent_id_t                agent_id            = {};
+    counter_dimension_id_vec_t            dimension_ids       = {};
+    counter_dimension_info_vec_t          dimensions          = {};
+    counter_dimension_instance_info_vec_t dimension_instances = {};
 };
 
 using counter_info_vec_t       = std::vector<tool_counter_info>;
@@ -73,13 +109,15 @@ using agent_counter_info_map_t = std::unordered_map<rocprofiler_agent_id_t, coun
 
 struct tool_counter_value_t
 {
-    rocprofiler_counter_id_t id    = {};
-    double                   value = 0;
+    rocprofiler_counter_id_t          id          = {};
+    rocprofiler_counter_instance_id_t instance_id = 0;
+    double                            value       = 0;
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("counter_id", id));
+        ar(cereal::make_nvp("counter_instance_id", instance_id));
         ar(cereal::make_nvp("value", value));
     }
 };
