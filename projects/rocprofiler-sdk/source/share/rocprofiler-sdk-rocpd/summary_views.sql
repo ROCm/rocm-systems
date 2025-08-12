@@ -55,7 +55,7 @@ FROM
                     `end`,
                     `start`
                 FROM
-                    `rocpd_memory_copy`
+                    `memory_copies`
             )
         GROUP BY
             agent_id,
@@ -70,13 +70,13 @@ FROM
                     `end`,
                     `start`
                 FROM
-                    `rocpd_kernel_dispatch`
+                    `kernels`
                 UNION ALL
                 SELECT
                     `end`,
                     `start`
                 FROM
-                    `rocpd_memory_copy`
+                    `memory_copies`
             )
     ) W ON 1 = 1
     INNER JOIN `rocpd_info_agent` AG ON AG.id = A.agent_id

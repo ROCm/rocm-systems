@@ -34,6 +34,13 @@ FROM
     `rocpd_info_thread{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
+    `rocpd_info_category` AS
+SELECT
+    *
+FROM
+    `rocpd_info_category{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
     `rocpd_info_agent` AS
 SELECT
     *
@@ -76,6 +83,27 @@ FROM
     `rocpd_info_kernel_symbol{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
+    `rocpd_info_address_range` AS
+SELECT
+    *
+FROM
+    `rocpd_info_address_range{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_info_source_code` AS
+SELECT
+    *
+FROM
+    `rocpd_info_source_code{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_info_pc` AS
+SELECT
+    *
+FROM
+    `rocpd_info_pc{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
     `rocpd_timestamp` AS
 SELECT
     *
@@ -102,6 +130,20 @@ SELECT
     *
 FROM
     `rocpd_arg{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_line_info` AS
+SELECT
+    *
+FROM
+    `rocpd_line_info{{uuid}}`;
+
+CREATE VIEW IF NOT EXISTS
+    `rocpd_call_stack` AS
+SELECT
+    *
+FROM
+    `rocpd_call_stack{{uuid}}`;
 
 CREATE VIEW IF NOT EXISTS
     `rocpd_pmc_event` AS
