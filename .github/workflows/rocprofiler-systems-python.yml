@@ -3,6 +3,8 @@ run-name: Python
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-systems/**'
       - 'projects/rocprofiler-systems/source/python/gui/*.py'

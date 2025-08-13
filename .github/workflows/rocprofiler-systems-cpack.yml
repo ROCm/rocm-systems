@@ -4,6 +4,8 @@ run-name: cpack
 on:
   workflow_dispatch:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/*.md'

@@ -3,6 +3,8 @@ run-name: ubuntu-jammy
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-ubuntu-jammy.yml'
       - 'projects/rocprofiler-systems/**'
