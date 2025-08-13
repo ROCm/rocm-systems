@@ -3,6 +3,8 @@ run-name: ubuntu-packaging
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-ubuntu-packaging.yml'
       - 'projects/rocprofiler-systems/**'

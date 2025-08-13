@@ -3,6 +3,8 @@ run-name: opensuse-packaging
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-opensuse-packaging.yml'
       - 'projects/rocprofiler-systems/**'
