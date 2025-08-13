@@ -199,16 +199,16 @@ struct integer_sequence {
 template<size_t... Ints>
 using index_sequence = integer_sequence<size_t, Ints...>;
 
-template<size_t N, size_t... Ints>
-struct make_index_sequence_impl : make_index_sequence_impl<N - 1, N - 1, Ints...> {};
+template <size_t _hip_N, size_t... Ints>
+struct make_index_sequence_impl : make_index_sequence_impl<_hip_N - 1, _hip_N - 1, Ints...> {};
 
 template<size_t... Ints>
 struct make_index_sequence_impl<0, Ints...> {
     using type = index_sequence<Ints...>;
 };
 
-template<size_t N>
-using make_index_sequence = typename make_index_sequence_impl<N>::type;
+template <size_t _hip_N>
+using make_index_sequence = typename make_index_sequence_impl<_hip_N>::type;
 
 template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {

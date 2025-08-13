@@ -97,6 +97,8 @@ Settings::Settings() {
   limit_blit_wg_ = 16;
 
   dynamic_queues_ = amd::IS_HIP ? DEBUG_HIP_DYNAMIC_QUEUES : false;
+  // note: OCL user events don't allow CPU blocking calls in DD mode
+  blocking_blit_ = amd::IS_HIP || !AMD_DIRECT_DISPATCH;
 }
 
 // ================================================================================================

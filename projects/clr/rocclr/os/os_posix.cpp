@@ -650,6 +650,7 @@ std::string Os::getTempFileName() {
 }
 
 int Os::unlink(const std::string& path) { return ::unlink(path.c_str()); }
+int Os::shm_unlink(const std::string& path) { return ::shm_unlink(path.c_str()); }
 
 #if defined(ATI_ARCH_X86)
 void Os::cpuid(int regs[4], int info) {

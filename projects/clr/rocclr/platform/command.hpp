@@ -397,6 +397,9 @@ class Command : public Event {
   //! Release the resources associated with this event.
   virtual void releaseResources();
 
+  //! Empty function for adding pinned memory
+  virtual void AddPinnedMemory(Memory* pinned) {}
+
   //! Set the next GPU command
   void setNext(Command* next) { next_ = next; }
 
@@ -424,16 +427,46 @@ class Command : public Event {
 };
 
 class UserEvent : public Command {
-  const Context& context_;
+  const Context&        context_;     //!< OCL context associated with the event
+  std::vector<Command*> dependents_;  //!< Commands, which depends on this user event
 
  public:
   UserEvent(Context& context) : Command(CL_COMMAND_USER), context_(context) {
     setStatus(CL_SUBMITTED);
   }
 
+  //! Creates a user event in the backend layer
+  bool Create() {
+    if (AMD_DIRECT_DISPATCH) {
+      return context_.devices()[0]->CreateUserEvent(this);
+    } else {
+      return true;
+    }
+  }
+
+  //! Sets the execution status of the user event
+  bool SetExecutionStatus(cl_int status) {
+    if (AMD_DIRECT_DISPATCH) {
+      // If it's invalid status, then mark dependent commands as invalid
+      if (status < CL_COMPLETE) {
+        for (auto it : dependents_) {
+          it->setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+        }
+      }
+      dependents_.clear();
+      context_.devices()[0]->SetUserEvent(this);
+    }
+    return setStatus(status);
+  }
+
+  //! Adds dependent commands for the user event
+  void AddDependent(Command* command) {
+    dependents_.push_back(command);
+  }
+
   virtual void submit(device::VirtualDevice& device) { ShouldNotCallThis(); }
 
-  virtual const Context& context() const { return context_; }
+  const Context& context() const { return context_; }
 };
 
 class ClGlEvent : public Command {
@@ -450,7 +483,7 @@ class ClGlEvent : public Command {
 
   bool awaitCompletion() { return waitForFence(); }
 
-  virtual const Context& context() const { return context_; }
+  const Context& context() const { return context_; }
 };
 
 inline Command& Event::command() { return *static_cast<Command*>(this); }
@@ -465,6 +498,7 @@ class NDRangeContainer;
 class OneMemoryArgCommand : public Command {
  protected:
   Memory* memory_;
+  std::vector<Memory*>  pinned_memory_;   //!< Pinned memory object
 
  public:
   OneMemoryArgCommand(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
@@ -477,8 +511,13 @@ class OneMemoryArgCommand : public Command {
     memory_->release();
     DEBUG_ONLY(memory_ = NULL);
     Command::releaseResources();
+    for (auto it : pinned_memory_) {
+      it->release();
+    }
   }
 
+  //! Adds pinned memory, used in this command for later release
+  virtual void AddPinnedMemory(Memory* pinned) override { pinned_memory_.push_back(pinned); }
   bool validateMemory();
   bool validatePeerMemory();
 };

@@ -269,7 +269,9 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
     ScopedLock l(notify_lock_);
     if ((status() > CL_COMPLETE) && (nullptr != queue) &&
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
-        (HwEvent() == nullptr) &&
+        // @note: Force the marker always in OCL for now, since OCL events require precise
+        // sequence of the status update
+        ((HwEvent() == nullptr) || !amd::IS_HIP) &&
         !notified_.test_and_set()) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this, cpu_wait);
@@ -364,8 +366,17 @@ void Command::enqueue() {
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
-    for (const auto& event : eventWaitList()) {
-      event->notifyCmdQueue(!kCpuWait);
+    for (const auto &event: eventWaitList()) {
+      if (!amd::IS_HIP && event->command().type() == CL_COMMAND_USER) {
+        if (event->status() >= CL_COMPLETE) {
+          reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
+        } else {
+          setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+          return;
+        }
+      } else {
+        event->notifyCmdQueue(!kCpuWait);
+      }
     }
 
     // The batch update must be lock protected to avoid a race condition

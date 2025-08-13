@@ -3,6 +3,8 @@ run-name: opensuse-15
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-opensuse.yml'
       - 'projects/rocprofiler-systems/**'

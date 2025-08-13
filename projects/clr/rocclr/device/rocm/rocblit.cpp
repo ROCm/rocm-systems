@@ -54,8 +54,8 @@ bool DmaBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
                                 const amd::Coord3D& origin, const amd::Coord3D& size,
                                 bool entire, amd::CopyMetadata copyMetadata) const {
   // Use host copy if memory has direct access
-  if (setup_.disableReadBuffer_ ||
-      (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached())) {
+  if (dev().settings().blocking_blit_ && (setup_.disableReadBuffer_ ||
+      (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::readBuffer(srcMemory, dstHost, origin, size, entire, copyMetadata);
@@ -138,8 +138,9 @@ bool DmaBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
                                  const amd::Coord3D& origin, const amd::Coord3D& size,
                                  bool entire, amd::CopyMetadata copyMetadata) const {
   // Use host copy if memory has direct access
-  if (setup_.disableWriteBuffer_ || dstMemory.isHostMemDirectAccess() ||
-      gpuMem(dstMemory).IsPersistentDirectMap()) {
+  if (dev().settings().blocking_blit_ &&
+      (setup_.disableWriteBuffer_ || dstMemory.isHostMemDirectAccess() ||
+       gpuMem(dstMemory).IsPersistentDirectMap())) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::writeBuffer(srcHost, dstMemory, origin, size, entire, copyMetadata);
@@ -685,6 +686,7 @@ void DmaBlitManager::getBuffer(const_address hostMem, size_t size,
   buffState.buffer_ = gpu().Staging().Acquire(std::min(xferSize, StagingXferSize));
 }
 
+// ================================================================================================
 void DmaBlitManager::releaseBuffer(BufferState &buffer) const {
   if (buffer.pinnedMem_) {
     gpu().addPinnedMem(buffer.pinnedMem_);
@@ -696,7 +698,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
                 size_t size, bool hostToDev, amd::CopyMetadata& copyMetadata,
                 bool enablePin) const {
   // Do not skip wait here for D2H. Resolving dependent signals for SDMA engine is slow
-  gpu().releaseGpuMemoryFence(hostToDev);
+  gpu().releaseGpuMemoryFence(hostToDev || !dev().settings().blocking_blit_);
   // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
   // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
   bool status = true;
@@ -740,9 +742,9 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
               copyMetadata.isAsync_);
       const_address src = static_cast<const_address>(hostSrc) + copyOffset;
       status = rocrCopyBuffer(stagingBuffer, dstAgent, src , srcAgent, copysize, copyMetadata);
-      if (status ) {
-        // Wait for current signal of previous rocr copy if its not pinned mem
+      if (status) {
         if (outBuffer.pinnedMem_ == nullptr) {
+          // Wait for current signal of previous rocr copy if its not pinned mem
           gpu().Barriers().WaitCurrent();
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "memcpy host dst=%p, stg buf=%p, size=%zu",
                   hostDst + copyOffset, stagingBuffer, copysize);
@@ -752,6 +754,7 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
         break;
       }
     }
+
     // Release Pinned Memory back to pool if any
     releaseBuffer(outBuffer);
     // Update Offset and Transfer Size
@@ -760,12 +763,18 @@ bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDs
     firstTx = false;
   }
 
+  // @note: HIP requires a blocking wait on D2H with the pageable system memory
+  if (amd::IS_HIP && !hostToDev) {
+    gpu().Barriers().WaitCurrent();
+  }
+
   if(!status) {
     return false;
   }
 
   return true;
 }
+
 // ================================================================================================
 KernelBlitManager::KernelBlitManager(VirtualGPU& gpu, Setup setup)
     : DmaBlitManager(gpu, setup),
@@ -1718,8 +1727,9 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
   bool result = false;
 
   // Use host copy if memory has direct access
-  if (setup_.disableReadBuffer_ || (srcMemory.isHostMemDirectAccess() &&
-      !srcMemory.isCpuUncached())) {
+  if (dev().settings().blocking_blit_ &&
+      (setup_.disableReadBuffer_ || (srcMemory.isHostMemDirectAccess() &&
+      !srcMemory.isCpuUncached()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     result = HostBlitManager::readBuffer(srcMemory, dstHost, origin, size, entire, copyMetadata);
@@ -1854,8 +1864,9 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
   bool result = false;
 
   // Use host copy if memory has direct access
-  if (setup_.disableWriteBuffer_ || dstMemory.isHostMemDirectAccess() ||
-      gpuMem(dstMemory).IsPersistentDirectMap()) {
+  if (dev().settings().blocking_blit_ &&
+      (setup_.disableWriteBuffer_ || dstMemory.isHostMemDirectAccess() ||
+       gpuMem(dstMemory).IsPersistentDirectMap())) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     result = HostBlitManager::writeBuffer(srcHost, dstMemory, origin, size, entire, copyMetadata);
@@ -2718,10 +2729,9 @@ void KernelBlitManager::releaseArguments(address args) const {
 }
 
 // ================================================================================================
-bool KernelBlitManager::runScheduler(uint64_t vqVM, amd::Memory* schedulerParam,
+bool KernelBlitManager::runScheduler(uint64_t vqVM,
                                      hsa_queue_t* schedulerQueue,
-                                     hsa_signal_t& schedulerSignal,
-                                     uint threads) {
+                                     uint threads, uint64_t aql_wrap) {
   size_t globalWorkOffset[1] = {0};
   size_t globalWorkSize[1] = {threads};
   size_t localWorkSize[1] = {1};
@@ -2731,21 +2741,16 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, amd::Memory* schedulerParam,
   device::Kernel* devKernel = const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
   Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 
-  SchedulerParam* sp = reinterpret_cast<SchedulerParam*>(schedulerParam->getHostMem());
+  auto* sp = reinterpret_cast<SchedulerParam*>(
+    gpu().allocKernArg(sizeof(SchedulerParam), kCBAlignment));
   memset(sp, 0, sizeof(SchedulerParam));
 
-  Memory* schedulerMem = dev().getRocMemory(schedulerParam);
-  sp->kernarg_address = reinterpret_cast<uint64_t>(schedulerMem->getDeviceMemory());
+  sp->kernarg_address = reinterpret_cast<uint64_t>(sp);
   sp->thread_counter = 0;
   sp->child_queue = reinterpret_cast<uint64_t>(schedulerQueue);
-  sp->complete_signal = schedulerSignal;
-
-  hsa_signal_store_relaxed(schedulerSignal, kInitSignalValueOne);
-
-
+  sp->complete_signal = gpu().Barriers().ActiveSignal(kInitSignalValueOne, nullptr);
   sp->vqueue_header = vqVM;
-
-  sp->parentAQL = sp->kernarg_address + sizeof(SchedulerParam);
+  sp->parentAQL = reinterpret_cast<uint64_t>(aql_wrap);
 
   if (dev().info().maxEngineClockFrequency_ > 0) {
     sp->eng_clk = (1000 * 1024) / dev().info().maxEngineClockFrequency_;
@@ -2754,8 +2759,8 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, amd::Memory* schedulerParam,
   // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
   sp->write_index = hsa_queue_load_write_index_relaxed(schedulerQueue);
 
-  cl_mem mem = as_cl<amd::Memory>(schedulerParam);
-  setArgument(kernels_[Scheduler], 0, sizeof(cl_mem), &mem);
+  constexpr bool kDirectVa = true;
+  setArgument(kernels_[Scheduler], 0, sizeof(cl_mem), sp, 0, nullptr, kDirectVa);
 
   address parameters = captureArguments(kernels_[Scheduler]);
 
@@ -2764,12 +2769,17 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, amd::Memory* schedulerParam,
     return false;
   }
   releaseArguments(parameters);
-
-  if (!WaitForSignal(schedulerSignal)) {
+  // Wait for the scheduler to finish all operations
+  gpu().WaitCompleteSignal(sp->complete_signal);
+  // @note: A wait shouldn't be really necessary, but the queue write_index may not get a proper
+  // value without the wait for all previous commands (see the PCIE3 atomics workaround above).
+  // The scheduler can enqueue extra commands, but the real queue write index didn't have any
+  // progress. That leads to hangs and requires blocking. Then the wait causes problems in DD mode
+  // with device enqueue and user events, because device enqueue is blocking below
+  if (!WaitForSignal(sp->complete_signal)) {
     LogWarning("Failed schedulerSignal wait");
     return false;
   }
-
   return true;
 }
 

@@ -95,6 +95,7 @@ class StreamOperationCommand;
 class BatchMemoryOperationCommand;
 class VirtualMapCommand;
 class ExternalSemaphoreCmd;
+class UserEvent;
 class Isa;
 class Device;
 struct KernelParameterDescriptor;
@@ -1329,6 +1330,7 @@ class VirtualDevice : public amd::HeapObject {
     ShouldNotReachHere();
   }
   virtual void submitVirtualMap(amd::VirtualMapCommand& cmd) { ShouldNotReachHere(); }
+  virtual void submitUserEvent(amd::UserEvent& vcmd) { ShouldNotReachHere(); }
 
   virtual address allocKernelArguments(size_t size, size_t alignment) { return nullptr; }
   virtual void ReleaseAllHwQueues() {}
@@ -2036,6 +2038,13 @@ class Device : public RuntimeObject {
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;
   }
+
+  /// @brief  Creates HW user event for OpenCL implementation
+  /// @return The pointer to a HW event structure, known to the HW backend
+  virtual bool CreateUserEvent(amd::UserEvent* event) const { return false; }
+
+  /// @brief  Sets HW user event to the complete status
+  virtual void SetUserEvent(amd::UserEvent* event) const {}
 
   //! Returns TRUE if the device is available for computations
   bool isOnline() const { return online_; }

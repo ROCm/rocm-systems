@@ -505,6 +505,9 @@ std::string Os::getTempFileName() {
 
 int Os::unlink(const std::string& path) { return ::_unlink(path.c_str()); }
 
+// shm_unlink is a nop on windows
+int Os::shm_unlink(const std::string& path) { return 0; }
+
 void Os::cpuid(int regs[4], int info) { return __cpuid(regs, info); }
 
 uint64_t Os::xgetbv(uint32_t ecx) { return (uint64_t)_xgetbv(ecx); }

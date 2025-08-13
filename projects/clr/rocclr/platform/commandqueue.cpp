@@ -173,6 +173,9 @@ void HostQueue::finish(bool cpu_wait) {
         (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
       cpu_wait = true;
     }
+  } else {
+    // Force CPU wait for OpenCL, since the tests may check OCL command status after finish
+    cpu_wait = true;
   }
 
   size_t batchSize = GetSubmissionBatchSize();
