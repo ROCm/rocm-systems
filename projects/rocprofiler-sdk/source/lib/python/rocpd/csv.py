@@ -250,9 +250,13 @@ def write_memory_allocation_csv(importData, config) -> None:
         SELECT
             guid AS Guid,
             'MEMORY_ALLOCATION' AS Kind,
-            'MEMORY_ALLOCATION_' || type AS Operation,
             CASE
-                WHEN type != "FREE"
+                WHEN type = 'ALLOC'
+                THEN 'MEMORY_ALLOCATION_ALLOCATE'
+                ELSE 'MEMORY_ALLOCATION_' || type
+            END AS Operation,
+            CASE
+                WHEN type != 'FREE'
                 THEN {agent_id}
                 ELSE '"'
             END AS Agent_Id,
