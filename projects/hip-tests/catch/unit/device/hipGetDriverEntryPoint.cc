@@ -46,7 +46,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
+  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
 
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
@@ -72,7 +72,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
   HIP_CHECK(hipGetDeviceCount(&count));
   REQUIRE(countFuncPtr == count);
 
-  free(status);
+  delete status;
 }
 
 /**
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
+  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
 
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("", &funcPtr, hipEnableDefault, &status),
@@ -109,7 +109,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
                     hipErrorInvalidValue);
   }
 
-  free(status);
+  delete status;
 }
 
 /**
@@ -140,7 +140,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
+  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
 
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
@@ -167,7 +167,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
 
   REQUIRE(countFuncPtr == count);
 
-  free(status);
+  delete status;
 }
 
 /**
@@ -187,7 +187,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
+  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
 
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("", &funcPtr, hipEnableDefault, &status),
@@ -205,7 +205,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
                     hipErrorInvalidValue);
   }
 
-  free(status);
+  delete status;
 }
 
 /**
