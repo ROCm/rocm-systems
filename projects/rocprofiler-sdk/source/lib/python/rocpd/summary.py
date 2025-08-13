@@ -397,10 +397,10 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     region_categories = kwargs.get("region_categories", None)
     output_format = kwargs.get("format", "console")
 
-    if check_function_availability(connection, "sqrt") is False:
     if not check_function_availability(connection, "sqrt"):
-            "sqrt", 1, lambda x: math.sqrt(x) if x is not None and x >= 0 else None
+        connection.create_function(
             "sqrt", 1, lambda x: math.sqrt(x) if x is not None and isinstance(x, (int, float)) and x >= 0 else None
+        )
 
     # create the temporary summary views
     create_summary_views(connection, by_rank)
