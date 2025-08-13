@@ -130,14 +130,20 @@ jobs:
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
+    - name: MI3xx Special Requirements
+      if: ${{matrix.system.gpu == 'mi3xx'}}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
+          echo 'PATH=/opt/rocm-custom/bin:$PATH' >> $GITHUB_ENV
+          echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH;
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export PATH=/opt/rocm-custom/bin:$PATH;
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export CMAKE_PREFIX_PATH=/opt/rocm-custom;
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
