@@ -48,9 +48,6 @@ def check_function_availability(connection, function_name):
 
     # Query pragma_function_list to check for the function
     cursor.execute(
-        "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name='{}')".format(
-            function_name
-        )
         "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)",
         (function_name,)
     )
