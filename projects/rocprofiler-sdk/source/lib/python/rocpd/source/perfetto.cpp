@@ -743,7 +743,7 @@ write_perfetto(
                             rocprofiler_address_t{.handle = itr.address},
                             agent_and_size{itr.agent_abs_index, itr.size});
                     }
-                    // Scratch memory operations operations are indexed by queue id as agent
+                    // Scratch memory operations are indexed by queue id as agent
                     // id is not available
                     else if(itr.level == "SCRATCH")
                     {

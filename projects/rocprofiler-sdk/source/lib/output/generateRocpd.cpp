@@ -1244,8 +1244,7 @@ write_rocpd(
                         rocprofiler_address_t   address         = {.handle = 0};
                     };
 
-                    auto _node_id      = std::optional<uint64_t>{};
-                    auto free_mem_info = std::vector<free_memory_information>{};
+                    auto _node_id = std::optional<uint64_t>{};
                     if(_type == "ALLOC")
                     {
                         _node_id = tool_metadata.get_agent(itr.agent_id)->node_id;
@@ -1255,10 +1254,6 @@ write_rocpd(
                     }
                     else if(_type == "FREE")
                     {
-                        // Store free memory operations in seperate vector to pair with agent
-                        // and allocation size in following loop
-                        free_mem_info.push_back(free_memory_information{
-                            itr.start_timestamp, itr.end_timestamp, _address});
                         if(address_to_agent_and_size.count(_address) == 0)
                         {
                             if(_address.handle == 0)
