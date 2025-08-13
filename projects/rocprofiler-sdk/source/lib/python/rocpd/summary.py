@@ -399,7 +399,13 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 
     if not check_function_availability(connection, "sqrt"):
         connection.create_function(
-            "sqrt", 1, lambda x: math.sqrt(x) if x is not None and isinstance(x, (int, float)) and x >= 0 else None
+            "sqrt",
+            1,
+            lambda x: (
+                math.sqrt(x)
+                if x is not None and isinstance(x, (int, float)) and x >= 0
+                else None
+            ),
         )
 
     # create the temporary summary views
