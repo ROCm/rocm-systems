@@ -489,6 +489,8 @@ TEST_CASE("Unit_hipMallocManaged_MultiThrdMultiStrm") {
       thr.join();
     }
   }
+
+  HIP_CHECK(hipFree(Hmm1));
 }
 
 
