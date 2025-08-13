@@ -20,6 +20,8 @@
 
 cmake_minimum_required(VERSION 3.16.8)
 
+project(hip-amd)
+
 #set components for HIP
 set(CPACK_COMPONENTS_ALL binary dev doc runtime-nvidia)
 
@@ -35,9 +37,9 @@ set(CPACK_DEB_COMPONENT_INSTALL ON)
 
 ###Set License####
 set(CPACK_RESOURCE_FILE_LICENSE ${hip_SOURCE_DIR}/LICENSE.md)
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR} COMPONENT binary)
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME} COMPONENT binary)
 # install license file in share/doc/hip-asan folder
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DOCDIR}-asan COMPONENT asan)
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME}-asan COMPONENT asan)
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 #Begin binary files install
 if(HIP_PLATFORM STREQUAL "amd" )
@@ -142,7 +144,7 @@ if(DOXYGEN_EXE)
         message(FATAL_ERROR "Unable to find doxygen config file")
     endif()
     install(DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/RuntimeAPI/html
-            DESTINATION ${CMAKE_INSTALL_DOCDIR}/RuntimeAPI COMPONENT doc)
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/${PROJECT_NAME}/RuntimeAPI COMPONENT doc)
 endif()
 #End doc files install
 
