@@ -50,7 +50,7 @@ jobs:
         system: [
           {gpu: 'navi4', runner: 'rocprofiler-navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
           {gpu: 'navi3', runner: 'rocprofiler-navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
-          {gpu: 'mi3xx', runner: 'rocprofiler-mi3xx', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
+          {gpu: 'mi3xx', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
         ]
 
     runs-on: ${{ matrix.system.runner }}
