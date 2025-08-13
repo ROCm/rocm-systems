@@ -64,8 +64,8 @@ Panel Config:
       It is the ratio of total floating-point operations (FLOPs) to total bytes transferred
       between HBM and the L2 cache. This value is used as the x-coordinate for the
       HBM roofline.
-    Performance GFLOPs: The overall achieved performance, measured in GigaFLOPs per
-      second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
+    Performance (GFLOPs): The overall achieved performance, measured in GigaFLOPs
+      per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
       operations divided by the total execution time. This value is used as the y-coordinate
       for the kernel's point on the Roofline plot.
   data source:

@@ -72,9 +72,6 @@ class cli_analysis(OmniAnalyze_Base):
                 workload.raw_pmc, self.get_args().kernel_verbose
             )
 
-            #update path
-            self._runs[d[0]].path = d[0]
-
             # create the loaded table
             parser.load_table_data(
                 workload=workload,
@@ -89,23 +86,22 @@ class cli_analysis(OmniAnalyze_Base):
         """Run CLI analysis."""
         super().run_analysis()
 
+        workload_path = self.get_args().path[0][0]
+        workload = self._runs[workload_path]
+        gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
+        arch_config = self._arch_configs[gpu_arch]
+
         if self.get_args().list_stats:
             tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ],
+                arch_config,
                 self._output,
             )
         else:
             roof_plot = None
             # 1. check if not baseline && compatible soc:
             if (len(self.get_args().path)) == 1:
-                workload_path = self.get_args().path[0][0]
-                workload = self._runs[workload_path]
-                gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
-
                 if gpu_arch in ["gfx90a", "gfx940", "gfx941", "gfx942", "gfx950"]:
                     roof_obj = self.get_socs()[gpu_arch].roofline_obj
 
@@ -118,13 +114,13 @@ class cli_analysis(OmniAnalyze_Base):
                             dtype=roof_obj.get_dtype()[0],
                             workload=workload,
                             config=self._profiling_config,
-                            arch_config=self._arch_configs[gpu_arch]
+                            arch_config=arch_config
                         )
 
             tty.show_all(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
+                arch_config,
                 self._output,
                 self._profiling_config,
                 roof_plot=roof_plot,

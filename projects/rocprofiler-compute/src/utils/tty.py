@@ -110,14 +110,6 @@ def convert_time_columns(df, time_unit):
 
     return df_copy
 
-def shorten_kernel_name(kernel_name, verbosity_level):
-    """Helper function to shorten kernel names"""
-    if verbosity_level < 5:
-        temp_df = pd.DataFrame({'Kernel_Name': [kernel_name]})
-        kernel_name_shortener(temp_df, verbosity_level)
-        return temp_df.loc[0, 'Kernel_Name']
-    return kernel_name
-
 def has_time_data(df):
     """
     Check if the dataframe contains time data by looking at the Unit column.
@@ -172,6 +164,8 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         print("-" * 80, file=output)
 
                         kernel_top_df = workload.dfs.get(1, pd.DataFrame())
+                        if not kernel_top_df.empty:
+                            kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
                         for i, (kernel_id, metrics) in enumerate(workload.roofline_metrics.items()):
                             if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
@@ -181,31 +175,24 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                 kernel_name = metrics.get('name', f'Kernel {kernel_id}')
                                 kernel_pct = 0
 
-                            shortened_name = shorten_kernel_name(kernel_name, args.kernel_verbose)
-
-                            print(f"\nKernel {kernel_id}: {shortened_name[:80]}{'...' if len(shortened_name) > 80 else ''} ({kernel_pct:.1f}%)", file=output)
+                            display_name = kernel_name[:80] + '...' if len(kernel_name) > 80 else kernel_name
+                            print(f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)", file=output)
 
                             base_indent = "  "
                             table_indent_prefix = f"{base_indent}|   "
 
-                            table_order = [401, 402]
-                            table_names = {401: "4.1 Roofline Rate Metrics:", 402: "4.2 Roofline AI Plot Points:"}
+                            tables = {
+                                401: ("4.1 Roofline Rate Metrics:", metrics.get('ai_table', pd.DataFrame())),
+                                402: ("4.2 Roofline AI Plot Points:", metrics.get('calc_table', pd.DataFrame()))
+                            }
 
                             print(f"{base_indent}|")
 
-                            for table_id in table_order:
-                                if table_id == 402:
-                                    df = metrics.get('calc_table', pd.DataFrame())
-                                elif table_id == 401:
-                                    df = metrics.get('ai_table', pd.DataFrame())
-                                else:
-                                    continue
-
+                            for table_id, (table_name, df) in tables.items():
                                 if df.empty:
                                     continue
 
-                                connector = "├─ "
-                                print(f"{base_indent}{connector}{table_names.get(table_id, '')}", file=output)
+                                print(f"{base_indent}├─ {table_name}", file=output)
 
                                 display_df = df.copy()
 
@@ -214,9 +201,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                         display_df = display_df.drop(columns=[col])
 
                                 table_string = get_table_string(display_df, transpose=False, decimal=args.decimal)
-
                                 indented_table_string = textwrap.indent(table_string, table_indent_prefix)
-
                                 print(indented_table_string, file=output)
 
                     else:

@@ -30,8 +30,8 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils import parser
 from utils.logger import console_debug
+from utils.parser import apply_filters, eval_metric
 
 ################################################
 # Global vars
@@ -270,7 +270,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
     }
 
     workload.roofline_metrics = {}
-    filtered_pmc = parser.apply_filters(
+    filtered_pmc = apply_filters(
         workload,
         workload.path,
         is_gui=False,
@@ -324,7 +324,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
         #eval metrics for single kernel only
-        parser.eval_metric(
+        eval_metric(
             kernel_dfs,
             kernel_dfs_type,
             workload.sys_info.iloc[0],
@@ -355,7 +355,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
                 elif metric == 'Performance (GFLOPs)':
                     performance = value if value and value != '' else 0
 
-        console_debug("roofline", f"Kernel {kernel_id}: AI_HBM={ai_hbm:.2f}, AI_L2={ai_l2:.2f}, AI_L1={ai_l1:.2f}, Performance={performance:.2e} FLOP/s")
+        console_debug("roofline", f"Kernel {kernel_id}: AI_HBM={ai_hbm:.2f}, AI_L2={ai_l2:.2f}, AI_L1={ai_l1:.2f}, Performance={performance:.2e} GFLOP/s")
 
         #add to plot points if we have valid data
         if performance > 0:

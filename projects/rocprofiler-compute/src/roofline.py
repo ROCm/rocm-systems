@@ -686,11 +686,6 @@ class Roofline:
                 arch_config=arch_config
             )
 
-            self.__ceiling_data = constuct_roof(
-                roofline_parameters=self.__run_parameters,
-                dtype=dtype
-            )
-
         else:
             pmc_perf_csv = base_path / "pmc_perf.csv"
             if not pmc_perf_csv.is_file():
@@ -703,11 +698,11 @@ class Roofline:
                 self.__run_parameters["sort_type"],
                 t_df
             )
-            self.__ceiling_data = constuct_roof(
+
+        self.__ceiling_data = constuct_roof(
                 roofline_parameters=self.__run_parameters,
                 dtype=dtype
             )
-
         console_debug(f"AI data: {self.__ai_data}")
         console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 

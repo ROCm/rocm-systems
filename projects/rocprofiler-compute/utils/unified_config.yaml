@@ -2837,14 +2837,6 @@ panels:
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
             peak: $MFMABF16Flops_empirical_peak
-          MFMA FLOPs (F8):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
-          MFMA FLOPs (F6F4):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
           MFMA IOPs (Int8):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GIOP/s
@@ -2898,14 +2890,6 @@ panels:
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
             peak: $MFMABF16Flops_empirical_peak
-          MFMA FLOPs (F8):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
-          MFMA FLOPs (F6F4):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
           MFMA IOPs (Int8):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GIOP/s
@@ -2963,10 +2947,6 @@ panels:
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
             peak: $MFMAF8Flops_empirical_peak
-          MFMA FLOPs (F6F4):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
           MFMA IOPs (Int8):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GIOP/s
@@ -3024,10 +3004,6 @@ panels:
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
             peak: $MFMAF8Flops_empirical_peak
-          MFMA FLOPs (F6F4):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
           MFMA IOPs (Int8):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GIOP/s
@@ -3085,10 +3061,6 @@ panels:
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GFLOP/s
             peak: $MFMAF8Flops_empirical_peak
-          MFMA FLOPs (F6F4):
-            value: 0
-            unit: GFLOP/s
-            peak: 0
           MFMA IOPs (Int8):
             value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
             unit: GIOP/s
@@ -3776,7 +3748,7 @@ panels:
           transferred between HBM and the L2 cache. This value is used as the x-coordinate
           for the HBM roofline.'
         unit: FLOPs/Byte
-      Performance GFLOPs:
+      Performance (GFLOPs):
         plain: 'The overall achieved performance, measured in GigaFLOPs
           per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
           operations divided by the total execution time. This value is used as the y-coordinate
