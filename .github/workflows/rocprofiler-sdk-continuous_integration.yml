@@ -175,25 +175,23 @@ jobs:
         export PATH=/opt/rocm-custom/bin:$PATH
         export ROCM_PATH=/opt/rocm-custom
   
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
-          --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --run-attempt ${{ github.run_attempt }}
-          ${{ matrix.system.ci-flags }}
-          --
-          -DROCPROFILER_DEP_ROCMCORE=ON
-          -DROCPROFILER_BUILD_DOCS=OFF
-          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
-          -DCPACK_GENERATOR='DEB;RPM;TGZ'
-          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm-custom)"
-          -DPython3_EXECUTABLE=$(which python3)
-          ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
+        python3 ./source/scripts/run-ci.py -B build \
+        --name ROCm/rocm-systems-334/merge---core \
+        --build-jobs 16 \
+        --site ${RUNNER_HOSTNAME} \
+        --gpu-targets gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201 \
+        --run-attempt 1 \
+        -- \
+        -DROCPROFILER_DEP_ROCMCORE=ON \
+        -DROCPROFILER_BUILD_DOCS=OFF \
+        -DCMAKE_BUILD_TYPE= \
+        -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk \
+        -DCPACK_GENERATOR='DEB;RPM;TGZ' \
+        -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm-custom)" \
+        -DPython3_EXECUTABLE=$(which python3) \
+        -- \
+        -LE "${_EXCLUDE_LABEL_REGEX}" \
+        -E "${_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
       if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
