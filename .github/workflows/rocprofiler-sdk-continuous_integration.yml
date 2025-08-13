@@ -72,7 +72,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile        
         submodules: true
         set-safe-directory: true
 
@@ -100,7 +102,7 @@ jobs:
         cat /opt/rocm/.info/version
         ls -la
         
-    - name: Build and install aqlprofile and rocprof-trace-decoder
+    - name: Build and Install Aqlprofile
       shell: bash
       working-directory: projects/aqlprofile
       run: |
@@ -108,8 +110,11 @@ jobs:
         ./build.sh
         cd build
         sudo make install
-        cd ..
-        
+
+    - name: Install rocprof-trace-decoder
+      shell: bash
+      working-directory: /tmp
+      run: |
         echo "Install rocprof-trace-decoder."
         URL=$(curl -s https://api.github.com/repos/ROCm/rocprof-trace-decoder/releases/latest \
             | grep browser_download_url \
@@ -127,6 +132,7 @@ jobs:
         echo "Installing package..."
         sudo dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || sudo apt-get install -f -y
         echo "✅ Installation complete!"
+        sudo rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -245,8 +251,12 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
-
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile 
+        submodules: true
+        set-safe-directory: true
+        
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -274,7 +284,7 @@ jobs:
         cat /opt/rocm/.info/version
         ls -la
 
-    - name: Build and install aqlprofile and rocprof-trace-decoder
+    - name: Build and Install Aqlprofile
       shell: bash
       working-directory: projects/aqlprofile
       run: |
@@ -282,26 +292,29 @@ jobs:
         ./build.sh
         cd build
         sudo make install
-        cd ..
-      
+    
+    - name: Install rocprof-trace-decoder
+      shell: bash
+      working-directory: /tmp
+      run: | 
         echo "Install rocprof-trace-decoder (RPM)."
         URL=$(curl -s https://api.github.com/repos/ROCm/rocprof-trace-decoder/releases/latest \
               | grep browser_download_url \
-              | grep "ubuntu-22.04" \
+              | grep "manylinux" \
               | grep ".rpm" \
               | cut -d '"' -f 4)
         if [ -z "$URL" ]; then
-          echo "❌ Error: Could not find Ubuntu 22.04 .rpm package URL."
+          echo "❌ Error: Could not find manylinux .rpm package URL."
           exit 1
         fi
       
         echo "Downloading: $URL"
-        curl -L -o rocprof-trace-decoder-latest-ubuntu-22.04.rpm "$URL"
+        curl -L -o rocprof-trace-decoder-latest-manylinux.rpm "$URL"
       
         echo "Installing package..."
-        sudo rpm -Uvh rocprof-trace-decoder-latest-ubuntu-22.04.rpm
-      
+        sudo rpm -Uvh rocprof-trace-decoder-latest-manylinux.rpm
         echo "✅ Installation complete!"
+        sudo rm -f rocprof-trace-decoder-latest-manylinux.rpm
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
