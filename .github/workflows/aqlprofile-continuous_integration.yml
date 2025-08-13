@@ -62,11 +62,11 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: "{{ matrix.system.runner }}"
+      GPU_RUNNER: ${{ matrix.system.runner }}
 
     steps:
     - name: Install Latest ROCm
-      if: matrix.system.runner == 'mi3xx'
+      if: ${{matrix.system.runner == 'mi3xx'}}
       shell: bash
       working-directory: /tmp
       run: |
