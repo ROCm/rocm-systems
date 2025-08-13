@@ -202,7 +202,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel-8', 'sles-15']
+        os: ['rhel-9', 'sles-15']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
@@ -225,11 +225,10 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         git config --global --add safe.directory '*'
-        if [ "${OS_TYPE}" == "rhel-8" ]; then
+        if [ "${OS_TYPE}" == "rhel-9" ]; then
           dnf makecache
           dnf groupinstall -y "Development Tools"
-          dnf remove -y gcc-c++
-          dnf install -y gcc-toolset-11-gcc-c++ llvm14-devel
+          dnf install -y llvm14-devel
         fi
         python3 -m pip install --upgrade pip
         python3 -m pip install -U --user -r requirements.txt
@@ -258,7 +257,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        if [ "${OS_TYPE}" == "rhel-8" ]; then source scl_source enable gcc-toolset-11; fi;
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16

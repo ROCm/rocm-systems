@@ -450,6 +450,8 @@ class Device : public NullDevice {
                               uint32_t hip_event_flags = 0) const;
   virtual void getHwEventTime(const amd::Event& event, uint64_t* start, uint64_t* end) const;
   virtual void ReleaseGlobalSignal(void* signal) const;
+  virtual bool CreateUserEvent(amd::UserEvent* event) const;
+  virtual void SetUserEvent(amd::UserEvent* event) const;
 
   //! Allocate host memory in terms of numa policy set by user
   void* hostNumaAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const;

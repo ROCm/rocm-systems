@@ -1210,6 +1210,12 @@ bool VirtualGPU::dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet,
 }
 
 // ================================================================================================
+void VirtualGPU::WaitCompleteSignal(hsa_signal_t signal) {
+  barrier_packet_.dep_signal[0] = signal;
+  dispatchBarrierPacket(kBarrierPacketHeader, false);
+}
+
+// ================================================================================================
 void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
                                        hsa_signal_t signal) {
   const uint32_t queueSize = gpu_queue_->size;
@@ -1413,9 +1419,7 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
       deviceQueueSize_(0),
       maskGroups_(0),
       schedulerThreads_(0),
-      schedulerParam_(nullptr),
       schedulerQueue_(nullptr),
-      schedulerSignal_({0}),
       barriers_(*this),
       managed_buffer_(*this, ManagedBuffer::kPoolNumSignals * device.settings().stagedXferSize_),
       managed_kernarg_buffer_(*this, device.settings().kernargPoolSize_),
@@ -1490,16 +1494,8 @@ VirtualGPU::~VirtualGPU() {
 
   delete printfdbg_;
 
-  if (0 != schedulerSignal_.handle) {
-    hsa_signal_destroy(schedulerSignal_);
-  }
-
   if (nullptr != schedulerQueue_) {
     hsa_queue_destroy(schedulerQueue_);
-  }
-
-  if (nullptr != schedulerParam_) {
-    schedulerParam_->release();
   }
 
   if (nullptr != virtualQueue_) {
@@ -2604,7 +2600,7 @@ void VirtualGPU::submitMapMemory(amd::MapMemoryCommand& cmd) {
   // If we have host memory, use it
   if ((devMemory->owner()->getHostMem() != nullptr) &&
       (devMemory->owner()->getSvmPtr() == nullptr)) {
-    if (!devMemory->isHostMemDirectAccess()) {
+    if (!AMD_DIRECT_DISPATCH && !devMemory->isHostMemDirectAccess()) {
       // Make sure GPU finished operation before synchronization with the backing store
       releaseGpuMemoryFence();
     }
@@ -3081,18 +3077,11 @@ void VirtualGPU::submitMigrateMemObjects(amd::MigrateMemObjectsCommand& vcmd) {
 // ================================================================================================
 bool VirtualGPU::createSchedulerParam()
 {
-  if (nullptr != schedulerParam_) {
+  if (nullptr != schedulerQueue_) {
     return true;
   }
 
-  while(true) {
-    schedulerParam_ = new (dev().context()) amd::Buffer(dev().context(),
-      CL_MEM_ALLOC_HOST_PTR, sizeof(SchedulerParam) + sizeof(AmdAqlWrap));
-
-    if ((nullptr != schedulerParam_) && !schedulerParam_->create(nullptr)) {
-      break;
-    }
-
+  while (true) {
     // The queue is written by multiple threads of the scheduler kernel
     if (HSA_STATUS_SUCCESS != hsa_queue_create(gpu_device(), 2048, HSA_QUEUE_TYPE_MULTI,
         callbackQueue, &roc_device_, std::numeric_limits<uint>::max(),
@@ -3100,37 +3089,12 @@ bool VirtualGPU::createSchedulerParam()
       break;
     }
 
-    hsa_signal_t  signal0 = {0};
-
-    if (HSA_STATUS_SUCCESS != hsa_signal_create(0, 0, nullptr, &signal0)) {
-      break;
-    }
-
-    schedulerSignal_ = signal0;
-
-    Memory* schedulerMem = dev().getRocMemory(schedulerParam_);
-
-    if (nullptr == schedulerMem) {
-      break;
-    }
-
-    schedulerParam_->setVirtualDevice(this);
     return true;
-  }
-
-  if (0 != schedulerSignal_.handle) {
-    hsa_signal_destroy(schedulerSignal_);
-    schedulerSignal_.handle = 0;
   }
 
   if (nullptr != schedulerQueue_) {
     hsa_queue_destroy(schedulerQueue_);
     schedulerQueue_ = nullptr;
-  }
-
-  if (nullptr != schedulerParam_) {
-    schedulerParam_->release();
-    schedulerParam_ = nullptr;
   }
 
   return false;
@@ -3355,7 +3319,7 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
     global[i] = static_cast<uint32_t>(sizes.global()[i]);
     local[i] = static_cast<uint16_t>(local_size[i]);
   }
-
+  uint64_t spVA = 0;
   // Check if runtime has to setup hidden arguments
   for (uint32_t i = signature.numParameters(); i < signature.numParametersAll(); ++i) {
     const auto& it = signature.at(i);
@@ -3415,14 +3379,12 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
         break;
       }
       case amd::KernelParameterDescriptor::HiddenCompletionAction: {
-        uint64_t spVA = 0;
-        if (nullptr != schedulerParam_ && devKernel->dynamicParallelism()) {
-          Memory* schedulerMem = dev().getRocMemory(schedulerParam_);
-          AmdAqlWrap* wrap = reinterpret_cast<AmdAqlWrap*>(
-                             reinterpret_cast<uint64_t>(schedulerParam_->getHostMem()) + sizeof(SchedulerParam));
+        if (devKernel->dynamicParallelism()) {
+          auto params = allocKernArg(sizeof(AmdAqlWrap), 64);
+          AmdAqlWrap* wrap = reinterpret_cast<AmdAqlWrap*>(params);
           memset(wrap, 0, sizeof(AmdAqlWrap));
           wrap->state = AQL_WRAP_DONE;
-          spVA = reinterpret_cast<uint64_t>(schedulerMem->getDeviceMemory()) + sizeof(SchedulerParam);
+          spVA = reinterpret_cast<uint64_t>(wrap);
         }
         WriteAqlArgAt(hidden_arguments, spVA, it.size_, it.offset_);
         break;
@@ -3651,8 +3613,8 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes,
     dispatchBarrierPacket(kBarrierPacketHeader, true);
     if (virtualQueue_ != nullptr) {
       static_cast<KernelBlitManager&>(blitMgr()).runScheduler(
-          getVQVirtualAddress(), schedulerParam_, schedulerQueue_,
-          schedulerSignal_, schedulerThreads_);
+          getVQVirtualAddress(), schedulerQueue_,
+          schedulerThreads_, spVA);
     }
   }
 
@@ -3833,10 +3795,10 @@ void VirtualGPU::flush(amd::Command* list, bool wait) {
 
 // ================================================================================================
 void VirtualGPU::addPinnedMem(amd::Memory* mem) {
-  //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
-  //!        unconditionally, before it can release pinned memory
-  releaseGpuMemoryFence();
   if (!AMD_DIRECT_DISPATCH) {
+    //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
+    //!        unconditionally, before it can release pinned memory
+    releaseGpuMemoryFence();
     if (nullptr == findPinnedMem(mem->getHostMem(), mem->getSize())) {
       if (pinnedMems_.size() > 7) {
         pinnedMems_.front()->release();
@@ -3847,7 +3809,14 @@ void VirtualGPU::addPinnedMem(amd::Memory* mem) {
       pinnedMems_.push_back(mem);
     }
   } else {
-    mem->release();
+    if (command_ != nullptr) {
+      command_->AddPinnedMemory(mem);
+    } else {
+      //! @note: ROCr backend doesn't have per resource busy tracking, hence runtime has to wait
+      //!        unconditionally, before it can release pinned memory
+      releaseGpuMemoryFence();
+      mem->release();
+    }
   }
 }
 

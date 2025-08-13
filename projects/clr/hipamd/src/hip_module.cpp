@@ -429,7 +429,11 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
                                   uint32_t firstDevice = 0) {
   int deviceId = hip::Stream::DeviceId(hStream);
-  if (deviceId != ihipGetDevice()) {
+
+  // Ensure the stream's device matches the current device,
+  // or the grid's assigned device in CooperativeKernelMultiDevice mode
+  int targetDevice = (numGrids == 0) ? ihipGetDevice() : gridId;
+  if (deviceId != targetDevice) {
     return hipErrorInvalidResourceHandle;
   }
   HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(deviceId));

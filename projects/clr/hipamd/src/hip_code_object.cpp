@@ -284,9 +284,7 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
     for (auto& hostVar : hostVarsIter->second) {
       auto varIter = vars_.find(hostVar);
       if (varIter == vars_.end()) {
-        LogPrintfError(
-          "removeFatBinary: Unable to find module 0x%x hostVar 0x%x",
-          module, hostVar);
+        LogPrintfError("removeFatBinary: Unable to find module 0x%x hostVar 0x%x", module, hostVar);
       } else {
         delete varIter->second;
         vars_.erase(varIter);
@@ -325,8 +323,8 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
     for (auto& hostFunc : hostFuncsIter->second) {
       auto funcIter = functions_.find(hostFunc);
       if (funcIter == functions_.end()) {
-        LogPrintfError("removeFatBinary: Unable to find module 0x%x hostFunc 0x%x",
-                       module, hostFunc);
+        LogPrintfError("removeFatBinary: Unable to find module 0x%x hostFunc 0x%x", module,
+                       hostFunc);
       } else {
         delete funcIter->second;
         functions_.erase(funcIter);
@@ -343,8 +341,8 @@ hipError_t StatCO::removeFatBinary(FatBinaryInfo** module) {
       delete moduleIter->second;
       modules_.erase(moduleIter);
     } else {
-      LogPrintfError("removeFatBinary: Unable to find module 0x%x via hostModule 0x%x",
-                    module, hostModule);
+      LogPrintfError("removeFatBinary: Unable to find module 0x%x via hostModule 0x%x", module,
+                     hostModule);
     }
     module_to_hostModule_.erase(hostModuleIter);
   }
@@ -383,7 +381,7 @@ hipError_t StatCO::getStatFunc(hipFunction_t* hfunc, const void* hostFunction, i
   }
 
   // Lazy load
-  FatBinaryInfo **module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->moduleInfo();
   if (*(module) == nullptr) {
     amd::ScopedLock lock(sclock_);
     if (*(module) == nullptr) {
@@ -405,7 +403,7 @@ hipError_t StatCO::getStatFuncAttr(hipFuncAttributes* func_attr, const void* hos
   }
 
   // Lazy load
-  FatBinaryInfo **module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->moduleInfo();
   if (*(module) == nullptr) {
     hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
     assert(err == hipSuccess);
@@ -437,7 +435,7 @@ hipError_t StatCO::getStatGlobalVar(const void* hostVar, int deviceId, hipDevice
   }
 
   // Lazy load
-  FatBinaryInfo **module = it->second->moduleInfo();
+  FatBinaryInfo** module = it->second->moduleInfo();
   if (*(module) == nullptr) {
     hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
     assert(err == hipSuccess);
@@ -464,7 +462,7 @@ hipError_t StatCO::initStatManagedVarDevicePtr(int deviceId) {
     for (auto& vecIter : managedVars_) {
       for (auto& var : vecIter.second) {
         // Lazy load
-        FatBinaryInfo **module = var->moduleInfo();
+        FatBinaryInfo** module = var->moduleInfo();
         if (*(module) == nullptr) {
           err = digestFatBinary(module_to_hostModule_[module], *module);
           assert(err == hipSuccess);

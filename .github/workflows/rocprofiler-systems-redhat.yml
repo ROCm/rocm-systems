@@ -3,6 +3,8 @@ run-name: redhat
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-redhat.yml'
       - 'projects/rocprofiler-systems/**'

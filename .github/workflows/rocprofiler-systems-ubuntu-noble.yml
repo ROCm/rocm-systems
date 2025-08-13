@@ -3,6 +3,8 @@ run-name: ubuntu-noble
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - '.github/workflows/rocprofiler-systems-ubuntu-noble.yml'
       - 'projects/rocprofiler-systems/**'

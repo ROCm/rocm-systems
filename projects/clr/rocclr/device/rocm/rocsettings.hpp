@@ -51,7 +51,8 @@ class Settings : public device::Settings {
       uint fgs_kernel_arg_ : 1;         //!< Use fine grain kernel arg segment
       uint barrier_value_packet_ : 1;   //!< Barrier value packet functionality
       uint dynamic_queues_ : 1;         //!< Dynamic queues management
-      uint reserved_ : 22;
+      uint blocking_blit_ : 1;          //!< Blit ops can be blocking on CPU
+      uint reserved_ : 21;
     };
     uint value_;
   };

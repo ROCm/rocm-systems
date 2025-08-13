@@ -492,10 +492,8 @@ class KernelBlitManager : public DmaBlitManager {
                          ) const;
 
   bool runScheduler(uint64_t vqVM,
-                    amd::Memory* schedulerParam,
                     hsa_queue_t* schedulerQueue,
-                    hsa_signal_t& schedulerSignal,
-                    uint threads);
+                    uint threads, uint64_t aql_wrap);
 
   //! Runs a blit kernel for GWS init
   bool RunGwsInit(uint32_t value             //!< Initial value for GWS resource
