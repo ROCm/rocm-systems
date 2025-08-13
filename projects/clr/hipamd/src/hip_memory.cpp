@@ -1796,11 +1796,16 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::Command::EventWaitList waitList;
     auto* pStream = hip::getNullStream(srcMemory->GetDeviceById()->context());
     if (stream != pStream) {
-      amd::Command* cmd = pStream->getLastQueuedCommand(false);
+      amd::Command* cmd = pStream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
     }
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
+
     amd::ReadMemoryCommand* readCommand =
         new amd::ReadMemoryCommand(*stream, CL_COMMAND_READ_BUFFER_RECT, waitList, *srcMemory,
                                    srcStart, copyRegion, dstHost, srcRect, dstRect, copyMetadata);
@@ -1931,10 +1936,14 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
     amd::Command::EventWaitList waitList;
     if (queueDevice != dstImage->GetDeviceById()) {
       pStream = hip::getNullStream(dstImage->GetDeviceById()->context());
-      amd::Command* cmd = stream->getLastQueuedCommand(false);
+      amd::Command* cmd = stream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
+    }
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
     }
 
     amd::WriteMemoryCommand* writeMemCmd = new amd::WriteMemoryCommand(
@@ -1978,10 +1987,14 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
     amd::Command::EventWaitList waitList;
     if (queueDevice != srcImage->GetDeviceById()) {
       pStream = hip::getNullStream(srcImage->GetDeviceById()->context());
-      amd::Command* cmd = stream->getLastQueuedCommand(false);
+      amd::Command* cmd = stream->getLastQueuedCommand(true);
       if (cmd != nullptr) {
         waitList.push_back(cmd);
       }
+    }
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
     }
 
     amd::ReadMemoryCommand* readMemCmd = new amd::ReadMemoryCommand(

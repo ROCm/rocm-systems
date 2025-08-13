@@ -386,8 +386,6 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
   if (*dev_ptr == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
   }
-
-  *dev_ptr = allocated_ptr;
   HIP_RETURN(hipSuccess);
 }
 
