@@ -87,15 +87,24 @@ jobs:
         cpack -G DEB
         dpkg -i *.deb
 
-    - name: Verify Installation
+    - name: Verify Installation (Manual)
       timeout-minutes: 15
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
+        set -v
         cd $INSTALL_DIR
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
         bin/rocprof-sys-python --help
         bin/rocprof-sys-run --help
         bin/rocprof-sys-sample --help
         bin/rocprof-sys-causal --help
+
+    - name: Verify Installation (test-install.sh)
+      timeout-minutes: 15
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      run: |
+        set -v
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
         ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1
