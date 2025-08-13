@@ -57,18 +57,41 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi4', 'navi3', 'mi3xx']
-        os: ['ubuntu-22.04']
-        build-type: ['RelWithDebInfo']
+        system: [
+          {gpu: 'navi4', runner: 'rocprofiler-navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
+          {gpu: 'navi3', runner: 'rocprofiler-navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
+          {gpu: 'mi3xx', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
+        ]
 
-    runs-on: rocprofiler-${{ matrix.runner }}
+    runs-on: ${{ matrix.system.runner }}
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       CORE_EXT_RUNNER: mi3xx
+      GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
+    - name: Install Latest ROCm
+      if: ${{matrix.system.gpu == 'mi3xx'}}
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install --upgrade pip pipx
+        python3 -m pipx install awscli
+        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -112,6 +135,9 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        [ "${GPU_RUNNER}" == "mi3xx" ] && export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH;
+        [ "${GPU_RUNNER}" == "mi3xx" ] && export PATH=/opt/rocm-custom/bin:$PATH;
+        [ "${GPU_RUNNER}" == "mi3xx" ] && export CMAKE_PREFIX_PATH=/opt/rocm-custom;
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
