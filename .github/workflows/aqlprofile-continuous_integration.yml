@@ -132,7 +132,7 @@ jobs:
       shell: bash
       run: |
         export LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DAQLPROFILE_BUILD_TESTS=ON $(pwd)/projects/aqlprofile
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON $(pwd)/projects/aqlprofile
         /usr/bin/cmake --build build --target all --parallel 16
         sudo /usr/bin/cmake --build build --target install
         /usr/bin/ctest --output-on-failure -VV --test-dir build
