@@ -54,6 +54,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
 
+"project: rocr-runtime":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocr-runtime/**/*'
+
 "project: roctracer":
 - changed-files:
   - any-glob-to-any-file: 'projects/roctracer/**/*'
