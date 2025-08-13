@@ -69,6 +69,48 @@ jobs:
       CORE_EXT_RUNNER: mi3xx
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install --upgrade pip pipx
+        python3 -m pipx install awscli
+    
+        # Pick key pattern based on matrix.runner
+        case "${{ matrix.runner }}" in
+          mi3xx)
+            PATTERN="gfx94X"
+            ;;
+          navi3)
+            PATTERN="gfx110x"
+            ;;
+          navi4)
+            PATTERN="gfx120x"
+            ;;
+          *)
+            echo "Unknown runner: ${{ matrix.runner }}"
+            exit 1
+            ;;
+        esac
+    
+        echo "Using pattern: $PATTERN"
+    
+        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, '$PATTERN')], &LastModified)[-1].Key")
+    
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No $PATTERN tarball found"; exit 1; }
+    
+        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+    
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf rocm.tar.gz -C /opt/rocm-custom
+
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -89,7 +131,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
+        rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
 
     - name: List Files
       shell: bash
@@ -99,7 +141,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm-custom/.info/version
         ls -la
         
     - name: Build and Install Aqlprofile
@@ -107,32 +149,12 @@ jobs:
       working-directory: projects/aqlprofile
       run: |
         echo "Install Aqlprofile."
-        ./build.sh
-        cd build
-        make install
-
-    - name: Install rocprof-trace-decoder
-      shell: bash
-      working-directory: /tmp
-      run: |
-        echo "Install rocprof-trace-decoder."
-        URL=$(curl -s https://api.github.com/repos/ROCm/rocprof-trace-decoder/releases/latest \
-            | grep browser_download_url \
-            | grep "ubuntu-22.04" \
-            | grep ".deb" \
-            | cut -d '"' -f 4)
-        if [ -z "$URL" ]; then
-          echo "❌ Error: Could not find Ubuntu 22.04 .deb package URL."
-          exit 1
-        fi
-        
-        echo "Downloading: $URL"
-        curl -L -o rocprof-trace-decoder-latest-ubuntu-22.04.deb "$URL"
-        
-        echo "Installing package..."
-        dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || apt-get install -f -y
+        export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON .
+        /usr/bin/cmake --build build --target all --parallel 16
+        sudo /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
-        rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -146,6 +168,9 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        export ROCM_PATH= /opt/rocm-custom
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
@@ -159,7 +184,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
-          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
+          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm-custom)"
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -213,8 +238,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
+        CMAKE_PREFIX_PATH=/opt/rocm-custom cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
+        CMAKE_PREFIX_PATH=/opt/rocm-custom cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
