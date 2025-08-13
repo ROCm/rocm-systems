@@ -557,6 +557,7 @@ write_rocpd(
     const generator<tool_buffer_tracing_memory_copy_ext_record_t>&          memory_copy_gen,
     const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
     const generator<tool_buffer_tracing_memory_allocation_ext_record_t>&    memory_alloc_gen,
+    const generator<tool_buffer_tracing_kfd_record_t>&                      kfd_gen,
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
@@ -858,7 +859,7 @@ write_rocpd(
                     insert_value("model_name", itr.model_name, allow_empty_string{}),
                     insert_value("vendor_name", itr.vendor_name, allow_empty_string{}),
                     insert_value("product_name", itr.product_name, allow_empty_string{}),
-                    insert_value("user_name", itr.product_name, allow_empty_string{}),
+                    insert_value("user_name", itr.name, allow_empty_string{}),
                     insert_value("extdata", json_info),
                 });
 
@@ -1391,6 +1392,269 @@ write_rocpd(
         }
     };
 
+    auto insert_kfd_data = [&conn, &tool_metadata, &string_entries, node_id, this_pid](auto& pmc_ids) {
+        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_info_pmc: kfd");
+
+        using kfd_pmc_info_t = std::vector<
+            std::tuple<rocprofiler_buffer_tracing_kind_t, std::string_view>
+        >;
+
+        auto kfd_info = kfd_pmc_info_t{
+            { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE,    "KFD page migration events" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT,      "KFD page fault events" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE,           "KFD queue eviction/restore events" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU,  "KFD unmap from GPU events" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS,  "KFD dropped_events events" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE,          "KFD page migration paired records" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT,            "KFD page fault paired records" },
+            { ROCPROFILER_BUFFER_TRACING_KFD_QUEUE,                 "KFD queue eviction/restore paired records" }
+        };
+
+        for (auto info : kfd_info)
+        {
+            auto trace_id    = std::get<0>(info);
+            auto name        = tool_metadata.buffer_names.at(trace_id);
+            auto description = std::get<1>(info);
+
+            auto stmt = get_insert_statement(
+                "rocpd_info_pmc{{uuid}}",
+                {
+                    insert_value("nid", node_id),
+                    insert_value("pid", this_pid),
+                    insert_value("name", name),
+                    insert_value("symbol", name),
+                    insert_value("description", description),
+                    insert_value("component", std::string_view{"rocm"}),
+                    insert_value("value_type", std::string_view{"ABS"}),
+                    insert_value("block", std::string_view{"KFD"}),
+                    insert_value("is_constant", false),
+                    insert_value("is_derived", false),
+                });
+
+            auto row_id = execute_raw_sql_statements(conn, stmt);
+            pmc_ids.emplace(trace_id, row_id);
+        }
+    };
+
+    auto insert_kfd_event_data =
+        [&conn, &tool_metadata, &string_entries, node_id, this_pid](const auto& _gen, const auto &_pmc_ids) {
+            auto   _sqlgenperf_rocpd = get_simple_timer("rocpd_pmc_event: kfd");
+            for(auto pitr : _gen)
+            {
+                auto _deferred = sql::deferred_transaction{conn};
+                for(const auto& itr : _gen.get(pitr))
+                {
+                    auto name      = std::string_view{};
+                    auto tid       = uint32_t{};
+                    auto start     = rocprofiler_timestamp_t{};
+                    auto end       = rocprofiler_timestamp_t{};
+                    auto value     = 1.0;
+                    auto json_data = std::string{};
+
+                    switch (itr.kind) {
+                    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_MIGRATE: {
+                        auto record = itr.event_page_migrate_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.timestamp;
+                        end   = record.timestamp;
+                        value = record.end_address.value - record.start_address.value;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("start_address", record.start_address.value));
+                            ar(cereal::make_nvp("end_address", record.end_address.value));
+                            ar(cereal::make_nvp("src_agent_id", record.src_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.src_agent)->node_id));
+                            ar(cereal::make_nvp("dst_agent_id", record.dst_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.dst_agent)->node_id));
+                            ar(cereal::make_nvp("prefetch_agent_id", record.prefetch_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.prefetch_agent)->node_id));
+                            ar(cereal::make_nvp("preferred_agent_id", record.preferred_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.preferred_agent)->node_id));
+                            ar(cereal::make_nvp("error_code", record.error_code));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_PAGE_FAULT: {
+                        auto record = itr.event_page_fault_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.timestamp;
+                        end   = record.timestamp;
+                        value = record.address.value;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("address", record.address.value));
+                            ar(cereal::make_nvp("agent_id", record.agent_id.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.agent_id)->node_id));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_QUEUE: {
+                        auto record = itr.event_queue_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.timestamp;
+                        end   = record.timestamp;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("agent_id", record.agent_id.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.agent_id)->node_id));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_UNMAP_FROM_GPU: {
+                        auto record = itr.event_unmap_from_gpu_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.timestamp;
+                        end   = record.timestamp;
+                        value = record.end_address.value - record.start_address.value;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("start_address", record.start_address.value));
+                            ar(cereal::make_nvp("end_address", record.end_address.value));
+                            ar(cereal::make_nvp("agent_id", record.agent_id.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.agent_id)->node_id));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_EVENT_DROPPED_EVENTS: {
+                        auto record = itr.event_dropped_events_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.timestamp;
+                        end   = record.timestamp;
+                        value = record.count;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("count", record.count));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_MIGRATE: {
+                        auto record = itr.page_migrate_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.start_timestamp;
+                        end   = record.end_timestamp;
+                        value = record.end_address.value - record.start_address.value;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("start_address", record.start_address.value));
+                            ar(cereal::make_nvp("end_address", record.end_address.value));
+                            ar(cereal::make_nvp("src_agent_id", record.src_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.src_agent)->node_id));
+                            ar(cereal::make_nvp("dst_agent_id", record.dst_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.dst_agent)->node_id));
+                            ar(cereal::make_nvp("prefetch_agent_id", record.prefetch_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.prefetch_agent)->node_id));
+                            ar(cereal::make_nvp("preferred_agent_id", record.preferred_agent.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.preferred_agent)->node_id));
+                            ar(cereal::make_nvp("error_code", record.error_code));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_PAGE_FAULT: {
+                        auto record = itr.page_fault_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.start_timestamp;
+                        end   = record.end_timestamp;
+                        value = record.address.value;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("address", record.address.value));
+                            ar(cereal::make_nvp("agent_id", record.agent_id.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.agent_id)->node_id));
+                        });
+
+                        break;
+                    }
+
+                    case ROCPROFILER_BUFFER_TRACING_KFD_QUEUE: {
+                        auto record = itr.queue_record;
+
+                        name  = tool_metadata.buffer_names.at(itr.kind, record.operation);
+                        tid   = record.pid; // KFD attributes all events to the thread_group's lead thread
+                        start = record.start_timestamp;
+                        end   = record.end_timestamp;
+
+                        json_data = get_json_string([&tool_metadata, &record](auto& ar) {
+                            ar(cereal::make_nvp("agent_id", record.agent_id.handle == 0 ? -1 :
+                                                tool_metadata.get_agent(record.agent_id)->node_id));
+                        });
+
+                        break;
+                    }
+
+                    default:
+                        continue;
+                    }
+
+                    auto name_id = string_entries.at(name);
+
+                    // insert thread info if it doesn't already exist
+                    get_thread_id(tid);
+
+                    // create an empty event, just to associate the various info tables
+                    auto evt_id = create_event(conn, {});
+
+                    // track timestamps with a track+sample for events, with a region for records
+                    if (start == end) {
+                        auto track_id = get_track_id(conn, node_id, this_pid, tid, name_id, "{}");
+                        auto sample_stmt = get_insert_statement("rocpd_sample{{uuid}}", {
+                            insert_value("track_id", track_id),
+                            insert_value("timestamp", start),
+                            insert_value("event_id", evt_id),
+                        });
+
+                        execute_raw_sql_statements(conn, sample_stmt);
+                    } else {
+                        auto region_stmt = get_insert_statement("rocpd_region{{uuid}}", {
+                             insert_value("nid", node_id),
+                             insert_value("pid", this_pid),
+                             insert_value("tid", tid),
+                             insert_value("start", start),
+                             insert_value("end", end),
+                             insert_value("name_id", name_id),
+                             insert_value("event_id", evt_id),
+                         });
+
+                        execute_raw_sql_statements(conn, region_stmt);
+                    }
+
+                    auto stmt = get_insert_statement("rocpd_pmc_event{{uuid}}", {
+                         insert_value("event_id", evt_id),
+                         insert_value("pmc_id", _pmc_ids.at(itr.kind)),
+                         insert_value("value", value),
+                         insert_value("extdata", json_data),
+                    });
+
+                    execute_raw_sql_statements(conn, stmt);
+                }
+            }
+        };
+
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
     insert_node_data();
@@ -1420,6 +1684,12 @@ write_rocpd(
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");
         insert_memory_alloc_data(memory_alloc_gen);
         insert_memory_alloc_data(scratch_memory_gen);
+    }
+
+    {
+        auto kfd_pmc_ids = std::unordered_map<rocprofiler_buffer_tracing_kind_t, uint64_t>{};
+        insert_kfd_data(kfd_pmc_ids);
+        insert_kfd_event_data(kfd_gen, kfd_pmc_ids);
     }
 
     {

@@ -169,6 +169,9 @@ get_node_map()
         auto _v = agent_id_map_t{};
         for(const auto* agent : agent::get_agents())
             _v.emplace(agent->gpu_id, agent->id);
+
+        // KFD may report a special undefined location
+        _v.emplace(KFD_IOCTL_SVM_LOCATION_UNDEFINED, rocprofiler_agent_id_t{.handle = 0});
         return _v;
     }());
 
@@ -188,6 +191,7 @@ constexpr char FAULT_MIGRATE_CHAR = 'M';  // Fault resolved with a migration
 constexpr char FAULT_UPDATE_CHAR  = 'U';  // Fault resolved with an update
 // Queue was not restored, will be restored later
 constexpr char QUEUE_RESTORE_RESCHEDULED_CHAR = 'R';
+constexpr char QUEUE_RESTORE_CHAR = '0';
 
 template <>
 kfd_event_record
@@ -511,14 +515,21 @@ parse_event<KFD_EVENT_QUEUE_RESTORE>(const agent_id_map_t& agents, std::string_v
 
     e.agent_id = get_node_agent_id(agents, _node_id);
 
-    if(scan_count == 5 && _rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
+    if(scan_count == 5)
     {
-        e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
-    }
-    else if(scan_count == 5 && _rescheduled != QUEUE_RESTORE_RESCHEDULED_CHAR)
-    {
-        ROCP_CI_LOG(WARNING) << "kfd: parse_event: Expected rescheduled with 5 items parsed";
-        return {};
+        if (_rescheduled == QUEUE_RESTORE_RESCHEDULED_CHAR)
+        {
+            e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE_RESCHEDULED;
+        }
+        else if (_rescheduled == QUEUE_RESTORE_CHAR)
+        {
+            e.operation = ROCPROFILER_KFD_EVENT_QUEUE_RESTORE;
+        }
+        else
+        {
+            ROCP_CI_LOG(WARNING) << "kfd: parse_event: Unknown rescheduled with 5 items parsed";
+            return {};
+        }
     }
     else if(scan_count == 4)
     {

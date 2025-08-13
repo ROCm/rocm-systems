@@ -352,6 +352,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     add_parser_bool_argument(
         basic_tracing_options,
+        "--kfd-trace",
+        help="For collecting KFD Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
         "--scratch-memory-trace",
         help="For collecting Scratch Memory operations Traces. Helps in determining scratch allocations and manage them efficiently",
     )
@@ -1135,6 +1140,7 @@ def run(app_args, args, **kwargs):
             "kernel_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
+            "kfd_trace",
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
@@ -1149,6 +1155,7 @@ def run(app_args, args, **kwargs):
             "kernel_trace",
             "memory_copy_trace",
             "memory_allocation_trace",
+            "kfd_trace",
             "scratch_memory_trace",
             "rccl_trace",
             "rocdecode_trace",
@@ -1181,6 +1188,7 @@ def run(app_args, args, **kwargs):
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["memory_allocation_trace", "MEMORY_ALLOCATION_TRACE"],
+            ["kfd_trace", "KFD_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],
             ["group_by_queue", "GROUP_BY_QUEUE"],
         ]
