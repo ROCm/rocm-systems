@@ -92,7 +92,7 @@ jobs:
       timeout-minutes: 10
       shell: bash
       env:
-        GPU_RUNNER: {{ matrix.system.runner }}
+        GPU_RUNNER: "{{ matrix.system.runner }}"
       run: |
         [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
         git config --global --add safe.directory '*'
