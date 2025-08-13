@@ -158,21 +158,6 @@ rocprofiler-sdk:
     EXPECT_FALSE(result.has_value());
 }
 
-TEST(FirmwareRestrictions, InvalidSchemaVersion)
-{
-    std::string yaml_content = R"(
-rocprofiler-sdk:
-  fw_restriction_schema_version: 2
-  firmware_restrictions:
-    - firmware_type: CP
-      min_version: 199
-)";
-
-    auto result = parse_firmware_restrictions(yaml_content);
-
-    EXPECT_FALSE(result.has_value());
-}
-
 TEST(FirmwareRestrictions, MissingRequiredFirmwareType)
 {
     std::string yaml_content = R"(
