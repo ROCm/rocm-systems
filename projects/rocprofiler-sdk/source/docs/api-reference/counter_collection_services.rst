@@ -270,6 +270,75 @@ Counters are defined in yaml format in the ``counter_defs.yaml`` file. The count
 
 You can separately define the counters for different architectures as shown in the preceding example for gfx90a and gfx1010. If two or more architectures share the same block, event, or expression definition, they can be specified together using "/" delimiter ("gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined and can't have block or event defined.
 
+Firmware Restrictions
+---------------------
+
+ROCprofiler-SDK supports firmware version restrictions to ensure counter collection operates on devices with compatible firmware. This helps prevent issues that may arise from using outdated firmware versions that could cause device instability or incorrect counter data.
+
+Firmware Restrictions File Format
+++++++++++++++++++++++++++++++++++
+
+Firmware restrictions are defined in YAML format in the ``firmware_restrictions.yaml`` file. The file uses the following schema:
+
+.. code-block:: yaml
+
+    rocprofiler-sdk:
+      # Required: Schema version for compatibility checking
+      fw_restriction_schema_version: 1
+      
+      # List of firmware restrictions
+      firmware_restrictions:
+        # Example: CP/MEC firmware restrictions
+        - firmware_type: CP
+          min_version: 199
+          reason: "CP firmware below version 199 has critical bugs affecting compute operations"
+          affected_architectures:
+            - "gfx908"
+            - "gfx90a"
+            - "gfx940"
+        
+        # Example: SDMA firmware restrictions  
+        - firmware_type: SDMA
+          min_version: 150
+          reason: "SDMA firmware below 150 causes system instability and data corruption"
+          affected_architectures:
+            - "gfx1030"
+            - "gfx1100"
+            - "gfx1101"
+
+**Schema Elements:**
+
+- ``fw_restriction_schema_version``: Required integer specifying the schema version (currently 1)
+- ``firmware_restrictions``: Array of restriction objects with the following fields:
+
+  - ``firmware_type`` (required): Type of firmware being restricted. Supported types:
+    
+    - ``CP`` or ``MEC``: Command Processor/MicroEngine Compute firmware
+    - ``SDMA``: System DMA firmware
+    
+  - ``min_version`` (required): Minimum firmware version required (integer)
+  - ``reason`` (optional): Human-readable explanation for the restriction
+  - ``affected_architectures`` (optional): Array of GPU architecture names (e.g., "gfx940", "gfx942") that must meet this restriction. If empty, the restriction applies to all architectures.
+
+Firmware Restrictions File Location
+++++++++++++++++++++++++++++++++++++
+
+The firmware restrictions file is located using the following search order:
+
+1. **Environment Variable**: If the ``ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH`` environment variable is set, ROCprofiler-SDK will look for ``firmware_restrictions.yaml`` in that directory.
+
+2. **Installation Path**: If no environment variable is set, ROCprofiler-SDK searches in the installation directory at ``<install_path>/share/rocprofiler-sdk/firmware_restrictions.yaml``.
+
+**Example:**
+
+.. code-block:: bash
+
+    # Set custom firmware restrictions path
+    export ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH=/path/to/custom/restrictions/
+    
+    # ROCprofiler-SDK will now look for:
+    # /path/to/custom/restrictions/firmware_restrictions.yaml
+
 Derived Metrics
 ---------------
 

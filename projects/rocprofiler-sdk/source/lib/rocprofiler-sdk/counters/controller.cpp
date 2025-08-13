@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/firmware_restrictions.hpp"
 #include "lib/rocprofiler-sdk/counters/ioctl.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -38,6 +39,7 @@ CounterController::CounterController()
 {
     // Pre-read metrics map file to catch faliures during initial setup.
     rocprofiler::counters::loadMetrics();
+    rocprofiler::counters::check_installed_firmware_restrictions();
 }
 
 // Adds a counter collection profile to our global cache.
