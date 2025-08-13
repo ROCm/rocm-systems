@@ -120,8 +120,8 @@ class RocpdMerger:
             tables = cur_orig.fetchall()
             print(f"Tables found: {len(tables) -1}")
 
-            uudid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
-            _uuid = [itr[0] for itr in cur_orig.execute(uudid_statement).fetchall()][0]
+            uuid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
+            _uuid = [itr[0] for itr in cur_orig.execute(uuid_statement).fetchall()][0]
 
             version_statement = (
                 "SELECT value FROM rocpd_metadata WHERE tag='schema_version'"
@@ -238,12 +238,15 @@ def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> None:
 def main(argv=None) -> int:
     """Main entry point for command line execution."""
 
+    from . import output_config
+
     parser = argparse.ArgumentParser(description="Merge ROCpd databases")
     parser.add_argument(
         "-i",
         "--input",
-        type=str,
         required=True,
+        type=output_config.check_file_exists,
+        nargs="+",
         help="Path to the input ROCpd database files",
     )
 

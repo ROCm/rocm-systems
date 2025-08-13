@@ -122,12 +122,15 @@ def process_args(args, valid_args):
 def execute(input_files, **kwargs):
 
     output_path = kwargs.get("output_path", ".")
-    consolidate = kwargs.get("consolidate", "False")
+    consolidate = kwargs.get("consolidate", False)
 
-    # Create a new folder with current date and time for unique folder to consolidate files to
-    if consolidate:
-        date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-        output_path = f"rocpd-{date_str}.rpdb"
+    if output_path != ".":
+        output_path = f"{output_path}.rpdb"
+    else:
+        # Create a new folder with current date and time for unique folder to consolidate files to
+        if consolidate:
+            date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            output_path = f"rocpd-{date_str}.rpdb"
 
     if consolidate:
         # Create a new folder with current date and time
@@ -168,53 +171,15 @@ def main(argv=None):
         help="Input path and filename to one or more database(s), separated by spaces",
     )
 
-    parser.add_argument(
-        "-d",
-        "--output-path",
-        help="Sets the name of output folder (default : current directory)",
-        # default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
-        type=str,
-        required=False,
-    )
-
-    parser.add_argument(
-        "-c",
-        "--consolidate",
-        action="store_true",
-        help="Consolidate (copy) database files into a new folder and generate metadata file pointing to that folder",
-    )
+    valid_args = add_args(parser)
 
     args = parser.parse_args(argv)
 
+    package_args = process_args(args, valid_args)
+
     input_files = flatten_rocpd_yaml_input_file(args.input)
 
-    # TODO: fix this complicated logic. Let's make it simpler.
-    if args.output_path:
-        output_path = args.output_path
-    else:
-        # Create a new folder with current date and time for unique folder to consolidate files to
-        if args.consolidate:
-            date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            output_path = f"rocpd-{date_str}.rpdb"
-        else:
-            output_path = "."
-
-    if args.consolidate:
-        # Create a new folder with current date and time
-        os.makedirs(output_path, exist_ok=True)
-        copied_files = []
-        for db_file in input_files:
-            dest_file = os.path.join(output_path, os.path.basename(db_file))
-            # Only copy if source and destination are not the same file
-            if os.path.abspath(db_file) != os.path.abspath(dest_file):
-                shutil.copy2(db_file, dest_file)
-            copied_files.append(dest_file)
-        metadata_path = create_metadata_file(copied_files, output_path, consolidate=True)
-    else:
-        # If not consolidating, just create metadata file with relative paths to current directory
-        metadata_path = create_metadata_file(input_files, output_path)
-
-    print(f"rocPD package created at: {metadata_path}")
+    execute(input_files, **package_args)
 
 
 # This is the entry point for the script.
