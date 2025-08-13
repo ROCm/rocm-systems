@@ -1500,10 +1500,8 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx16_floatx16
 #else
   __amd_floatx32_storage_t tmp;
   for (size_t i = 0; i < 16; i++) {
-    tmp[i] = in1[i];
-  }
-  for (size_t i = 0; i < 16; i++) {
-    tmp[i + 16] = in2[i];
+    tmp[i * 2] = in1[i];
+    tmp[i * 2 + 1] = in2[i];
   }
   using namespace fcbx;
   return interpret == __AMD_OCP_E2M3
@@ -1527,11 +1525,12 @@ __OCP_FP_HOST_DEVICE_STATIC__ __amd_fp6x32_storage_t __amd_cvt_floatx32_to_fp6x3
     const __amd_floatx32_storage_t val, const __amd_fp6_interpretation_t interpret,
     const __amd_scale_t scale) {
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
-  __amd_floatx16_storage_t in1{val[0],  val[1],  val[2],  val[3], val[4],  val[5],
-                               val[6],  val[7],  val[8],  val[9], val[10], val[11],
-                               val[12], val[13], val[14], val[15]},
-      in2 = {val[16], val[17], val[18], val[19], val[20], val[21], val[22], val[23],
-             val[24], val[25], val[26], val[27], val[28], val[29], val[30], val[31]};
+  // The API exepcts interleaved inputs
+  __amd_floatx16_storage_t in1{val[0],  val[2],  val[4],  val[6],  val[8],  val[10],
+                               val[12], val[14], val[16], val[18], val[20], val[22],
+                               val[24], val[26], val[28], val[30]},
+      in2 = {val[1],  val[3],  val[5],  val[7],  val[9],  val[11], val[13], val[15],
+             val[17], val[19], val[21], val[23], val[25], val[27], val[29], val[31]};
   return interpret == __AMD_OCP_E2M3
              ? __builtin_amdgcn_cvt_scalef32_2xpk16_fp6_f32(in1, in2, __amd_scale_to_float(scale))
              : __builtin_amdgcn_cvt_scalef32_2xpk16_bf6_f32(in1, in2, __amd_scale_to_float(scale));
