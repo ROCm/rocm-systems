@@ -428,7 +428,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
     {
       packet.type = ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY;
-      packet.data20 = (1 + cu_per_se) * (config->perfcounters.size() & ~3) * config->perfPeriod;
+      packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
       builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
     }
     if (Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
