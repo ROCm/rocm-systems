@@ -33,7 +33,12 @@ from . import libpyrocpd
 
 
 def write_sql_query_to_csv(
-    connection: RocpdImportData, query, output_path, output_file, filename=""
+    connection: RocpdImportData,
+    query,
+    output_path,
+    output_file,
+    filename="",
+    postfix="trace",
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
 
@@ -45,7 +50,8 @@ def write_sql_query_to_csv(
 
     # call query module to export to csv
     file_prefix = output_file + "_" if output_file else ""
-    export_path = os.path.join(output_path, f"{file_prefix}{filename}_trace.csv")
+    file_postfix = "_" + postfix if postfix else ""
+    export_path = os.path.join(output_path, f"{file_prefix}{filename}{file_postfix}.csv")
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 
@@ -134,7 +140,7 @@ def write_agent_info_csv(importData, config) -> None:
         FROM "rocpd_info_agent"
     """
     write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "agent_info"
+        importData, query, config.output_path, config.output_file, "agent_info", ""
     )
 
 
