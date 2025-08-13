@@ -92,7 +92,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         cd $INSTALL_DIR
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
         bin/rocprof-sys-python --help
@@ -105,6 +104,5 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run: |
-        set -v
         source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
         ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,rewrite,runtime}=1
