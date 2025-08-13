@@ -398,7 +398,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     output_format = kwargs.get("format", "console")
 
     if check_function_availability(connection, "sqrt") is False:
-        connection.create_function(
+    if not check_function_availability(connection, "sqrt"):
             "sqrt", 1, lambda x: math.sqrt(x) if x is not None and x >= 0 else None
         )
 
