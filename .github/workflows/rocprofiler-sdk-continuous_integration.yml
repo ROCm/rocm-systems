@@ -173,7 +173,7 @@ jobs:
       run:
         export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
-        export ROCM_PATH= /opt/rocm-custom
+        export ROCM_PATH=/opt/rocm-custom
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
