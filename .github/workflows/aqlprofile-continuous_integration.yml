@@ -48,9 +48,10 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'rocprofiler-navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
-          {gpu: 'navi3', runner: 'rocprofiler-navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
-          {gpu: 'mi3xx', runner: 'rocprofiler-mi3xx', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
+          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X"},
+          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X"},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X"},
+          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950"}
         ]
 
     runs-on: ${{ matrix.system.runner }}
@@ -62,8 +63,28 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
+        export PATH=/usr/local/bin:~/.local/bin:$PATH
+        KEY=$(aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, '${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/aqlprofile
@@ -74,10 +95,10 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        apt-get update
-        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        output=$(sudo apt-get update 2>&1) && exit_status=$? || exit_status=$?
+        sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev rocm-llvm-dev
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
     - name: List Files
       shell: bash
@@ -94,9 +115,9 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.gpu }}-core
+        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm-custom /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
@@ -107,12 +128,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi300']
-        os: ['rhel-9', 'sles-15']
-        build-type: ['RelWithDebInfo']
-        ci-flags: ['--linter clang-tidy']
+        system: [
+          {gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
+          {gpu: 'mi325', os: 'rhel-9.1', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
+          {gpu: 'mi325', os: 'sles-15.4', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''}
+        ]
 
-    runs-on: rocprofiler-${{ matrix.os }}
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: rocm/rocprofiler-private:${{ matrix.system.os }}
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
 
     permissions:
       contents: read
@@ -123,6 +150,28 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install --upgrade pip pipx
+        python3 -m pipx install awscli
+        python3 -m pipx ensurepath
+        source ~/.bashrc
+        KEY=$(aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+        sudo ln -s /opt/rocm-custom /opt/rocm
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/aqlprofile
@@ -131,16 +180,22 @@ jobs:
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
-      run: git config --global --add safe.directory '*'
+      run: |
+        git config --global --add safe.directory '*'
+        python3 -m pipx install cmake
+        python3 -m pipx ensurepath
+        source ~/.bashrc
 
     - name: List Files
       shell: bash
       run: |
+        python3 -m pipx ensurepath
+        source ~/.bashrc
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm-custom/.info/version
         ls -la
         pwd
 
@@ -148,9 +203,10 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
+        python3 -m pipx ensurepath; source ~/.bashrc;
+        PATH=/opt/rocm/bin:$PATH LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
