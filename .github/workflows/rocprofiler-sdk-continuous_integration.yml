@@ -74,8 +74,8 @@ jobs:
       working-directory: /tmp
       run: |
         python3 -m pip install --upgrade pip
-        sudo apt-get update
-        sudo apt-get install -y python3.10-venv
+        apt-get update
+        apt-get install -y python3.10-venv
         python3 -m pip install --upgrade pip pipx
         python3 -m pipx install awscli
     
