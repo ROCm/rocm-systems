@@ -70,19 +70,21 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        sudo apt update
-        sudo apt install -y wget sudo curl git
-        export ROCM_JOB_NAME="compute-rocm-dkms-${ROCM_BUILD_TYPE}-hipclang"
-        export ROCM_JOB_BASE_URL="http://rocm-ci.amd.com/job/${ROCM_JOB_NAME}/"
-        export ROCM_JOB_API_URL_POSTFIX="/api/json?pretty=true"
-        export ROCM_JOB_BUILD_NUMBER_URL_POSTFIX="/buildNumber"
-        export ROCM_JOB_API_FULL_URL="${ROCM_JOB_BASE_URL}${ROCM_JOB_NUMBER}${ROCM_JOB_API_URL_POSTFIX}"
-        export ROCM_JOB_BUILD_NUMBER_FULL_URL="${ROCM_JOB_BASE_URL}${ROCM_JOB_NUMBER}${ROCM_JOB_BUILD_NUMBER_URL_POSTFIX}"
-        wget https://artifactory-cdn.amd.com/artifactory/list/amdgpu-deb/amdgpu-install-internal_$(curl -s ${ROCM_JOB_API_FULL_URL} | grep amdgpu-install-internal_ | sed 's/.*amdgpu-install-internal//' | awk -F'[_|-]' '{print $2}' | tr -d '\n')-22.04-1_all.deb
-        sudo apt install -y ./*_all.deb
-        sudo amdgpu-repo --amdgpu-build=$(curl -s ${ROCM_JOB_API_FULL_URL} | grep amdgpu-build | sed 's/.* --amdgpu-build//' | awk -F'[=| |<]' '{print $2}' | tr -d '\n') --rocm-build=${ROCM_JOB_NAME}/$(curl -s ${ROCM_JOB_BUILD_NUMBER_FULL_URL})
-        sudo amdgpu-install -y --no-dkms --usecase=rocm
-        rm -rf amdgpu-install-internal_*.deb
+        python3 -m pip install --upgrade pip pipx
+        pipx install awscli
+        KEY=$(aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo rm -rf /opt/rocm*
+        sudo mkdir -p /opt/rocm
+        sudo tar -xf *.tar.gz -C /opt/rocm
     
     - uses: actions/checkout@v4
       with:
