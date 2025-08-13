@@ -151,6 +151,8 @@ jobs:
       shell: bash
       working-directory: projects/aqlprofile
       run: |
+        apt-get update
+        apt-get install -y libgtest-dev
         echo "Install Aqlprofile."
         export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
