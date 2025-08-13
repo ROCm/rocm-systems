@@ -285,8 +285,8 @@ class PerfettoReader:
 
         counter_df = self.query_tp(
             """SELECT
-                counter.id as slice_id,
-                counter.track_id,
+                begin.id as slice_id,
+                begin.track_id,
                 CASE
                     WHEN counter_track.name LIKE '%SCRATCH MEMORY%' THEN 'scratch_memory'
                     WHEN counter_track.name LIKE '%ALLOCATE BYTES%' THEN 'memory_allocation'
@@ -294,16 +294,14 @@ class PerfettoReader:
                 END as category,
                 0 as depth,
                 0 as stack_id,
-                0 as parent_stack_id,
-                counter.ts as ts,
-                end.ts - counter.ts as dur,
+                  0 as parent_stack_id,
+                begin.ts as ts,
+                end.ts - begin.ts as dur,
                 counter_track.name as name
-            FROM counter AS counter
-            JOIN counter AS end ON counter.id + 1 == end.id AND end.track_id == counter.track_id
-            JOIN counter_track ON counter.track_id = counter_track.id
-            WHERE (counter_track.name LIKE 'AGENT%'
-                   OR counter_track.name LIKE '%SCRATCH MEMORY%'
-                   OR counter_track.name LIKE '%ALLOCATE BYTES%') AND counter.id % 2 == 0"""
+            FROM counter AS begin
+            JOIN counter AS end ON begin.id + 1 == end.id AND end.track_id == begin.track_id AND begin.value == end.value
+            JOIN counter_track ON begin.track_id = counter_track.id
+            WHERE (counter_track.name LIKE '%SCRATCH MEMORY%') AND begin.id % 2 == 1"""
         )
 
         # Transform counter data to match the main dataframe schema
