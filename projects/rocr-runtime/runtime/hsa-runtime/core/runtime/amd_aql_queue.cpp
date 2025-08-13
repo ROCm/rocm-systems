@@ -58,6 +58,7 @@
 #include <string.h>
 
 #include "core/inc/runtime.h"
+#include "core/inc/amd_gpu_agent.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/signal.h"
 #include "core/inc/queue.h"
@@ -96,7 +97,6 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       suspended_(false),
       priority_(HSA_QUEUE_PRIORITY_NORMAL),
       exception_signal_(nullptr) {
-
   // Queue size is a function of several restrictions.
   const uint32_t min_pkts = ComputeRingBufferMinPkts();
   const uint32_t max_pkts = ComputeRingBufferMaxPkts();
@@ -122,44 +122,50 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     (((core::AqlPacket*)ring_buf_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
   }
 
-  // Zero the amd_queue_ structure to clear RPTR/WPTR before queue attach.
-  memset(&amd_queue_, 0, sizeof(amd_queue_));
+  // Zero the QueueDescriptorT queue descriptor structure to clear RPTR/WPTR before queue attach.
+  memset(std::get<QueueDescriptorT*>(queue_descriptor_), 0, sizeof(QueueDescriptorT));
 
   // Initialize and map a HW AQL queue.
   HsaQueueResource queue_rsrc = {0};
-  queue_rsrc.Queue_read_ptr_aql = (uint64_t*)&amd_queue_.read_dispatch_id;
+  queue_rsrc.Queue_read_ptr_aql =
+      (uint64_t*)&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id;
 
   // Hardware write pointer supports AQL semantics.
-  queue_rsrc.Queue_write_ptr_aql = (uint64_t*)&amd_queue_.write_dispatch_id;
+  queue_rsrc.Queue_write_ptr_aql =
+      (uint64_t*)&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id;
 
-  // Populate amd_queue_ structure.
-  amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
-  amd_queue_.hsa_queue.features = HSA_QUEUE_FEATURE_KERNEL_DISPATCH;
-  amd_queue_.hsa_queue.base_address = ring_buf_;
-  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
-  amd_queue_.hsa_queue.size = queue_size_pkts;
-  amd_queue_.hsa_queue.id = INVALID_QUEUEID;
-  amd_queue_.read_dispatch_id_field_base_byte_offset = uint32_t(
-      uintptr_t(&amd_queue_.read_dispatch_id) - uintptr_t(&amd_queue_));
+  // Populate QueueDescriptorT queue descriptor structure.
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type = HSA_QUEUE_TYPE_MULTI;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.features =
+      HSA_QUEUE_FEATURE_KERNEL_DISPATCH;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.base_address = ring_buf_;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.doorbell_signal = Signal::Convert(this);
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.size = queue_size_pkts;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.id = INVALID_QUEUEID;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id_field_base_byte_offset =
+      uint32_t(uintptr_t(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id) -
+               uintptr_t(std::get<QueueDescriptorT*>(queue_descriptor_)));
   // Initialize the doorbell signal structure.
   memset(&signal_, 0, sizeof(signal_));
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
   signal_.hardware_doorbell_ptr = nullptr;
-  signal_.queue_ptr = &amd_queue_;
+  signal_.queue_ptr = std::get<QueueDescriptorT*>(queue_descriptor_);
 
   const auto& props = agent->properties();
-  amd_queue_.max_cu_id = (props.NumFComputeCores / props.NumSIMDPerCU) - 1;
-  amd_queue_.max_wave_id = (props.MaxWavesPerSIMD * props.NumSIMDPerCU) - 1;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->max_cu_id =
+      (props.NumFComputeCores / props.NumSIMDPerCU) - 1;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->max_wave_id =
+      (props.MaxWavesPerSIMD * props.NumSIMDPerCU) - 1;
 
 #ifdef HSA_LARGE_MODEL
-  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64,
-                   1);
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
 #else
-  AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64,
-                   0);
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
 #endif
 
-  // Set group and private memory apertures in amd_queue_.
+  // Set group and private memory apertures in queue_descriptor_
   auto& regions = agent->regions();
 
   for (auto region : regions) {
@@ -168,27 +174,31 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
     if (amdregion->IsLDS()) {
 #ifdef HSA_LARGE_MODEL
-      amd_queue_.group_segment_aperture_base_hi =
+      std::get<QueueDescriptorT*>(queue_descriptor_)->group_segment_aperture_base_hi =
           uint32_t(uintptr_t(base) >> 32);
 #else
-      amd_queue_.group_segment_aperture_base_hi = uint32_t(base);
+      std::get<QueueDescriptorT*>(queue_descriptor_)->group_segment_aperture_base_hi =
+          uint32_t(base);
 #endif
     }
 
     if (amdregion->IsScratch()) {
 #ifdef HSA_LARGE_MODEL
-      amd_queue_.private_segment_aperture_base_hi =
+      std::get<QueueDescriptorT*>(queue_descriptor_)->private_segment_aperture_base_hi =
           uint32_t(uintptr_t(base) >> 32);
 #else
-      amd_queue_.private_segment_aperture_base_hi = uint32_t(base);
+      std::get<QueueDescriptorT*>(queue_descriptor_)->private_segment_aperture_base_hi =
+          uint32_t(base);
 #endif
     }
   }
 
-  assert(amd_queue_.group_segment_aperture_base_hi != 0 && "No group region found.");
+  assert(std::get<QueueDescriptorT*>(queue_descriptor_)->group_segment_aperture_base_hi != 0 &&
+         "No group region found.");
 
   if (core::Runtime::runtime_singleton_->flag().check_flat_scratch()) {
-    assert(amd_queue_.private_segment_aperture_base_hi != 0 && "No private region found.");
+    assert(std::get<QueueDescriptorT*>(queue_descriptor_)->private_segment_aperture_base_hi != 0 &&
+           "No private region found.");
   }
 
   if (agent_->supported_isas()[0]->GetMajorVersion() >= 11)
@@ -223,8 +233,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   });
 
   MAKE_NAMED_SCOPE_GUARD(SignalGuard, [&]() {
-    if (amd_queue_.queue_inactive_signal.handle != 0)
-      HSA::hsa_signal_destroy(amd_queue_.queue_inactive_signal);
+    if (std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal.handle != 0)
+      HSA::hsa_signal_destroy(
+          std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal);
     if (exception_signal_ != nullptr) exception_signal_->DestroySignal();
   });
 
@@ -241,14 +252,16 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     }
     auto Signal = new core::InterruptSignal(0, queue_event());
     assert(Signal != nullptr && "Should have thrown!\n");
-    amd_queue_.queue_inactive_signal = core::InterruptSignal::Convert(Signal);
+    std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal =
+        core::InterruptSignal::Convert(Signal);
     exception_signal_ = new core::InterruptSignal(0, queue_event());
     assert(exception_signal_ != nullptr && "Should have thrown!\n");
   } else {
     EventGuard.Dismiss();
     auto Signal = new core::DefaultSignal(0);
     assert(Signal != nullptr && "Should have thrown!\n");
-    amd_queue_.queue_inactive_signal = core::DefaultSignal::Convert(Signal);
+    std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal =
+        core::DefaultSignal::Convert(Signal);
     exception_signal_ = new core::DefaultSignal(0);
     assert(exception_signal_ != nullptr && "Should have thrown!\n");
   }
@@ -257,10 +270,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   // so that we call hsakmtSetEvent to force hsaKmtWaitOnEvent to return.
   exception_signal_->WaitingInc();
 
-  // Ensure the amd_queue_ is fully initialized before creating the KFD queue.
-  // This ensures that the debugger can access the fields once it detects there
-  // is a KFD queue. The debugger may access the aperture addresses, queue
-  // scratch base, and queue type.
+  // Ensure the QueueDescriptorT queue descriptor is fully initialized before creating the KFD
+  // queue. This ensures that the debugger can access the fields once it detects there is a KFD
+  // queue. The debugger may access the aperture addresses, queue scratch base, and queue type.
 
   hsa_status_t status;
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
@@ -280,29 +292,31 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
 
   // Bind Id of Queue such that is unique i.e. it is not re-used by another
   // queue (AQL, HOST) in the same process during its lifetime.
-  amd_queue_.hsa_queue.id = this->GetQueueId();
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.id = this->GetQueueId();
 
   queue_id_ = queue_rsrc.QueueId;
   MAKE_NAMED_SCOPE_GUARD(QueueGuard, [&]() { agent_->driver().DestroyQueue(queue_id_); });
 
-  amd_queue_.scratch_max_use_index = UINT64_MAX;
-  amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_max_use_index = UINT64_MAX;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_max_use_index = UINT64_MAX;
 
   // Set flag to notify CP FW that SW supports the new amd_queue_v2
   if (agent_->AsyncScratchReclaimEnabled())
-    amd_queue_.caps |= AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->caps |= AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM;
 
   // On the first queue creation, reserve some scratch memory on this agent.
   agent_->ReserveScratch();
 
   // Initialize scratch memory related entities
-  queue_scratch_.queue_retry = amd_queue_.queue_inactive_signal;
+  queue_scratch_.queue_retry =
+      std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal;
   InitScratchSRD();
 
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
-    if (AMD::hsa_amd_signal_async_handler(amd_queue_.queue_inactive_signal, HSA_SIGNAL_CONDITION_NE,
-                                          0, DynamicQueueEventsHandler<false>,
-                                          this) != HSA_STATUS_SUCCESS)
+    if (AMD::hsa_amd_signal_async_handler(
+            std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal,
+            HSA_SIGNAL_CONDITION_NE, 0, DynamicQueueEventsHandler<false>,
+            this) != HSA_STATUS_SUCCESS)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Queue event handler failed registration.\n");
     if (AMD::hsa_amd_signal_async_handler(core::Signal::Convert(exception_signal_),
@@ -311,9 +325,10 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Queue event handler failed registration.\n");
   } else {
-    if (AMD::hsa_amd_signal_async_handler(amd_queue_.queue_inactive_signal, HSA_SIGNAL_CONDITION_NE,
-                                          0, DynamicQueueEventsHandler<true>,
-                                          this) != HSA_STATUS_SUCCESS)
+    if (AMD::hsa_amd_signal_async_handler(
+            std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal,
+            HSA_SIGNAL_CONDITION_NE, 0, DynamicQueueEventsHandler<true>,
+            this) != HSA_STATUS_SUCCESS)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Queue event handler failed registration.\n");
     exceptionState = ERROR_HANDLER_DONE;
@@ -344,9 +359,12 @@ AqlQueue::~AqlQueue() {
   // Sequences error handler callbacks with queue destroy.
   dynamicScratchState |= ERROR_HANDLER_TERMINATE;
   while ((dynamicScratchState & ERROR_HANDLER_DONE) != ERROR_HANDLER_DONE) {
-    HSA::hsa_signal_store_screlease(amd_queue_.queue_inactive_signal, 0x8000000000000000ull);
-    HSA::hsa_signal_wait_relaxed(amd_queue_.queue_inactive_signal, HSA_SIGNAL_CONDITION_NE,
-                                 0x8000000000000000ull, -1ull, HSA_WAIT_STATE_BLOCKED);
+    HSA::hsa_signal_store_screlease(
+        std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal,
+        0x8000000000000000ull);
+    HSA::hsa_signal_wait_relaxed(
+        std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal,
+        HSA_SIGNAL_CONDITION_NE, 0x8000000000000000ull, -1ull, HSA_WAIT_STATE_BLOCKED);
   }
 
   // Remove kfd exception handler
@@ -380,7 +398,7 @@ AqlQueue::~AqlQueue() {
 
   exception_signal_->WaitingDec();
   exception_signal_->DestroySignal();
-  HSA::hsa_signal_destroy(amd_queue_.queue_inactive_signal);
+  HSA::hsa_signal_destroy(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal);
   FreeQueueMemory();
 
   if (core::g_use_interrupt_wait) {
@@ -395,7 +413,8 @@ AqlQueue::~AqlQueue() {
 }
 
 void AqlQueue::Destroy() {
-  if (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE) {
+  if (std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type ==
+      HSA_QUEUE_TYPE_COOPERATIVE) {
     agent_->GWSRelease();
     return;
   }
@@ -403,65 +422,69 @@ void AqlQueue::Destroy() {
 }
 
 uint64_t AqlQueue::LoadReadIndexAcquire() {
-  return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id,
+                      std::memory_order_acquire);
 }
 
 uint64_t AqlQueue::LoadReadIndexRelaxed() {
-  return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_relaxed);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id,
+                      std::memory_order_relaxed);
 }
 
 uint64_t AqlQueue::LoadWriteIndexAcquire() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id,
+                      std::memory_order_acquire);
 }
 
 uint64_t AqlQueue::LoadWriteIndexRelaxed() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_relaxed);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id,
+                      std::memory_order_relaxed);
 }
 
 void AqlQueue::StoreWriteIndexRelaxed(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
+  atomic::Store(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                 std::memory_order_relaxed);
 }
 
 void AqlQueue::StoreWriteIndexRelease(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
+  atomic::Store(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                 std::memory_order_release);
 }
 
 uint64_t AqlQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acq_rel);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_acq_rel);
 }
 uint64_t AqlQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acquire);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_acquire);
 }
 uint64_t AqlQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_relaxed);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_relaxed);
 }
 uint64_t AqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_release);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_release);
 }
 
 uint64_t AqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_acq_rel);
 }
 
 uint64_t AqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_acquire);
 }
 
 uint64_t AqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_relaxed);
 }
 
 uint64_t AqlQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_release);
 }
 
@@ -677,13 +700,13 @@ void AqlQueue::AsyncReclaimMainScratch() {
    * supported
    *
    * Notes:
-   * - CP FW only updates its copy of amd_queue_ (scratch_copy) on queue_connect
-   * so changes to amd_queue_ by ROCr are only visible to CP FW after a queue
+   * - CP FW only updates its copy of QueueDescriptorT (scratch_copy) on queue_connect
+   * so changes to QueueDescriptorT by ROCr are only visible to CP FW after a queue
    * re-map.
    *
    * - CP sets AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM bit to indicate that this version
    * of CP FW supports asynchronous scratch reclaim. But CP will only update
-   * amd_queue_.caps on queue-connect so ROCr assumes that async scratch reclaim
+   * QueueDescriptorT::caps on queue-connect so ROCr assumes that async scratch reclaim
    * is supported based on the CP FW version.
    *
    * - ROCR sets AMD_QUEUE_CAPS_SW_ASYNC_RECLAIM bit to indicate to CP that this
@@ -756,8 +779,8 @@ void AqlQueue::AsyncReclaimMainScratch() {
   auto getMaxMainScratchUseIndex = [&]() {
     uint64_t max = 0;
     for (int i = 0; i < agent_->properties().NumXcc; i++) {
-      if (amd_queue_.scratch_last_used_index[i].main > max)
-        max = amd_queue_.scratch_last_used_index[i].main;
+      if (std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_last_used_index[i].main > max)
+        max = std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_last_used_index[i].main;
     }
     return max;
   };
@@ -767,34 +790,38 @@ void AqlQueue::AsyncReclaimMainScratch() {
     return;
   }
 
-  assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
-          "This version of CP FW should support async scratch, but flag is not set");
+  assert((std::get<QueueDescriptorT*>(queue_descriptor_)->caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
+         "This version of CP FW should support async scratch, but flag is not set");
 
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE);
 
   ScopedAcquire<KernelMutex> lock(&scratch_lock_);
 
-  // Unmap the queue. CP will check amd_queue_ fields on re-map
+  // Unmap the queue. CP will check QueueDescriptorT fields on re-map
   Suspend();
 
   /*
-   * amd_queue_.scratch_last_used_index[*].main is updated by CP FW every time a
+   * QueueDescriptorT::scratch_last_used_index[*].main is updated by CP FW every time a
    * dispatch packet is launched and it needs scratch memory.
-   * If amd_queue_.scratch_last_used_index[*].main >= amd_queue_.read_dispatch_id
-   * then this XCC is currently running a dispatch that uses scratch.
-   * Setting max_scratch_use_index to max(amd_queue_.scratch_last_used_index[*].main)
-   * prevents CP from trying to use main-scratch after
-   * amd_queue_.scratch_max_use_index. If CP sees a dispatch that needs scratch,
-   * it will raise a new signal. CP may use alt-scratch in the meantime.
+   * If QueueDescriptorT::scratch_last_used_index[*].main >=
+   * QueueDescriptorT::read_dispatch_id then this XCC is currently running a dispatch
+   * that uses scratch. Setting max_scratch_use_index to
+   * max(QueueDescriptorT::scratch_last_used_index[*].main) prevents CP from trying to
+   * use main-scratch after QueueDescriptorT::scratch_max_use_index. If CP sees a
+   * dispatch that needs scratch, it will raise a new signal. CP may use alt-scratch in the
+   * meantime.
    */
-  amd_queue_.scratch_max_use_index = getMaxMainScratchUseIndex();
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_max_use_index =
+      getMaxMainScratchUseIndex();
 
   Resume();
 
   // If current dispatch is using scratch, wait for it to finish
-  while (amd_queue_.scratch_max_use_index >= LoadReadIndexRelaxed()) {
-    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+  while (std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_max_use_index >=
+         LoadReadIndexRelaxed()) {
+    // TODO: if mwaitx supported,
+    // //mwaitx(std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id);
     os::YieldThread();
   }
 
@@ -828,8 +855,8 @@ void AqlQueue::AsyncReclaimAltScratch() {
   auto getMaxAltScratchUseIndex = [&]() {
     uint64_t max = 0;
     for (int i = 0; i < agent_->properties().NumXcc; i++) {
-      if (amd_queue_.scratch_last_used_index[i].alt > max)
-        max = amd_queue_.scratch_last_used_index[i].alt;
+      if (std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_last_used_index[i].alt > max)
+        max = std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_last_used_index[i].alt;
     }
     return max;
   };
@@ -839,24 +866,27 @@ void AqlQueue::AsyncReclaimAltScratch() {
     return;
   }
 
-  assert((amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
-          "This version of CP FW should support async scratch, but flag is not set");
+  assert((std::get<QueueDescriptorT*>(queue_descriptor_)->caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM) &&
+         "This version of CP FW should support async scratch, but flag is not set");
 
   tool::notify_event_scratch_async_reclaim_start(public_handle(),
                                                  HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT);
 
   ScopedAcquire<KernelMutex> lock(&scratch_lock_);
 
-  // Unmap the queue. CP will check amd_queue_ fields on re-map
+  // Unmap the queue. CP will check QueueDescriptorT fields on re-map
   Suspend();
 
-  amd_queue_.alt_scratch_max_use_index = getMaxAltScratchUseIndex();
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_max_use_index =
+      getMaxAltScratchUseIndex();
 
   Resume();
 
   // If current dispatch is using alt scratch, wait for it to finish
-  while (amd_queue_.alt_scratch_max_use_index >= LoadReadIndexRelaxed()) {
-    //TODO: if mwaitx supported, //mwaitx(amd_queue_.read_dispatch_id);
+  while (std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_max_use_index >=
+         LoadReadIndexRelaxed()) {
+    // TODO: if mwaitx supported,
+    // //mwaitx(std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id);
     os::YieldThread();
   }
 
@@ -910,16 +940,17 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   uint64_t dispatch_id = UINT64_MAX;
 
   auto get_dispatch_pkt = [&]() {
-    dispatch_id = amd_queue_.read_dispatch_id;
+    dispatch_id = std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id;
     do {
       // On GPUs where EOP is handled in asic, the read_dispatch_id is not
       // updated after each packet so look for the first dispatch that needs
       // scratch
       const uint64_t pkt_slot_idx =
-          dispatch_id & (amd_queue_.hsa_queue.size - 1);
+          dispatch_id & (std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.size - 1);
 
-      core::AqlPacket *dispatch_pkt =
-          &((core::AqlPacket *)amd_queue_.hsa_queue.base_address)[pkt_slot_idx];
+      core::AqlPacket* dispatch_pkt =
+          &((core::AqlPacket*)std::get<QueueDescriptorT*>(queue_descriptor_)
+                ->hsa_queue.base_address)[pkt_slot_idx];
       if (dispatch_pkt->IsDispatchAndNeedsScratch()) return dispatch_pkt;
 
       dispatch_id++;
@@ -948,7 +979,7 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
                        pkt.dispatch.workgroup_size_y) *
                       ((uint64_t(pkt.dispatch.grid_size_z) + pkt.dispatch.workgroup_size_z - 1) /
                        pkt.dispatch.workgroup_size_z);
-    const uint32_t cu_count = amd_queue_.max_cu_id + 1;
+    const uint32_t cu_count = std::get<QueueDescriptorT*>(queue_descriptor_)->max_cu_id + 1;
 
     const uint32_t engines = agent_->properties().NumShaderBanks;
 
@@ -978,15 +1009,18 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   auto calc_device_slots = [&]() {
     // Get the hw maximum scratch slot count taking into consideration asymmetric harvest.
     const uint32_t engines = agent_->properties().NumShaderBanks;
-    const uint32_t cu_count = amd_queue_.max_cu_id + 1;
+    const uint32_t cu_count = std::get<QueueDescriptorT*>(queue_descriptor_)->max_cu_id + 1;
     return AlignUp(cu_count, engines) * agent_->properties().MaxSlotsScratchCU;
   };
 
-  assert(core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
-         (!scratch.async_reclaim || (amd_queue_.caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM)) &&
-          "Asynchronous scratch reclaim capability not set, but this FW version should support it");
+  assert(
+      core::Runtime::runtime_singleton_->flag().enable_scratch_async_reclaim() &&
+      (!scratch.async_reclaim ||
+       (std::get<QueueDescriptorT*>(queue_descriptor_)->caps & AMD_QUEUE_CAPS_CP_ASYNC_RECLAIM)) &&
+      "Asynchronous scratch reclaim capability not set, but this FW version should support it");
 
-  scratch.cooperative = (amd_queue_.hsa_queue.type == HSA_QUEUE_TYPE_COOPERATIVE);
+  scratch.cooperative = (std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type ==
+                         HSA_QUEUE_TYPE_COOPERATIVE);
 
   pkt = get_dispatch_pkt(); // Sets dispatch_id
   assert((pkt && dispatch_id != UINT64_MAX) &&
@@ -1038,11 +1072,12 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
       /*
        * Indicate to CP FW that any dispatch may use alt scratch memory.
        * If ROCr wants to reclain scratch memory, it will set
-       * amd_queue_.alt_scratch_max_use_index to a lower value
+       * QueueDescriptorT::alt_scratch_max_use_index to a lower value
        */
-      amd_queue_.alt_scratch_max_use_index = UINT64_MAX;
+      std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_max_use_index = UINT64_MAX;
       // Restart the queue.
-      HSA::hsa_signal_store_screlease(amd_queue_.queue_inactive_signal, 0);
+      HSA::hsa_signal_store_screlease(
+          std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal, 0);
       tool::notify_event_scratch_alloc_end(public_handle(), HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT,
                                            dispatch_id, scratch.alt_size, dispatch_slots);
       return;
@@ -1084,7 +1119,8 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
 
   // If we had to reduce number of waves
   if (scratch.large) {
-    amd_queue_.queue_properties |= AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties |=
+        AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE;
     // Set system release fence to flush scratch stores with older firmware versions.
     if ((agent_->supported_isas()[0]->GetMajorVersion() == 8) && (agent_->GetMicrocodeVersion() < 729)) {
       pkt->dispatch.header &=
@@ -1108,12 +1144,13 @@ void AqlQueue::HandleInsufficientScratch(hsa_signal_value_t& error_code,
   /*
    * Indicate to CP FW that any dispatch may use alt scratch memory.
    * If ROCr wants to reclain scratch memory, it will set
-   * amd_queue_.alt_scratch_max_use_index to a lower value
+   * QueueDescriptorT::alt_scratch_max_use_index to a lower value
    */
-  amd_queue_.scratch_max_use_index = UINT64_MAX;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_max_use_index = UINT64_MAX;
 
   // Restart the queue.
-  HSA::hsa_signal_store_screlease(amd_queue_.queue_inactive_signal, 0);
+  HSA::hsa_signal_store_screlease(
+      std::get<QueueDescriptorT*>(queue_descriptor_)->queue_inactive_signal, 0);
 
   auto alloc_flag = (scratch.large) ? HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE
                                     : HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_NONE;
@@ -1136,7 +1173,9 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
     queue->dynamicScratchState &= ~ERROR_HANDLER_SCRATCH_RETRY;
     changeWait = true;
     waitVal = 0;
-    HSA::hsa_signal_and_relaxed(queue->amd_queue_.queue_inactive_signal, ~0x8000000000000000ull);
+    HSA::hsa_signal_and_relaxed(
+        std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_inactive_signal,
+        ~0x8000000000000000ull);
     error_code &= ~0x8000000000000000ull;
   }
 
@@ -1154,10 +1193,12 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
       scratch.main_queue_process_offset = 0;
       queue->InitScratchSRD();
 
-      HSA::hsa_signal_store_relaxed(queue->amd_queue_.queue_inactive_signal, 0);
+      HSA::hsa_signal_store_relaxed(
+          std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_inactive_signal, 0);
       // Resumes queue processing.
-      atomic::Store(&queue->amd_queue_.queue_properties,
-                    queue->amd_queue_.queue_properties & (~AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE),
+      atomic::Store(&std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_properties,
+                    std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_properties &
+                        (~AMD_QUEUE_PROPERTIES_USE_SCRATCH_ONCE),
                     std::memory_order_release);
       atomic::Fence(std::memory_order_release);
       tool::notify_event_scratch_free_end(queue->public_handle(),
@@ -1212,14 +1253,15 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
       }
     } else {
       // Not handling exceptions, clear so that ExceptionHandler can run.
-      HSA::hsa_signal_store_relaxed(queue->amd_queue_.queue_inactive_signal, 0);
+      HSA::hsa_signal_store_relaxed(
+          std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_inactive_signal, 0);
     }
 
     if (errorCode == HSA_STATUS_SUCCESS) {
       if (changeWait) {
         core::Runtime::runtime_singleton_->SetAsyncSignalHandler(
-            queue->amd_queue_.queue_inactive_signal, HSA_SIGNAL_CONDITION_NE, waitVal,
-            DynamicQueueEventsHandler<HandleExceptions>, queue);
+            std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_inactive_signal,
+            HSA_SIGNAL_CONDITION_NE, waitVal, DynamicQueueEventsHandler<HandleExceptions>, queue);
         return false;
       }
       return true;
@@ -1238,7 +1280,8 @@ bool AqlQueue::DynamicQueueEventsHandler(hsa_signal_value_t error_code, void* ar
   // Copy here is to protect against queue being released between setting the scratch state and
   // updating the signal value.  The signal itself is safe to use because it is ref counted rather
   // than being released with the queue.
-  hsa_signal_t signal = queue->amd_queue_.queue_inactive_signal;
+  hsa_signal_t signal =
+      std::get<QueueDescriptorT*>(queue->queue_descriptor_)->queue_inactive_signal;
   queue->dynamicScratchState = ERROR_HANDLER_DONE;
   HSA::hsa_signal_store_screlease(signal, -1ull);
   return false;
@@ -1422,7 +1465,8 @@ hsa_status_t AqlQueue::GetCUMasking(uint32_t num_cu_mask_count, uint32_t* cu_mas
 }
 
 void AqlQueue::SetProfiling(bool enabled) {
-  Queue::SetProfiling(enabled);
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, (enabled != 0));
 
   if (enabled) agent_->CheckClockTicks();
   return;
@@ -1443,14 +1487,17 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   // Obtain a queue slot for a single AQL packet.
   uint64_t write_idx = queue->AddWriteIndexAcqRel(1);
 
-  while ((write_idx - queue->LoadReadIndexRelaxed()) >= queue->amd_queue_.hsa_queue.size) {
+  while ((write_idx - queue->LoadReadIndexRelaxed()) >=
+         std::get<QueueDescriptorT*>(queue->queue_descriptor_)->hsa_queue.size) {
     os::YieldThread();
   }
 
-  uint32_t slot_idx = uint32_t(write_idx % queue->amd_queue_.hsa_queue.size);
+  uint32_t slot_idx =
+      uint32_t(write_idx % std::get<QueueDescriptorT*>(queue->queue_descriptor_)->hsa_queue.size);
   constexpr uint32_t slot_size_b = 0x40;
-  uint32_t* queue_slot =
-      (uint32_t*)(uintptr_t(queue->amd_queue_.hsa_queue.base_address) + (slot_idx * slot_size_b));
+  uint32_t* queue_slot = (uint32_t*)(uintptr_t(std::get<QueueDescriptorT*>(queue->queue_descriptor_)
+                                                   ->hsa_queue.base_address) +
+                                     (slot_idx * slot_size_b));
 
   // Copy client PM4 command into IB.
   assert(cmd_size_b < pm4_ib_size_b_ && "PM4 exceeds IB size");
@@ -1559,7 +1606,8 @@ void AqlQueue::ExecutePM4(uint32_t* cmd_data, size_t cmd_size_b, hsa_fence_scope
   atomic::Store(&queue_slot[0], slot_data[0], std::memory_order_release);
 
   // Submit the packet slot.
-  core::Signal* doorbell = core::Signal::Convert(queue->amd_queue_.hsa_queue.doorbell_signal);
+  core::Signal* doorbell = core::Signal::Convert(
+      std::get<QueueDescriptorT*>(queue->queue_descriptor_)->hsa_queue.doorbell_signal);
   doorbell->StoreRelease(write_idx);
 
   // Wait for the packet to be consumed.
@@ -1583,7 +1631,7 @@ void AqlQueue::FillBufRsrcWord0() {
   uintptr_t scratch_base = uintptr_t(queue_scratch_.main_queue_base);
 
   srd0.bits.BASE_ADDRESS = uint32_t(scratch_base);
-  amd_queue_.scratch_resource_descriptor[0] = srd0.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[0] = srd0.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord1() {
@@ -1600,7 +1648,7 @@ void AqlQueue::FillBufRsrcWord1() {
   srd1.bits.CACHE_SWIZZLE = 0;
   srd1.bits.SWIZZLE_ENABLE = 1;
 
-  amd_queue_.scratch_resource_descriptor[1] = srd1.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[1] = srd1.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord1_Gfx11() {
@@ -1616,7 +1664,7 @@ void AqlQueue::FillBufRsrcWord1_Gfx11() {
   srd1.bits.STRIDE = 0;
   srd1.bits.SWIZZLE_ENABLE = 1;
 
-  amd_queue_.scratch_resource_descriptor[1] = srd1.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[1] = srd1.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord2() {
@@ -1627,7 +1675,7 @@ void AqlQueue::FillBufRsrcWord2() {
    // report size per XCC
   srd2.bits.NUM_RECORDS = uint32_t(queue_scratch_.main_size / num_xcc);
 
-  amd_queue_.scratch_resource_descriptor[2] = srd2.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[2] = srd2.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord3() {
@@ -1648,7 +1696,7 @@ void AqlQueue::FillBufRsrcWord3() {
   srd3.bits.MTYPE__CI__VI = 0;
   srd3.bits.TYPE = SQ_RSRC_BUF;
 
-  amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[3] = srd3.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord3_Gfx10() {
@@ -1667,7 +1715,7 @@ void AqlQueue::FillBufRsrcWord3_Gfx10() {
   srd3.bits.OOB_SELECT = 2;  // no bounds check in swizzle mode
   srd3.bits.TYPE = SQ_RSRC_BUF;
 
-  amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[3] = srd3.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord3_Gfx11() {
@@ -1685,7 +1733,7 @@ void AqlQueue::FillBufRsrcWord3_Gfx11() {
   srd3.bits.OOB_SELECT = 2;  // no bounds check in swizzle mode
   srd3.bits.TYPE = SQ_RSRC_BUF;
 
-  amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[3] = srd3.u32All;
 }
 
 void AqlQueue::FillBufRsrcWord3_Gfx12() {
@@ -1705,14 +1753,14 @@ void AqlQueue::FillBufRsrcWord3_Gfx12() {
   srd3.bits.OOB_SELECT = 2;  // no bounds check in swizzle mode
   srd3.bits.TYPE = SQ_RSRC_BUF;
 
-  amd_queue_.scratch_resource_descriptor[3] = srd3.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_resource_descriptor[3] = srd3.u32All;
 }
 
 // Set concurrent wavefront limits only when scratch is being used.
 void AqlQueue::FillComputeTmpRingSize() {
   COMPUTE_TMPRING_SIZE tmpring_size = {};
   if (queue_scratch_.main_size == 0) {
-    amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
     return;
   }
 
@@ -1735,7 +1783,7 @@ void AqlQueue::FillComputeTmpRingSize() {
       (tmpring_size.bits.WAVESIZE * queue_scratch_.mem_alignment_size);
 
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
-  amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
   assert((tmpring_size.bits.WAVES % (agent_props.NumShaderBanks / num_xcc) == 0) &&
          "Invalid scratch wave count.  Must be divisible by #SEs.");
 }
@@ -1744,7 +1792,7 @@ void AqlQueue::FillComputeTmpRingSize() {
 void AqlQueue::FillAltComputeTmpRingSize() {
   COMPUTE_TMPRING_SIZE tmpring_size = {};
   if (queue_scratch_.alt_size == 0) {
-    amd_queue_.alt_compute_tmpring_size = tmpring_size.u32All;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->alt_compute_tmpring_size = tmpring_size.u32All;
     return;
   }
 
@@ -1767,7 +1815,7 @@ void AqlQueue::FillAltComputeTmpRingSize() {
       (tmpring_size.bits.WAVESIZE * queue_scratch_.mem_alignment_size);
 
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
-  amd_queue_.alt_compute_tmpring_size = tmpring_size.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_compute_tmpring_size = tmpring_size.u32All;
   assert((tmpring_size.bits.WAVES % (agent_props.NumShaderBanks / num_xcc) == 0) &&
          "Invalid scratch wave count.  Must be divisible by #SEs.");
 }
@@ -1776,7 +1824,7 @@ void AqlQueue::FillAltComputeTmpRingSize() {
 void AqlQueue::FillComputeTmpRingSize_Gfx11() {
   COMPUTE_TMPRING_SIZE_GFX11 tmpring_size = {};
   if (queue_scratch_.main_size == 0) {
-    amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
     return;
   }
 
@@ -1803,7 +1851,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx11() {
   // For GFX11 we specify number of waves per engine instead of total
   num_waves /= agent_->properties().NumShaderBanks;
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
-  amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
 }
 
 // Set concurrent wavefront limits only when scratch is being used.
@@ -1812,7 +1860,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12() {
   // Consider refactoring code for GFX11/GFX12 if no other changes.
   COMPUTE_TMPRING_SIZE_GFX12 tmpring_size = {};
   if (queue_scratch_.main_size == 0) {
-    amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+    std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
     return;
   }
 
@@ -1838,7 +1886,7 @@ void AqlQueue::FillComputeTmpRingSize_Gfx12() {
   // For GFX11 we specify number of waves per engine instead of total
   num_waves /= agent_->properties().NumShaderBanks;
   tmpring_size.bits.WAVES = std::min(num_waves, max_scratch_waves);
-  amd_queue_.compute_tmpring_size = tmpring_size.u32All;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->compute_tmpring_size = tmpring_size.u32All;
 }
 
 // @brief Define the Scratch Buffer Descriptor and related parameters
@@ -1876,22 +1924,27 @@ void AqlQueue::InitScratchSRD() {
       break;
   }
 
-  // Populate flat scratch parameters in amd_queue_.
-  amd_queue_.scratch_backing_memory_location = queue_scratch_.main_queue_process_offset;
-  amd_queue_.alt_scratch_backing_memory_location = queue_scratch_.alt_queue_process_offset;
+  // Populate flat scratch parameters in QueueDescriptorT queue descriptor.
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_backing_memory_location =
+      queue_scratch_.main_queue_process_offset;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_backing_memory_location =
+      queue_scratch_.alt_queue_process_offset;
 
   // For backwards compatibility this field records the per-lane scratch
   // for a 64 lane wavefront. If scratch was allocated for 32 lane waves
   // then the effective size for a 64 lane wave is halved.
-  amd_queue_.scratch_wave64_lane_byte_size =
+  std::get<QueueDescriptorT*>(queue_descriptor_)->scratch_wave64_lane_byte_size =
       uint32_t((queue_scratch_.main_size_per_thread * queue_scratch_.main_lanes_per_wave) / 64);
 
-  amd_queue_.alt_scratch_wave64_lane_byte_size =
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_wave64_lane_byte_size =
       uint32_t((queue_scratch_.alt_size_per_thread * queue_scratch_.alt_lanes_per_wave) / 64);
 
-  amd_queue_.alt_scratch_dispatch_limit_x = queue_scratch_.alt_dispatch_limit_x;
-  amd_queue_.alt_scratch_dispatch_limit_y = queue_scratch_.alt_dispatch_limit_y;
-  amd_queue_.alt_scratch_dispatch_limit_z = queue_scratch_.alt_dispatch_limit_z;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_dispatch_limit_x =
+      queue_scratch_.alt_dispatch_limit_x;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_dispatch_limit_y =
+      queue_scratch_.alt_dispatch_limit_y;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->alt_scratch_dispatch_limit_z =
+      queue_scratch_.alt_dispatch_limit_z;
 
   return;
 }
@@ -1900,7 +1953,7 @@ hsa_status_t AqlQueue::EnableGWS(int gws_slot_count) {
   uint32_t discard;
   auto status = agent_->driver().AllocQueueGWS(queue_id_, gws_slot_count, &discard);
   if (status != HSA_STATUS_SUCCESS) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
-  amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_COOPERATIVE;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type = HSA_QUEUE_TYPE_COOPERATIVE;
   return HSA_STATUS_SUCCESS;
 }
 

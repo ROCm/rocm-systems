@@ -52,6 +52,7 @@
 #include "hsakmt/hsakmt.h"
 
 #include "core/inc/agent.h"
+#include "core/inc/amd_aql_queue.h"
 #include "core/inc/blit.h"
 #include "core/inc/cache.h"
 #include "core/inc/driver.h"
@@ -651,7 +652,7 @@ class GpuAgent : public GpuAgentInt {
 
   // @brief Mappings from doorbell index to queue, for trap handler.
   // Correlates with output of s_sendmsg(MSG_GET_DOORBELL) for queue identification.
-  amd_queue_v2_t** doorbell_queue_map_;
+  AqlQueue::QueueDescriptorT** doorbell_queue_map_;
 
   // @brief The GPU memory bus width in bit.
   uint32_t memory_bus_width_;

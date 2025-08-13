@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2023, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -44,15 +44,16 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstring>
 #include <climits>
-#include <map>
-#include <string>
-#include <vector>
-#include <memory>
-#include <utility>
-#include <iomanip>
 #include <cmath>
+#include <cstring>
+#include <iomanip>
+#include <map>
+#include <memory>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
 
 #include "core/inc/amd_aql_queue.h"
 #include "core/inc/amd_blit_kernel.h"
@@ -1782,7 +1783,8 @@ hsa_status_t GpuAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
     // Calculate index of the queue doorbell within the doorbell aperture.
     auto doorbell_addr = uintptr_t(aql_queue->signal_.hardware_doorbell_ptr);
     auto doorbell_idx = (doorbell_addr >> 3) & (MAX_NUM_DOORBELLS - 1);
-    doorbell_queue_map_[doorbell_idx] = &aql_queue->amd_queue_;
+    doorbell_queue_map_[doorbell_idx] =
+        std::get<AqlQueue::QueueDescriptorT*>(aql_queue->queue_descriptor_);
   }
 
   scratchGuard.Dismiss();
@@ -2266,10 +2268,11 @@ void GpuAgent::BindTrapHandler() {
     AssembleShader("TrapHandler", AssembleTarget::ISA, trap_code_buf_, trap_code_buf_size_);
 
     // Make an empty map from doorbell index to queue.
-    // The trap handler uses this to retrieve a wave's amd_queue_v2_t*.
-    auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(amd_queue_v2_t*);
+    // The trap handler uses this to retrieve a wave's AqlQueue::QueueDescriptorT*.
+    auto doorbell_queue_map_size = MAX_NUM_DOORBELLS * sizeof(AqlQueue::QueueDescriptorT*);
 
-    doorbell_queue_map_ = (amd_queue_v2_t**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
+    doorbell_queue_map_ =
+        (AqlQueue::QueueDescriptorT**)system_allocator()(doorbell_queue_map_size, 0x1000, 0);
     assert(doorbell_queue_map_ != NULL && "Doorbell queue map allocation failed");
 
     memset(doorbell_queue_map_, 0, doorbell_queue_map_size);

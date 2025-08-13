@@ -88,18 +88,18 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   }
 
   // Populate hsa_queue_t fields.
-  amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
-  amd_queue_.hsa_queue.id = INVALID_QUEUEID;
-  amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
-  amd_queue_.hsa_queue.size = req_size_pkts;
-  amd_queue_.hsa_queue.base_address = ring_buf_;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.id = INVALID_QUEUEID;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.doorbell_signal = Signal::Convert(this);
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.size = req_size_pkts;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.base_address = ring_buf_;
   // Populate AMD queue fields.
-  amd_queue_.write_dispatch_id = 0;
-  amd_queue_.read_dispatch_id = 0;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id = 0;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id = 0;
 
   signal_.hardware_doorbell_ptr = nullptr;
   signal_.kind = AMD_SIGNAL_KIND_DOORBELL;
-  signal_.queue_ptr = &amd_queue_;
+  signal_.queue_ptr = std::get<QueueDescriptorT*>(queue_descriptor_);
   active_ = true;
 
   HsaQueueResource queue_resource = {};
@@ -111,7 +111,7 @@ AieAqlQueue::AieAqlQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   }
 
   queue_id_ = queue_resource.QueueId;
-  amd_queue_.hsa_queue.id = GetQueueId();
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.id = GetQueueId();
 }
 
 AieAqlQueue::~AieAqlQueue() {
@@ -143,68 +143,72 @@ void AieAqlQueue::Destroy() { delete this; }
 
 // Atomic Reads/Writes
 uint64_t AieAqlQueue::LoadReadIndexRelaxed() {
-  return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_relaxed);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id,
+                      std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::LoadReadIndexAcquire() {
-  return atomic::Load(&amd_queue_.read_dispatch_id, std::memory_order_acquire);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id,
+                      std::memory_order_acquire);
 }
 
 uint64_t AieAqlQueue::LoadWriteIndexRelaxed() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_relaxed);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id,
+                      std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::LoadWriteIndexAcquire() {
-  return atomic::Load(&amd_queue_.write_dispatch_id, std::memory_order_acquire);
+  return atomic::Load(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id,
+                      std::memory_order_acquire);
 }
 
 void AieAqlQueue::StoreWriteIndexRelaxed(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
+  atomic::Store(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                 std::memory_order_relaxed);
 }
 
 void AieAqlQueue::StoreWriteIndexRelease(uint64_t value) {
-  atomic::Store(&amd_queue_.write_dispatch_id, value,
+  atomic::Store(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                 std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexRelaxed(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_relaxed);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexAcquire(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acquire);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_acquire);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexRelease(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_release);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::CasWriteIndexAcqRel(uint64_t expected, uint64_t value) {
-  return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
-                     std::memory_order_acq_rel);
+  return atomic::Cas(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
+                     expected, std::memory_order_acq_rel);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexRelaxed(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_relaxed);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexAcquire(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_acquire);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexRelease(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_release);
 }
 
 uint64_t AieAqlQueue::AddWriteIndexAcqRel(uint64_t value) {
-  return atomic::Add(&amd_queue_.write_dispatch_id, value,
+  return atomic::Add(&std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id, value,
                      std::memory_order_acq_rel);
 }
 
@@ -216,7 +220,7 @@ void AieAqlQueue::SubmitPackets() {
   }
 
   auto& driver = static_cast<XdnaDriver&>(agent_.driver());
-  void* queue_base = amd_queue_.hsa_queue.base_address;
+  void* queue_base = std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.base_address;
 
   uint64_t cur_id = LoadReadIndexRelaxed();
   const uint64_t end = LoadWriteIndexAcquire();
@@ -259,7 +263,8 @@ void AieAqlQueue::SubmitPackets() {
     }
   }
 
-  atomic::Store(&amd_queue_.read_dispatch_id, cur_id, std::memory_order_release);
+  atomic::Store(&std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id, cur_id,
+                std::memory_order_release);
 }
 
 void AieAqlQueue::StoreRelease(hsa_signal_value_t value) {
@@ -300,6 +305,10 @@ void AieAqlQueue::ExecutePM4(uint32_t *cmd_data, size_t cmd_size_b,
                              hsa_fence_scope_t releaseFence,
                              hsa_signal_t *signal) {
   assert(false && "AIE AQL queue does not support PM4 packets.");
+}
+
+void AieAqlQueue::SetProfiling(bool enabled) {
+  assert(false && "AIE AQL queue does not support profiling.");
 }
 
 } // namespace AMD

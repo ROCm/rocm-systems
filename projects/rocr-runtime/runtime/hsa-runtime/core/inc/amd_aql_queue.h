@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -44,18 +44,24 @@
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
 
 #include "core/inc/runtime.h"
+#include "core/inc/scratch_cache.h"
 #include "core/inc/signal.h"
 #include "core/inc/queue.h"
-#include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
 
 namespace rocr {
 namespace AMD {
+
+class GpuAgent;
+
 /// @brief Encapsulates HW Aql Command Processor functionality. It
 /// provide the interface for things such as Doorbell register, read,
 /// write pointers and a buffer.
 class AqlQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
  public:
+  using ScratchInfo = ScratchCache::ScratchInfo;
+  using QueueDescriptorT = amd_queue_v2_t;
+
   static __forceinline bool IsType(core::Signal* signal) {
     return signal->IsType(&rtti_id());
   }
@@ -284,7 +290,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   void* ring_buf_;
 
   // Size of ring_buf_ allocation.
-  // This may be larger than (amd_queue_.hsa_queue.size * sizeof(AqlPacket)).
+  // This may be larger than (hsa_queue.size * sizeof(AqlPacket)).
   uint32_t ring_buf_alloc_bytes_;
 
   // Id of the Queue used in communication with thunk

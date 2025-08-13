@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,7 +45,10 @@
 #ifndef HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 #define HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 
+#include <cstdint>
+#include <cstring>
 #include <sstream>
+#include <variant>
 
 #include "core/common/shared.h"
 #include "core/inc/checked.h"
@@ -151,10 +154,12 @@ struct AqlPacket {
 
 class Queue;
 
-/// @brief Helper structure to simplify conversion of amd_queue_v2_t and
+/// @brief Helper structure to simplify conversion of C interface queue descriptors and
 /// core::Queue object.
 struct SharedQueue {
-  amd_queue_v2_t amd_queue;
+  union QueueDescriptor {
+    amd_queue_v2_t compute_aql_queue;
+  } queue_descriptor;
   Queue* core_queue;
 };
 
@@ -172,10 +177,14 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
       : Queue(shared_queue, queue_flags, false) {}
 
   Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering)
-      : amd_queue_(shared_queue->amd_queue),
-        shared_queue_(shared_queue),
+      : shared_queue_(shared_queue),
         flags_(queue_flags),
         pcie_write_ordering_(pcie_write_ordering) {
+    // queue_descriptor_ must be initialized before passing the this
+    // pointer to Convert.
+    std::memset(&shared_queue->queue_descriptor.compute_aql_queue, 0,
+                sizeof(shared_queue->queue_descriptor));
+    queue_descriptor_ = &shared_queue->queue_descriptor.compute_aql_queue;
     public_handle_ = Convert(this);
     shared_queue->core_queue = this;
   }
@@ -190,7 +199,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   ///
   /// @return hsa_queue_t * Pointer to the public data type of a queue
   static __forceinline hsa_queue_t* Convert(Queue* queue) {
-    return (queue != nullptr) ? &queue->amd_queue_.hsa_queue : nullptr;
+    return (queue != nullptr) ? &std::get<amd_queue_v2_t*>(queue->queue_descriptor_)->hsa_queue
+                              : nullptr;
   }
 
   /// @brief Transform the public data type of a Queue's data type into an
@@ -201,8 +211,10 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   /// @return Queue * Pointer to the Queue's implementation object
   static __forceinline Queue* Convert(const hsa_queue_t* queue) {
     return (queue != nullptr)
-        ? reinterpret_cast<SharedQueue*>(reinterpret_cast<uintptr_t>(queue) -
-                                         offsetof(SharedQueue, amd_queue.hsa_queue))->core_queue
+        ? reinterpret_cast<SharedQueue*>(
+              reinterpret_cast<uintptr_t>(queue) -
+              offsetof(SharedQueue, queue_descriptor.compute_aql_queue.hsa_queue))
+              ->core_queue
         : nullptr;
   }
 
@@ -356,10 +368,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
                           hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                           hsa_signal_t* signal = NULL) = 0;
 
-  virtual void SetProfiling(bool enabled) {
-    AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
-                     (enabled != 0));
-  }
+  virtual void SetProfiling(bool enabled) = 0;
 
   /// @ brief Returns queue queries about the queue
   virtual hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) = 0;
@@ -367,8 +376,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   /// @ brief Reports async queue errors to stderr if no other error handler was registered.
   static void DefaultErrorHandler(hsa_status_t status, hsa_queue_t* source, void* data);
 
-  // Handle of AMD Queue struct
-  amd_queue_v2_t& amd_queue_;
+  /// @brief Holds the variants of the queue descriptor struct.
+  std::variant<amd_queue_v2_t*> queue_descriptor_;
 
   hsa_queue_t* public_handle() const { return public_handle_; }
 

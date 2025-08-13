@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -71,22 +71,23 @@ HostQueue::HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint3
     (((AqlPacket*)ring_)[pkt_id]).dispatch.header = HSA_PACKET_TYPE_INVALID;
   }
 
-  amd_queue_.hsa_queue.base_address = ring_;
-  amd_queue_.hsa_queue.size = size_;
-  amd_queue_.hsa_queue.doorbell_signal = doorbell_signal;
-  amd_queue_.hsa_queue.id = this->GetQueueId();
-  amd_queue_.hsa_queue.type = type;
-  amd_queue_.hsa_queue.features = features;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.base_address = ring_;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.size = size_;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.doorbell_signal = doorbell_signal;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.id = this->GetQueueId();
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.type = type;
+  std::get<QueueDescriptorT*>(queue_descriptor_)->hsa_queue.features = features;
 #ifdef HSA_LARGE_MODEL
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_IS_PTR64, 1);
 #else
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_IS_PTR64, 0);
 #endif
-  amd_queue_.write_dispatch_id = amd_queue_.read_dispatch_id = 0;
-  AMD_HSA_BITS_SET(
-      amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, 0);
+  std::get<QueueDescriptorT*>(queue_descriptor_)->write_dispatch_id =
+      std::get<QueueDescriptorT*>(queue_descriptor_)->read_dispatch_id = 0;
+  AMD_HSA_BITS_SET(std::get<QueueDescriptorT*>(queue_descriptor_)->queue_properties,
+                   AMD_QUEUE_PROPERTIES_ENABLE_PROFILING, 0);
 
   bufferGuard.Dismiss();
   registerGuard.Dismiss();

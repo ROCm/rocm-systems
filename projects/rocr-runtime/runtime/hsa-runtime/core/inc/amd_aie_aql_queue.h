@@ -60,6 +60,7 @@ class AieAqlQueue : public core::Queue,
                     private core::LocalSignal,
                     core::DoorbellSignal {
  public:
+  using QueueDescriptorT = amd_queue_v2_t;
   static __forceinline bool IsType(core::Signal *signal) {
     return signal->IsType(&rtti_id());
   }
@@ -113,6 +114,7 @@ class AieAqlQueue : public core::Queue,
                   hsa_fence_scope_t acquireFence = HSA_FENCE_SCOPE_NONE,
                   hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                   hsa_signal_t *signal = NULL) override;
+  void SetProfiling(bool enabled) override;
 
  private:
   HSA_QUEUEID queue_id_ = INVALID_QUEUEID;
