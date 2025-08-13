@@ -64,6 +64,25 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    - name: Install Latest ROCm
+      if: matrix.system.runner == 'mi3xx'
+      shell: bash
+      working-directory: /tmp
+      run: |
+        sudo apt update
+        sudo apt install -y wget sudo curl git
+        export ROCM_JOB_NAME="compute-rocm-dkms-${ROCM_BUILD_TYPE}-hipclang"
+        export ROCM_JOB_BASE_URL="http://rocm-ci.amd.com/job/${ROCM_JOB_NAME}/"
+        export ROCM_JOB_API_URL_POSTFIX="/api/json?pretty=true"
+        export ROCM_JOB_BUILD_NUMBER_URL_POSTFIX="/buildNumber"
+        export ROCM_JOB_API_FULL_URL="${ROCM_JOB_BASE_URL}${ROCM_JOB_NUMBER}${ROCM_JOB_API_URL_POSTFIX}"
+        export ROCM_JOB_BUILD_NUMBER_FULL_URL="${ROCM_JOB_BASE_URL}${ROCM_JOB_NUMBER}${ROCM_JOB_BUILD_NUMBER_URL_POSTFIX}"
+        wget https://artifactory-cdn.amd.com/artifactory/list/amdgpu-deb/amdgpu-install-internal_$(curl -s ${ROCM_JOB_API_FULL_URL} | grep amdgpu-install-internal_ | sed 's/.*amdgpu-install-internal//' | awk -F'[_|-]' '{print $2}' | tr -d '\n')-22.04-1_all.deb
+        sudo apt install -y ./*_all.deb
+        sudo amdgpu-repo --amdgpu-build=$(curl -s ${ROCM_JOB_API_FULL_URL} | grep amdgpu-build | sed 's/.* --amdgpu-build//' | awk -F'[=| |<]' '{print $2}' | tr -d '\n') --rocm-build=${ROCM_JOB_NAME}/$(curl -s ${ROCM_JOB_BUILD_NUMBER_FULL_URL})
+        sudo amdgpu-install -y --no-dkms --usecase=rocm
+        rm -rf amdgpu-install-internal_*.deb
+    
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/aqlprofile
@@ -72,12 +91,15 @@ jobs:
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
+      env:
+        GPU_RUNNER: {{ matrix.system.runner }}
       run: |
+        [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
         git config --global --add safe.directory '*'
-        apt-get update
-        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        $PRE_COMMAND apt-get update
+        $PRE_COMMAND apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
+        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
     - name: List Files
       shell: bash
