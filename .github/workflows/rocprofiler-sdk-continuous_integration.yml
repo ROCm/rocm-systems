@@ -85,10 +85,10 @@ jobs:
             PATTERN="gfx94X"
             ;;
           navi3)
-            PATTERN="gfx110x"
+            PATTERN="gfx110X"
             ;;
           navi4)
-            PATTERN="gfx120x"
+            PATTERN="gfx120X"
             ;;
           *)
             echo "Unknown runner: ${{ matrix.runner }}"
@@ -111,8 +111,8 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
     
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf rocm.tar.gz -C /opt/rocm-custom
+        mkdir -p /opt/rocm-custom
+        tar -xf rocm.tar.gz -C /opt/rocm-custom
 
     - name: Checkout
       uses: actions/checkout@v4
@@ -156,7 +156,7 @@ jobs:
         export PATH=/opt/rocm-custom/bin:$PATH
         /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON .
         /usr/bin/cmake --build build --target all --parallel 16
-        sudo /usr/bin/cmake --build build --target install
+        /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
   
     - name: Enable PC Sampling
