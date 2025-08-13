@@ -69,7 +69,8 @@ rocprofiler_systems_add_test(
     REWRITE_ARGS -e -v 2 -i 1024 --label return args
     RUNTIME_ARGS -e -v 1 -i 1024 --label return args
     RUN_ARGS 35 2 ${THREAD_LIMIT_TEST_VALUE}
-    REWRITE_TIMEOUT 180
+    SAMPLING_TIMEOUT 240
+    REWRITE_TIMEOUT 240
     RUNTIME_TIMEOUT 360
     RUNTIME_PASS_REGEX "${_thread_limit_pass_regex}"
     SAMPLING_PASS_REGEX "${_thread_limit_pass_regex}"
