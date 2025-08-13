@@ -54,6 +54,8 @@
 #include <utility>
 
 #define ROCPROFILER_LIB_ROCPROFILER_HIP_HIP_CPP_IMPL 1
+#define hipStreamLegacy                              ((hipStream_t) 1)
+#define hipStreamPerThread                           ((hipStream_t) 2)  // Implicit stream per application thread.
 
 // template specializations
 #include "hip.def.cpp"
@@ -271,8 +273,12 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
 
         if(!callback_contexts.empty())
         {
-            tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;
+            // Handle special case where stream is passed in as hipStreamLegacy (0x01) or
+            // hipStreamPerThread (0x02)
+            auto _stream =
+                (stream == hipStreamLegacy || stream == hipStreamPerThread) ? nullptr : stream;
+            tracer_data.stream_id        = get_stream_id(_stream);
+            tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
             tracing::execute_phase_none_callbacks(callback_contexts,
                                                   thr_id,
                                                   internal_corr_id,
@@ -330,8 +336,12 @@ FuncT create_read_functor(RetT (*func)(Args...))
 
         if(!callback_contexts.empty())
         {
-            tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;
+            // Handle special case where stream is passed in as hipStreamLegacy (0x01) or
+            // hipStreamPerThread (0x02)
+            auto _stream =
+                (stream == hipStreamLegacy || stream == hipStreamPerThread) ? nullptr : stream;
+            tracer_data.stream_id        = get_stream_id(_stream);
+            tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
             tracing::execute_phase_enter_callbacks(callback_contexts,
                                                    thr_id,
                                                    internal_corr_id,
