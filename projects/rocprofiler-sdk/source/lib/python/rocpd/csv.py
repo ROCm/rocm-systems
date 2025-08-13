@@ -191,7 +191,7 @@ def write_kernel_csv(importData, config) -> None:
             grid_z AS Grid_Size_Z
         FROM "kernels"
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "kernel"
@@ -223,14 +223,14 @@ def write_memory_copy_csv(importData, config) -> None:
             'MEMORY_COPY' AS Kind,
             name AS Direction,
             stream_id AS Stream_Id,
-            {src_agent_id}  AS Source_Agent_Id,
-            {dst_agent_id}  AS Destination_Agent_Id,
+            {src_agent_id} AS Source_Agent_Id,
+            {dst_agent_id} AS Destination_Agent_Id,
             stack_id AS Correlation_Id,
             start AS Start_Timestamp,
             end AS End_Timestamp
         FROM "memory_copies"
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "memory_copy"
@@ -273,7 +273,7 @@ def write_memory_allocation_csv(importData, config) -> None:
             end AS End_Timestamp
         FROM "memory_allocations"
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "memory_allocation"
@@ -296,7 +296,7 @@ def write_hip_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'HIP_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "hip_api"
@@ -319,7 +319,7 @@ def write_hsa_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'HSA_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "hsa_api"
@@ -346,7 +346,7 @@ def write_marker_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'MARKER_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "marker_api"
@@ -392,7 +392,7 @@ def write_counters_csv(importData, config) -> None:
             end AS End_Timestamp
         FROM "counters_collection"
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "counter_collection"
@@ -427,7 +427,7 @@ def write_scratch_memory_csv(importData, config) -> None:
             end AS End_Timestamp
         FROM "scratch_memory"
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "scratch_memory"
@@ -450,7 +450,7 @@ def write_rccl_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'RCCL_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "rccl_api"
@@ -473,7 +473,7 @@ def write_rocdecode_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'ROCDECODE_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "rocdecode_api"
@@ -496,7 +496,7 @@ def write_rocjpeg_api_csv(importData, config) -> None:
         WHERE
             category LIKE 'ROCJPEG_%'
         ORDER BY
-            start ASC, end DESC
+            guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "rocjpeg_api"
