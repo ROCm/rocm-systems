@@ -395,7 +395,39 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
+        
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        ./build.sh
+        cd build
+        make install
 
+    - name: Install rocprof-trace-decoder
+      shell: bash
+      working-directory: /tmp
+      run: |
+        echo "Install rocprof-trace-decoder."
+        URL=$(curl -s https://api.github.com/repos/ROCm/rocprof-trace-decoder/releases/latest \
+            | grep browser_download_url \
+            | grep "ubuntu-22.04" \
+            | grep ".deb" \
+            | cut -d '"' -f 4)
+        if [ -z "$URL" ]; then
+          echo "❌ Error: Could not find Ubuntu 22.04 .deb package URL."
+          exit 1
+        fi
+        
+        echo "Downloading: $URL"
+        curl -L -o rocprof-trace-decoder-latest-ubuntu-22.04.deb "$URL"
+        
+        echo "Installing package..."
+        dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || apt-get install -f -y
+        echo "✅ Installation complete!"
+        rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
