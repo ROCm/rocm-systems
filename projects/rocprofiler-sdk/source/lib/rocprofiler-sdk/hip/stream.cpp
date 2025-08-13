@@ -54,8 +54,6 @@
 #include <utility>
 
 #define ROCPROFILER_LIB_ROCPROFILER_HIP_HIP_CPP_IMPL 1
-#define hipStreamLegacy                              ((hipStream_t) 1)
-#define hipStreamPerThread                           ((hipStream_t) 2)  // Implicit stream per application thread.
 
 // template specializations
 #include "hip.def.cpp"
