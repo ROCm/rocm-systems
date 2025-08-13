@@ -45,24 +45,23 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
-  
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
-  
+
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
   }
-  
+
   SECTION("hipEnableLegacyStream search flag") {
     HIP_CHECK(
         hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableLegacyStream, &status));
   }
-  
+
   SECTION("hipEnablePerThreadDefaultStream search flag") {
     HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnablePerThreadDefaultStream,
                                      &status));
   }
-  
+
   REQUIRE(*status == hipDriverEntryPointSuccess);
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
@@ -92,31 +91,30 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
  */
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
-
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
-  
+
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("", &funcPtr, hipEnableDefault, &status),
                     hipErrorInvalidValue);
   }
-  
+
   SECTION("funtion pointer is nullptr") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("hipGetDeviceCount", nullptr, hipEnableDefault, &status),
                     hipErrorInvalidValue);
   }
-  
+
   SECTION("Invalid flag") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, -1, &status),
                     hipErrorInvalidValue);
   }
-  
+
   free(status);
 }
 
 /**
- * hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
-                                   hipDriverEntryPointQueryResult** driverStatus);
+ * hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long
+ flags, hipDriverEntryPointQueryResult** driverStatus);
  * Gets function pointer of a request HIP API
  *
  * @param [in]  symbol  The API base name
@@ -141,10 +139,9 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
  */
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
-  
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
-  
+
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
   }
@@ -153,12 +150,12 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
     HIP_CHECK(
         hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableLegacyStream, &status));
   }
-  
+
   SECTION("hipEnablePerThreadDefaultStream search flag") {
-    HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnablePerThreadDefaultStream,
-                                     &status));
+    HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr,
+                                         hipEnablePerThreadDefaultStream, &status));
   }
-  
+
   REQUIRE(*status == hipDriverEntryPointSuccess);
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
@@ -167,9 +164,9 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
 
   int count;
   HIP_CHECK(hipGetDeviceCount(&count));
-  
+
   REQUIRE(countFuncPtr == count);
-  
+
   free(status);
 }
 
@@ -189,25 +186,25 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
  */
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
-  
   void* funcPtr = nullptr;
   hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult();
-  
+
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("", &funcPtr, hipEnableDefault, &status),
                     hipErrorInvalidValue);
   }
-  
+
   SECTION("funtion pointer is nullptr") {
-    HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("hipGetDeviceCount", nullptr, hipEnableDefault, &status),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipGetDriverEntryPoint_spt("hipGetDeviceCount", nullptr, hipEnableDefault, &status),
+        hipErrorInvalidValue);
   }
-  
+
   SECTION("Invalid flag") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, -1, &status),
                     hipErrorInvalidValue);
   }
-  
+
   free(status);
 }
 
