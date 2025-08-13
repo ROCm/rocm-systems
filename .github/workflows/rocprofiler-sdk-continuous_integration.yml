@@ -109,7 +109,7 @@ jobs:
         echo "Install Aqlprofile."
         ./build.sh
         cd build
-        sudo make install
+        make install
 
     - name: Install rocprof-trace-decoder
       shell: bash
@@ -130,9 +130,9 @@ jobs:
         curl -L -o rocprof-trace-decoder-latest-ubuntu-22.04.deb "$URL"
         
         echo "Installing package..."
-        sudo dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || sudo apt-get install -f -y
+        dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || apt-get install -f -y
         echo "✅ Installation complete!"
-        sudo rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
+        rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
@@ -291,7 +291,7 @@ jobs:
         echo "Install Aqlprofile."
         ./build.sh
         cd build
-        sudo make install
+        make install
     
     - name: Install rocprof-trace-decoder
       shell: bash
@@ -312,9 +312,9 @@ jobs:
         curl -L -o rocprof-trace-decoder-latest-manylinux.rpm "$URL"
       
         echo "Installing package..."
-        sudo rpm -Uvh rocprof-trace-decoder-latest-manylinux.rpm
+        rpm -Uvh rocprof-trace-decoder-latest-manylinux.rpm
         echo "✅ Installation complete!"
-        sudo rm -f rocprof-trace-decoder-latest-manylinux.rpm
+        rm -f rocprof-trace-decoder-latest-manylinux.rpm
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
