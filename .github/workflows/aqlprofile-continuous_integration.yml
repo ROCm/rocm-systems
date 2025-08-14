@@ -177,7 +177,10 @@ jobs:
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
-      run: git config --global --add safe.directory '*'
+      run: |
+        git config --global --add safe.directory '*'
+        python3 -m pipx install cmake
+        echo 'PATH=~/.local/bin:$PATH' >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -186,7 +189,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm-custom/.info/version
         ls -la
         pwd
 
@@ -194,10 +197,11 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
+          -DCMAKE_PREFIX_PATH=/opt/rocm-custom
           -S $(pwd)/projects/aqlprofile/dashboard.cmake
