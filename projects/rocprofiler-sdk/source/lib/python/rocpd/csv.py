@@ -42,10 +42,14 @@ def write_sql_query_to_csv(
 ) -> None:
     """Write the contents of a SQL query to a CSV file in the specified output path."""
 
-    query_one = "{} LIMIT 1".format(query)
+    query_not_empty = f"""
+        SELECT EXISTS (
+            {query}
+        )
+    """
 
-    # just return if view is empty
-    if not connection.execute(query_one).fetchone():
+    # just return if the result is empty
+    if not connection.execute(query_not_empty).fetchone()[0]:
         return
 
     # call query module to export to csv
