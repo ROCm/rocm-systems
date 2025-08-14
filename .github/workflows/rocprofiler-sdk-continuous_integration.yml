@@ -134,9 +134,9 @@ jobs:
         echo "Install Aqlprofile."
         export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom .
         /usr/bin/cmake --build build --target all --parallel 16
-        /usr/bin/cmake --build build --target install
+        sudo /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
   
     - name: Enable PC Sampling
@@ -346,9 +346,9 @@ jobs:
         echo "Install Aqlprofile."
         export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom .
         /usr/bin/cmake --build build --target all --parallel 16
-        /usr/bin/cmake --build build --target install
+        sudo /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
   
     - name: Enable PC Sampling
@@ -463,9 +463,9 @@ jobs:
         echo "Install Aqlprofile."
         export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom .
         /usr/bin/cmake --build build --target all --parallel 16
-        /usr/bin/cmake --build build --target install
+        sudo /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
   
     - name: Enable PC Sampling
