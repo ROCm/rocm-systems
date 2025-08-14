@@ -67,7 +67,6 @@ jobs:
 
     steps:
     - name: Install Latest ROCm
-      if: ${{matrix.system.gpu == 'mi3xx'}}
       shell: bash
       working-directory: /tmp
       run: |
@@ -95,12 +94,11 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
         git config --global --add safe.directory '*'
-        $PRE_COMMAND apt-get update
-        $PRE_COMMAND apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
-        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
     - name: List Files
       shell: bash
@@ -114,7 +112,6 @@ jobs:
         pwd
 
     - name: Configure, Build, and Test
-      # if: ${{matrix.system.gpu != 'mi3xx'}}
       timeout-minutes: 30
       shell: bash
       run:
@@ -125,18 +122,6 @@ jobs:
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
           -S $(pwd)/projects/aqlprofile/dashboard.cmake
-
-    # - name: Configure, Build, and Test (MI3xx)
-    #   if: ${{matrix.system.gpu == 'mi3xx'}}
-    #   timeout-minutes: 30
-    #   shell: bash
-    #   run: |
-    #     export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH
-    #     export PATH=/opt/rocm-custom/bin:$PATH
-    #     /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON $(pwd)/projects/aqlprofile
-    #     /usr/bin/cmake --build build --target all --parallel 16
-    #     sudo /usr/bin/cmake --build build --target install
-    #     /usr/bin/ctest --output-on-failure -VV --test-dir build
 
   core-rpm:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
