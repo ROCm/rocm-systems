@@ -101,6 +101,9 @@ VirtMemoryTestBasic::VirtMemoryTestBasic(void) : TestBase() {
 VirtMemoryTestBasic::~VirtMemoryTestBasic(void) {}
 
 void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_pool_t pool) {
+  hsa_agent_t* agents_accessible;
+  hsa_amd_pointer_info_t ptrInfo = {};
+  uint32_t num_agents_accessible = 0;
   std::vector<hsa_agent_t> gpus;
   rocrtst::pool_info_t pool_i;
   hsa_device_type_t ag_type;
@@ -116,14 +119,38 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   if (ag_type != HSA_DEVICE_TYPE_GPU || !pool_i.alloc_allowed) return;
 
   size_t granule_size = pool_i.alloc_granule;
+  const size_t sizeof_addrRangeUnmapped = 10 * granule_size;
+  const size_t sizeof_addrRange = 20 * granule_size;
 
   ASSERT_SUCCESS(hsa_iterate_agents(rocrtst::IterateGPUAgents, &gpus));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, 20 * granule_size, 0, 0));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRangeUnmapped, 10 * granule_size, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRange, sizeof_addrRange, 0, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_reserve(&addrRangeUnmapped, sizeof_addrRangeUnmapped, 0, 0));
+
+  /* Verify that pointer info for unmapped VA's return expected values */
+  ptrInfo.size = sizeof(ptrInfo);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(addrRangeUnmapped, &ptrInfo, &malloc, &num_agents_accessible,
+                                      &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+  ASSERT_EQ(ptrInfo.hostBaseAddress, addrRangeUnmapped);
+  /* For unmapped VA, then size is equal to size of address reservation */
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
+  ASSERT_EQ(num_agents_accessible, 0);
+
+  /* Verify that pointer info for unmapped VA offset return expected values */
+  ptrInfo.size = sizeof(ptrInfo);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(reinterpret_cast<uint8_t*>(addrRangeUnmapped) + 10, &ptrInfo, &malloc,
+                                      &num_agents_accessible, &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_RESERVED_ADDR);
+  ASSERT_EQ(ptrInfo.hostBaseAddress,
+            addrRangeUnmapped);  // hostBaseAddress is address of reservation instead of offset.
+  /* For unmapped VA, then size is equal to size of address reservation */
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_addrRangeUnmapped);
+  ASSERT_EQ(num_agents_accessible, 0);
 
   hsa_amd_vmem_alloc_handle_t mem_handle;
+  const size_t sizeof_mem_handle = 10 * granule_size;
   ASSERT_SUCCESS(
-      hsa_amd_vmem_handle_create(pool, 10 * granule_size, MEMORY_TYPE_NONE, 0, &mem_handle));
+      hsa_amd_vmem_handle_create(pool, sizeof_mem_handle, MEMORY_TYPE_NONE, 0, &mem_handle));
 
   /* Test alloc properties returns correct memory type and pool handle */
   hsa_amd_memory_pool_t poolRet;
@@ -134,7 +161,7 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   ASSERT_EQ(memTypeRet, MEMORY_TYPE_NONE);
 
   hsa_amd_vmem_alloc_handle_t mem_handleTypePinned;
-  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, 10 * granule_size, MEMORY_TYPE_PINNED, 0,
+  ASSERT_SUCCESS(hsa_amd_vmem_handle_create(pool, sizeof_mem_handle, MEMORY_TYPE_PINNED, 0,
                                             &mem_handleTypePinned));
 
   ASSERT_SUCCESS(
@@ -143,7 +170,15 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
   ASSERT_EQ(memTypeRet, MEMORY_TYPE_PINNED);
 
 
-  ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, 10 * granule_size, 0, mem_handle, 0));
+  ASSERT_SUCCESS(hsa_amd_vmem_map(addrRange, sizeof_mem_handle, 0, mem_handle, 0));
+
+  /* Verity pointer info on mapped addresses */
+  ptrInfo.size = sizeof(ptrInfo);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(addrRange, &ptrInfo, &malloc, &num_agents_accessible,
+                                      &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);  // size matches memory handle
+  ASSERT_EQ(num_agents_accessible, 0);
 
   // Access to each GPU should be None
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
@@ -160,9 +195,31 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
     for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
       desc[descIndex++] = {HSA_ACCESS_PERMISSION_RO, *gpuIt};
     }
-
     ASSERT_SUCCESS(hsa_amd_vmem_set_access(addrRange, 10 * granule_size, desc, gpus.size()));
   }
+
+  /* Verity pointer info accessible agents on mapped addresses */
+  ptrInfo.size = sizeof(ptrInfo);
+  ASSERT_SUCCESS(hsa_amd_pointer_info(addrRange, &ptrInfo, &malloc, &num_agents_accessible,
+                                      &agents_accessible));
+  ASSERT_EQ(ptrInfo.type, HSA_EXT_POINTER_TYPE_HSA_VMEM);
+  ASSERT_EQ(ptrInfo.sizeInBytes, sizeof_mem_handle);  // size matches memory handle
+  ASSERT_EQ(num_agents_accessible, gpus.size());
+  ASSERT_NE(agents_accessible, nullptr);
+
+  /* Verify agents_accessible is valid */
+  for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
+    bool found = false;
+    for (auto i = 0; i < gpus.size(); i++) {
+      if (agents_accessible[i].handle == (*gpuIt).handle) {
+        found = true;
+        break;
+      }
+    }
+    ASSERT_EQ(found, true);
+  }
+
+  free(agents_accessible);
 
   for (auto gpuIt = gpus.begin(); gpuIt != gpus.end(); ++gpuIt) {
     hsa_access_permission_t perm = HSA_ACCESS_PERMISSION_NONE;
@@ -195,10 +252,10 @@ void VirtMemoryTestBasic::TestCreateDestroy(hsa_agent_t agent, hsa_amd_memory_po
     }
   }
 
-  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, 10 * granule_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_unmap(addrRange, sizeof_mem_handle));
   ASSERT_SUCCESS(hsa_amd_vmem_handle_release(mem_handle));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, 20 * granule_size));
-  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRangeUnmapped, 10 * granule_size));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRange, sizeof_addrRange));
+  ASSERT_SUCCESS(hsa_amd_vmem_address_free(addrRangeUnmapped, sizeof_addrRangeUnmapped));
 }
 
 void VirtMemoryTestBasic::TestCreateDestroy(void) {

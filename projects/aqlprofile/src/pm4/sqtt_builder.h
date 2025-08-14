@@ -37,14 +37,22 @@ namespace pm4_builder {
 class CmdBuffer;
 class CmdBuilder;
 
-constexpr size_t ATT_CODEOBJ_OPCODE = 4;
-constexpr size_t ATT_TIMESTAMP_OPCODE = 5;
+enum ATT_OPCODES {
+  ATT_CODEOBJ_OPCODE = 4,
+  ATT_TIMESTAMP_OPCODE,
+  ATT_AGENT_INFO_OPCODE,
+};
+
+enum ATT_AGENT_INFO_TYPE {
+  ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ = 0,
+  ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY,
+};
 
 union att_decoder_packet_header_t {
   struct {
     unsigned int opcode : 8;
     unsigned int type : 4;
-    unsigned int reserved : 20;
+    unsigned int data20 : 20;
   };
   unsigned int u32All;
 };
@@ -160,7 +168,9 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
   explicit GpuSqttBuilder(const AgentInfo* agent_info)
       : builder(acquire_ip_offset_table(agent_info)),
         xcc_number_(agent_info->xcc_num),
-        se_number_total(agent_info->se_num) {}
+        se_number_total(agent_info->se_num),
+        timestamp_freq(agent_info->timestamp_freq),
+        cu_per_se(agent_info->cu_num / agent_info->se_num) {}
 
   // Returns TT_CONTROL_UTC_ERR_MASK
   virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
@@ -406,6 +416,21 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 524801);
 
+    att_decoder_packet_header_t packet{};
+    packet.opcode = ATT_AGENT_INFO_OPCODE;
+
+    if (config->enable_rt_timestamp)
+    {
+      packet.type = ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
+      packet.data20 = this->timestamp_freq / 1000;
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+    }
+    if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
+    {
+      packet.type = ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY;
+      packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+    }
     if (Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
     {
       for (size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
@@ -566,7 +591,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     att_decoder_packet_header_t header{};
     header.opcode = ATT_CODEOBJ_OPCODE;
     header.type = channel;
-    header.reserved = 0;
+    header.data20 = 0;
     auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
 
     SetGRBMToBroadcast(cmd_buffer);
@@ -580,7 +605,7 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     att_decoder_packet_header_t header{};
     header.opcode = ATT_TIMESTAMP_OPCODE;
     header.type = 0;
-    header.reserved = 0;
+    header.data20 = 0;
 
     SetGRBMToBroadcast(cmd_buffer);
     builder.BuildGPUClockPacket(cmd_buffer, addr, Primitives::SQ_THREAD_TRACE_USERDATA_3, header.u32All);
@@ -594,8 +619,10 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWritePConfigRegPacket(cmdbuf, reg, value);
   }
 
-  size_t se_number_total;
-  size_t xcc_number_;
+  size_t se_number_total{};
+  size_t xcc_number_{};
+  uint32_t timestamp_freq{};
+  uint32_t cu_per_se{};
 };
 
 }  // namespace pm4_builder

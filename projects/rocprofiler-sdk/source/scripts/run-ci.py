@@ -237,6 +237,11 @@ def generate_dashboard_script(args):
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
     ARGN = "${ARGN}"
     SUBMIT_ERR = "${_cdash_submit_err}"
+    REPO_SOURCE_DIR = (
+        os.path.dirname(os.path.dirname((SOURCE_DIR)))
+        if not os.path.exists(os.path.join(SOURCE_DIR, ".git"))
+        else SOURCE_DIR
+    )
 
     if args.memcheck == "ThreadSanitizer":
         MEMCHECK = 0
@@ -279,7 +284,7 @@ def generate_dashboard_script(args):
     _script += f"""
         set(STAGES "{STAGES}")
         ctest_start({DASHBOARD_MODE})
-        ctest_update(SOURCE "{SOURCE_DIR}" RETURN_VALUE _update_ret
+        ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
                      CAPTURE_CMAKE_ERROR _update_err)
         ctest_configure(BUILD "{BINARY_DIR}" RETURN_VALUE _configure_ret)
         dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)

@@ -31,13 +31,13 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
+      working-directory: projects/rocprofiler-sdk
       run: |
-        cd projects/rocprofiler-sdk
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
     - name: Lint with flake8
+      working-directory: projects/rocprofiler-sdk
       run: |
-        cd projects/rocprofiler-sdk
         # stop the build if there are Python syntax errors or undefined names
         flake8 source --count --show-source --statistics --select=E9,F63,F7,F82
         # flake8 options are defined in .flake8
