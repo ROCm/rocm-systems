@@ -134,9 +134,9 @@ query_rocm_agents()
                 _agent->logical_node_id,
                 _agent->logical_node_type_id,
                 std::string(_agent->name),
+                std::string(_agent->model_name),
                 std::string(_agent->vendor_name),
                 std::string(_agent->product_name),
-                std::string(_agent->model_name),
             };
             _agent_manager.insert_agent(cur_agent);
         }

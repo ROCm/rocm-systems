@@ -116,9 +116,11 @@ database::initialize_schema()
         std::string query = ss_query.str();
 
         std::regex upid_pattern("\\{\\{uuid\\}\\}");
+        std::regex guid_pattern("\\{\\{guid\\}\\}");
         std::regex view_upid_pattern("\\{\\{view_upid\\}\\}");
 
         query = std::regex_replace(query, upid_pattern, "_" + get_upid());
+        query = std::regex_replace(query, guid_pattern, get_upid());
         query = std::regex_replace(query, view_upid_pattern, "");
 
         validate_sqlite3_result(
