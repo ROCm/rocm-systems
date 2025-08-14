@@ -279,46 +279,23 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        python3 -m pip install --upgrade pip
-        apt-get update
-        apt-get install -y python3.10-venv
         python3 -m pip install --upgrade pip pipx
         python3 -m pipx install awscli
-    
-        # Pick key pattern based on matrix.runner
-        case "${{ matrix.runner }}" in
-          mi3xx)
-            PATTERN="gfx94X"
-            ;;
-          navi3)
-            PATTERN="gfx110X"
-            ;;
-          navi4)
-            PATTERN="gfx120X"
-            ;;
-          *)
-            echo "Unknown runner: ${{ matrix.runner }}"
-            exit 1
-            ;;
-        esac
-    
-        echo "Using pattern: $PATTERN"
-    
-        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+        python3 -m pipx ensurepath
+        source ~/.bashrc
+        KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, '$PATTERN')], &LastModified)[-1].Key")
-    
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No $PATTERN tarball found"; exit 1; }
-    
-        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-    
-        mkdir -p /opt/rocm-custom
-        tar -xf rocm.tar.gz -C /opt/rocm-custom
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+        sudo ln -s /opt/rocm-custom /opt/rocm
         
     - name: Checkout
       uses: actions/checkout@v4
