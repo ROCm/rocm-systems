@@ -35,7 +35,10 @@ RUN apt-get update && \
         python3 -m pip install --break-system-packages 'cmake==3.21' perfetto \
     else \
         python3 -m pip install 'cmake==3.21' perfetto; \
-    fi
+    fi; \
+    if [ "${OS_VERSION}" == "20.04" ]; then \
+        apt-get install -y gfortran; \
+    fi;
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
 

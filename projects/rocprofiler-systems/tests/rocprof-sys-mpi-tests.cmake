@@ -99,6 +99,49 @@ rocprofiler_systems_add_test(
         ">>> mpi-flat.inst(.*\n.*)>>> MPI_Init_thread(.*\n.*)>>> pthread_create(.*\n.*)>>> MPI_Comm_size(.*\n.*)>>> MPI_Comm_rank(.*\n.*)>>> MPI_Barrier(.*\n.*)>>> MPI_Alltoall"
 )
 
+if(ENABLE_FORTRAN_TESTS)
+    rocprofiler_systems_add_test(
+        NAME "mpi-fortran-array"
+        TARGET mpi-fortran-array
+        MPI ON
+        NUM_PROCS 2
+        LABELS "fortran"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_mpip_environment};"
+        BASELINE_PASS_REGEX "Final sum= *0\\.400000E\\+15"
+    )
+
+    rocprofiler_systems_add_test(
+        SKIP_RUNTIME # Runtime needs to be skipped
+        NAME "mpi-fortran-mm"
+        TARGET mpi-fortran-mm
+        MPI ON
+        NUM_PROCS 2
+        LABELS "fortran"
+        REWRITE_ARGS
+            -e
+            -v
+            2
+            --label
+            file
+            line
+            args
+            --min-instructions
+            0
+        ENVIRONMENT "${_mpip_environment};"
+        BASELINE_PASS_REGEX "1015\\.00.*44520\\.00"
+    )
+endif()
+
 set(_mpip_environment
     "ROCPROFSYS_TRACE=ON"
     "ROCPROFSYS_PROFILE=ON"
