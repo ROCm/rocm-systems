@@ -509,5 +509,5 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" \
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" \
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
