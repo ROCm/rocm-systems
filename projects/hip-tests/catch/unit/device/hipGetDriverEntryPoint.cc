@@ -21,7 +21,7 @@ THE SOFTWARE.
 
 /**
  * hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned long long flags,
-                                   hipDriverEntryPointQueryResult** driverStatus);
+                                   hipDriverEntryPointQueryResult* driverStatus);
  * Gets function pointer of a request HIP API
  *
  * @param [in]  symbol  The API base name
@@ -46,7 +46,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
+  hipDriverEntryPointQueryResult status;
 
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
@@ -62,7 +62,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
                                      &status));
   }
 
-  REQUIRE(*status == hipDriverEntryPointSuccess);
+  REQUIRE(status == hipDriverEntryPointSuccess);
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
   int countFuncPtr;
@@ -71,8 +71,6 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
   int count;
   HIP_CHECK(hipGetDeviceCount(&count));
   REQUIRE(countFuncPtr == count);
-
-  delete status;
 }
 
 /**
@@ -92,7 +90,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Positive") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
+  hipDriverEntryPointQueryResult status;
 
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("", &funcPtr, hipEnableDefault, &status),
@@ -108,13 +106,11 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint("hipGetDeviceCount", &funcPtr, -1, &status),
                     hipErrorInvalidValue);
   }
-
-  delete status;
 }
 
 /**
  * hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long
- flags, hipDriverEntryPointQueryResult** driverStatus);
+ flags, hipDriverEntryPointQueryResult* driverStatus);
  * Gets function pointer of a request HIP API
  *
  * @param [in]  symbol  The API base name
@@ -140,7 +136,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_Negative") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
+  hipDriverEntryPointQueryResult status;
 
   SECTION("hipEnableDefault search flag") {
     HIP_CHECK(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, hipEnableDefault, &status));
@@ -156,7 +152,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
                                          hipEnablePerThreadDefaultStream, &status));
   }
 
-  REQUIRE(*status == hipDriverEntryPointSuccess);
+  REQUIRE(status == hipDriverEntryPointSuccess);
 
   hipError_t (*hipGetDeviceCount_ptr)(int*) = (hipError_t(*)(int*))funcPtr;
   int countFuncPtr;
@@ -166,8 +162,6 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
   HIP_CHECK(hipGetDeviceCount(&count));
 
   REQUIRE(countFuncPtr == count);
-
-  delete status;
 }
 
 /**
@@ -187,7 +181,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Positive") {
 
 TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
   void* funcPtr = nullptr;
-  hipDriverEntryPointQueryResult* status = new hipDriverEntryPointQueryResult;
+  hipDriverEntryPointQueryResult status;
 
   SECTION("Empty string as symbol") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("", &funcPtr, hipEnableDefault, &status),
@@ -204,10 +198,7 @@ TEST_CASE("Unit_hipGetDriverEntryPoint_spt_Negative") {
     HIP_CHECK_ERROR(hipGetDriverEntryPoint_spt("hipGetDeviceCount", &funcPtr, -1, &status),
                     hipErrorInvalidValue);
   }
-
-  delete status;
 }
-
 /**
  * End doxygen group DeviceTest.
  * @}
