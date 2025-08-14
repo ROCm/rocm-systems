@@ -240,7 +240,7 @@ jobs:
         os: ['rhel-9.1', 'sles-15.4']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
-        gpu-target: 'gfx942'
+        gpu-target: ['gfx942']
 
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
