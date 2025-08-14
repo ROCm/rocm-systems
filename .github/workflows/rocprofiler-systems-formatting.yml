@@ -4,6 +4,8 @@ run-name: formatting
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-systems/**'
   pull_request:

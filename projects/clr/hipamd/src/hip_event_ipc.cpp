@@ -201,16 +201,23 @@ hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event) {
 hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) {
   HIP_INIT_API(hipIpcOpenEventHandle, event, handle);
 
-  hipError_t hip_err = hipSuccess;
+  hipError_t status = hipSuccess;
   if (event == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  hip_err = ihipEventCreateWithFlags(event, hipEventDisableTiming | hipEventInterprocess);
-  if (hip_err != hipSuccess) {
-    HIP_RETURN(hip_err);
+
+  status = ihipEventCreateWithFlags(event, hipEventDisableTiming | hipEventInterprocess);
+  if (status != hipSuccess) {
+    HIP_RETURN(status);
   }
+
   hip::Event* e = reinterpret_cast<hip::Event*>(*event);
   ihipIpcEventHandle_t* iHandle = reinterpret_cast<ihipIpcEventHandle_t*>(&handle);
-  HIP_RETURN(e->OpenHandle(iHandle));
+  status = e->OpenHandle(iHandle);
+  // Free the event in case of failure
+  if (status != hipSuccess) {
+    delete e;
+  }
+  HIP_RETURN(status);
 }
 }  // namespace hip

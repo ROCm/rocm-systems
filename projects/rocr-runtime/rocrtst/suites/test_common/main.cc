@@ -58,6 +58,7 @@
 #include "suites/functional/memory_allocation.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
+#include "suites/functional/svm_memory.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #include "suites/performance/memory_async_copy_numa.h"
@@ -380,6 +381,14 @@ TEST(rocrtstFunc, AgentPropertiesTests) {
   propTest.QueryAgentUUID();
   propTest.QueryAgentClockCounters();
   RunCustomTestEpilog(&propTest);
+}
+
+TEST(rocrtstFunc, SvmMemory_Basic_Test) {
+  SvmMemoryTestBasic smt;
+
+  RunCustomTestProlog(&smt);
+  smt.TestCreateDestroy();
+  RunCustomTestEpilog(&smt);
 }
 
 TEST(rocrtstFunc, VirtMemory_Basic_Test) {

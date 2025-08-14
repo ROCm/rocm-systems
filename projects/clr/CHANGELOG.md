@@ -19,11 +19,120 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
 * New `wptr` and `rptr` values in `ClPrint`, for better logging in dispatch barrier methods.
 * New debug mask, to print precise code object information for logging.
 * The `_sync()` version of crosslane builtins such as `shfl_sync()` and `__reduce_add_sync` are enabled by default. These can be disabled by setting the preprocessor macro `HIP_DISABLE_WARP_SYNC_BUILTINS`.
+* Added `constexpr` operators for `fp16`/`bf16`.
+* Added `__syncwarp` operation.
+* Extended fine grained system memory pool.
+* `num_threads`  total number of threads in the group. The legacy API size is alias.
+* Added PCI CHIP ID information as the device attribute.
+* Added new tests applications for OCP data types `FP4`/`FP6`/`FP8`.
+* A new attribute in HIP runtime was implemented which exposes a new device capability of how many compute dies (chiplets, xcc) are available on a given GPU. Developers can get this attribute via the API `hipDeviceGetAttribute`, to make use of the best cache locality in a kernel, and optimize the Kernel launch grid layout, for performance improvement.
 
 ### Changed
-
-* Some unsupported GPUs such as gfx9, gfx8 and gfx7 are deprecated on Microsoft Windows.
-* Stream validation in some HIP APIs are removed, to match the behavior with CUDA.
+* Deprecated GPUs.
+Some unsupported GPUs such as gfx9, gfx8 and gfx7 are deprecated on Microsoft Windows.
+* Behavior changes
+    - `hipGetLastError`  now gets the error code returned by `hipGetLastError` which should be the last actual error caught in the current thread during the application execution.
+    - Cooperative groups  in `hipLaunchCooperativeKernelMultiDevice` and `hipLaunchCooperativeKernel` functions, additional input parameter validation checks are added.
+    - `hipPointerGetAttributes` returns `hipSuccess` instead of an error with invalid value `hipErrorInvalidValue`, in case `NULL` host or attribute pointer is passed as input parameter. It now matches the functionality of `cudaPointerGetAttributes` which changed with CUDA 11 and above releases.
+    - `hipFree` previously there was an implicit wait which was applicable for all memory allocations, for synchronization purpose. This wait is now disabled for allocations made with `hipMallocAsync` and `hipMallocFromPoolAsync`, to match the behavior of CUDA API `cudaFree`
+    - `hipFreeAsync` now returns `hipSuccess` when the input pointer is NULL, instead of ` hipErrorInvalidValue` , to be consistent with `hipFree`.
+* Changes in hipRTC.
+    - Removal of `hipRTC` symbols from HIP Runtime Library.
+    Any application using `hipRTC` APIs should link explicitly with the `hipRTC` library. This makes the usage of `hipRTC` library on Linux the same as on Windows and matches the behavior of CUDA `nvRTC`.
+    - `hipRTC` compilation
+    The device code compilation now uses namespace `__hip_internal`, instead of the standard headers `std`, to avoid namespace collision.
+    - Changes of datatypes from `hipRTC`.
+    Datatype definitions such as `int64_t`, `uint64_t`, `int32_t`, and `uint32_t`, etc. are removed to avoid any potential conflicts in some applications. HIP now uses internal datatypes instead, prefixed with `__hip`, for example, `__hip_int64_t`.
+* HIP header clean up
+    - Usage of STD headers, HIP header files only include necessary STL headers.
+    - Deprecated structure `HIP_MEMSET_NODE_PARAMS` is removed. Developers can use the definition `hipMemsetParams` instead.
+* API signature/struct changes
+    - API signatures are adjusted in some APIs to match corresponding CUDA APIs. Impacted APIs are as folloing:
+      * `hiprtcCreateProgram`
+      * `hiprtcCompileProgram`
+      * `hipMemcpyHtoD`
+      * `hipCtxGetApiVersion`
+    - HIP struct change in `hipMemsetParams`, it is updated and compatible with CUDA.
+    - HIP vector constructor change in `hipComplex` initialization now generates correct values. The affected constructors will be small vector types such as `float2`, `int4`, etc.
+* Stream Capture updates
+    - Restricted stream capture mode, it is made in HIP APIs via adding the macro `CHECK_STREAM_CAPTURE_SUPPORTED ()`.
+In the previous HIP enumeration `hipStreamCaptureMode`, three capture modes were defined. With checking in the macro, the only supported stream capture mode is now `hipStreamCaptureModeRelaxed`. The rest are not supported, and the macro will return `hipErrorStreamCaptureUnsupported`. This update involves the following APIs, which is allowed only in relaxed stream capture mode,
+      * `hipMallocManaged`
+      * `hipMemAdvise`
+    - Checks stream capture mode, the following APIs check the stream capture mode and return error codes to match the behavior of CUDA.
+      * `hipLaunchCooperativeKernelMultiDevice`
+      * `hipEventQuery`
+      * `hipStreamAddCallback`
+    - Returns error during stream capture. The following HIP APIs now returns specific error `hipErrorStreamCaptureUnsupported` on the AMD platform, but not always `hipSuccess`, to match behavior with CUDA.
+      * `hipDeviceSetMemPool`
+      * `hipMemPoolCreate`
+      * `hipMemPoolDestroy`
+      * `hipDeviceSetSharedMemConfig`
+      * `hipDeviceSetCacheConfig`
+      * `hipMemcpyWithStream`
+* Error code update
+Returned error/value codes are updated in the following HIP APIs to match the corresponding CUDA APIs.
+    - Module Management Related APIs
+      * `hipModuleLaunchKernel`
+      * `hipExtModuleLaunchKernel`
+      * `hipExtLaunchKernel`
+      * `hipDrvLaunchKernelEx`
+      * `hipLaunchKernel`
+      * `hipLaunchKernelExC`
+      * `hipModuleLaunchCooperativeKernel`
+      * `hipModuleLoad`
+    - Texture Management Related APIs
+The following APIs update the return codes to match the behavior with CUDA:
+      * `hipTexObjectCreate`, supports zero width and height for 2D image. If either is zero, will not return `false`.
+      * `hipBindTexture2D`, adds extra check, if pointer for texture reference or device is NULL, returns `hipErrorNotFound`.
+      * `hipBindTextureToArray`, if any NULL pointer is input for texture object, resource descriptor, or texture descriptor, returns error `hipErrorInvalidChannelDescriptor`, instead of `hipErrorInvalidValue`.
+      * `hipGetTextureAlignmentOffset`, adds a return code `hipErrorInvalidTexture` when the texture reference pointer is NULL.
+    - Cooperative Group Related APIs, more calidations are added in the following API implementation,
+      * `hipLaunchCooperativeKernelMultiDevice`
+      * `hipLaunchCooperativeKernel`
+* Invalid stream input parameter handling
+In order to match the CUDA runtime behavior more closely, HIP APIs with streams passed as input parameters no longer check the stream validity. Previously, the HIP runtime returned an error code `hipErrorContextIsDestroyed` if the stream was invalid. In CUDA version 12 and later, the equivalent behavior is to raise a segmentation fault. HIP runtime now matches the CUDA by causing a segmentation fault. The list of APIs impacted by this change are as follows:
+    - Stream Management Related APIs
+      * `hipStreamGetCaptureInfo`
+      * `hipStreamGetPriority`
+      * `hipStreamGetFlags`
+      * `hipStreamDestroy`
+      * `hipStreamAddCallback`
+      * `hipStreamQuery`
+      * `hipLaunchHostFunc`
+    - Graph Management Related APIs
+      * `hipGraphUpload`
+      * `hipGraphLaunch`
+      * `hipStreamBeginCaptureToGraph`
+      * `hipStreamBeginCapture`
+      * `hipStreamIsCapturing`
+      * `hipStreamGetCaptureInfo`
+      * `hipGraphInstantiateWithParams`
+    - Memory Management Related APIs
+      * `hipMemcpyPeerAsync`
+      * `hipMemcpy2DValidateParams`
+      * `hipMallocFromPoolAsync`
+      * `hipFreeAsync`
+      * `hipMallocAsync`
+      * `hipMemcpyAsync`
+      * `hipMemcpyToSymbolAsync`
+      * `hipStreamAttachMemAsync`
+      * `hipMemPrefetchAsync`
+      * `hipDrvMemcpy3D`
+      * `hipDrvMemcpy3DAsync`
+      * `hipDrvMemcpy2DUnaligned`
+      * `hipMemcpyParam2D`
+      * `hipMemcpyParam2DAsync`
+      * `hipMemcpy2DArrayToArray`
+      * `hipMemcpy2D`
+      * `hipMemcpy2DAsync`
+      * `hipDrvMemcpy2DUnaligned`
+      * `hipMemcpy3D`
+    - Event Management Related APIs
+      * `hipEventRecord`
+      * `hipEventRecordWithFlags`
+* `warpSize` Change
+In order to match the CUDA specification, the `warpSize` variable is no longer `constexpr`. In general, this should be a transparent change; however, if an application was using `warpSize` as a compile-time constant, it will have to be updated to handle the new definition. For more information, see either the discussion of `warpSize` within the [HIP C++ language extensions](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html#warpsize).
 
 ### Optimized
 
@@ -31,37 +140,56 @@ HIP runtime has the following functional improvements which greatly improve runt
 
 * Reduced usage of the lock scope in events and kernel handling.
     - Switches to `shared_mutex` for event validation, uses `std::unique_lock` in HIP runtime to create/destroy event, instead of `scopedLock`.
-    - Reduces the `scopedLock` in handling of kernel execution. HIP runtime now calls `scopedLock` during kernel binary creation/initialization,
-    doesn't call it again during kernel vector iteration before launch.
+    - Reduces the `scopedLock` in handling of kernel execution. HIP runtime now calls `scopedLock` during kernel binary creation/initialization, doesn't call it again during kernel vector iteration before launch.
 * Implementation of unifying managed buffer and kernel argument buffer so HIP runtime doesn't need to create/load a separate kernel argument buffer.
 * Refactored memory validation, creates a unique function to validate a variety of memory copy operations.
 * Improved kernel logging using demangling shader names.
 * Advanced support for SPIRV, now kernel compilation caching is enabled by default. This feature is controlled by the environment variable `AMD_COMGR_CACHE`, for details, see [hip_rtc document](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_rtc.html).
-* Programmatic support for scratch limit on GPU device. Developer can now use the environment variable `HSA_SCRATCH_SINGLE_LIMIT` to change the default allocation size with expected scratch limit.
-* HIP runtime now enables peer-to-peer (P2P) memory copies to utilize all available SDMA engines, rather than being limited to a single engine. It also selects the best engine first to give optimal bindwidth.
+* Programmatic support for scratch limits on MI300 and MI350 series up GPU devices. More enumeration values were added in `hipLimit_t` as following, 
+   - `hipExtLimitScratchMin`, minimum allowed value in bytes for scratch limit on the device. 
+   - `hipExtLimitScratchMax`, maximum allowed value in bytes for scratch limit on the device. 
+   - `hipExtLimitScratchCurrent`, current scratch limit threshold in bytes on the device. Must be between the value `hipExtLimitScratchMin` and `hipExtLimitScratchMax`.
+ Developers can now use the environment variable `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` to change the default allocation size with expected scratch limit in ROCR runtime. On top of it, this value can also be overwritten programmatically in the application using the HIP API `hipDeviceSetLimit(hipExtLimitScratchCurrent, value)` to reset the scratch limit value.
+* HIP runtime now enables peer-to-peer (P2P) memory copies to utilize all available SDMA engines, rather than being limited to a single engine. It also selects the best engine first to give optimal bandwidth.
 * Improved launch latency for `D2D` copies and `memset` on MI300 series.
+* Memory manager was implemented to improve the efficiency of memory usage and speed-up memory allocation/free in memory pools.
+* Introduced a threshold to handle the command submission patch to the GPU device(s), considering the synchronization with CPU, for performance improvement.
 
 ### Resolved issues
 
 * Error of "unable to find modules" in HIP clean up for code object module.
+* The issue of incorrect return error `hipErrorNoDevice`, when a crash occurred on GPU device due to illegal operation or memory violation. HIP runtime now handles the failure on the GPU side properly and reports the precise error code based on the last error seen on the GPU.
+* Failures in some framework test applications, HIP runtime fixed the bug in retrieving a memory object from the IPC memory handle.
+* A crash in TensorFlow related application. HIP runtime now combines multiple definitions of `callbackQueue` into a single function, in case of an exception, passes its handler to the application and provides corresponding error code.
+* Fixed issue of handling the kernel parameters for the graph launch.
+* Failures in roc-obj tools. HIP runtime now makes `DEPRECATED` message in roc-obj tools as `STDERR`.
+* Support of `hipDeviceMallocContiguous` flags in `hipExtMallocWithFlags()`. It now enables `HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG` in the memory pool allocation on GPU device.
+* Compilation failure, HIP runtime refactored the vector type alignment with `__hip_vec_align_v`
+
 
 ## HIP 6.4.2 for ROCm 6.4.2
 
 ### Added
 
+* HIP API implementation for `hipEventRecordWithFlags`, records an event in the specified stream with flags.
 * Support for the pointer attribute `HIP_POINTER_ATTRIBUTE_CONTEXT`.
+* Support for the flags `hipEventWaitDefault` and `hipEventWaitExternal`.
 
 ### Optimized
 
-* Improved implementation in `hipEventSynchronize`, HIP runtime now makes internal callbacks non-blocking to gain performance.
+* Improved implementation in `hipEventSynchronize`, HIP runtime now makes internal callbacks as non-blocking operations to improve performance.
 
 ### Resolved issues
 
 * Issue of dependency on `libgcc-s1` during rocm-dev install on Debian Buster. HIP runtime removed this Debian package dependency, and uses `libgcc1` instead for this distros.
 * Building issue for `COMGR` dynamic load on Fedora and other Distros. HIP runtime now doesn't link against `libamd_comgr.so`.
 * Failure in the API `hipStreamDestroy`, when stream type is `hipStreamLegacy`. The API now returns error code `hipErrorInvalidResourceHandle` on this condition.
-* Kernel launch errors, such as `shared object initialization failed`, `invalid device function` or `kernel execution failure`. HIP runtime now loads `COMGR` properly considering the file with its name and mapped mage.
-* Memory access fault in some appplications. HIP runtime fixed offset accumulation in memory address.
+* Kernel launch errors, such as `shared object initialization failed`, `invalid device function` or `kernel execution failure`. HIP runtime now loads `COMGR` properly considering the file with its name and mapped image.
+* Memory access fault in some applications. HIP runtime fixed offset accumulation in memory address.
+* The memory leak in virtual memory management (VMM). HIP runtime now uses the size of handle for allocated memory range instead of actual size for physical memory, which fixed the issue of address clash with VMM.
+* Large memory allocation issue. HIP runtime now checks GPU video RAM and system RAM properly and sets size limits during memory allocation either on the host or the GPU device.
+* Support of `hipDeviceMallocContiguous` flags in `hipExtMallocWithFlags()`. It now enables `HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG` in the memory pool allocation on GPU device.
+* Radom memory segmentation fault in handling `GraphExec` object release and `hipDeviceSyncronization`. HIP runtime now uses internal device synchronize function in `__hipUnregisterFatBinary`. 
 
 ## HIP 6.4.1 for ROCm 6.4.1
 
@@ -73,6 +201,7 @@ HIP runtime has the following functional improvements which greatly improve runt
 
 * HIP runtime uses device bitcode before SPIRV.
 * The implementation of preventing `hipLaunchKernel` latency degradation with number of idle streams is reverted/disabled by default.
+* Stop using `__AMDGCN_WAVEFRONT_SIZE` and `warpSize` as compile-time constants. The `warpSize` variable is no longer `constexpr`, in order to match the CUDA specification. See more details of the `warpSize` change within the ROCm 6.4.1 [deprecation notice](https://rocm.docs.amd.com/en/latest/about/release-notes.html#amdgpu-wavefront-size-compiler-macro-deprecation).
 
 ### Optimized
 
@@ -168,7 +297,7 @@ The following are the list of backwards incompatible changes planned for the upc
     - Any application using hiprtc APIs should link explicitly with hiprtc library.
     - This change makes the usage of hiprtc library on Linux the same as on Windows, and matches the behavior of CUDA nvrtc.
 * Removal of deprecated struct `HIP_MEMSET_NODE_PARAMS`, developers can use definition `hipMemsetParams` instead.
-
+* `warpSize` change. Usages of `__AMDGCN_WAVEFRONT_SIZE` and `warpSize` as compile-time constants will be removed in HIP header files. In order to match the CUDA specification, the `warpSize` variable is no longer `constexpr`. If an application was using `warpSize` as a compile-time constant, it will have to be updated to handle the new definition. For details usage of the `warpSize`, see [the best practice for warpSize handling](https://rocm.docs.amd.com/projects/HIP/en/latest/how-to/hip_cpp_language_extensions.html#warpsize).
 
 ## HIP 6.3.2 for ROCm 6.3.2
 
