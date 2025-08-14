@@ -170,6 +170,7 @@ jobs:
         echo "Downloaded: ${KEY}"
         sudo mkdir -p /opt/rocm-custom
         sudo tar -xf *.tar.gz -C /opt/rocm-custom
+        sudo ln -s /opt/rocm-custom /opt/rocm
 
     - uses: actions/checkout@v4
       with:
@@ -203,7 +204,7 @@ jobs:
       shell: bash
       run:
         python3 -m pipx ensurepath; source ~/.bashrc;
-        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm-custom ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
