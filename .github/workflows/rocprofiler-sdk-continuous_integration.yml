@@ -59,10 +59,10 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", gpu-target: "gfx1201", ci-flags: '--linter clang-tidy'},
-          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", gpu-target: "gfx1101", ci-flags: '--linter clang-tidy'},
-          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", gpu-target: "gfx942", ci-flags: '--linter clang-tidy'},
-          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", gpu-target: "gfx950", ci-flags: '--linter clang-tidy'}
+          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", ci-flags: '--linter clang-tidy'}
         ]
 
     runs-on: ${{ matrix.system.runner }}
@@ -144,14 +144,14 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        RUNNER_HOSTNAME="$(hostname)"
+        RUNNER_HOSTNAME=$(hostname)
         LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         PATH=/opt/rocm-custom/bin:/usr/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ matrix.system.gpu-target }}
+          --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.system.ci-flags }}
           --
@@ -240,7 +240,6 @@ jobs:
         os: ['rhel-9.1', 'sles-15.4']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
-        gpu-target: ['gfx942']
 
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
@@ -288,8 +287,12 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         git config --global --add safe.directory '*'
+        if [ "${OS_TYPE}" == "rhel-9.1" ]; then
+          sudo dnf makecache
+          sudo dnf groupinstall -y "Development Tools"
+          sudo dnf install -y llvm14-devel
+        fi
         python3 -m pip install -U --user -r requirements.txt
-        python3 -m pipx install cmake
         rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 
     - name: List Files
@@ -314,6 +317,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+          python3 -m pipx install cmake
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
@@ -323,11 +327,11 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME="$(hostname)" LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME=$(hostname) LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
-          --gpu-targets ${{ matrix.gpu-target }}
-          --site ${RUNNER_HOSTNAME}
+          --site linux-mi325-1gpu-ossci-rocm
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.ci-flags }}
           --
@@ -348,8 +352,6 @@ jobs:
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
-        gpu-target: ['gfx942']
-
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
@@ -422,6 +424,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+          echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
@@ -430,11 +433,11 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH RUNNER_HOSTNAME="$(hostname)" /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
-          --gpu-targets ${{ matrix.gpu-target }}
-          --site ${RUNNER_HOSTNAME}
+          --site linux-mi325-1gpu-ossci-rocm
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
