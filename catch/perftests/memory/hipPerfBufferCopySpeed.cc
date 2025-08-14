@@ -127,8 +127,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipDeviceSynchronize());
       hipError_t syncErr = hipGetLastError();
       if (syncErr != hipSuccess) {
-        std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
-                  << std::endl;
+        DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
       }
       HIP_CHECK(hipDeviceSynchronize());
       auto all_end = std::chrono::steady_clock::now();
@@ -140,20 +139,19 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
               .count();
 
-      printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
-      printf("Elapsed seconds: %f\n", elapsed_secs.count());
+      DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
+      DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
       double bufSizeWithIter = static_cast<double>(bufSize_);
-      printf("%f\n", bufSizeWithIter);
+      DEBUG_PRINT("%f\n", bufSizeWithIter);
       double perf_pre = bufSizeWithIter / elapsed_secs.count();
-      printf("%f\n", perf_pre);
+      DEBUG_PRINT("%f\n", perf_pre);
       double perf = perf_pre * static_cast<double>(numIter);
-      printf("%f\n", perf_pre);
+      DEBUG_PRINT("%f\n", perf_pre);
       perf *= static_cast<double>(1e-09);
-      printf("%f\n", perf);
-      INFO("HIPPerfBufferCopySpeed[P2P] ( " << bufSize_ << ") s:dev0 d:dev1 i:" << numIter
-                                            << " (GB/s) perf " << (float)perf);
-      std::cout << "P2P," << bufSize_ << ",dev0,dev1," << numIter << "," << (float)perf
-                << std::endl;
+      CONSOLE_PRINT("%f\n", perf);
+      CONSOLE_PRINT("HIPPerfBufferCopySpeed[P2P] ( %u ) s:dev0 d:dev1 i:%u (GB/s) perf %f\n",
+                    bufSize_, numIter, (float)perf);
+      CONSOLE_PRINT("P2P,%u,dev0,dev1,%u,%f\n", bufSize_, numIter, (float)perf);
       test++;
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = reinterpret_cast<void*>(temp);
@@ -191,8 +189,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     HIP_CHECK(hipDeviceSynchronize());
     hipError_t syncErr = hipGetLastError();
     if (syncErr != hipSuccess) {
-      std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
-                << std::endl;
+      DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
     }
     HIP_CHECK(hipDeviceSynchronize());
     auto all_end = std::chrono::steady_clock::now();
@@ -203,20 +200,20 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
             .count();
 
-    printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
+    DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
-    printf("Elapsed seconds: %f\n", elapsed_secs.count());
+    DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
     double bufSizeWithIter = static_cast<double>(bufSize_);
-    printf("%f\n", bufSizeWithIter);
+    DEBUG_PRINT("%f\n", bufSizeWithIter);
     double perf_pre = bufSizeWithIter / elapsed_secs.count();
-    printf("%f\n", perf_pre);
+    DEBUG_PRINT("%f\n", perf_pre);
     double perf = perf_pre * static_cast<double>(numIter);
-    printf("%f\n", perf_pre);
+    DEBUG_PRINT("%f\n", perf_pre);
     perf *= static_cast<double>(1e-09);
-    printf("%f\n", perf);
-    INFO("HIPPerfBufferCopySpeed[IntraD2DNoCU] ( " << bufSize_ << ") s:dev0 d:dev0 i:" << numIter
-                                                   << " (GB/s) perf " << (float)perf);
-    std::cout << "NoCU," << bufSize_ << ",dev0,dev0," << numIter << "," << (float)perf << std::endl;
+    CONSOLE_PRINT("%f\n", perf);
+    CONSOLE_PRINT("HIPPerfBufferCopySpeed[IntraD2DNoCU] ( %u ) s:dev0 d:dev0 i:%u (GB/s) perf %f\n",
+                  bufSize_, numIter, (float)perf);
+    CONSOLE_PRINT("NoCU,%u,dev0,dev0,%u,%f\n", bufSize_, numIter, (float)perf);
     test++;
     void* temp = malloc(bufSize_ + 4096);
     void* chkBuf = reinterpret_cast<void*>(temp);
@@ -312,8 +309,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         HIP_CHECK(hipDeviceSynchronize());
         hipError_t syncErr = hipGetLastError();
         if (syncErr != hipSuccess) {
-          std::cout << "WARNING: hipDeviceSynchronize error: " << hipGetErrorString(syncErr)
-                    << std::endl;
+          DEBUG_PRINT("WARNING: hipDeviceSynchronize error: %s\n", hipGetErrorString(syncErr));
         }
         HIP_CHECK(hipDeviceSynchronize());
         auto all_end = std::chrono::steady_clock::now();
@@ -324,18 +320,17 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
             std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
                 .count();
 
-        printf("All_start: %f s, All_end: %f s\n", start_s, end_s);
+        DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
         std::chrono::duration<double> elapsed_secs = all_end - all_start;
-        printf("Elapsed seconds: %f\n", elapsed_secs.count());
+        DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
         double bufSizeWithIter = static_cast<double>(bufSize_);
-        printf("%f\n", bufSizeWithIter);
+        DEBUG_PRINT("%f\n", bufSizeWithIter);
         double perf_pre = bufSizeWithIter / elapsed_secs.count();
-        printf("%f\n", perf_pre);
-        printf("%f\n", perf_pre);
+        DEBUG_PRINT("%f\n", perf_pre);
         double perf = perf_pre * static_cast<double>(numIter);
-        printf("%f\n", perf_pre);
+        DEBUG_PRINT("%f\n", perf_pre);
         perf *= static_cast<double>(1e-09);
-        printf("%f\n", perf);
+        CONSOLE_PRINT("%f\n", perf);
         const char* strSrc = NULL;
         const char* strDst = NULL;
         if (deviceMallocUncached[0])
@@ -364,9 +359,8 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         if ((hostMalloc[0] || hostRegister[0] || unpinnedMalloc[0]) &&
             (hostMalloc[1] || hostRegister[1] || unpinnedMalloc[1]))
           perf *= 2.0;
-        INFO("HIPPerfBufferCopySpeed[" << test << "] ( " << bufSize_ << ") s:" << strSrc
-                                       << " d:" << strDst << " i:" << numIter << " (GB/s) perf "
-                                       << (float)perf);
+        CONSOLE_PRINT("HIPPerfBufferCopySpeed[%d] ( %u ) s:%s d:%s i:%u (GB/s) perf %f\n", test,
+                      bufSize_, strSrc, strDst, numIter, (float)perf);
         std::cout << "Type," << bufSize_ << "," << strSrc << "," << strDst << "," << numIter << ","
                   << (float)perf << std::endl;
         test++;
@@ -430,11 +424,11 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
 
-    INFO("hipPerfBufferCopySpeed - info: Set device to "
-         << deviceId << " : " << props.name
-         << "\nLegend: unp - unpinned(malloc),"
-            " hM - hipMalloc(device), hHR - hipHostRegister(pinned),"
-            " hHM - hipHostMalloc(prePinned), hMUC - hipMallocUncached\n");
+    CONSOLE_PRINT(
+        "hipPerfBufferCopySpeed - info: Set device to %d : %s\nLegend: unp - unpinned(malloc), hM "
+        "- hipMalloc(device), hHR - hipHostRegister(pinned), hHM - hipHostMalloc(prePinned), hMUC "
+        "- hipMallocUncached\n",
+        deviceId, props.name);
 
     // Run the test with all sizes and buffer types, alter p_tests to run a specific test
     REQUIRE(true == hipPerfBufferCopySpeed_test(-1));
