@@ -808,9 +808,6 @@ load(ArchiveT& ar, rocpd::types::kernel_dispatch& data)
     load_dim3("grid", data.grid_size);
     LOAD_DATA_FIELD(lds_size);
     LOAD_DATA_FIELD(scratch_size);
-    LOAD_DATA_FIELD(vgpr_count);
-    LOAD_DATA_FIELD(accum_vgpr_count);
-    LOAD_DATA_FIELD(sgpr_count);
     LOAD_DATA_FIELD(static_lds_size);
     LOAD_DATA_FIELD(static_scratch_size);
     LOAD_DATA_FIELD(sgpr_count);
