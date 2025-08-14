@@ -6258,7 +6258,7 @@ class AMDSMICommands():
             self.logger.store_watch_output(multiple_device_enabled=False)
 
 
-        self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
+        self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
     def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
