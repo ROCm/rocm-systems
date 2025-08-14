@@ -96,7 +96,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile        
         submodules: true
         set-safe-directory: true
 
@@ -124,7 +126,19 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm-custom/.info/version
         ls -la
-
+        
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake --build build --target all --parallel 16
+        /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.runner, 'mi200') || contains(matrix.system.runner, 'mi300a') }}
       shell: bash
@@ -285,8 +299,10 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
-
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile 
+        
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -323,6 +339,18 @@ jobs:
         cat /opt/rocm-custom/.info/version
         ls -la
 
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake --build build --target all --parallel 16
+        /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
@@ -355,7 +383,7 @@ jobs:
           --
           -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
-
+  
   sanitizers:
     strategy:
       fail-fast: false
@@ -396,7 +424,9 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
       with:
-        sparse-checkout: projects/rocprofiler-sdk
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile    
         submodules: true
         set-safe-directory: true
 
@@ -425,7 +455,19 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm-custom/.info/version
         ls -la
-
+        
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake --build build --target all --parallel 16
+        /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
@@ -467,5 +509,5 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" \
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" \
