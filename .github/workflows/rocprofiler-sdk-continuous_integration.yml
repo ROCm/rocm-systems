@@ -59,10 +59,10 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy'},
-          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy'},
-          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", ci-flags: '--linter clang-tidy'},
-          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", ci-flags: '--linter clang-tidy'}
+          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy', gpu-target: 'gfx1201'},
+          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy', gpu-target: 'gfx1101'},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", ci-flags: '--linter clang-tidy', gpu-target: 'gfx942'},
+          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", ci-flags: '--linter clang-tidy', gpu-target: 'gfx950'}
         ]
 
     runs-on: ${{ matrix.system.runner }}
@@ -126,7 +126,7 @@ jobs:
         ls -la
 
     - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      if: ${{ contains(matrix.system.runner, 'mi200') || contains(matrix.system.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
@@ -161,7 +161,8 @@ jobs:
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DOPENMP_GPU_TARGETS=${{ matrix.system.gpu-target }}
+          -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX='/opt/rocm-custom'
@@ -169,25 +170,25 @@ jobs:
           -DPython3_EXECUTABLE='/usr/bin/python3'
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}"
+          -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       run:
         sudo cmake --build build --target install --parallel 16
 
     - name: Build Packaging
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
       run:
         cmake --build build --target package --parallel 16
 
     - name: Test Install Build
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -197,11 +198,11 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-samples -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-tests -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Install Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 5
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -214,7 +215,7 @@ jobs:
         for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do sudo dpkg --force-all -i ${i}; done;
 
     - name: Test Installed Packages
-      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       working-directory: projects/rocprofiler-sdk
@@ -223,11 +224,11 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm-custom cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm-custom/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-samples-deb -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
+        ctest --test-dir build-tests-deb -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
 
     - name: Archive production artifacts
-      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.runner, env.CORE_EXT_RUNNER) }}
+      if: ${{ github.event_name == 'workflow_dispatch' && contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       uses: actions/upload-artifact@v4
       with:
         name: installers-deb
@@ -346,6 +347,7 @@ jobs:
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
+          -DOPENMP_GPU_TARGETS=gfx942
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
           -DPython3_EXECUTABLE=$(which python3)
@@ -461,6 +463,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
+          -DOPENMP_GPU_TARGETS=gfx942
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
