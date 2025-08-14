@@ -1428,7 +1428,7 @@ post_process_perfetto(int64_t _tid, const std::vector<timer_sampling_data>& _tim
             {
                 auto _ncur = _ncount++;
                 // the begin/end + HW counters will be same for entire call-stack so only
-                // annotate the top and the bottom functons to keep the data consumption
+                // annotate the top and the bottom functions to keep the data consumption
                 // low
                 bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
 
