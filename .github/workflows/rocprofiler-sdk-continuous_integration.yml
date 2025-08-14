@@ -97,6 +97,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
+        submodules: true
         set-safe-directory: true
 
     - name: Install requirements
@@ -134,8 +135,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
@@ -144,7 +143,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -315,8 +314,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
@@ -325,7 +322,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -421,8 +418,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
@@ -431,7 +426,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
