@@ -156,14 +156,15 @@ jobs:
       run: |
         python3 -m pip install --upgrade pip pipx
         python3 -m pipx install awscli
-        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+        python3 -m pipx ensurepath
+        KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
           --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
         test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         sudo mkdir -p /opt/rocm-custom
@@ -180,11 +181,12 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         python3 -m pipx install cmake
-        echo 'PATH=~/.local/bin:$PATH' >> $GITHUB_ENV
+        python3 -m pipx ensurepath
 
     - name: List Files
       shell: bash
       run: |
+        python3 -m pipx ensurepath
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
@@ -197,6 +199,7 @@ jobs:
       timeout-minutes: 30
       shell: bash
       run:
+        python3 -m pipx ensurepath;
         LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core

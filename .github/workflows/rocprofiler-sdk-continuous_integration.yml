@@ -96,7 +96,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
-        submodules: true
         set-safe-directory: true
 
     - name: Install requirements
@@ -149,6 +148,7 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
+          --submit-url "https://my.cdash.org/submit.php?project=rocprofiler-sdk"
           ${{ matrix.system.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
