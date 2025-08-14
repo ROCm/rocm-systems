@@ -95,8 +95,7 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        sudo apt-get update
-        sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
+        sudo apt-get update; sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev rocm-llvm-dev
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
