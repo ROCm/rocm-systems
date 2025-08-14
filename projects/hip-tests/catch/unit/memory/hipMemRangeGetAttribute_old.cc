@@ -170,21 +170,21 @@ TEST_CASE("Unit_hipMemRangeGetAttribute_NegativeTests") {
     }
     // checking the behavior with dataSize > 4 and even
     SECTION("checking the behavior with dataSize > 4 and even") {
-      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 6,
-                                     hipMemRangeAttributeReadMostly,
-                                     devPtr, MEM_SIZE), __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 6, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behavior with dataSize > 4 and odd
     SECTION("checking the behavior with dataSize > 4 and odd") {
-      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 7,
-                                     hipMemRangeAttributeReadMostly,
-                                     devPtr, MEM_SIZE), __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 7, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behavior with dataSize which is not multiple of 4
     SECTION("checking the behavior with dataSize which is not multiple of 4") {
-      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 27,
-                                     hipMemRangeAttributeReadMostly,
-                                     devPtr, MEM_SIZE), __LINE__));
+      REQUIRE(CheckError(hipMemRangeGetAttribute(out_data.get(), 27, hipMemRangeAttributeReadMostly,
+                                                 devPtr, MEM_SIZE),
+                         __LINE__));
     }
     // checking the behaviour with devPtr(4th param) as NULL
     SECTION("checking the behaviour with devPtr(4th param) as NULL") {
