@@ -70,7 +70,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        python3 -m pip install awscli --break-system-packages
+        sudo apt-get update
+        sudo apt-get install -y awscli
         KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
