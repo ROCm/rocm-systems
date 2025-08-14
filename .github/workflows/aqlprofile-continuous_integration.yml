@@ -204,7 +204,7 @@ jobs:
       shell: bash
       run:
         python3 -m pipx ensurepath; source ~/.bashrc;
-        LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        PATH=/opt/rocm/bin:$PATH LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""

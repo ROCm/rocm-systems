@@ -149,7 +149,6 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
-          --submit-url '${{ env.CDASH_URL }}'
           ${{ matrix.system.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
