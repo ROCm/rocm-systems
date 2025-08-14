@@ -138,6 +138,13 @@ jobs:
       run: |
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang' >> $GITHUB_ENV
+          echo 'HIP_CLANG_PATH=/opt/rocm-custom/llvm/bin' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HSA_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm-custom/llvm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -286,6 +293,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         python3 -m pip install -U --user -r requirements.txt
+        python3 -m pipx install cmake
         sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
         sudo rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
 
@@ -293,10 +301,15 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          python3 -m pipx install cmake
-          echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang' >> $GITHUB_ENV
+          echo 'HIP_CLANG_PATH=/opt/rocm-custom/llvm/bin' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HSA_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm-custom/llvm' >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -421,9 +434,15 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang' >> $GITHUB_ENV
+          echo 'HIP_CLANG_PATH=/opt/rocm-custom/llvm/bin' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HSA_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm-custom/llvm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
