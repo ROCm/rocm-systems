@@ -25,7 +25,6 @@
 #include "hip_prof_api.h"
 #include "trace_helper.h"
 #include "rocclr/utils/debug.hpp"
-#include "hip_formatting.hpp"
 #include "hip_graph_capture.hpp"
 
 #include <unordered_set>
@@ -620,11 +619,13 @@ public:
     hipStreamCaptureMode stream_capture_mode_;
     std::stack<ihipExec_t> exec_stack_;
     stream_per_thread stream_per_thread_obj_;
+    bool isSetDeviceCalled;
 
     TlsAggregator(): device_(nullptr),
       last_error_(hipSuccess),
       last_command_error_(hipSuccess),
-      stream_capture_mode_(hipStreamCaptureModeGlobal) {
+      stream_capture_mode_(hipStreamCaptureModeGlobal),
+      isSetDeviceCalled(false) {
     }
     ~TlsAggregator() {
     }

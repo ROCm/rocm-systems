@@ -166,26 +166,26 @@ class OmniSoC_Base:
         )
 
         # Parse json from amd-smi static --clock
-        amd_smi_mclk = run(
-            ["amd-smi", "static", "--clock", "--json"], exit_on_error=True
+        static_data = json.loads(
+            run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
         )
-        amd_smi_mclk = json.loads(amd_smi_mclk)
 
-        if isinstance(amd_smi_mclk, dict):
-            # The output of `amd-smi static --clock --json` is a dict with
-            # amd-smi>=26.0.0.
-            amd_smi_mclk = amd_smi_mclk["gpu_data"][0]["clock"]["mem"][
-                "frequency_levels"
-            ]
-        else:
-            # For backward compatibility: the output of `amd-smi static --clock --json`
-            # used to be a list for amd-smi<26.0.0.
-            amd_smi_mclk = amd_smi_mclk[0]["clock"]["mem"]["frequency_levels"]
+        # Extract GPU data
+        gpu_list = (
+            static_data
+            if isinstance(static_data, list)
+            else static_data.get("gpu_data", [])
+        )
+        gpu_data = gpu_list[0] if gpu_list else {}
 
-        # Choose the highest level of memory clock frequency
-        amd_smi_mclk = amd_smi_mclk[sorted(amd_smi_mclk.keys())[-1]]
-        # 100 Mhz -> 100
-        self._mspec.max_mclk = amd_smi_mclk.split(" ")[0]
+        frequency_levels = (
+            gpu_data.get("clock", {}).get("mem", {}).get("frequency_levels")
+        )
+        if frequency_levels:
+            # Extract max memory clock frequency
+            amd_smi_mclk = frequency_levels[max(frequency_levels.keys())]
+            # 100 Mhz -> 100
+            self._mspec.max_mclk = amd_smi_mclk.split()[0]
 
         console_debug("max mem clock is {}".format(self._mspec.max_mclk))
 
@@ -218,37 +218,38 @@ class OmniSoC_Base:
         Falls back through multiple methods if the primary method fails.
         """
 
-        from utils.specs import run, search
+        from utils.specs import run
 
         # TODO: use amd-smi python api when available
-        amd_smi_static = run(["amd-smi", "static", "--gpu=0"], exit_on_error=True)
+        # Load AMD-SMI data
+        static_data = run(
+            ["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True
+        )
+        gpu_list = (
+            static_data
+            if isinstance(static_data, list)
+            else static_data.get("gpu_data", [])
+        )
+        gpu_data = gpu_list[0] if gpu_list else {}
 
-        # Purposely search for patterns without variants suffix to try and match a known
-        # GPU model.
+        # Try detection methods until we find a match
         detection_methods = [
-            {
-                "name": "Market Name",
-                "pattern": r"MARKET_NAME:\s*.*(mi|MI\d*[a-zA-Z]*)",
-            },
-            {
-                "name": "VBIOS Name",
-                "pattern": r"NAME:\s*.*(mi|MI\d*[a-zA-Z]*)",
-            },
-            {
-                "name": "Product Name",
-                "pattern": r"PRODUCT_NAME:\s*.*(mi|MI\d*[a-zA-Z]*)",
-            },
+            ("asic", "market_name"),
+            ("vbios", "name"),
+            ("board", "product_name"),
         ]
 
         gpu_model = None
-        for method in detection_methods:
-            console_log(f"Determining GPU model using {method['name']}.")
-            gpu_model = search(method["pattern"], amd_smi_static)
-            if gpu_model:
-                break
+        for section, field in detection_methods:
+            detected_name = gpu_data.get(section, {}).get(field, "").lower()
+            for model in mi_gpu_specs.get_all_gpu_models():
+                if model in detected_name:
+                    console_log(f"GPU model '{model}' detected using {section}.{field}")
+                    gpu_model = model
+                    break
 
         if not gpu_model:
-            console_warning("Unable to determine the GPU model.")
+            console_warning("Unable to determine the GPU model from amd-smi.")
             return
 
         gpu_model = self._adjust_mi300_model(gpu_model.lower(), gpu_arch.lower())
@@ -302,7 +303,8 @@ class OmniSoC_Base:
                     f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
                 )
             self.__args.filter_blocks = [
-                next(iter(metric.keys())) for metric in sets_info[set_selected]["metric"]
+                next(iter(metric.keys()))
+                for metric in sets_info[set_selected]["metric"]
             ]
 
         if not self.get_args().filter_blocks:
@@ -375,10 +377,14 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
-                })
+                counters = counters.union(
+                    {
+                        f"{counter_name}[{i}]"
+                        for i in range(
+                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
+                        )
+                    }
+                )
 
         return counters
 

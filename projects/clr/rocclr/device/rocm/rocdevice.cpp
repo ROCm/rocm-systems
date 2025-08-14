@@ -3465,6 +3465,25 @@ void Device::ReleaseGlobalSignal(void* signal) const {
 }
 
 // ================================================================================================
+bool Device::CreateUserEvent(amd::UserEvent* event) const {
+  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+  if ((signal == nullptr) ||
+      (HSA_STATUS_SUCCESS != hsa_signal_create(0, 0, nullptr, &signal->signal_))) {
+    return false;
+  }
+  hsa_signal_silent_store_relaxed(signal->signal_, kInitSignalValueOne);
+  event->SetHwEvent(signal.release());
+  return true;
+}
+
+// ================================================================================================
+void Device::SetUserEvent(amd::UserEvent* event) const {
+  auto signal = reinterpret_cast<ProfilingSignal*>(event->HwEvent());
+  assert(signal != nullptr && "Can't have user event without hw event!");
+  hsa_signal_silent_store_relaxed(signal->signal_, 0);
+}
+
+// ================================================================================================
 bool Device::IsValidAllocation(const void* dev_ptr, size_t size, hsa_amd_pointer_info_t* ptr_info) {
   // Query ptr type to see if it's a HMM allocation
   hsa_status_t status =

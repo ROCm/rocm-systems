@@ -200,6 +200,9 @@ class IPCEvent : public Event {
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
+      if (owners == 0) {
+        amd::Os::shm_unlink(ipc_evt_.ipc_name_);
+      }
     }
   }
   IPCEvent() : Event(hipEventInterprocess) {}

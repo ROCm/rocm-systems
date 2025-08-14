@@ -285,6 +285,9 @@ class Os : AllStatic {
   //! Deletes file
   static int unlink(const std::string& path);
 
+  //! Removes the shared memory object name
+  static int shm_unlink(const std::string& path);
+
   // Library routines:
   //
   typedef bool (*SymbolCallback)(std::string, const void*, void*);

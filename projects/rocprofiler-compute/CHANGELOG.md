@@ -76,7 +76,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Remove aggregated analysis view from TUI mode
 
 
-## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
+## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
 ### Added
 

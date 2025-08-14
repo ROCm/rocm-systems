@@ -50,7 +50,7 @@ repos:
       - id: check-copyright
         name: copyright-detector
         require_serial: true # Slightly slower, but prevents hook running script many times
-        entry: ./scripts/check-copyright.sh
+        entry: ./projects/rocprofiler-systems/scripts/check-copyright.sh
         language: script
         files: \.(c|h|txt|cpp|hpp|py)$
         exclude: ^\.|^docs/|^examples/lulesh/|^examples/mpi/|^examples/openmp/|^external/|^cmake/
