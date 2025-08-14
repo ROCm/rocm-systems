@@ -304,28 +304,19 @@ def test_csv_data(
     json_data,
     categories=(
         "agent",
-        "hip",
-        "hsa",
-        "marker",
-        "kernel",
-        "memory_copy",
-        "memory_allocation",
-        "rocdecode_api",
-        "rocjpeg_api",
         "counter_collection",
+        "kernel",
+        "memory_allocation",
+        "memory_copy",
+        "region",
     ),
 ):
 
     mapping = {
-        "hip": "hip_api",
-        "hsa": "hsa_api",
-        "marker": "marker_api",
-        "kernel": "kernel_dispatch",
-        "memory_copy": "memory_copy",
-        "memory_allocation": "memory_allocation",
-        "rocdecode_api": "rocdecode_api",
-        "rocjpeg_api": "rocjpeg_api",
         "counter_collection": "counter_collection",
+        "kernel": "kernel_dispatch",
+        "memory_allocation": "memory_allocation",
+        "memory_copy": "memory_copy",
     }
 
     keys_mapping = {
@@ -345,16 +336,8 @@ def test_csv_data(
             "Grid_Size_Y": ("dispatch_info.grid_size.y", None),
             "Grid_Size_Z": ("dispatch_info.grid_size.z", None),
         },
-        "hip": {
-            "Function": (),  # Special case
-            "Thread_Id": ("thread_id", None),
-            "Correlation_Id": ("correlation_id", "internal"),
-            "Start_Timestamp": ("start_timestamp", None),
-            "End_Timestamp": ("end_timestamp", None),
-        },
-        "hsa": {
-            "Function": (),  # Special case
-            "Thread_Id": ("thread_id", None),
+        "memory_allocation": {
+            "Operation": (),  # Special case
             "Correlation_Id": ("correlation_id", "internal"),
             "Start_Timestamp": ("start_timestamp", None),
             "End_Timestamp": ("end_timestamp", None),
@@ -364,13 +347,7 @@ def test_csv_data(
             "Start_Timestamp": ("start_timestamp", None),
             "End_Timestamp": ("end_timestamp", None),
         },
-        "memory_allocation": {
-            "Operation": (),  # Special case
-            "Correlation_Id": ("correlation_id", "internal"),
-            "Start_Timestamp": ("start_timestamp", None),
-            "End_Timestamp": ("end_timestamp", None),
-        },
-        "marker": {
+        "region": {
             "Thread_Id": ("thread_id", None),
             "Correlation_Id": ("correlation_id", "internal"),
             "Start_Timestamp": ("start_timestamp", None),
@@ -390,6 +367,12 @@ def test_csv_data(
             _js_data = json_data["rocprofiler-sdk-tool"]["callback_records"][category]
         elif category == "agent":
             _js_data = json_data["rocprofiler-sdk-tool"]["agents"]
+        elif category == "region":
+            buffer_records = json_data["rocprofiler-sdk-tool"]["buffer_records"]
+            _js_data = []
+            for key, value in buffer_records.items():
+                if key.endswith("_api"):
+                    _js_data.extend(value)
         else:
             json_records_key = mapping[category]
             _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][

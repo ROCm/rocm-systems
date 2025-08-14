@@ -54,13 +54,11 @@ def test_csv_data(csv_data, json_data):
         json_data,
         (
             "agent",
-            "hip",
-            "hsa",
-            "marker",
-            "kernel",
-            "memory_copy",
-            "memory_allocation",
             "counter_collection",
+            "kernel",
+            "memory_allocation",
+            "memory_copy",
+            "region",
         ),
     )
 

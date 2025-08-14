@@ -2,7 +2,7 @@
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -284,79 +284,6 @@ def write_memory_allocation_csv(importData, config) -> None:
     )
 
 
-def write_hip_api_csv(importData, config) -> None:
-
-    query = """
-        SELECT
-            guid AS Guid,
-            category AS Domain,
-            name AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions"
-        WHERE
-            category LIKE 'HIP_%'
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "hip_api"
-    )
-
-
-def write_hsa_api_csv(importData, config) -> None:
-
-    query = """
-        SELECT
-            guid AS Guid,
-            category AS Domain,
-            name AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions"
-        WHERE
-            category LIKE 'HSA_%'
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "hsa_api"
-    )
-
-
-def write_marker_api_csv(importData, config) -> None:
-
-    query = """
-        SELECT
-            guid AS Guid,
-            category AS Domain,
-            CASE
-                WHEN json_extract(extdata, '$.message') IS NOT NULL
-                THEN json_extract(extdata, '$.message')
-                ELSE name
-            END AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions_and_samples"
-        WHERE
-            category LIKE 'MARKER_%'
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "marker_api"
-    )
-
-
 def write_counters_csv(importData, config) -> None:
 
     if config.agent_index_value == libpyrocpd.agent_indexing.node:  # absolute
@@ -438,53 +365,7 @@ def write_scratch_memory_csv(importData, config) -> None:
     )
 
 
-def write_rccl_api_csv(importData, config) -> None:
-
-    query = """
-         SELECT
-            guid AS Guid,
-            category AS Domain,
-            name AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions"
-        WHERE
-            category LIKE 'RCCL_%'
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "rccl_api"
-    )
-
-
-def write_rocdecode_api_csv(importData, config) -> None:
-
-    query = """
-         SELECT
-            guid AS Guid,
-            category AS Domain,
-            name AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions"
-        WHERE
-            category LIKE 'ROCDECODE_%'
-        ORDER BY
-            guid ASC, start ASC, end DESC
-    """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "rocdecode_api"
-    )
-
-
-def write_rocjpeg_api_csv(importData, config) -> None:
+def write_region_csv(importData, config) -> None:
 
     query = """
         SELECT
@@ -498,29 +379,45 @@ def write_rocjpeg_api_csv(importData, config) -> None:
             end AS End_Timestamp
         FROM "regions"
         WHERE
+            category LIKE 'HIP_%' OR
+            category LIKE 'HSA_%' OR
+            category LIKE 'RCCL_%' OR
+            category LIKE 'ROCDECODE_%' OR
             category LIKE 'ROCJPEG_%'
+        UNION ALL
+                SELECT
+            guid AS Guid,
+            category AS Domain,
+            CASE
+                WHEN json_extract(extdata, '$.message') IS NOT NULL
+                THEN json_extract(extdata, '$.message')
+                ELSE name
+            END AS Function,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            stack_id AS Correlation_Id,
+            start AS Start_Timestamp,
+            end AS End_Timestamp
+        FROM "regions_and_samples"
+        WHERE
+            category LIKE 'MARKER_%'
         ORDER BY
             guid ASC, start ASC, end DESC
     """
     write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "rocjpeg_api"
+        importData, query, config.output_path, config.output_file, "region"
     )
 
 
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
-    write_kernel_csv(importData, config)
-    write_memory_copy_csv(importData, config)
-    write_memory_allocation_csv(importData, config)
-    write_hip_api_csv(importData, config)
-    write_hsa_api_csv(importData, config)
-    write_marker_api_csv(importData, config)
     write_counters_csv(importData, config)
+    write_kernel_csv(importData, config)
+    write_memory_allocation_csv(importData, config)
+    write_memory_copy_csv(importData, config)
+    write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
-    write_rccl_api_csv(importData, config)
-    write_rocdecode_api_csv(importData, config)
-    write_rocjpeg_api_csv(importData, config)
 
 
 def execute(input, config=None, window_args=None, **kwargs):
