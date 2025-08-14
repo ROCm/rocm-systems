@@ -611,11 +611,6 @@ class VirtualGPU : public device::VirtualDevice {
  protected:
   void profileEvent(EngineType engine, bool type) const;
 
-  //! Creates buffer object from image
-  amd::Memory* createBufferFromImage(
-      amd::Memory& amdImage  //! The parent image object(untiled images only)
-  );
-
  private:
   struct MemoryRange {
     uint64_t start_;  //!< Memory range start address
