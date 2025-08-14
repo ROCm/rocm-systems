@@ -391,6 +391,51 @@ jobs:
       GCC_COMPILER_VERSION: 13
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install --upgrade pip
+        apt-get update
+        apt-get install -y python3.10-venv
+        python3 -m pip install --upgrade pip pipx
+        python3 -m pipx install awscli
+    
+        # Pick key pattern based on matrix.runner
+        case "${{ matrix.runner }}" in
+          mi3xx)
+            PATTERN="gfx94X"
+            ;;
+          navi3)
+            PATTERN="gfx110X"
+            ;;
+          navi4)
+            PATTERN="gfx120X"
+            ;;
+          *)
+            echo "Unknown runner: ${{ matrix.runner }}"
+            exit 1
+            ;;
+        esac
+    
+        echo "Using pattern: $PATTERN"
+    
+        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, '$PATTERN')], &LastModified)[-1].Key")
+    
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No $PATTERN tarball found"; exit 1; }
+    
+        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+    
+        mkdir -p /opt/rocm-custom
+        tar -xf rocm.tar.gz -C /opt/rocm-custom
+        
     - name: Checkout
       uses: actions/checkout@v4
       with:
@@ -414,7 +459,7 @@ jobs:
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
 
     - name: List Files
       shell: bash
@@ -422,7 +467,7 @@ jobs:
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm-custom/.info/version
         ls -la
         
     - name: Build and Install Aqlprofile
@@ -430,32 +475,12 @@ jobs:
       working-directory: projects/aqlprofile
       run: |
         echo "Install Aqlprofile."
-        ./build.sh
-        cd build
-        make install
-
-    - name: Install rocprof-trace-decoder
-      shell: bash
-      working-directory: /tmp
-      run: |
-        echo "Install rocprof-trace-decoder."
-        URL=$(curl -s https://api.github.com/repos/ROCm/rocprof-trace-decoder/releases/latest \
-            | grep browser_download_url \
-            | grep "ubuntu-22.04" \
-            | grep ".deb" \
-            | cut -d '"' -f 4)
-        if [ -z "$URL" ]; then
-          echo "❌ Error: Could not find Ubuntu 22.04 .deb package URL."
-          exit 1
-        fi
-        
-        echo "Downloading: $URL"
-        curl -L -o rocprof-trace-decoder-latest-ubuntu-22.04.deb "$URL"
-        
-        echo "Installing package..."
-        dpkg -i rocprof-trace-decoder-latest-ubuntu-22.04.deb || apt-get install -f -y
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' .
+        /usr/bin/cmake --build build --target all --parallel 16
+        /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
-        rm -f rocprof-trace-decoder-latest-ubuntu-22.04.deb
   
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
@@ -467,19 +492,23 @@ jobs:
       timeout-minutes: 45
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
-        python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
-          --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ env.GPU_TARGETS }}
-          --memcheck ${{ matrix.sanitizer }}
-          --run-attempt ${{ github.run_attempt }}
+      run: |
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        export ROCM_PATH=/opt/rocm-custom
+  
+        python3 ./source/scripts/run-ci.py -B build \
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }} \
+          --build-jobs 16 \
+          --site ${RUNNER_HOSTNAME} \
+          --gpu-targets ${{ env.GPU_TARGETS }} \
+          --memcheck ${{ matrix.sanitizer }} \
+          --run-attempt ${{ github.run_attempt }} \
+          -- \
+          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
+          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}" \
+          -DPython3_EXECUTABLE=$(which python3) \
+          ${{ env.GLOBAL_CMAKE_OPTIONS }} \
           --
-          -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
-          -DPython3_EXECUTABLE=$(which python3)
-          ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
+          -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}" \
+          -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}" \
