@@ -70,8 +70,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        python3 -m pip install --upgrade pip pipx --break-system-packages
-        python3 -m pipx install awscli --break-system-packages
+        python3 -m pip install awscli --break-system-packages
         KEY=$(~/.local/bin/aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
@@ -128,12 +127,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi300']
-        os: ['rhel-9', 'sles-15']
-        build-type: ['RelWithDebInfo']
-        ci-flags: ['--linter clang-tidy']
+        system: [
+          {gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
+          {gpu: 'mi325', os: 'rhel-9.1', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
+          {gpu: 'mi325', os: 'sles-15.4', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''}
+        ]
 
-    runs-on: rocprofiler-${{ matrix.os }}
+    runs-on: linux-mi325-1gpu-ossci-rocm
+    container:
+      image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-${{ matrix.system.os }}-base:latest
+      username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+      password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
 
     permissions:
       contents: read
