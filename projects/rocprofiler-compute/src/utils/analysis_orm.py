@@ -22,8 +22,20 @@
 # SOFTWARE.
 ##############################################################################el
 
-from sqlalchemy import create_engine, Column, String, JSON, Integer, ForeignKey, Text, Float, select, func, text
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship
+from sqlalchemy import (
+    JSON,
+    Column,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+    func,
+    select,
+    text,
+)
+from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 from utils.logger import console_debug, console_error
 
@@ -32,8 +44,9 @@ Base = declarative_base()
 PREFIX = "compute_"
 SCHEMA_VERSION = "1.0.0"
 
+
 class Workload(Base):
-    __tablename__ = f'{PREFIX}workload'
+    __tablename__ = f"{PREFIX}workload"
 
     workload_id = Column(Integer, primary_key=True)
     name = Column(String)
@@ -51,28 +64,34 @@ class Workload(Base):
     # Workload can have multiple pc_sampling values
     pc_sampling_values = relationship("PCsampling", back_populates="workload")
 
+
 class Metric(Base):
-    __tablename__ = f'{PREFIX}metric'
+    __tablename__ = f"{PREFIX}metric"
 
     metric_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(Integer, ForeignKey(f'{PREFIX}workload.workload_id'), nullable=False)
-    name = Column(String) # e.g. Wavefronts Num
-    metric_id = Column(String) # e.g. 4.1.3
-    description = Column(Text) # e.g. Number of wavefronts
-    table_name = Column(String) # e.g. Wavefront
-    sub_table_name = Column(String) # e.g. Wavefront stats
-    unit = Column(String) # e.g. Gbps
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
+    name = Column(String)  # e.g. Wavefronts Num
+    metric_id = Column(String)  # e.g. 4.1.3
+    description = Column(Text)  # e.g. Number of wavefronts
+    table_name = Column(String)  # e.g. Wavefront
+    sub_table_name = Column(String)  # e.g. Wavefront stats
+    unit = Column(String)  # e.g. Gbps
 
     # Metric can have one workload
     workload = relationship("Workload", back_populates="metrics")
     # Metric can have multiple values
     values = relationship("Value", back_populates="metric")
 
+
 class RooflineData(Base):
-    __tablename__ = f'{PREFIX}roofline_data'
+    __tablename__ = f"{PREFIX}roofline_data"
 
     roofline_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(Integer, ForeignKey(f'{PREFIX}workload.workload_id'), nullable=False)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
     kernel_name = Column(String)
     total_flops = Column(Float)
     l1_cache_data = Column(Float)
@@ -82,11 +101,14 @@ class RooflineData(Base):
     # Roofline data point can have one workload
     workload = relationship("Workload", back_populates="roofline_data_points")
 
+
 class Dispatch(Base):
-    __tablename__ = f'{PREFIX}dispatch'
+    __tablename__ = f"{PREFIX}dispatch"
 
     dispatch_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(Integer, ForeignKey(f'{PREFIX}workload.workload_id'), nullable=False)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
     dispatch_id = Column(Integer)
     kernel_name = Column(String)
     gpu_id = Column(Integer)
@@ -95,11 +117,14 @@ class Dispatch(Base):
     # Dispatch can have one workload
     workload = relationship("Workload", back_populates="dispatches")
 
+
 class PCsampling(Base):
-    __tablename__ = f'{PREFIX}pcsampling'
+    __tablename__ = f"{PREFIX}pcsampling"
 
     pc_sampling_uuid = Column(Integer, primary_key=True)
-    workload_id = Column(Integer, ForeignKey(f'{PREFIX}workload.workload_id'), nullable=False)
+    workload_id = Column(
+        Integer, ForeignKey(f"{PREFIX}workload.workload_id"), nullable=False
+    )
     source = Column(String)
     instruction = Column(String)
     count = Column(Integer)
@@ -112,19 +137,23 @@ class PCsampling(Base):
     # PCsampling can have one workload
     workload = relationship("Workload", back_populates="pc_sampling_values")
 
+
 class Value(Base):
-    __tablename__ = f'{PREFIX}value'
+    __tablename__ = f"{PREFIX}value"
 
     value_uuid = Column(Integer, primary_key=True)
-    metric_uuid = Column(Integer, ForeignKey(f'{PREFIX}metric.metric_uuid'), nullable=False)
-    value_name= Column(String) # e.g. min, max, avg
-    value = Column(Float) # e.g. 123.45
+    metric_uuid = Column(
+        Integer, ForeignKey(f"{PREFIX}metric.metric_uuid"), nullable=False
+    )
+    value_name = Column(String)  # e.g. min, max, avg
+    value = Column(Float)  # e.g. 123.45
 
     # Value can have one metric
     metric = relationship("Metric", back_populates="values")
 
+
 class Metadata(Base):
-    __tablename__ = f'{PREFIX}metadata'
+    __tablename__ = f"{PREFIX}metadata"
 
     id = Column(Integer, primary_key=True)
     compute_version = Column(String)
@@ -158,15 +187,15 @@ class Database:
         finally:
             self._session.close()
 
+
 def get_views():
     views = {
         "kernel_view": select(
             Dispatch.kernel_name,
-            func.count(Dispatch.dispatch_id).label('dispatch_count'),
-            func.sum(Dispatch.duration).label('duration_sum'),
-            func.avg(Dispatch.duration).label('duration_mean')
+            func.count(Dispatch.dispatch_id).label("dispatch_count"),
+            func.sum(Dispatch.duration).label("duration_sum"),
+            func.avg(Dispatch.duration).label("duration_mean"),
         ).group_by(Dispatch.kernel_name),
-
         "metric_view": select(
             Metric.workload_id,
             Metric.name,
@@ -176,10 +205,13 @@ def get_views():
             Metric.sub_table_name,
             Metric.unit,
             Value.value_name,
-            Value.value
+            Value.value,
         ).join(Value, Metric.metric_uuid == Value.metric_uuid),
     }
     return [
-        text(f"CREATE VIEW {PREFIX}{view_name} AS {stmt.compile(compile_kwargs={'literal_binds': True})}")
+        text(
+            f"CREATE VIEW {PREFIX}{view_name} AS "
+            f"{stmt.compile(compile_kwargs={'literal_binds': True})}"
+        )
         for view_name, stmt in views.items()
     ]

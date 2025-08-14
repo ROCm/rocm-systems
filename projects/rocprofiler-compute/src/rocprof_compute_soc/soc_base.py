@@ -300,7 +300,8 @@ class OmniSoC_Base:
             sets_info = parse_sets_yaml(self.__arch)
             if set_selected not in set(sets_info.keys()):
                 console_error(
-                    f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
+                    f"argument --set: invalid choice: '{set_selected}' "
+                    f"(choose from {sets_info.keys()})"
                 )
             self.__args.filter_blocks = [
                 next(iter(metric.keys()))
@@ -377,14 +378,10 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union(
-                    {
-                        f"{counter_name}[{i}]"
-                        for i in range(
-                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
-                        )
-                    }
-                )
+                counters = counters.union({
+                    f"{counter_name}[{i}]"
+                    for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
+                })
 
         return counters
 

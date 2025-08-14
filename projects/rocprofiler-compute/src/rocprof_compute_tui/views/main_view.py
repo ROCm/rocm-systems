@@ -57,9 +57,7 @@ class MainView(Horizontal):
         super().__init__(id="main-container")
         self.start_path = (
             # NOTE: is cwd the best choice?
-            Path.cwd()
-            if DEFAULT_START_PATH is None
-            else Path(DEFAULT_START_PATH)
+            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
         )
 
         self.logger = Logger()

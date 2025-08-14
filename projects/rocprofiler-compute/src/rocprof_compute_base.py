@@ -261,7 +261,8 @@ class RocProfCompute:
 
         # Print header
         print(
-            f"{'Set Option':<35} {'Set Title':<35} {'Metric Name':<30} {'Metric ID':<10}"
+            f"{'Set Option':<35} {'Set Title':<35} {'Metric Name':<30} "
+            f"{'Metric ID':<10}"
         )
         print("-" * 115)
 
@@ -281,7 +282,8 @@ class RocProfCompute:
                     title_display = title if first_row else ""
 
                     print(
-                        f"{set_display:<35} {title_display:<35} {metric_name:<30} {metric_id:<10}"
+                        f"{set_display:<35} {title_display:<35} {metric_name:<30} "
+                        f"{metric_id:<10}"
                     )
                     first_row = False
             # Empty line between sets
@@ -291,7 +293,7 @@ class RocProfCompute:
         if sets_info:
             first_set = next(iter(sets_info.keys()))
             print(f"  rocprof-compute profile --set {first_set}  # Profile this set")
-        print(f"  rocprof-compute profile --list-sets        # Show this help")
+        print("  rocprof-compute profile --list-sets        # Show this help")
         print()
 
         sys.exit(0)
