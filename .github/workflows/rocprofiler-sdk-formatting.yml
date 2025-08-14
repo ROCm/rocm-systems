@@ -44,6 +44,8 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         FORMAT_FILES=$(find . -type f | egrep 'CMakeLists.txt|\.cmake$')
+        command -v cmake-format
+        cmake-format --version
         set +e
         cmake-format -i ${FORMAT_FILES}
         if [ $(git diff | wc -l) -ne 0 ]; then
@@ -77,14 +79,19 @@ jobs:
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
-        sudo apt-get install -y software-properties-common python3 python3-pip build-essential
-        sudo apt install -y wget curl clang-format-11
+        sudo apt-get install -y software-properties-common python3 python3-pip build-essential wget curl clang-format-11 git
         python3 -m pip install -r requirements.txt
 
     - name: Run clang-format
       working-directory: projects/rocprofiler-sdk
       run: |
         FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
+        command -v git
+        command -v clang-format
+        command -v clang-format-11
+        git --version
+        clang-format --version
+        clang-format-11 --version
         set +e
         FORMAT_OUT=$(clang-format-11 -i ${FORMAT_FILES})
         if [ $(git diff | wc -l) -ne 0 ]; then
