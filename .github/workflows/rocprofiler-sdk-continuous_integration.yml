@@ -149,7 +149,7 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
-          --submit-url ${{ env.CDASH_URL }}
+          --submit-url '${{ env.CDASH_URL }}'
           ${{ matrix.system.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -157,12 +157,9 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.system.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
-          -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
-          -DPython3_EXECUTABLE=$(which python3)
+          -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom
+          -DPython3_EXECUTABLE=/usr/bin/python3
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
-          --
-          -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}"
-          -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}"
 
     - name: Install
       if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
