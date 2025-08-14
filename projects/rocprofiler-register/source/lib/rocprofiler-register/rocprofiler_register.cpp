@@ -864,6 +864,10 @@ rocprofiler_register_invoke_nonpropagated_registrations()
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations() ROCPROFILER_REGISTER_PUBLIC_API;
 
+// This function can be invoked by ptrace
+rocprofiler_register_error_code_t
+rocprofiler_register_invoke_prestore_loads() ROCPROFILER_REGISTER_PUBLIC_API;
+
 rocprofiler_register_error_code_t
 rocprofiler_register_invoke_all_registrations()
 {
