@@ -64,11 +64,10 @@ findViaInstallPath(const std::string& filename)
 std::string
 findViaEnvironment(const std::string& filename)
 {
-    if(const char* fw_path = nullptr; (fw_path = getenv("ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH")))
+    if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
     {
-        ROCP_INFO << filename
-                  << " is being looked up via env variable ROCPROFILER_FIRMWARE_RESTRICTIONS_PATH";
-        return common::filesystem::path{std::string{fw_path}} / filename;
+        ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
+        return common::filesystem::path{std::string{metrics_path}} / filename;
     }
     // No environment variable, lookup via install path
     return findViaInstallPath(filename);
@@ -163,7 +162,6 @@ check_agent_firmware_restrictions(const std::string& yaml_content)
     // Check each agent against applicable firmware restrictions
     for(const auto* agent : agents)
     {
-        ROCP_ERROR << "Hello";
         if(!agent || agent->type != ROCPROFILER_AGENT_TYPE_GPU)
         {
             continue;  // Skip non-GPU agents
@@ -237,13 +235,13 @@ check_installed_firmware_restrictions()
     std::call_once(check_flag, []() {
         result = true;  // Assume valid until proven otherwise
 
-        // Find the firmware restrictions YAML file
-        auto fw_restrictions_path = findViaEnvironment("firmware_restrictions.yaml");
+        // Find the counter definitions YAML file that contains firmware restrictions
+        auto fw_restrictions_path = findViaEnvironment("config.yaml");
 
         // Check if file exists
         if(!common::filesystem::exists(fw_restrictions_path))
         {
-            ROCP_ERROR << "Firmware restrictions file '" << fw_restrictions_path
+            ROCP_ERROR << "Counter definitions file '" << fw_restrictions_path
                        << "' does not exist, skipping firmware validation";
             return;  // No restrictions file means no restrictions
         }
@@ -252,7 +250,7 @@ check_installed_firmware_restrictions()
         std::ifstream file(fw_restrictions_path);
         if(!file.is_open())
         {
-            ROCP_WARNING << "Failed to open firmware restrictions file '" << fw_restrictions_path
+            ROCP_WARNING << "Failed to open counter definitions file '" << fw_restrictions_path
                          << "'";
             return;  // If we can't read the file, assume no restrictions
         }
@@ -263,7 +261,7 @@ check_installed_firmware_restrictions()
 
         if(yaml_content.empty())
         {
-            ROCP_INFO << "Firmware restrictions file '" << fw_restrictions_path
+            ROCP_INFO << "Counter definitions file '" << fw_restrictions_path
                       << "' is empty, no restrictions to apply";
             return;
         }

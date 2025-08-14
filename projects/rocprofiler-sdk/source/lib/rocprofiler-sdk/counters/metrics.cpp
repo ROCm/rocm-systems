@@ -280,7 +280,7 @@ loadMetrics(bool reload, const std::optional<ArchMetric> add_metric)
     }
 
     auto reload_func = [&]() {
-        auto counters_path = findViaEnvironment("counter_defs.yaml");
+        auto counters_path = findViaEnvironment("config.yaml");
         ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
             << "metric xml file '" << counters_path << "' does not exist";
         return std::make_shared<counter_metrics_t>(loadYAML(counters_path, add_metric));

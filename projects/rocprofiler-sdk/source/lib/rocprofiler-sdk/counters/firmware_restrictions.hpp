@@ -53,7 +53,7 @@ check_agent_firmware_restrictions(const std::string& yaml_content);
 // Check all agents against firmware restrictions from installed YAML file
 // Returns false if any agent has firmware below minimum requirements
 // Uses std::call_once to ensure this check is only performed once
-// Looks for firmware_restrictions.yaml in the same way as metrics.cpp
+// Looks for config.yaml in the same way as metrics.cpp
 bool
 check_installed_firmware_restrictions();
 

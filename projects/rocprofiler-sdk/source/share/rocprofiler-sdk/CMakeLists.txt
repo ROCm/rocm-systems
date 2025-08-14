@@ -21,8 +21,7 @@
 # SOFTWARE.
 
 # non-executable files
-set(share_files basic_counters.xml counter_defs.yaml derived_counters.xml
-                firmware_restrictions.yaml)
+set(share_files basic_counters.xml config.yaml derived_counters.xml)
 
 # executables
 set(share_progs convert-counters-collection-format.py)
