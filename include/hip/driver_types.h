@@ -510,6 +510,16 @@ typedef enum hipFunction_attribute {
     HIP_FUNC_ATTRIBUTE_MAX
 } hipFunction_attribute;
 
+/**
+ * @brief Function cache configurations
+ */
+typedef enum hipFunc_cache {
+  CU_FUNC_CACHE_PREFER_NONE = 1,    ///< no preference for shared memory or L1 (default)
+  CU_FUNC_CACHE_PREFER_SHARED = 2,  ///< prefer larger shared memory and smaller L1 cache
+  CU_FUNC_CACHE_PREFER_L1 = 3,      ///< prefer larger L1 cache and smaller shared memory
+  CU_FUNC_CACHE_PREFER_EQUAL = 4,   ///< prefer equal sized L1 cache and shared memory
+} hipFunc_cache;
+
 typedef enum hipPointer_attribute {
     HIP_POINTER_ATTRIBUTE_CONTEXT = 1,   ///< The context on which a pointer was allocated
                                          ///< @warning This attribute is not supported in HIP

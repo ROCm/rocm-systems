@@ -3155,6 +3155,303 @@ hipError_t hipGraphExecBatchMemOpNodeSetParams(hipGraphExec_t hGraphExec, hipGra
 /**
  *-------------------------------------------------------------------------------------------------
  *-------------------------------------------------------------------------------------------------
+ *  @defgroup Library Library Management
+ *  @{
+ *  This section describes the library management functions of HIP runtime API.
+ */
+
+typedef int hipDevice;
+typedef unsigned int hipDevicePtr;
+
+// Placeholder types
+struct hipKernel;
+struct hipLibrary;
+
+/**
+ * @brief Returns information about a kernel.
+ *
+ * @param[out] pi Returned attribute value
+ * @param[in] attrib Attribute requested
+ * @param[in] kernel Kernel to query attribute of
+ * @param[in] dev Device to query attribute of
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorInvalidDevice
+ *
+ * Returns in *pi the integer value of the attribute attrib for the kernel kernel for the requested
+ device dev. The supported attributes are:
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
+ hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
+ hipModuleGetFunction, hipFuncGetAttribute
+ */
+hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel kernel, hipDevice dev);
+
+/**
+ * @brief Returns a function handle.
+ *
+ * @param[out] pFunc Returned function handle
+ * @param[in] kernel Kernel to retrieve function for the requested context
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidValue,
+ #hipErrorInvalidHandle, #hipErrorNotFound, #hipErrorInvalidContext, #hipErrorContextIsDestroyed
+ *
+ * Returns in pFunc the handle of the function for the requested kernel and the current context.
+ If function handle is not found, the call returns hipErrorNotFound.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipLibraryGetKernel,
+ hipLibraryGetModule, hipModuleGetFunction
+ */
+hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel kernel);
+
+/**
+ * @brief Returns a library handle.
+ *
+ * @param[out] pLib Returned library handle
+ * @param[in] kernel Kernel to retrieve library handle
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidValue,
+ #hipErrorInvalidHandle, #hipErrorNotFound
+ *
+ * Returns in pLib the handle of the library for the requested kernel.
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipLibraryGetKernel
+ */
+hipError_t hipKernelGetLibrary(hipLibrary* pLib, hipKernel kernel);
+
+/**
+ * @brief Returns the function name for a CUkernel handle.
+ *
+ * @param[out] name The returned name of the function
+ * @param[in] hfunc The function handle to retrieve the name for
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * Returns in **name the function name associated with the kernel handle hfunc. The function name
+ is returned as a null-terminated string. The returned name is only valid when the kernel handle
+ is valid. If the library is unloaded or reloaded, one must call the API again to get the updated
+ name. This API may return a mangled name if the function is not declared as having C linkage.
+ If either **name or hfunc is NULL, hipErrorInvalidValue is returned.
+ *
+ * @note Note that this function may also return error codes from previous, asynchronous launches.
+ */
+hipError_t hipKernelGetName(const char** name, hipKernel hfunc);
+
+/**
+ * @brief Returns the offset and size of a kernel parameter in the device-side parameter layout.
+ *
+ * @param[in] kernel The kernel to query
+ * @param[in] paramIndex The parameter index to query
+ * @param[out] paramOffset Returns the offset into the device-side parameter layout at which the
+ parameter resides
+ * @param[out] paramSize Optionally returns the size of the parameter in the device-side parameter
+ layout
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * Queries the kernel parameter at paramIndex into kernel's list of parameters, and returns in
+ paramOffset and paramSize the offset and size, respectively, where the parameter will reside in
+ the device-side parameter layout. This information can be used to update kernel node parameters
+ from the device via hipGraphKernelNodeSetParam() and hipGraphKernelNodeUpdatesApply().
+ paramIndex must be less than the number of parameters that kernel takes. paramSize can be set to
+ NULL if only the parameter offset is desired.
+ *
+ * @note Note that this function may also return error codes from previous, asynchronous launches.
+ *
+ * @see hipFuncGetParamInfo
+ */
+hipError_t hipKernelGetParamInfo(hipKernel kernel, size_t paramIndex, size_t* paramOffset, size_t* paramSize);
+
+/**
+ * @brief Sets information about a kernel.
+ *
+ * @param[in] attrib Attribute requested
+ * @param[in] val Value to set
+ * @param[in] kernel Kernel to set attribute of
+ * @param[in] dev Device to set attribute of
+ *
+ * This call sets the value of a specified attribute attrib on the kernel for the requested device
+ dev to an integer value specified by val. This function returns hipSuccess if the new value of the
+ attribute could be successfully set. If the set fails, this call will return an error. Not all
+ attributes can have values set. Attempting to set a value on a read-only attribute will result in
+ an error (hipErrorInvalidValue).
+ *
+ * Note that attributes set using hipFuncSetAttribute() will override the attribute set by this API
+ irrespective of whether the call to hipFuncSetAttribute() is made before or after this API call.
+ However, hipKernelGetAttribute() will always return the attribute value set by this API.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorOutOfMemory
+ *
+ * @note Note that this function may also return error codes from previous, asynchronous launches.
+ *
+ * @see hipCtxGetCacheConfig, hipCtxSetCacheConfig, hipFuncSetCacheConfig, hipLaunchKernel,
+ hipFuncGetAttributes, hipFuncSetAttribute, hipFuncIsLoaded, hipFuncLoad, hipKernelGetAttribute
+ */
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int val, hipKernel kernel, hipDevice dev);
+
+/**
+ * @brief Sets the preferred cache configuration for a device kernel.
+ *
+ * @param[in] kernel Kernel to configure cache for
+ * @param[in] config Requested cache configuration
+ * @param[in] dev Device to set attribute of
+ *
+ * On devices where the L1 cache and shared memory use the same hardware resources, this sets
+ through config the preferred cache configuration for the device kernel on the requested device
+ dev. This is only a preference. The driver will use the requested configuration if possible, but
+ it is free to choose a different configuration if required to execute kernel. Any context-wide
+ preference set via hipCtxSetCacheConfig() will be overridden by this per-kernel setting.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorInvalidDevice, #hipErrorOutOfMemory
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipLibraryGetKernel,
+ hipKernelGetFunction, hipLibraryGetModule, hipModuleGetFunction, hipFuncSetCacheConfig,
+ hipCtxSetCacheConfig, hipLaunchKernel
+ */
+hipError_t hipKernelSetCacheConfig(hipKernel kernel, hipFunc_cache config, hipDevice dev);
+
+/**
+ * @brief Retrieve the kernel handles within a library.
+ *
+ * @param[out] kernels Buffer where the kernel handles are returned to
+ * @param[in] numKernels Maximum number of kernel handles may be returned to the buffer
+ * @param[in] lib Library to query from
+ *
+ * Returns in kernels a maximum number of numKernels kernel handles within lib. The returned
+ * kernel handle becomes invalid when the library is unloaded.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue
+ *
+ * @see hipLibraryGetKernelCount
+ */
+hipError_t hipLibraryEnumerateKernels(hipKernel* kernels, unsigned int numKernels, hipLibrary lib);
+
+/**
+ * @brief Returns a global device pointer.
+ *
+ * @param[out] dptr Returned global device pointer for the requested context
+ * @param[out] bytes Returned global size in bytes
+ * @param[in] library Library to retrieve global from
+ * @param[in] name Name of global to retrieve
+ *
+ * Returns in *dptr and *bytes the base pointer and size of the global with name name for the
+ requested library library and the current context. If no global for the requested name name
+ exists, the call returns hipErrorNotFound. One of the parameters dptr or bytes (not both) can
+ be NULL in which case it is ignored.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorNotFound, #hipErrorInvalidContext, #hipErrorContextIsDestroyed
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipLibraryGetModule,
+ hipModuleGetGlobal
+ */
+hipError_t hipLibraryGetGlobal(hipDevicePtr* dptr, size_t* bytes, hipLibrary library, const char* name);
+
+/**
+ * @brief Returns a kernel handle.
+ *
+ * @param[out] pKernel Returned kernel handle
+ * @param[in] library Library to retrieve kernel from
+ * @param[in] name Name of kernel to retrieve
+ *
+ * Returns in pKernel the handle of the kernel with name name located in library library. If kernel handle is not found, the call returns CUDA_ERROR_NOT_FOUND.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorNotFound
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelGetFunction, hipLibraryGetModule, hipModuleGetFunction
+ */
+hipError_t hipLibraryGetKernel(hipKernel* pKernel, hipLibrary library, const char* name);
+
+/**
+ * @brief Returns the number of kernels within a library.
+ *
+ * @param[out] count Number of kernels found within the library
+ * @param[in] lib Library to query
+ *
+ * Returns in count the number of kernels in lib.
+ *
+ * @returns #hipSuccess, #hipErrorInvalidHandle, #hipErrorInvalidValue
+ *
+ */
+hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary lib);
+
+/**
+ * @brief Returns a pointer to managed memory.
+ *
+ * @param[out] dptr Returned pointer to the managed memory
+ * @param[out] bytes Returned memory size in bytes
+ * @param[in] library Library to retrieve managed memory from
+ * @param[in] name Name of managed memory to retrieve
+ *
+ * Returns in *dptr and *bytes the base pointer and size of the managed memory with name name for
+ the requested library library. If no managed memory with the requested name name exists, the call
+ returns hipErrorNotFound. One of the parameters dptr or bytes (not both) can be NULL in which case
+ it is ignored. Note that managed memory for library library is shared across devices and is
+ registered when the library is loaded into atleast one context.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorNotFound
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload
+ */
+hipError_t hipLibraryGetManaged(hipDevicePtr* dptr, size_t* bytes, hipLibrary library, const char* name);
+
+/**
+ * @brief Returns a module handle.
+ *
+ * @param[out] pMod Returned module handle
+ * @param[in] library Library to retrieve module from
+ *
+ * Returns in pMod the module handle associated with the current context located in library library.
+ If module handle is not found, the call returns hipErrorNotFound.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorNotFound, #hipErrorInvalidContext, #hipErrorContextIsDestroyed
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipModuleGetFunction
+ */
+hipError_t hipLibraryGetModule(hipModule_t* pMod, hipLibrary library);
+
+/**
+ * @brief Returns a pointer to a unified function.
+ *
+ * @param[out] fptr Returned pointer to a unified function
+ * @param[in] library Library to retrieve function pointer memory from
+ * @param[in] symbol Name of function pointer to retrieve
+ *
+ * Returns in *fptr the function pointer to a unified function denoted by symbol. If no unified
+ function with name symbol exists, the call returns hipErrorNotFound.
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorNotFound
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload
+ */
+hipError_t hipLibraryGetUnifiedFunction(void** fptr, hipLibrary library, const char* symbol);
+
+/**
+ * @brief Unloads a library.
+ *
+ * @param[in] library Library to unload
+ *
+ * Unloads the library specified with library
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidValue
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipModuleUnload
+ */
+hipError_t hipLibraryUnload(hipLibrary library);
+
+// end doxygen Library Management
+/**
+ * @}
+ */
+/**
+ *-------------------------------------------------------------------------------------------------
+ *-------------------------------------------------------------------------------------------------
  *  @defgroup Event Event Management
  *  @{
  *  This section describes the event management functions of HIP runtime API.
