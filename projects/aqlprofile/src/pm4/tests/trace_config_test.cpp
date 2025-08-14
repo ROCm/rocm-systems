@@ -8,7 +8,7 @@ protected:
   void SetUp() override {
     // Setup default configuration
     config.sampleRate = 1000;
-    config.spm_se_number_total = 4;  // Typical number of shader engines
+    config.se_number = 4;  // Use se_number instead of spm_se_number_total
     config.se_mask = 0x0F;  // All 4 SEs enabled
     config.capacity_per_se = 0x2000;
     config.capacity_per_disabled_se = 0x1000;
@@ -27,8 +27,7 @@ TEST_F(TraceConfigTest, DefaultValues) {
   EXPECT_EQ(default_config.sampleRate, 625);
   EXPECT_EQ(default_config.perfMASK, ~0u);
   EXPECT_TRUE(default_config.spm_sq_32bit_mode);
-  EXPECT_TRUE(default_config.spm_kfd_mode);
-  EXPECT_FALSE(default_config.mi100);
+  EXPECT_FALSE(default_config.spm_has_core1);
   EXPECT_EQ(default_config.se_mask, 0x11);
 }
 
@@ -118,25 +117,21 @@ TEST_F(TraceConfigTest, PerformanceConfiguration) {
 TEST_F(TraceConfigTest, ConcurrentConfiguration) {
   // Test concurrent kernel configuration
   config.concurrent = 2;
-  config.spm_kfd_mode = true;
-  config.mi100 = true;
 
   // Configure per-SE capacities for concurrent mode
   config.capacity_per_se = 0x4000;
   config.capacity_per_disabled_se = 0x2000;
 
   // Setup multiple SEs with different target CUs
-  for (uint32_t se = 0; se < config.spm_se_number_total; se++) {
+  for (uint32_t se = 0; se < config.se_number; se++) {
     config.target_cu_per_se[se] = se % 2 ? -1 : se;  // Alternate between enabled/disabled
     config.se_base_addresses[se] = 0x1000 * (se + 1);
   }
 
   EXPECT_EQ(config.concurrent, 2);
-  EXPECT_TRUE(config.spm_kfd_mode);
-  EXPECT_TRUE(config.mi100);
 
   // Verify SE configuration in concurrent mode
-  for (uint32_t se = 0; se < config.spm_se_number_total; se++) {
+  for (uint32_t se = 0; se < config.se_number; se++) {
     if (se % 2 == 0) {
       EXPECT_EQ(config.GetTargetCU(se), se);
       EXPECT_EQ(config.GetCapacity(se), config.capacity_per_se);
