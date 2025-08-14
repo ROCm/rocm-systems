@@ -37,6 +37,15 @@ TEST(FirmwareRestrictions, ValidYamlParsing)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters:
+    - name: TEST_COUNTER
+      description: "Test counter for unit tests"
+      properties: []
+      definitions:
+        - architectures: ["gfx908"]
+          block: SQ
+          event: 1
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: CP
@@ -77,6 +86,8 @@ TEST(FirmwareRestrictions, EmptyRestrictionsList)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions: []
 )";
@@ -91,6 +102,8 @@ TEST(FirmwareRestrictions, MissingOptionalReason)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: CP
@@ -113,6 +126,8 @@ TEST(FirmwareRestrictions, EmptyArchitecturesList)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: RLC
@@ -148,6 +163,8 @@ TEST(FirmwareRestrictions, MissingSchemaVersion)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   firmware_restrictions:
     - firmware_type: CP
       min_version: 199
@@ -162,6 +179,8 @@ TEST(FirmwareRestrictions, MissingRequiredFirmwareType)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - min_version: 199
@@ -178,6 +197,8 @@ TEST(FirmwareRestrictions, MissingRequiredMinVersion)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: CP
@@ -194,6 +215,8 @@ TEST(FirmwareRestrictions, InvalidYamlSyntax)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: CP
@@ -211,6 +234,8 @@ TEST(FirmwareRestrictions, MultipleRestrictions)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: CP
@@ -253,6 +278,8 @@ TEST(FirmwareRestrictions, LargeVersionNumbers)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: TEST
@@ -272,6 +299,8 @@ TEST(FirmwareRestrictions, NoRestrictionsField)
 {
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
 )";
 
@@ -286,6 +315,8 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictions)
     // Test with empty restrictions (should pass)
     std::string yaml_empty = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions: []
 )";
@@ -296,6 +327,8 @@ rocprofiler-sdk:
     // Test with high version requirements (may fail depending on actual agent firmware)
     std::string yaml_high_requirements = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: MEC
@@ -318,6 +351,8 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictionsCallOnce)
     // Test that multiple calls to check_agent_firmware_restrictions work correctly
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: MEC
@@ -350,7 +385,7 @@ TEST(FirmwareRestrictions, CheckInstalledFirmwareRestrictionsCallOnce)
     EXPECT_EQ(result2, result3);
 
     // Note: Don't assert specific return value since it depends on:
-    // 1. Whether firmware_restrictions.yaml file exists
+    // 1. Whether counter_defs.yaml file exists
     // 2. Whether actual agents meet the requirements in the file
     // The important thing is that std::call_once works correctly
 }
@@ -387,6 +422,8 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictionsWithRealAgents)
     // Create YAML with high firmware requirements for actual architectures
     std::string yaml_content = R"(
 rocprofiler-sdk:
+  counters-schema-version: 1
+  counters: []
   fw_restriction_schema_version: 1
   firmware_restrictions:
     - firmware_type: MEC

@@ -10555,3 +10555,15 @@ rocprofiler-sdk:
       - gfx942
       - gfx950
       expression: TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum/TCP_GATE_EN1_sum
+
+  # Firmware restrictions section
+  fw_restriction_schema_version: 1
+  firmware_restrictions:
+    # Example: CP firmware restrictions
+    - firmware_type: CP
+      min_version: 186
+      reason: "CP firmware below version 186 can cause device resets and VM Page Faults on MI3XX devices."
+      affected_architectures:
+        - "gfx940"
+        - "gfx941"
+        - "gfx942"
