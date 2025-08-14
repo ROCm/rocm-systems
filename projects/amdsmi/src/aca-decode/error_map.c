@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -22,56 +21,57 @@
  */
 
 #include "error_map.h"
+#include "aca_constants.h"
 #include <string.h>
 
 #define AFID_VERSION "0.7"
 
 static const error_map_entry_t error_map[] = {
-    {1, "Boot-Time Errors", "FW Load", "CPER", "Fail-to-init"},
-    {2, "Boot-Time Errors", "HBM BIST Test", "CPER", "Fail-to-init"},
-    {3, "Boot-Time Errors", "HBM Memory Test", "CPER", "Fail-to-init"},
-    {4, "Boot-Time Errors", "HBM Training", "CPER", "Fail-to-init"},
-    {5, "Boot-Time Errors", "Unhandled", "CPER", "Fail-to-init"},
-    {6, "Boot-Time Errors", "Unknown", "CPER", "Fail-to-init"},
-    {7, "Boot-Time Errors", "USR CP Link Training", "CPER", "Fail-to-init"},
-    {8, "Boot-Time Errors", "USR DP Link Training", "CPER", "Fail-to-init"},
-    {9, "Boot-Time Errors", "WAFL Link Training", "CPER", "Fail-to-init"},
-    {10, "Boot-Time Errors", "XGMI Link Training", "CPER", "Fail-to-init"},
-    {11, "Boot-Time Errors", "Boot Controller Data Abort", "CPER", "Fail-to-init"},
-    {12, "Boot-Time Errors", "Boot Controller Generic", "CPER ", "Fail-to-init"},
-    {13, "Off-Package Link Errors", "PCIe AER", "CPER", "Corrected"},
-    {14, "Off-Package Link Errors", "PCIe AER", "CPER", "Fatal"},
-    {15, "Off-Package Link Errors", "WAFL", "CPER", "Corrected"},
-    {16, "Off-Package Link Errors", "WAFL", "CPER", "Fatal"},
-    {17, "Off-Package Link Errors", "XGMI", "CPER", "Corrected"},
-    {18, "Off-Package Link Errors", "XGMI", "CPER", "Fatal"},
-    {19, "HBM Errors", "Bad Page Retirement Threshold", "CPER", "Fatal"},
-    {20, "HBM Errors", "On-die ECC", "CPER", "Fatal"},
-    {21, "HBM Errors", "End-to-end CRC", "CPER", "Fatal"},
-    {22, "HBM Errors", "On-die ECC", "CPER", "Uncorrected, Non-fatal"},
-    {23, "HBM Errors", "End-to-end CRC", "CPER", "Uncorrected, Non-fatal"},
-    {24, "HBM Errors", "All", "CPER", "Corrected"},
-    {25, "HBM Errors", "All Others", "CPER", "Fatal"},
-    {26, "Device Internal Errors", "Hardware Assertion (HWA)", "CPER", "Fatal"},
-    {27, "Device Internal Errors", "Watchdog Timeout (WDT)", "CPER", "Fatal"},
-    {28, "Device Internal Errors", "All Others", "CPER", "Uncorrected, Non-fatal"},
-    {29, "Device Internal Errors", "All Others", "CPER", "Corrected"},
-    {30, "Device Internal Errors", "All Others", "CPER", "Fatal"},
-    {31, "CPER Format", "Malformed CPER", "CPER", "ALL"},
-    {32, "CPER Format", "Incomplete ACA Data", "CPER", "ALL"},
-    {33, "CPER Format", "Invalid ACA Data", "CPER", "ALL"},
-    {34, "Unidentified Errors", "Unidentified Error", "CPER", "ALL"}};
+    {1, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_FW_LOAD, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {2, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_HBM_BIST_TEST, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {3, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_HBM_MEMORY_TEST, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {4, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_HBM_TRAINING, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {5, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_UNHANDLED, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {6, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_UNKNOWN_ERROR, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {7, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_USR_CP_LINK_TRAINING, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {8, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_USR_DP_LINK_TRAINING, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {9, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_WAFL_LINK_TRAINING, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {10, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_XGMI_LINK_TRAINING, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {11, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_BOOT_CONTROLLER_DATA_ABORT, ACA_PROTOCOL_CPER, ACA_SEVERITY_FAIL_TO_INIT},
+    {12, ACA_CATEGORY_BOOT_TIME_ERRORS, ACA_ERROR_TYPE_BOOT_CONTROLLER_GENERIC, ACA_PROTOCOL_CPER_WITH_SPACE, ACA_SEVERITY_FAIL_TO_INIT},
+    {13, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_PCIE_AER, ACA_PROTOCOL_CPER, ACA_SEVERITY_CORRECTED},
+    {14, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_PCIE_AER, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {15, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_WAFL, ACA_PROTOCOL_CPER, ACA_SEVERITY_CORRECTED},
+    {16, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_WAFL, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {17, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_XGMI, ACA_PROTOCOL_CPER, ACA_SEVERITY_CORRECTED},
+    {18, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS, ACA_ERROR_TYPE_XGMI, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {19, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_BAD_PAGE_RETIREMENT_THRESHOLD, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {20, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_ON_DIE_ECC, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {21, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_END_TO_END_CRC, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {22, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_ON_DIE_ECC, ACA_PROTOCOL_CPER, ACA_SEVERITY_UNCORRECTED_NON_FATAL},
+    {23, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_END_TO_END_CRC, ACA_PROTOCOL_CPER, ACA_SEVERITY_UNCORRECTED_NON_FATAL},
+    {24, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_ALL, ACA_PROTOCOL_CPER, ACA_SEVERITY_CORRECTED},
+    {25, ACA_CATEGORY_HBM_ERRORS, ACA_ERROR_TYPE_ALL_OTHERS, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {26, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS, ACA_ERROR_TYPE_HARDWARE_ASSERTION, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {27, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS, ACA_ERROR_TYPE_WATCHDOG_TIMEOUT, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {28, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS, ACA_ERROR_TYPE_ALL_OTHERS, ACA_PROTOCOL_CPER, ACA_SEVERITY_UNCORRECTED_NON_FATAL},
+    {29, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS, ACA_ERROR_TYPE_ALL_OTHERS, ACA_PROTOCOL_CPER, ACA_SEVERITY_CORRECTED},
+    {30, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS, ACA_ERROR_TYPE_ALL_OTHERS, ACA_PROTOCOL_CPER, ACA_SEVERITY_FATAL},
+    {31, ACA_CATEGORY_CPER_FORMAT, ACA_ERROR_TYPE_MALFORMED_CPER, ACA_PROTOCOL_CPER, ACA_SEVERITY_ALL_CAPS},
+    {32, ACA_CATEGORY_CPER_FORMAT, ACA_ERROR_TYPE_INCOMPLETE_ACA_DATA, ACA_PROTOCOL_CPER, ACA_SEVERITY_ALL_CAPS},
+    {33, ACA_CATEGORY_CPER_FORMAT, ACA_ERROR_TYPE_INVALID_ACA_DATA, ACA_PROTOCOL_CPER, ACA_SEVERITY_ALL_CAPS},
+    {34, ACA_CATEGORY_UNIDENTIFIED_ERRORS, ACA_ERROR_TYPE_UNIDENTIFIED_ERROR, ACA_PROTOCOL_CPER, ACA_SEVERITY_ALL_CAPS}};
 
 static const size_t NUM_ERROR_ENTRIES = sizeof(error_map) / sizeof(error_map[0]);
 
 int get_error_id(const char *error_category, const char *error_type, const char *error_severity)
 {
     if (!error_category || !error_type || !error_severity ||
-        strcmp(error_category, "UNKNOWN") == 0 ||
-        strcmp(error_type, "UNKNOWN") == 0 ||
-        strcmp(error_severity, "UNKNOWN") == 0)
+        strcmp(error_category, ACA_SEVERITY_UNKNOWN) == 0 ||
+        strcmp(error_type, ACA_SEVERITY_UNKNOWN) == 0 ||
+        strcmp(error_severity, ACA_SEVERITY_UNKNOWN) == 0)
     {
-        return 33; // Return ID for "Invalid Error" if any input is "UNKNOWN" or NULL
+        return ACA_ERROR_INVALID_ACA_DATA_ID; // Return ID for "Invalid Error" if any input is "UNKNOWN" or NULL
     }
 
     for (size_t i = 0; i < NUM_ERROR_ENTRIES; i++)
@@ -84,5 +84,5 @@ int get_error_id(const char *error_category, const char *error_type, const char 
         }
     }
 
-    return 34; // Return ID for "Unidentified Errors" if no match found
+    return ACA_ERROR_UNIDENTIFIED_ERROR_ID; // Return ID for "Unidentified Errors" if no match found
 }

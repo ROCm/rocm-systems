@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -33,6 +32,7 @@
 #include "aca_decode.h"
 #include "aca_tables.h"
 #include "error_map.h"
+#include "aca_constants.h"
 #include <string.h>
 
 /**
@@ -61,18 +61,18 @@ aca_decoder_get_bank(const aca_decoder_t *decoder, const char **bank_name)
 static const char *get_error_severity(const aca_status_fields_t *status)
 {
     if (status->poison)
-        return "Uncorrected, Non-fatal";
+        return ACA_SEVERITY_UNCORRECTED_NON_FATAL;
     if (status->pcc)
-        return "Fatal";
+        return ACA_SEVERITY_FATAL;
     if (!status->pcc && status->uc && status->tcc)
-        return "Fatal";
+        return ACA_SEVERITY_FATAL;
     if (!status->pcc && status->uc && !status->tcc)
-        return "Uncorrected, Non-fatal";
+        return ACA_SEVERITY_UNCORRECTED_NON_FATAL;
     if (!status->pcc && !status->uc && !status->tcc && status->deferred)
-        return "Uncorrected, Non-fatal";
+        return ACA_SEVERITY_UNCORRECTED_NON_FATAL;
     if (!status->pcc && !status->uc && !status->tcc && !status->deferred)
-        return "Corrected";
-    return "UNKNOWN";
+        return ACA_SEVERITY_CORRECTED;
+    return ACA_SEVERITY_UNKNOWN;
 }
 
 /**
@@ -85,31 +85,31 @@ static const char *get_error_category(const char *bank, const char *error_type)
 {
     if (!bank || !error_type)
     {
-        return "UNKNOWN";
+        return ACA_SEVERITY_UNKNOWN;
     }
 
-    if (strcmp(bank, "umc") == 0)
+    if (strcmp(bank, ACA_BANK_UMC) == 0)
     {
-        if (strcmp(error_type, "On-die ECC") == 0 ||
+        if (strcmp(error_type, ACA_ERROR_TYPE_ON_DIE_ECC) == 0 ||
             strcmp(error_type, "WriteDataPoisonErr") == 0 ||
             strcmp(error_type, "AddressCommandParityErr") == 0 ||
             strcmp(error_type, "WriteDataCrcErr") == 0 ||
             strcmp(error_type, "EcsErr") == 0 ||
             strcmp(error_type, "RdCrcErr") == 0 ||
-            strcmp(error_type, "End-to-end CRC") == 0)
+            strcmp(error_type, ACA_ERROR_TYPE_END_TO_END_CRC) == 0)
         {
-            return "HBM Errors";
+            return ACA_CATEGORY_HBM_ERRORS;
         }
     }
-    else if (strcmp(bank, "pcs_xgmi") == 0 ||
-             strcmp(bank, "kpx_serdes") == 0 ||
-             strcmp(bank, "kpx_wafl") == 0 ||
-             (strcmp(bank, "psp") == 0 && strcmp(error_type, "WAFL") == 0))
+    else if (strcmp(bank, ACA_BANK_PCS_XGMI) == 0 ||
+             strcmp(bank, ACA_BANK_KPX_SERDES) == 0 ||
+             strcmp(bank, ACA_BANK_KPX_WAFL) == 0 ||
+             (strcmp(bank, ACA_BANK_PSP) == 0 && strcmp(error_type, ACA_ERROR_TYPE_WAFL) == 0))
     {
-        return "Off-Package Link Errors";
+        return ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS;
     }
 
-    return "Device Internal Errors";
+    return ACA_CATEGORY_DEVICE_INTERNAL_ERRORS;
 }
 
 /**
@@ -125,55 +125,55 @@ static int get_service_error_type(const char *error_category, const char *error_
                                   const char *error_severity, const char **service_error_type)
 {
     if (!error_category || !error_type || !error_severity || !service_error_type ||
-        strcmp(error_category, "UNKNOWN") == 0 ||
-        strcmp(error_type, "UNKNOWN") == 0 ||
-        strcmp(error_severity, "UNKNOWN") == 0)
+        strcmp(error_category, ACA_SEVERITY_UNKNOWN) == 0 ||
+        strcmp(error_type, ACA_SEVERITY_UNKNOWN) == 0 ||
+        strcmp(error_severity, ACA_SEVERITY_UNKNOWN) == 0)
     {
         return -1;
     }
-    if (strcmp(error_type, "Bad Page Retirement Threshold") == 0)
+    if (strcmp(error_type, ACA_ERROR_TYPE_BAD_PAGE_RETIREMENT_THRESHOLD) == 0)
     {
-        *service_error_type = "Bad Page Retirement Threshold";
+        *service_error_type = ACA_ERROR_TYPE_BAD_PAGE_RETIREMENT_THRESHOLD;
+        return 0;
+    }
+    if ((strcmp(error_category, ACA_CATEGORY_HBM_ERRORS) == 0) && (strcmp(error_severity, ACA_SEVERITY_CORRECTED) == 0))
+    {
+        *service_error_type = ACA_ERROR_TYPE_ALL;
         return 0;
     }
     if (strcmp(error_type, "RdCrcErr") == 0)
     {
-        *service_error_type = "End-to-end CRC";
+        *service_error_type = ACA_ERROR_TYPE_END_TO_END_CRC;
         return 0;
     }
-    if ((strcmp(error_category, "HBM Errors") == 0) && (strcmp(error_severity, "Corrected") == 0))
+    if ((strcmp(error_category, ACA_CATEGORY_HBM_ERRORS) == 0) && (strcmp(error_severity, ACA_SEVERITY_FATAL) == 0) &&
+        (strcmp(error_type, ACA_ERROR_TYPE_ON_DIE_ECC) != 0) && (strcmp(error_type, ACA_ERROR_TYPE_END_TO_END_CRC) != 0))
     {
-        *service_error_type = "All";
+        *service_error_type = ACA_ERROR_TYPE_ALL_OTHERS;
         return 0;
     }
-    if ((strcmp(error_category, "HBM Errors") == 0) && (strcmp(error_severity, "Fatal") == 0) &&
-        (strcmp(error_type, "On-die ECC") != 0) && (strcmp(error_type, "End-to-end CRC") != 0))
+    if (strcmp(error_category, ACA_CATEGORY_DEVICE_INTERNAL_ERRORS) == 0)
     {
-        *service_error_type = "All Others";
-        return 0;
-    }
-    if (strcmp(error_category, "Device Internal Errors") == 0)
-    {
-        if ((strcmp(error_severity, "Uncorrected, Non-fatal") == 0 ||
-             strcmp(error_severity, "Corrected") == 0 ||
-             strcmp(error_severity, "Fatal") == 0) &&
-            strcmp(error_type, "Hardware Assertion (HWA)") != 0 &&
-            strcmp(error_type, "Watchdog Timeout (WDT)") != 0)
+        if ((strcmp(error_severity, ACA_SEVERITY_UNCORRECTED_NON_FATAL) == 0 ||
+             strcmp(error_severity, ACA_SEVERITY_CORRECTED) == 0 ||
+             strcmp(error_severity, ACA_SEVERITY_FATAL) == 0) &&
+            strcmp(error_type, ACA_ERROR_TYPE_HARDWARE_ASSERTION) != 0 &&
+            strcmp(error_type, ACA_ERROR_TYPE_WATCHDOG_TIMEOUT) != 0)
         {
-            *service_error_type = "All Others";
+            *service_error_type = ACA_ERROR_TYPE_ALL_OTHERS;
             return 0;
         }
     }
-    if (strcmp(error_category, "Off-Package Link Errors") == 0)
+    if (strcmp(error_category, ACA_CATEGORY_OFF_PACKAGE_LINK_ERRORS) == 0)
     {
-        if (strcmp(error_bank, "pcs_xgmi") == 0)
+        if (strcmp(error_bank, ACA_BANK_PCS_XGMI) == 0)
         {
-            *service_error_type = "XGMI";
+            *service_error_type = ACA_ERROR_TYPE_XGMI;
             return 0;
         }
-        if (strcmp(error_bank, "kpx_wafl") == 0)
+        if (strcmp(error_bank, ACA_BANK_KPX_WAFL) == 0)
         {
-            *service_error_type = "WAFL";
+            *service_error_type = ACA_ERROR_TYPE_WAFL;
             return 0;
         }
     }
@@ -205,7 +205,7 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
     result = aca_decoder_get_bank(decoder, &bank);
     if (result < 0)
     {
-        bank = "UNKNOWN";
+        bank = ACA_SEVERITY_UNKNOWN;
     }
     info->bank_ref = bank;
 
@@ -215,13 +215,13 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
     }
     else
     {
-        info->instance_ref = "Decode Inapplicable";
+        info->instance_ref = ACA_ERROR_TYPE_DECODE_INAPPLICABLE;
     }
 
     // 0b1000 indicate error threshold has been exceeded, and is always fatal
-    if (decoder->flags & 0x8)
+    if (decoder->flags & ACA_FLAG_THRESHOLD_EXCEEDED)
     {
-        info->severity_ref = "Fatal";
+        info->severity_ref = ACA_SEVERITY_FATAL;
     }
     else
     {
@@ -242,31 +242,31 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
         info->aid = -1;  // Invalid value
     }
 
-    if (decoder->status.error_code_ext >= 0x3A && decoder->status.error_code_ext <= 0x3E)
+    if (decoder->status.error_code_ext >= ACA_ERROR_CODE_EXT_MIN && decoder->status.error_code_ext <= ACA_ERROR_CODE_EXT_MAX)
     {
         uint32_t instance_id = decoder->ipid.instance_id_lo;
         uint32_t error_info = decoder->synd.error_information & 0xFF;
 
-        if ((instance_id == 0x36430400 || instance_id == 0x38430400 ||
-             instance_id == 0x36430401 || instance_id == 0x38430401) &&
+        if ((instance_id == ACA_INSTANCE_ID_XCD0_400 || instance_id == ACA_INSTANCE_ID_XCD1_400 ||
+             instance_id == ACA_INSTANCE_ID_XCD0_401 || instance_id == ACA_INSTANCE_ID_XCD1_401) &&
             find_error_in_table(xcd_error_table, NUM_XCD_ERRORS, error_info, &error_type) == 0)
         {
             info->error_type_ref = error_type;
         }
-        else if ((instance_id == 0x3B30400 || instance_id == 0x3B30401) &&
+        else if ((instance_id == ACA_INSTANCE_ID_AID_400 || instance_id == ACA_INSTANCE_ID_AID_401) &&
                  find_error_in_table(aid_error_table, NUM_AID_ERRORS, error_info, &error_type) == 0)
         {
             info->error_type_ref = error_type;
         }
         else
         {
-            info->error_type_ref = "UNKNOWN";
+            info->error_type_ref = ACA_SEVERITY_UNKNOWN;
         }
     }
     // 0b1000 indicate error threshold has been exceeded
-    else if (decoder->flags & 0x8)
+    else if (decoder->flags & ACA_FLAG_THRESHOLD_EXCEEDED)
     {
-        info->error_type_ref = "Bad Page Retirement Threshold";
+        info->error_type_ref = ACA_ERROR_TYPE_BAD_PAGE_RETIREMENT_THRESHOLD;
     }
     else
     {
@@ -276,14 +276,14 @@ static void aca_decoder_get_error_info(const aca_decoder_t *decoder, aca_error_i
         }
         else
         {
-            info->error_type_ref = "UNKNOWN";
+            info->error_type_ref = ACA_SEVERITY_UNKNOWN;
         }
     }
 
     // 0b1000 indicate error threshold has been exceeded, and is always a HBM error
-    if (decoder->flags & 0x8)
+    if (decoder->flags & ACA_FLAG_THRESHOLD_EXCEEDED)
     {
-        info->category_ref = "HBM Errors";
+        info->category_ref = ACA_CATEGORY_HBM_ERRORS;
     }
     else
     {

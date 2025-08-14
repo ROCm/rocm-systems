@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -21,8 +20,8 @@
  * THE SOFTWARE.
  */
 
- #include "aca_decode.h"
-#include <utils.h>
+#include "aca_decode.h"
+#include "aca_constants.h"
 
 int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag, uint16_t hw_revision)
 {
@@ -33,20 +32,21 @@ int decode_afid(const uint64_t *register_array, size_t array_len, uint32_t flag,
 
     aca_raw_data_t raw_data;
 
-    if (array_len == 4) // 32 bytes
+    if (array_len == ACA_REGISTER_ARRAY_SIZE_32_BYTES) // 32 bytes
     {
         raw_data.aca_status = register_array[0];
         raw_data.aca_addr = register_array[1];
         raw_data.aca_ipid = register_array[2];
         raw_data.aca_synd = register_array[3];
     }
-    else if (array_len == 16) // 128 bytes
+    else if (array_len == ACA_REGISTER_ARRAY_SIZE_128_BYTES) // 128 bytes
     {
         raw_data.aca_status = register_array[1];
         raw_data.aca_addr = register_array[2];
         raw_data.aca_ipid = register_array[5];
         raw_data.aca_synd = register_array[6];
     }
+    
     else
     {
         return -1; // Unsupported size
@@ -67,32 +67,19 @@ aca_error_info_t decode_error_info(const uint64_t *register_array, size_t array_
     if (!register_array)
     {
         return error_info;
-    }
-
-    // Create a copy of the register array to avoid modifying the original
-    uint64_t converted_array[16];
-    if (array_len > 16) {
-        return error_info;
-    }
-    
-    // Copy and convert the array
-    for (size_t i = 0; i < array_len; i++) {
-        converted_array[i] = le64_to_be64(register_array[i]);
-    }
-
-    if (array_len == 4) // 32 bytes
+    }    if (array_len == ACA_REGISTER_ARRAY_SIZE_32_BYTES) // 32 bytes
     {
-        raw_data.aca_status = converted_array[0];
-        raw_data.aca_addr = converted_array[1];
-        raw_data.aca_ipid = converted_array[2];
-        raw_data.aca_synd = converted_array[3];
+        raw_data.aca_status = register_array[0];
+        raw_data.aca_addr = register_array[1];
+        raw_data.aca_ipid = register_array[2];
+        raw_data.aca_synd = register_array[3];
     }
-    else if (array_len == 16) // 128 bytes
+    else if (array_len == ACA_REGISTER_ARRAY_SIZE_128_BYTES) // 128 bytes
     {
-        raw_data.aca_status = converted_array[1];
-        raw_data.aca_addr = converted_array[2];
-        raw_data.aca_ipid = converted_array[5];
-        raw_data.aca_synd = converted_array[6];
+        raw_data.aca_status = register_array[1];
+        raw_data.aca_addr = register_array[2];
+        raw_data.aca_ipid = register_array[5];
+        raw_data.aca_synd = register_array[6];
     }
     else
     {

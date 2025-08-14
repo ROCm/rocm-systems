@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: MIT
 /*
  * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -34,6 +33,7 @@
  */
 
 #include "aca_tables.h"
+#include "aca_constants.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
@@ -80,19 +80,19 @@ const aca_error_type_t error_table[] = {
     {"cs", 0xe, "FTI_ND_ILL_REQ"},
     {"cs", 0xf, "FTI_ND_ADDR_VIOL"},
     {"cs", 0x10, "FTI_ND_SEC_VIOL"},
-    {"cs", 0x11, "Hardware Assertion (HWA)"},
+    {"cs", 0x11, ACA_ERROR_TYPE_HARDWARE_ASSERTION},
     {"cs", 0x12, "ST_PRT_ERR"},
     {"cs", 0x13, "ST_ECC_ERR"},
     {"cs", 0x14, "ST_TXN_ERR"},
-    {"pie", 0x0, "Hardware Assertion (HWA)"},
+    {"pie", 0x0, ACA_ERROR_TYPE_HARDWARE_ASSERTION},
     {"pie", 0x1, "CSW"},
     {"pie", 0x2, "GMI"},
     {"pie", 0x3, "FTI_DAT_STAT"},
     {"pie", 0x4, "DEF"},
-    {"pie", 0x5, "Watchdog Timeout (WDT)"},
+    {"pie", 0x5, ACA_ERROR_TYPE_WATCHDOG_TIMEOUT},
     {"pie", 0x6, "CNLI"},
     {"pie", 0x7, "RSLVFCI"},
-    {"umc", 0x0, "On-die ECC"},
+    {"umc", 0x0, ACA_ERROR_TYPE_ON_DIE_ECC},
     {"umc", 0x1, "WriteDataPoisonErr"},
     {"umc", 0x2, "SdpParityErr"},
     {"umc", 0x4, "AddressCommandParityErr"},
@@ -103,7 +103,7 @@ const aca_error_type_t error_table[] = {
     {"umc", 0xb, "RdCrcErr"},
     {"umc", 0xd, "MpFwErr"},
     {"umc", 0xe, "MpParErr"},
-    {"umc", 0xf, "End-to-end CRC"},
+    {"umc", 0xf, ACA_ERROR_TYPE_END_TO_END_CRC},
     {"psp", 0x0, "Mp0HighSramError"},
     {"psp", 0x1, "Mp0LowSramError"},
     {"psp", 0x2, "Mp0IDataBank0Error"},
@@ -127,7 +127,7 @@ const aca_error_type_t error_table[] = {
     {"psp", 0x3b, "SRAM_EDC"},
     {"psp", 0x3c, "SMN_Parity"},
     {"psp", 0x3d, "SMN_Timeout"},
-    {"psp", 0x3f, "WAFL"},
+    {"psp", 0x3f, ACA_ERROR_TYPE_WAFL},
     {"smu", 0x0, "Mp5HighSramError"},
     {"smu", 0x1, "Mp5LowSramError"},
     {"smu", 0x2, "Mp5DCacheAError"},
@@ -478,7 +478,7 @@ int find_bank_name(uint16_t hw_id, uint16_t aca_type, const char **bank_name)
         }
     }
 
-    *bank_name = "UNKNOWN";
+    *bank_name = ACA_SEVERITY_UNKNOWN;
     return 1;
 }
 
@@ -499,7 +499,7 @@ int find_error_type_by_bank(const char *bank, uint32_t error_code, const char **
         }
     }
 
-    *error_type = "UNKNOWN";
+    *error_type = ACA_SEVERITY_UNKNOWN;
     return 1;
 }
 
@@ -520,7 +520,7 @@ int find_error_in_table(const aca_error_entry_t *table, size_t table_size,
         }
     }
 
-    *error_type = "UNKNOWN";
+    *error_type = ACA_SEVERITY_UNKNOWN;
     return 1;
 }
 
@@ -556,6 +556,6 @@ int find_instance_name(const char *bank, uint32_t instance_id_lo, const char **i
         }
     }
 
-    *instance_name = "UNKNOWN";
+    *instance_name = ACA_SEVERITY_UNKNOWN;
     return 1;
 }

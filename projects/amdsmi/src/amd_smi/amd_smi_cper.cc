@@ -29,7 +29,9 @@
 #include <sstream>
 #include <vector>
 
+extern "C" {
 #include "aca-decode/aca_decode.h"
+}
 #include "amd_smi/impl/amd_smi_cper.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
