@@ -71,6 +71,8 @@ jobs:
       working-directory: /tmp
       run: |
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
+        export PATH=/usr/local/bin:$PATH
+        ls -lah /usr/local/bin/aws
         KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
