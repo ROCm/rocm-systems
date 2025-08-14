@@ -136,7 +136,7 @@ jobs:
 
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-${{ matrix.system.os }}-base:latest
+      image: rocm/rocprofiler-private:${{ matrix.system.os }}
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
