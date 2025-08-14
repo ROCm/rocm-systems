@@ -151,7 +151,6 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${{ matrix.system.runner }}
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.system.ci-flags }}
           --
@@ -287,11 +286,6 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         git config --global --add safe.directory '*'
-        if [ "${OS_TYPE}" == "rhel-9.1" ]; then
-          sudo dnf makecache
-          sudo dnf groupinstall -y "Development Tools"
-          sudo dnf install -y llvm14-devel
-        fi
         python3 -m pip install -U --user -r requirements.txt
         rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 
@@ -331,7 +325,6 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.ci-flags }}
           --
@@ -437,7 +430,6 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
