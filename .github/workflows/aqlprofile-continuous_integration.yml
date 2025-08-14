@@ -70,8 +70,8 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        python3 -m pip install --upgrade pip pipx
-        python3 -m pipx install awscli
+        python3 -m pip install --upgrade pip pipx --break-system-packages
+        python3 -m pipx install awscli --break-system-packages
         KEY=$(~/.local/bin/aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
