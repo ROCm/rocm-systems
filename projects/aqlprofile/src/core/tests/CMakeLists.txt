@@ -149,3 +149,30 @@ gtest_add_tests(
 set_tests_properties(
     ${pm4-factory-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
                                  "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
+# Add tests for logger
+add_executable(logger-test)
+SET(AQLPROFILE_LOGGER_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/logger_tests.cpp
+)
+target_sources(logger-test PRIVATE ${AQLPROFILE_LOGGER_SOURCES})
+target_include_directories(logger-test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${LIB_DIR} ${LIB_DIR}/core/include)
+target_link_libraries(
+    logger-test
+    PRIVATE
+            GTest::gtest
+            GTest::gtest_main
+            GTest::gmock
+            GTest::gmock_main
+            ${CMAKE_DL_LIBS})
+
+gtest_add_tests(
+    TARGET logger-test
+    SOURCES ${AQLPROFILE_LOGGER_SOURCES}
+    TEST_LIST logger-test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    
+set_tests_properties(
+    ${logger-test_TESTS} PROPERTIES TIMEOUT 45 LABELS "unittests" FAIL_REGULAR_EXPRESSION
+                                 "${AQLPROFILE_DEFAULT_FAIL_REGEX}")
+
