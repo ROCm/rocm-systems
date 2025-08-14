@@ -21,6 +21,9 @@
 // SOFTWARE.
 
 #include "buffer_storage.hpp"
+#include "PTL/Task.hh"
+#include "PTL/TaskGroup.hh"
+#include "PTL/ThreadPool.hh"
 #include "debug.hpp"
 #include "library/runtime.hpp"
 #include <chrono>
@@ -39,12 +42,17 @@ namespace trace_cache
 namespace
 {
 constexpr auto CACHE_FILE_FLUSH_TIMEOUT = 10ms;
+constexpr auto NUM_OF_THREADS = 1;
 }  // namespace
 
 buffer_storage::buffer_storage(pid_t _pid)
 {
     ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
-    m_flushing_thread = std::make_unique<std::thread>([this, _pid]() {
+    m_thread_pool = std::make_unique<PTL::ThreadPool>(NUM_OF_THREADS);
+    m_thread_pool->initialize_threadpool(NUM_OF_THREADS);
+
+    m_task_group = std::make_unique<PTL::TaskGroup<void>>(m_thread_pool.get());
+    m_task_group->exec([this, _pid]() {
         std::ofstream _ofs(filename, std::ios::binary | std::ios::out);
 
         if(!_ofs)
@@ -125,8 +133,7 @@ buffer_storage::shutdown()
     std::mutex       _exit_mutex;
     std::unique_lock _exit_lock{ _exit_mutex };
     m_exit_condition.wait(_exit_lock, [&]() { return m_exit_finished; });
-    m_flushing_thread->join();
-    m_flushing_thread.reset();
+    m_thread_pool->destroy_threadpool();
 }
 
 void
