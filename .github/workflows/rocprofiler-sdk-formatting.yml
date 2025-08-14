@@ -58,8 +58,7 @@ jobs:
         fi
 
   source:
-    runs-on: ubuntu-latest
-    container: rocm/dev-ubuntu-22.04:latest
+    runs-on: ubuntu-22.04
     env:
       ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -94,6 +93,7 @@ jobs:
         clang-format-11 --version
         set +e
         FORMAT_OUT=$(clang-format-11 -i ${FORMAT_FILES})
+        git status
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Code not formatted. Run clang-format (version 11)...\n"
           echo -e "\nFiles:\n"
