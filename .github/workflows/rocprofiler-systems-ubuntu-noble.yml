@@ -102,7 +102,7 @@ jobs:
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version
-        '${{ matrix.compiler }}' --version
+        ${{ matrix.compiler }} --version
         USE_ROCM=OFF
         if [ "${{ matrix.rocm-version }}" != "0.0" ]; then
           CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=/opt/rocm"
