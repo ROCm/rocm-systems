@@ -38,10 +38,10 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `clr`                  | 8/21           |
-| `hip`                  | 8/21           |
-| `hipother`             | 8/21           |
-| `hip-tests`            | 8/21           |
+| `clr`                  | 8/18           |
+| `hip`                  | 8/18           |
+| `hipother`             | 8/18           |
+| `hip-tests`            | 8/18           |
 
 *Remaining schedule to be determined.
 
