@@ -71,14 +71,14 @@ jobs:
       working-directory: /tmp
       run: |
         python3 -m pip install awscli --break-system-packages
-        KEY=$(~/.local/bin/aws s3api list-objects-v2 \
+        KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
           --query "sort_by(Contents[?contains(Key, '${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
         test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
-        ~/.local/bin/aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         sudo mkdir -p /opt/rocm-custom
@@ -149,6 +149,24 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install awscli --break-system-packages
+        KEY=$(aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo mkdir -p /opt/rocm-custom
+        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/aqlprofile
@@ -176,7 +194,7 @@ jobs:
       run:
         LD_LIBRARY_PATH=$(pwd)/build:$LD_LIBRARY_PATH ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="${RUNNER_HOSTNAME}"
-          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.os }}-${{ matrix.runner }}-core
+          -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
