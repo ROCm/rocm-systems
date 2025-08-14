@@ -346,9 +346,9 @@ jobs:
         echo "Install Aqlprofile."
         export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         export PATH=/opt/rocm-custom/bin:$PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom .
-        /usr/bin/cmake --build build --target all --parallel 16
-        sudo /usr/bin/cmake --build build --target install
+        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom .
+        cmake --build build --target all --parallel 16
+        sudo cmake --build build --target install
         echo "✅ Installation complete!"
   
     - name: Enable PC Sampling
