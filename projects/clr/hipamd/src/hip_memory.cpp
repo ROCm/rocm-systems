@@ -1802,10 +1802,6 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       }
     }
 
-    if (!waitList.empty()) {
-      waitList[0]->release();
-    }
-
     amd::ReadMemoryCommand* readCommand =
         new amd::ReadMemoryCommand(*stream, CL_COMMAND_READ_BUFFER_RECT, waitList, *srcMemory,
                                    srcStart, copyRegion, dstHost, srcRect, dstRect, copyMetadata);
@@ -1818,6 +1814,10 @@ hipError_t ihipMemcpyDtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       return hipErrorInvalidValue;
     }
     command = readCommand;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
@@ -1942,10 +1942,6 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
       }
     }
 
-    if (!waitList.empty()) {
-      waitList[0]->release();
-    }
-
     amd::WriteMemoryCommand* writeMemCmd = new amd::WriteMemoryCommand(
         *pStream, CL_COMMAND_WRITE_IMAGE, waitList, *dstImage, dstOrigin, copyRegion,
         static_cast<const char*>(srcHost) + start, srcRowPitch, srcSlicePitch, copyMetadata);
@@ -1958,6 +1954,10 @@ hipError_t ihipMemcpyHtoACommand(amd::Command*& command, amd::Image* dstImage,
       return hipErrorInvalidValue;
     }
     command = writeMemCmd;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
@@ -1993,10 +1993,6 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       }
     }
 
-    if (!waitList.empty()) {
-      waitList[0]->release();
-    }
-
     amd::ReadMemoryCommand* readMemCmd = new amd::ReadMemoryCommand(
         *pStream, CL_COMMAND_READ_IMAGE, waitList, *srcImage, srcOrigin, copyRegion,
         static_cast<char*>(dstHost) + start, dstRowPitch, dstSlicePitch, copyMetadata);
@@ -2010,6 +2006,10 @@ hipError_t ihipMemcpyAtoHCommand(amd::Command*& command, void* dstHost, amd::Coo
       return hipErrorInvalidValue;
     }
     command = readMemCmd;
+
+    if (!waitList.empty()) {
+      waitList[0]->release();
+    }
   }
 
   return hipSuccess;
