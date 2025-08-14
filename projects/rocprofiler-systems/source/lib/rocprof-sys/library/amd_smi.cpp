@@ -130,7 +130,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_mm_busy>::value, "Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
-          COMPONENT, "$", "ABS", BLOCK, EXPRESSION, 0, 0, "{}" });
+          COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
