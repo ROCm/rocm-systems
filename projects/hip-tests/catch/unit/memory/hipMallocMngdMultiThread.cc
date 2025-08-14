@@ -83,52 +83,46 @@ static void LaunchKrnl(int* Hmm1, size_t NumElms, int InitVal, int GpuOrdnl, int
   }
 }
 
-static void LaunchKrnl2(int* hmm, size_t num_elms, int init_val, int hmm_mem) {
-  constexpr int kBlockSize = 64;
-  hipStream_t stream = nullptr;
-  HIPCHECK(hipStreamCreate(&stream));
-
+static void LaunchKrnl2(int* Hmm, size_t NumElms, int InitVal, int HmmMem) {
+  int *ptr = nullptr, blockSize = 64;
   std::unique_ptr<int[]> host_ptr;
-  int* device_ptr = nullptr;
-
-  if (hmm_mem == 0) {
-    host_ptr = std::make_unique<int[]>(num_elms);
-    HIPCHECK(hipMalloc(&device_ptr, sizeof(int) * num_elms));
+  hipStream_t strm;
+  HIPCHECK(hipStreamCreate(&strm));
+  if (HmmMem == 0) {
+    host_ptr = std::make_unique<int[]>(NumElms);
+    HIPCHECK(hipMalloc(&ptr, (sizeof(int) * NumElms)));
   } else {
-    HIPCHECK(hipMallocManaged(&device_ptr, sizeof(int) * num_elms));
+    HIPCHECK(hipMallocManaged(&ptr, (sizeof(int) * NumElms)));
   }
-
-  const dim3 kDimBlock(kBlockSize, 1, 1);
-  const dim3 kDimGrid((num_elms + kBlockSize - 1) / kBlockSize, 1, 1);
-
+  dim3 dimBlock(blockSize, 1, 1);
+  dim3 dimGrid((NumElms + blockSize - 1) / blockSize, 1, 1);
   for (int i = 0; i < 2; ++i) {
-    KrnlWth2MemTypes<<<kDimGrid, kDimBlock, 0, stream>>>(device_ptr, hmm, num_elms);
+    KrnlWth2MemTypes<<<dimGrid, dimBlock, 0, strm>>>(ptr, Hmm, NumElms);
   }
-  HIPCHECK(hipStreamSynchronize(stream));
-
-  int data_mismatch = 0;
-  if (hmm_mem == 0) {
-    HIPCHECK(hipMemcpy(host_ptr.get(), device_ptr, sizeof(int) * num_elms, hipMemcpyDeviceToHost));
-    for (size_t i = 0; i < num_elms; ++i) {
-      if (host_ptr[i] != (init_val + 10)) {
-        ++data_mismatch;
+  HIPCHECK(hipStreamSynchronize(strm));
+  // Verifying the result
+  int DataMismatch = 0;
+  if (HmmMem == 0) {
+    HIPCHECK(hipMemcpy(host_ptr.get(), ptr, (sizeof(int) * NumElms), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < NumElms; ++i) {
+      if (host_ptr[i] != (InitVal + 10)) {
+        DataMismatch++;
       }
     }
   } else {
-    for (size_t i = 0; i < num_elms; ++i) {
-      if (device_ptr[i] != (init_val + 10)) {
-        ++data_mismatch;
+    for (size_t i = 0; i < NumElms; ++i) {
+      if (ptr[i] != (InitVal + 10)) {
+        DataMismatch++;
       }
     }
   }
-
-  if (data_mismatch != 0) {
+  if (DataMismatch != 0) {
     INFO("Data Mismatch observed at line: " << __LINE__);
     REQUIRE(false);
   }
 
-  HIP_CHECK(hipFree(device_ptr));
-  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(ptr));
+  HIP_CHECK(hipStreamDestroy(strm));
 }
 
 static void LaunchKrnl3(int* Dptr, size_t NumElms, int InitVal) {
