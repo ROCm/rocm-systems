@@ -137,6 +137,8 @@ jobs:
       run: |
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -314,15 +316,18 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+          python3 -m pipx install cmake
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        python3 -m pipx ensurepath; source ~/.bashrc; LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
@@ -367,9 +372,9 @@ jobs:
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, '${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
@@ -420,6 +425,8 @@ jobs:
       run: |
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
