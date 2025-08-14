@@ -59,6 +59,7 @@
 #include "rocm_smi/rocm_smi_io_link.h"
 #include "rocm_smi/rocm_smi64Config.h"
 #include "rocm_smi/rocm_smi_logger.h"
+#include "rocm_smi/rocm_smi_board_temp.h"
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
@@ -1580,6 +1581,12 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+    // fill out rsmi_od_volt_freq_data_t p with default max values to indicate no valid data
+    p->curr_sclk_range.lower_bound = UINT64_MAX;
+    p->curr_sclk_range.upper_bound = UINT64_MAX;
+    p->curr_mclk_range.lower_bound = UINT64_MAX;
+    p->curr_mclk_range.upper_bound = UINT64_MAX;
+
   ret = GetDevValueVec(amd::smi::kDevPowerODVoltage, dv_ind, &val_vec);
   if (ret != RSMI_STATUS_SUCCESS) {
     return ret;
@@ -1607,13 +1614,6 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
     .structure_content();
 
-  //
-  // Note:  We must have minimum of 'GFXCLK:' && 'MCLK:' OR:
-  //        'OD_SCLK:' && 'OD_MCLK:' tags.
-  if (txt_power_dev_od_voltage.get_title_size() < kMIN_VALID_LINES)  {
-      return rsmi_status_t::RSMI_STATUS_NO_DATA;
-  }
-
   // Note:  For debug builds/purposes only.
   assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
          txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK));
@@ -1634,49 +1634,63 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
       return std::vector<std::string>{upper_bound_data};
   };
 
-  // Validates 'OD_SCLK' is in the structure
-  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
+    // track the number of keys found, if this goes down to 0 then that means that there is no valid data
+    const uint8_t kNumStructuredKeysToCheck = 6;
+    uint8_t structured_key_counter = kNumStructuredKeysToCheck;
+    // Validates 'OD_SCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
                                                        KTAG_FIRST_FREQ_IDX)) {
-      p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
-      p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
-
+        p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+        p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
       // Validates 'OD_MCLK' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
-                                                           KTAG_FIRST_FREQ_IDX)) {
-          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
-      }
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
+                                                        KTAG_FIRST_FREQ_IDX)) {
+        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
 
-      // Validates 'OD_RANGE' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                           KTAG_SCLK)) {
-          od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
-                                     &p->sclk_freq_limits);
-      }
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
-                                                           KTAG_MCLK)) {
-          od_value_pair_str_to_range(txt_power_dev_od_voltage
-                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
-                                     &p->mclk_freq_limits);
-      }
-  }
-  // Validates 'GFXCLK' is in the structure
-  else if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
+    // Validates 'OD_RANGE' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                        KTAG_SCLK)) {
+        od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+                                    &p->sclk_freq_limits);
+    }
+    else
+        structured_key_counter--;
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                        KTAG_MCLK)) {
+        od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+                                    &p->mclk_freq_limits);
+    }
+    else
+        structured_key_counter--;
+    // Validates 'GFXCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
                                                             KTAG_FIRST_FREQ_IDX)) {
       p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
       p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
+    // Validates 'MCLK' is in the structure
+    if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
+                                                        KTAG_FIRST_FREQ_IDX)) {
+        p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
+        p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+    }
+    else
+        structured_key_counter--;
 
-      // Validates 'MCLK' is in the structure
-      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
-                                                           KTAG_FIRST_FREQ_IDX)) {
-          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
-          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
-      }
-  }
-  else {
-      return RSMI_STATUS_NOT_YET_IMPLEMENTED;
-  }
+    if (structured_key_counter == 0) {
+        return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+    }
 
   // Note: No curve entries.
   p->num_regions = 0;
@@ -3293,6 +3307,63 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   rsmi_status_t ret;
   amd::smi::MonitorTypes mon_type = amd::smi::kMonInvalid;
   uint16_t val_ui16;
+  GET_DEV_FROM_INDX
+
+  // handle gpu board temp
+  if (sensor_type >= RSMI_TEMP_TYPE_GPUBOARD_NODE_FIRST &&
+      sensor_type <= RSMI_TEMP_TYPE_GPUBOARD_LAST ) {
+        if (metric != RSMI_TEMP_CURRENT) {
+          LOG_ERROR("GPUBoard temperature only support RSMI_TEMP_CURRENT");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        
+        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevGpuBoardTempMetrics);
+        if (file_path == "") {
+          LOG_ERROR("Failed to get GPU board temperature metrics file path");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        amd::smi::amdgpu_gpuboard_temp_metrics_v1_0 gpuboard_metric;
+        ret = read_gpuboard_temp_metrics(file_path.c_str(), gpuboard_metric);
+        if (ret != RSMI_STATUS_SUCCESS) {
+          std::string err_msg = "Failed to read GPU board temperature metrics at " + file_path;
+          LOG_ERROR(err_msg);
+          return ret;
+        }
+
+        ret = get_gpuboard_temp_value(gpuboard_metric, 
+                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+        return ret;
+  }
+
+  // handle base board temp
+  if (sensor_type >= RSMI_TEMP_TYPE_BASEBOARD_FIRST &&
+      sensor_type <= RSMI_TEMP_TYPE_BASEBOARD_LAST ) {
+        if (metric != RSMI_TEMP_CURRENT) {
+          LOG_ERROR("Baseboard temperature only supports RSMI_TEMP_CURRENT");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+
+        std::string file_path = dev->get_sys_file_path_by_type(amd::smi::kDevBaseBoardTempMetrics);
+        if (file_path.empty()) {
+          LOG_ERROR("Failed to get baseboard temperature metrics file path");
+          return RSMI_STATUS_NOT_SUPPORTED;
+        }
+
+        amd::smi::amdgpu_baseboard_temp_metrics_v1_0 baseboard_metric;
+        ret = read_baseboard_temp_metrics(file_path.c_str(), baseboard_metric);
+        if (ret != RSMI_STATUS_SUCCESS) {
+          std::string err_msg = "Failed to read baseboard temperature metrics at " + file_path;
+          LOG_ERROR(err_msg);
+          return ret;
+        }
+
+        ret = get_baseboard_temp_value(baseboard_metric,
+                static_cast<rsmi_temperature_type_t>(sensor_type), temperature);
+        return ret;
+  }
 
   static const std::map<rsmi_temperature_metric_t, amd::smi::MonitorTypes>
     kMetricTypeMap = {
@@ -3409,8 +3480,6 @@ rsmi_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor_type,
   }  // end HBM temperature
 
   DEVICE_MUTEX
-
-  GET_DEV_FROM_INDX
 
   if (dev->monitor() == nullptr) {
     ss << __PRETTY_FUNCTION__
@@ -3671,6 +3740,52 @@ rsmi_dev_gpu_reset(uint32_t dv_ind) {
      << getRSMIStatusString(ret, false);
   LOG_INFO(ss);
   return ret;
+
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_amdgpu_driver_reload(void) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+  // TODO(amdsmi_team): technically, we should block for all devices
+  // As this is a global operation, we can use a mutex to ensure
+  // that only one thread is trying to restart the driver at a time.
+  uint32_t dv_ind = 0;  // Default to first device
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
+
+  // Attempting to speed up processing time
+  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
+  if (restartRet != RSMI_STATUS_SUCCESS) {
+    if (is_logger_enabled) {
+      ss << __PRETTY_FUNCTION__
+         << " | ======= end ======= "
+         << " | Fail - restart AMD GPU detected"
+         << " | Device #: " << dv_ind
+         << " | Type: AMDGPU Driver Reload"
+         << " | Cause: AMDGPU Driver Reload failed "
+         << " | Returning = "
+         << getRSMIStatusString(restartRet, false);
+      LOG_ERROR(ss);
+    }
+    return restartRet;
+  }
+
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Success - if restart completed successfully"
+       << " | Device #: " << dv_ind
+       << " | Type: AMDGPU Driver Reload"
+       << " | Returning = "
+       << getRSMIStatusString(restartRet, false);
+    LOG_INFO(ss);
+  }
+  return restartRet;
 
   CATCH
 }
@@ -6434,16 +6549,10 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
-  const int k1000_MS_WAIT = 1000;
 
   const uint32_t kMaxMemoryCapabilitiesSize = 30;
   char available_memory_capabilities[kMaxMemoryCapabilitiesSize];
   available_memory_capabilities[0] = '\0';
-
-  const uint32_t kMaxCurrentMemoryMode = 5;
-  char current_memory_mode[kMaxCurrentMemoryMode];
-  current_memory_mode[0] = '\0';
-
 
   // Is the current mode already what user requested?
   switch (memory_partition) {
@@ -6549,11 +6658,11 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   GET_DEV_FROM_INDX
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition,
                               newMemoryPartition);
+  rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
-  if (amd::smi::ErrnoToRsmiStatus(ret) != RSMI_STATUS_SUCCESS) {
-    rsmi_status_t err = amd::smi::ErrnoToRsmiStatus(ret);
-    if (ret == EACCES) {
-      err = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+  if (status != RSMI_STATUS_SUCCESS) {
+    if (status == RSMI_STATUS_PERMISSION) {
+      status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
     }
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
@@ -6563,93 +6672,22 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: issue writing reqested setting of " + newMemoryPartition
        << " | Returning = "
-       << getRSMIStatusString(err, false);
+       << getRSMIStatusString(status, false);
     LOG_ERROR(ss);
-    return err;
+    return status;
   }
 
-  rsmi_status_t restartRet = dev->restartAMDGpuDriver();
   ss << __PRETTY_FUNCTION__
      << " | ======= end ======= "
-     << " | Success - if restart completed successfully"
+     << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
      << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
-     << getRSMIStatusString(restartRet, false);
-  LOG_TRACE(ss);
-
-  if (restartRet != RSMI_STATUS_SUCCESS) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail - restart AMD GPU detected"
-       << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: issue writing reqested setting of " + newMemoryPartition
-       << " | Returning = "
-       << getRSMIStatusString(restartRet, false);
-    LOG_ERROR(ss);
-    return restartRet;
-  }
-
-  std::string current_memory_mode_str = "unknown";
-  rsmi_status_t can_read_sysfs_again = RSMI_STATUS_AMDGPU_RESTART_ERR;
-  int maxWaitSeconds = 10;
-  // wait until we can read SYSFS again
-  if (restartRet == RSMI_STATUS_SUCCESS) {
-    while ((current_memory_mode_str != user_requested_memory_partition)
-          && maxWaitSeconds > 0) {
-      maxWaitSeconds -= 1;
-      can_read_sysfs_again =
-        rsmi_dev_memory_partition_get(dv_ind, current_memory_mode, kMaxCurrentMemoryMode);
-      if (can_read_sysfs_again == RSMI_STATUS_SUCCESS) {
-        current_memory_mode_str.clear();
-        current_memory_mode_str = current_memory_mode;
-        ss << __PRETTY_FUNCTION__
-           << " | ======= rsmi_dev_memory_partition_get ======= "
-           << " | Success - can read SYSFS"
-           << " | Device #: " << dv_ind
-           << " | Type: "
-           << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-           << " | Data (user requested mode): " << user_requested_memory_partition
-           << " | Current Memory Partition Mode: " << current_memory_mode_str
-           << " | Available Memory Partition Modes: " << memory_capabilities_str
-           << " | maxWaitSeconds: " << maxWaitSeconds
-           << " | total wait time (sec): " << (10 - maxWaitSeconds)
-           << " | Returning = "
-           << getRSMIStatusString(can_read_sysfs_again, false);
-        LOG_TRACE(ss);
-        if (!current_memory_mode_str.empty()
-            && (current_memory_mode_str == user_requested_memory_partition)) {
-          break;
-        }
-      }
-      amd::smi::system_wait(k1000_MS_WAIT);
-    }
-  }
-
-  if (current_memory_mode_str == user_requested_memory_partition) {
-    restartRet = RSMI_STATUS_SUCCESS;
-  } else {
-    restartRet = RSMI_STATUS_AMDGPU_RESTART_ERR;
-  }
-
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - completed driver restart and all SYSFS are active"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-     << " | Data: " << user_requested_memory_partition
-     << " | Current Memory Partition Mode: " << current_memory_mode_str
-     << " | Available Memory Partition Modes: " << memory_capabilities_str
-     << " | Returning = "
-     << getRSMIStatusString(restartRet, false);
-  LOG_TRACE(ss);
-
-  return restartRet;
+     << getRSMIStatusString(status, false);
+  LOG_INFO(ss);
+  return status;
   CATCH
 }
 
@@ -7360,9 +7398,14 @@ rsmi_event_notification_get(int timeout_ms,
          * Both event are expressed in hex.
          * information is a string
          */
-        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE];
+        char message[MAX_EVENT_NOTIFICATION_MSG_SIZE] = {0};
         // parse the line here for event_number and rest of message_information
-        sscanf(event_in, "%x %[^\n]\n", &event, message);
+        // sscanf(event_in, "%x %[^\n]\n", &event, message); // This is unsafe code and flagged by codeql. Replace with iss below:
+        std::istringstream iss(event_in);
+        iss >> std::hex >> event;
+        std::string message_str;
+        std::getline(iss >> std::ws, message_str);
+        snprintf(message, sizeof(message), "%s", message_str.c_str());
 
         // parse message based on event received
         switch (event){

@@ -144,7 +144,7 @@ amdsmi_status_t AMDSmiDrm::init() {
         // even if fail, still add to prevent mismatch the index
         if (!has_valid_fds) {
             drm_bdfs_.push_back(bdf);
-            drm_free_device(&device);
+            // No need to free device here since it is not valid
             continue;
         }
 

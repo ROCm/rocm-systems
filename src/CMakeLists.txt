@@ -77,9 +77,6 @@ set(${AMD_SMI}_VERSION_PATCH "0")
 set(${AMD_SMI}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-# Create a configure file to get version info from within library
-configure_file("amd_smiConfig.in" "${PROJECT_SOURCE_DIR}/include/amd_smi/amd_smiConfig.h")
-
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
 target_link_libraries(${AMD_SMI} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
 target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
@@ -115,6 +112,6 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)
 install(
-    FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amd_smiConfig.h
+    FILES ${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/kfd_ioctl.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)

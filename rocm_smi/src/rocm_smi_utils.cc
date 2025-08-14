@@ -1283,18 +1283,25 @@ void system_wait(int milli_seconds) {
   auto start = std::chrono::high_resolution_clock::now();
   // 1 ms = 1000 us
   int waitTime = milli_seconds * 1000;
-  ss << __PRETTY_FUNCTION__ << " | "
-     << "** Waiting for " << std::dec << waitTime
-     << " us (" << waitTime/1000 << " milli-seconds) **";
-  LOG_DEBUG(ss);
+  // Attempting to speed up processing time
+  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "** Waiting for " << std::dec << waitTime
+       << " us (" << waitTime/1000 << " milli-seconds) **";
+    LOG_DEBUG(ss);
+  }
+
   usleep(waitTime);
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration =
       std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  ss << __PRETTY_FUNCTION__ << " | "
-     << "** Waiting took " << duration.count() / 1000
-     << " milli-seconds **";
-  LOG_DEBUG(ss);
+  if (is_logger_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | "
+       << "** Waiting took " << duration.count() / 1000
+       << " milli-seconds **";
+    LOG_DEBUG(ss);
+  }
 }
 
 int countDigit(uint64_t n) {

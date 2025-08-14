@@ -39,6 +39,30 @@ variable to the directory containing ``librocm_smi64.so`` (usually
 ``/opt/rocm/lib``) or by passing the ``-lamd_smi`` flag to the compiler.
 ```
 
+```{note}
+The environment variable ``AMDSMI_GPU_METRICS_CACHE_MS`` may be set to
+control the internal GPU metrics cache duration (ms). 
+Default 1, set to 0 to disable.
+
+You can apply it in one of two ways:
+
+1. In Python code (before the AMDSMI library loads):
+```
+
+```python
+import os
+os.environ["AMDSMI_GPU_METRICS_CACHE_MS"] = "200"
+from amdsmi import *
+```
+
+```{note}
+2. On the shell when invoking Python:
+```
+
+```shell
+AMDSMI_GPU_METRICS_CACHE_MS=200 python tools/amdsmi_quick_start.py
+```
+
 To get started, the `amdsmi` folder should be copied and placed next to
 the importing script. Import it as follows:
 

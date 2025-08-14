@@ -705,7 +705,7 @@ struct AMDGpuMetrics_v18_t {
   uint16_t m_average_gfx_activity;
   uint16_t m_average_umc_activity;  // memory controller
 
-  /* VRAM max bandwidthi (in GB/sec) at max memory clock */
+  /* VRAM max bandwidth (in GB/sec) at max memory clock */
   uint64_t m_mem_max_bandwidth;
 
   /* Energy (15.259uJ (2^-16) units) */

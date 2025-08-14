@@ -207,7 +207,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 26
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 0
+#define AMDSMI_LIB_VERSION_MINOR 1
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -464,7 +464,66 @@ typedef enum {
     AMDSMI_TEMPERATURE_TYPE_HBM_2,   //!< High Bandwidth 2 temperature per stack
     AMDSMI_TEMPERATURE_TYPE_HBM_3,   //!< High Bandwidth 3 temperature per stack
     AMDSMI_TEMPERATURE_TYPE_PLX,     //!< PCIe switch temperature
-    AMDSMI_TEMPERATURE_TYPE__MAX = AMDSMI_TEMPERATURE_TYPE_PLX
+
+    // GPU Board Node temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST = 100,
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X 
+      = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST,         //!< Retimer X temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC,         //!< OAM X IBC temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC_2,       //!< OAM X IBC 2 temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR,    //!< OAM X VDD 1.8V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR, //!< OAM X 0.4V HBM B voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR, //!< OAM X 0.4V HBM D voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_LAST = 149,
+
+    // GPU Board VR (Voltage Regulator) temperature 
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST = 150,
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD0
+         = AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST,        //!< VDDCR VDD0 voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD1,        //!< VDDCR VDD1 voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD2,        //!< VDDCR VDD2 voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD3,        //!< VDDCR VDD3 voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_A,       //!< VDDCR SOC A voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_C,       //!< VDDCR SOC C voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_A,     //!< VDDCR SOCIO A voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_C,     //!< VDDCR SOCIO C voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_085_HBM,       //!< VDD 0.85V HBM voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_B,    //!< VDDCR 1.1V HBM B voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_D,    //!< VDDCR 1.1V HBM D voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR,           //!< VDD USR voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32,      //!< VDDIO 1.1V E32 voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST = 199,
+
+    // Baseboard System temperature 
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST = 200,
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA
+        = AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST,       //!< UBB FPGA temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FRONT,         //!< UBB front temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_BACK,          //!< UBB back temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM7,          //!< UBB OAM7 temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_IBC,           //!< UBB IBC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_UFPGA,         //!< UBB UFPGA temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM1,          //!< UBB OAM1 temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_HSC,       //!< OAM 0-1 HSC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_2_3_HSC,       //!< OAM 2-3 HSC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_HSC,       //!< OAM 4-5 HSC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_6_7_HSC,       //!< OAM 6-7 HSC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_0V72_VR,  //!< UBB FPGA 0.72V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_3V3_VR,   //!< UBB FPGA 3.3V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR,  //!< Retimer 0-1-2-3 1.2V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR,  //!< Retimer 4-5-6-7 1.2V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR, //!< Retimer 0-1 0.9V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR, //!< Retimer 4-5 0.9V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR, //!< Retimer 2-3 0.9V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR, //!< Retimer 6-7 0.9V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR, //!< OAM 0-1-2-3 3.3V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR, //!< OAM 4-5-6-7 3.3V voltage regulator temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC_HSC,           //!< IBC HSC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC,               //!< IBC temperature
+    AMDSMI_TEMPERATURE_TYPE_BASEBOARD_LAST = 249,
+    AMDSMI_TEMPERATURE_TYPE__MAX = AMDSMI_TEMPERATURE_TYPE_BASEBOARD_LAST, //!< Maximum per GPU temperature type
+
+
 } amdsmi_temperature_type_t;
 
 /**
@@ -655,17 +714,17 @@ typedef struct {
                                                    Gfx clock below host limit violation; 1 = active 0 = not active; Max uint8 means unsupported.*/
     //GPU metrics 1.8 violations
     uint64_t acc_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit power count; Max uint64 means unsupported
-    uint64_t acc_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit thermal count; Max uint64 means unsupported
+    uint64_t acc_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Current gfx clock below host limit thermal count; Max uint64 means unsupported
     uint64_t acc_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];                 //!< New Driver 1.8 fields: Current low utilization count; Max uint64 means unsupported
     uint64_t acc_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Current gfx clock below host limit total count; Max uint64 means unsupported
 
     uint64_t per_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit power violation % (greater than 0% is a violation); Max uint64 means unsupported
-    uint64_t per_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
+    uint64_t per_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];    //!< New Driver 1.8 fields: Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];                 //!< New Driver 1.8 fields: Low utilization violation % (greater than 0% is a violation); Max uint64 means unsupported
     uint64_t per_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Any Gfx clock below host limit violation % (greater than 0% is a violation); Max uint64 means unsupported
 
     uint8_t active_gfx_clk_below_host_limit_pwr[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit power violation; 1 = active 0 = not active; Max uint8 means unsupported
-    uint8_t active_gfx_clk_below_host_limit_thm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+    uint8_t active_gfx_clk_below_host_limit_thrm[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];  //!< New Driver 1.8 fields: Gfx clock below host limit thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_low_utilization[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];               //!< New Driver 1.8 fields: Low utilization violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint8_t active_gfx_clk_below_host_limit_total[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];//!< New Driver 1.8 fields: Any Gfx clock host limit violation; 1 = active 0 = not active; Max uint8 means unsupported
     uint64_t reserved[AMDSMI_MAX_NUM_XCP][AMDSMI_MAX_NUM_XCC];   // reserved for new violation info
@@ -5693,6 +5752,9 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
  *  device's memory partition setting. This function does not allow any concurrent operations.
  *  Device must be idle and have no workloads when performing set partition operations.
  *
+ *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
+ *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
+ *
  *  @param[in] processor_handle Device which to query
  *
  *  @param[in] memory_partition using enum ::amdsmi_memory_partition_type_t,
@@ -5703,8 +5765,6 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle, char *
  *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
  *  @return ::amdsmi_status_t
  *
  */
@@ -5736,6 +5796,14 @@ amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle processor_handle,
  *  @ingroup tagMemoryPartition
  *
  *  @platform{gpu_bm_linux} @platform{host}
+ *
+ *  @details Given a processor handle @p processor_handle and a type of memory partition
+ *  @p mode, this function will attempt to update the selected
+ *  device's memory partition setting. This function does not allow any concurrent operations.
+ *  Device must be idle and have no workloads when performing set partition operations.
+ *
+ *  On @platform{gpu_bm_linux} AMDGPU driver restart is REQUIRED to complete updating to
+ *  the new memory partition setting. Refer to `amdsmi_gpu_driver_reload()` for more details.
  *
  *  @param[in] processor_handle A processor handle
  *
@@ -6335,6 +6403,61 @@ amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
 
 /** @} End tagProcessInfo */
+
+/*****************************************************************************/
+/** @defgroup tagDriverControl Driver control mechanisms
+ *  These functions provide control over the driver. Users should use with
+ *  caution as they may cause the driver to become unstable.
+ *  @{
+ */
+/**
+ *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
+ *  system.
+ *
+ *  @ingroup tagDriverControl
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf} @platform{guest_mvf}
+ *
+ *  @details This function will reload the AMD GPU driver as described in
+ *  the Linux kernel documentation -
+ *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
+ *  with no extra parameters as specified in
+ *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
+ * 
+ *  Use this function with caution, as it will unload and reload the AMD GPU
+ *  driver: `modprobe -r amdgpu && modprobe amdgpu`. 
+ *  
+ *  Any process or workload using the AMD GPU driver is REQUIRED to be
+ *  stopped before calling this function. Otherwise, function will return
+ *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *  the amdgpu driver.
+ * 
+ *  User is REQUIRED to have root/admin privileges to call this function.
+ *  Otherwise, this function will return ::AMDSMI_STATUS_NO_PERM.
+ * 
+ *  This API will take time to complete, as we are checking the driver's
+ *  loading status to confirm it reloaded properly. If
+ *  ::AMDSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
+ *  did not reload properly and the user should check dmesg logs.
+ * 
+ *  This function has been created in order to conviently reload the
+ *  AMD GPU driver once `amdsmi_set_gpu_memory_partition()` or
+ *  `amdsmi_set_gpu_memory_partition_mode()` successfully has been changed
+ *  on Baremetal systems. Now users can control the reload once all GPU
+ *  processes/workloads have been stopped on the AMD GPU driver.
+ *  A (AMD GPU) driver reload is REQUIRED to complete changing
+ *  to the new memory partition configuration
+ *  (`amdsmi_set_gpu_memory_partition()`/`amdsmi_set_gpu_memory_partition_mode()`)
+ *  operation MUST be successful. This function WILL EFFECT all GPUs in the
+ *  hive to be reconfigured with the specified memory partition configuration.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success
+ *  @return                   | ::AMDSMI_STATUS_NO_PERM function requires root access
+ *  @return                   | ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
+ *                                the amdgpu driver.
+ */
+amdsmi_status_t amdsmi_gpu_driver_reload(void);
+/** @} End tagDriverControl */
 
 #ifdef ENABLE_ESMI_LIB
 
