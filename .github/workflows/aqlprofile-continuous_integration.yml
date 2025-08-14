@@ -84,7 +84,7 @@ jobs:
         echo "Downloaded: ${KEY}"
         sudo mkdir -p /opt/rocm-custom
         sudo tar -xf *.tar.gz -C /opt/rocm-custom
-    
+
     - uses: actions/checkout@v4
       with:
         sparse-checkout: projects/aqlprofile
@@ -113,7 +113,7 @@ jobs:
         pwd
 
     - name: Configure, Build, and Test
-      if: ${{matrix.system.gpu != 'mi3xx'}}
+      # if: ${{matrix.system.gpu != 'mi3xx'}}
       timeout-minutes: 30
       shell: bash
       run:
@@ -125,17 +125,17 @@ jobs:
           -DAQLPROFILE_EXTRA_CONFIGURE_ARGS=""
           -S $(pwd)/projects/aqlprofile/dashboard.cmake
 
-    - name: Configure, Build, and Test (MI3xx)
-      if: ${{matrix.system.gpu == 'mi3xx'}}
-      timeout-minutes: 30
-      shell: bash
-      run: |
-        export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH
-        export PATH=/opt/rocm-custom/bin:$PATH
-        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON $(pwd)/projects/aqlprofile
-        /usr/bin/cmake --build build --target all --parallel 16
-        sudo /usr/bin/cmake --build build --target install
-        /usr/bin/ctest --output-on-failure -VV --test-dir build
+    # - name: Configure, Build, and Test (MI3xx)
+    #   if: ${{matrix.system.gpu == 'mi3xx'}}
+    #   timeout-minutes: 30
+    #   shell: bash
+    #   run: |
+    #     export LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+    #     export PATH=/opt/rocm-custom/bin:$PATH
+    #     /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=/opt/rocm-custom -DCMAKE_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_PACKAGING_INSTALL_PREFIX=/opt/rocm-custom -DCPACK_GENERATOR='DEB;RPM;STGZ' -DGPU_TARGETS='gfx906,gfx90a,gfx942,gfx1101,gfx1201' -DAQLPROFILE_BUILD_TESTS=ON $(pwd)/projects/aqlprofile
+    #     /usr/bin/cmake --build build --target all --parallel 16
+    #     sudo /usr/bin/cmake --build build --target install
+    #     /usr/bin/ctest --output-on-failure -VV --test-dir build
 
   core-rpm:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix

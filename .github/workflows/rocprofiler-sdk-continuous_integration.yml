@@ -135,7 +135,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
+          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
           echo 'PATH=/opt/rocm-custom/bin:$PATH' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
 
