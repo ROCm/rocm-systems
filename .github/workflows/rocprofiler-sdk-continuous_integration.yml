@@ -30,6 +30,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
+  CDASH_URL: "https://my.cdash.org/submit.php?project=rocprofiler-sdk"
   ## No tests should be excluded here except for extreme emergencies; tests should only be disabled in CMake
   ## A task should be assigned directly to fix the issues
   ## Scratch memory tests need to be fixed for ROCm 7.0 release
@@ -108,7 +109,7 @@ jobs:
         sudo apt-get install -y build-essential coreutils cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
-        python3 -m pip install -U --user -r requirements.txt
+        [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install -U --user -r requirements.txt --break-system-packages || python3 -m pip install -U --user -r requirements.txt
         sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
 
     - name: List Files
@@ -119,7 +120,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat /opt/rocm-custom/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -148,7 +149,7 @@ jobs:
           --site ${RUNNER_HOSTNAME}
           --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
-          --submit-url "https://my.cdash.org/submit.php?project=rocprofiler-sdk"
+          --submit-url ${{ env.CDASH_URL }}
           ${{ matrix.system.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
