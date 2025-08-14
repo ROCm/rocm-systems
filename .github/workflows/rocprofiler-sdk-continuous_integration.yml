@@ -27,7 +27,7 @@ concurrency:
 
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
-  ROCM_PATH: "/opt/rocm"
+  ROCM_PATH: "/opt/rocm-custom"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   CDASH_URL: "https://my.cdash.org/submit.php?project=rocprofiler-sdk"
@@ -112,6 +112,7 @@ jobs:
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install -U --user -r requirements.txt --break-system-packages || python3 -m pip install -U --user -r requirements.txt
         sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
+        sudo rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
 
     - name: List Files
       shell: bash
@@ -135,7 +136,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
@@ -144,7 +144,6 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        RUNNER_HOSTNAME=$(hostname)
         LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
         PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
@@ -160,6 +159,7 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX='/opt/rocm-custom'
+          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
           -DPython3_EXECUTABLE='/usr/bin/python3'
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -213,8 +213,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
+        CMAKE_PREFIX_PATH=/opt/rocm-custom cmake -B build-samples-deb /opt/rocm-custom/share/rocprofiler-sdk/samples
+        CMAKE_PREFIX_PATH=/opt/rocm-custom cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm-custom/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${${{ matrix.system.gpu }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.gpu }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
@@ -287,25 +287,8 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
-
-    - name: List Files
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-        echo "PATH: ${PATH}"
-        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
-        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
-        ls -la
-
-    - name: Enable PC Sampling
-      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run:
-          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+        sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        sudo rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
 
     - name: Special Requirements
       shell: bash
@@ -316,12 +299,33 @@ jobs:
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
+    - name: List Files
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat /opt/rocm-custom/.info/version
+        ls -la
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run:
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME=$(hostname) LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        python3 -m pipx ensurepath; source ~/.bashrc;
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
+        PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
+        /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
@@ -331,6 +335,7 @@ jobs:
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
+          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -396,6 +401,7 @@ jobs:
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -U --user -r requirements.txt
         sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+        sudo rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
 
     - name: List Files
       shell: bash
@@ -425,7 +431,9 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
+        PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
+        /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
@@ -434,6 +442,7 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
+          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
