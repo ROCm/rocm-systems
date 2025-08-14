@@ -35,39 +35,17 @@
 #include <string>
 #include <string_view>
 
+namespace rocprofiler
+{
+namespace att_wrapper
+{
 using pcinfo_t           = rocprofiler_thread_trace_decoder_pc_t;
 using occupancy_t        = rocprofiler_thread_trace_decoder_occupancy_t;
 using wave_t             = rocprofiler_thread_trace_decoder_wave_t;
 using perfevent_t        = rocprofiler_thread_trace_decoder_perfevent_t;
 using wave_instruction_t = rocprofiler_thread_trace_decoder_inst_t;
+using realtime_t         = rocprofiler_thread_trace_decoder_realtime_t;
 
-template <>
-struct std::hash<pcinfo_t>
-{
-public:
-    size_t operator()(const pcinfo_t& a) const
-    {
-        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
-    }
-};
-
-inline bool
-operator==(const pcinfo_t& a, const pcinfo_t& b)
-{
-    return a.addr == b.addr && a.marker_id == b.marker_id;
-};
-
-inline bool
-operator<(const pcinfo_t& a, const pcinfo_t& b)
-{
-    if(a.marker_id == b.marker_id) return a.addr < b.addr;
-    return a.marker_id < b.marker_id;
-};
-
-namespace rocprofiler
-{
-namespace att_wrapper
-{
 class GlobalDefs
 {
 public:
@@ -92,3 +70,29 @@ struct KernelName
 
 }  // namespace att_wrapper
 }  // namespace rocprofiler
+
+inline constexpr bool
+operator==(const rocprofiler::att_wrapper::pcinfo_t& a,
+           const rocprofiler::att_wrapper::pcinfo_t& b) noexcept
+{
+    return a.addr == b.addr && a.marker_id == b.marker_id;
+}
+
+inline constexpr bool
+operator<(const rocprofiler::att_wrapper::pcinfo_t& a,
+          const rocprofiler::att_wrapper::pcinfo_t& b) noexcept
+{
+    return (a.marker_id == b.marker_id) ? (a.addr < b.addr) : (a.marker_id < b.marker_id);
+}
+
+namespace std
+{
+template <>
+struct hash<rocprofiler::att_wrapper::pcinfo_t>
+{
+    size_t operator()(const rocprofiler::att_wrapper::pcinfo_t& a) const noexcept
+    {
+        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
+    }
+};
+}  // namespace std

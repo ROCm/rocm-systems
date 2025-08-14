@@ -68,6 +68,17 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
     {
         PerfcounterFile(tool.config, static_cast<perfevent_t*>(trace_events), trace_size);
     }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_RT_FREQUENCY)
+    {
+        if(tool.config.realtime && trace_size != 0)
+            tool.config.realtime->frequency = *static_cast<uint64_t*>(trace_events);
+    }
+    else if(trace_id == ROCPROFILER_THREAD_TRACE_DECODER_RECORD_REALTIME)
+    {
+        if(tool.config.realtime && trace_size != 0)
+            tool.config.realtime->add(
+                tool.config.shader_engine, static_cast<realtime_t*>(trace_events), trace_size);
+    }
 
     if(trace_id != ROCPROFILER_THREAD_TRACE_DECODER_RECORD_WAVE) return;
 
