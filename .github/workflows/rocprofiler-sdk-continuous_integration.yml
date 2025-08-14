@@ -383,7 +383,7 @@ jobs:
           --
           -LE "${${{ matrix.runner }}_EXCLUDE_LABEL_REGEX}"
           -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
-  
+
   sanitizers:
     strategy:
       fail-fast: false
