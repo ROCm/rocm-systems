@@ -588,6 +588,8 @@ int main() {
                 // Since memory partition effects entire GPU hive (and modifies current
                 // compute/accelerator partition), we'll default to only changing the
                 // first device for the first socket (GPU #0)
+                // Note: Any device can be requested to change memory partition,
+                //       but for simplicity, we will only change GPU #0.
                 if (gpu_number == 0) {
                     std::cout << "    **Changing memory partition for GPU #"
                               << gpu_number << "...**\n";
@@ -612,6 +614,20 @@ int main() {
                         std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                                   << memoryPartitionString(updatePartition) << "): "
                                   << err_str << "\n\n";
+
+                        // Reload only if the memory partition was set successfully
+                        if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                            std::cout << "\t**Reloading GPU driver to apply memory "
+                            << "partition change, this may take some time... **\n";
+                            amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
+                            amdsmi_status_code_to_string(reload_status, &err_str);
+                            if (reload_status == AMDSMI_STATUS_SUCCESS) {
+                                PRINT_AMDSMI_RET(reload_status)
+                                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                            } else {
+                                std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                            }
+                        }
 
                         // Get the current memory partition
                         char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
@@ -678,6 +694,17 @@ int main() {
                 std::cout << "\t**Device Index: " << device_index << std::endl;
                 std::cout << "\t**Device Handle: " << processor_handles[device_index] << std::endl;
                 std::cout << "\t**GPU Number: " << gpu_number << std::endl;
+                // Since memory partition effects entire GPU hive (and modifies current
+                // compute/accelerator partition), we'll default to only changing the
+                // first device for the first socket (GPU #0)
+                // Note: Any device can be requested to change memory partition,
+                //       but for simplicity, we will only change GPU #0.
+                if (gpu_number != 0) {
+                    std::cout << "    **Skipping memory partition reset for GPU #"
+                              << gpu_number << "...**\n";
+                    gpu_number++;
+                    continue;
+                }
 
                 // Reset to original memory partition settings
                 amdsmi_memory_partition_type_t orig_partition =
@@ -693,6 +720,19 @@ int main() {
                 std::cout << "\tamdsmi_set_gpu_memory_partition(" << gpu_number << ", "
                           << memoryPartitionString(orig_partition) << "): "
                           << err_str << "\n\n";
+                // Reload only if the memory partition was set successfully
+                if (ret_set == AMDSMI_STATUS_SUCCESS) {
+                    std::cout << "\t**Reloading GPU driver to apply memory "
+                    << "partition change, this may take some time... **\n";
+                    amdsmi_status_t reload_status = amdsmi_gpu_driver_reload();
+                    amdsmi_status_code_to_string(reload_status, &err_str);
+                    if (reload_status == AMDSMI_STATUS_SUCCESS) {
+                        PRINT_AMDSMI_RET(reload_status)
+                        std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                    } else {
+                        std::cout << "\tamdsmi_gpu_driver_reload(): " << err_str << "\n\n";
+                    }
+                }
                 // Get the current memory partition
                 char current_memory_partition[AMDSMI_MAX_STRING_LENGTH];
                 ret = amdsmi_get_gpu_memory_partition(processor_handles[device_index],
@@ -832,6 +872,7 @@ int main() {
         // For each device of the socket, get name and temperature.
         for (uint32_t device_index = 0; device_index < device_count; device_index++) {
             std::cout << "Device Index: " << device_index << std::endl;
+            std::cout << "SMI gpu #: " << gpu_number << std::endl;
 
 // Commenting out the code to get CPU socket count and GPU count
 // Doesn't work on system with no supported CPU sockets
@@ -842,6 +883,95 @@ int main() {
             CHK_AMDSMI_RET(ret)
             std::cout << "CPU socket count: " << cpu_sockets << std::endl;
             std::cout << "GPU count: " << gpus << std::endl;
+#endif
+
+// Commenting out since, not verified to work on all ASICs yet.
+#if 0
+            amdsmi_name_value_t *pm_metrics = {};
+            uint32_t num_metrics = 0;
+            ret = amdsmi_get_gpu_pm_metrics_info(processor_handles[device_index],
+                                                 &pm_metrics, &num_metrics);
+            const char* err_str;
+            amdsmi_status_code_to_string(ret, &err_str);
+            std::cout << "    Output of amdsmi_get_gpu_pm_metrics_info:" << err_str << "\n";
+            if (ret == AMDSMI_STATUS_SUCCESS) {
+                CHK_AMDSMI_RET(ret)
+                std::cout << "\tNumber of PM metrics: " << num_metrics << std::endl;
+                for (uint32_t j = 0; j < num_metrics; j++) {
+                    std::cout << "\tPM Metric Name: " << pm_metrics[j].name
+                              << ", Value: " << pm_metrics[j].value << std::endl;
+                }
+            }
+            free(pm_metrics);
+
+            // typedef enum {
+            //     AMDSMI_REG_XGMI,  //!< XGMI registers
+            //     AMDSMI_REG_WAFL,  //!< WAFL registers
+            //     AMDSMI_REG_PCIE,  //!< PCIe registers
+            //     AMDSMI_REG_USR,   //!< Usr registers
+            //     AMDSMI_REG_USR1   //!< Usr1 registers
+            // } amdsmi_reg_type_t;
+            std::map<amdsmi_reg_type_t, std::string> reg_type_map = {
+                {AMDSMI_REG_XGMI, "XGMI"},
+                {AMDSMI_REG_WAFL, "WAFL"},
+                {AMDSMI_REG_PCIE, "PCIE"},
+                {AMDSMI_REG_USR, "USR"},
+                {AMDSMI_REG_USR1, "USR1"}
+            };
+
+            for (uint32_t j = static_cast<uint32_t>(AMDSMI_REG_XGMI);
+                 j <= static_cast<uint32_t>(AMDSMI_REG_USR1); j++) {
+                amdsmi_name_value_t *reg_metrics = {};
+                amdsmi_reg_type_t reg_type = static_cast<amdsmi_reg_type_t>(j);
+                std::string reg_type_str = "N/A";
+                ret = amdsmi_get_gpu_reg_table_info(processor_handles[device_index],
+                                                    reg_type, &reg_metrics, &num_metrics);
+                if (auto it = reg_type_map.find(reg_type); it != reg_type_map.end()) {
+                    reg_type_str = it->second;
+                }
+                // Skipping these for now due to some ASICS having issues
+                if (reg_type == AMDSMI_REG_USR1 || reg_type == AMDSMI_REG_XGMI ||
+                    reg_type == AMDSMI_REG_USR) {
+                    std::cout << "\tSkipping " << reg_type_str << " registers for now."
+                              << std::endl;
+                    free(reg_metrics);
+                    continue;
+                }
+
+                amdsmi_status_code_to_string(ret, &err_str);
+                std::cout << "    Output of amdsmi_get_gpu_reg_table_info(" << gpu_number << ", "
+                          << reg_type_str << "): " << err_str << "\n";
+                if (ret == AMDSMI_STATUS_SUCCESS) {
+                    CHK_AMDSMI_RET(ret)
+                    std::cout << "\tNumber of Register metrics: " << num_metrics << std::endl;
+                    for (uint32_t k = 0; k < num_metrics; k++) {
+                        if (reg_metrics == nullptr) {
+                            std::cout << "\tRegister Number: " << k
+                                      << ", Type: " << reg_type_str
+                                      << ", Register Metric Name: N/A, Value: N/A" << std::endl;
+                            continue;
+                        }
+                        if (reg_metrics[k].name == nullptr) {
+                            std::cout << "\tRegister Number: " << k
+                                      << ", Type: " << reg_type_str
+                                      << ", Register Metric Name: "
+                                      << (reg_metrics[k].name != nullptr ?
+                                          reg_metrics[k].name : "N/A")
+                                      << ", Value: N/A" << std::endl;
+                            continue;
+                        }
+                        std::cout << "\tRegister Number: " << k
+                                << ", Type: " << reg_type_str
+                                << ", Register Metric Name: "
+                                << (reg_metrics[k].name != nullptr ?
+                                    reg_metrics[k].name : "N/A")
+                                << ", Value: " << reg_metrics[k].value << std::endl;
+                    }
+                }
+                free(reg_metrics);
+                std::cout << std::endl;
+            }
+            std::cout << std::endl;
 #endif
 
             // Get device type. Since the amdsmi is initialized with
@@ -1233,8 +1363,8 @@ int main() {
                 uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0;
                 uint64_t gfx = 0, enc = 0;
                 uint32_t cu_occupancy = 0;
-                char bdf_str[20];
-                sprintf(bdf_str, "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
+                char bdf_str[64] = {0};
+                snprintf(bdf_str, sizeof(bdf_str), "%04" PRIx64 ":%02" PRIx32 ":%02" PRIx32 ".%" PRIu32,
                    static_cast<uint64_t>(bdf.domain_number),
                    static_cast<uint32_t>(bdf.bus_number),
                    static_cast<uint32_t>(bdf.device_number),
@@ -1265,7 +1395,7 @@ int main() {
                     struct passwd *pwd = nullptr;
                     struct stat st;
 
-                    sprintf(command, "/proc/%d", process_info_list[it].pid);
+                    snprintf(command, sizeof(command), "/proc/%d", process_info_list[it].pid);
                     if (stat(command, &st))
                         continue;
                     pwd = getpwuid(st.st_uid);
@@ -1869,8 +1999,8 @@ int main() {
                     }
                 }
             }
-          gpu_number++;
-      }
+            gpu_number++;
+        }
     }
 
     // Clean up resources allocated at amdsmi_init. It will invalidate sockets

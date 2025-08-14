@@ -42,6 +42,61 @@ const uint32_t MAX_DPX_PARTITIONS = 2;
 const uint32_t MAX_TPX_PARTITIONS = 3;
 const uint32_t MAX_QPX_PARTITIONS = 4;
 
+void ReloadDriverWithMessages(bool isVerbose,
+                              const std::string& preReloadMessage,
+                              const std::string& successMessage,
+                              const std::string& errorMessage,
+                              const std::string& restartErrorMessage,
+                              amdsmi_status_t *reload_status) {
+    if (isVerbose) {
+      std::cout << "\t**" << preReloadMessage << std::endl;
+    }
+
+    auto start_time = std::chrono::steady_clock::now();
+    auto driver_reload_status = amdsmi_gpu_driver_reload();
+    auto end_time = std::chrono::steady_clock::now();
+    auto elapsed_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                            end_time - start_time);
+    auto elapsed_seconds = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time);
+    *reload_status = driver_reload_status;
+
+    if (isVerbose) {
+      std::cout << "\t**"
+                << "amdsmi_gpu_driver_reload() took "
+                << elapsed_time.count() << " milliseconds ("
+                << elapsed_seconds.count() << " seconds)" << std::endl;
+    }
+
+    if (driver_reload_status == AMDSMI_STATUS_SUCCESS) {
+      if (isVerbose) {
+        std::cout << "\t**" << successMessage << std::endl;
+      }
+      ASSERT_EQ(driver_reload_status, AMDSMI_STATUS_SUCCESS);
+    } else if (driver_reload_status == AMDSMI_STATUS_AMDGPU_RESTART_ERR) {
+      if (isVerbose) {
+        std::cout << "\t**" << restartErrorMessage << std::endl;
+      }
+      ASSERT_TRUE(driver_reload_status == AMDSMI_STATUS_AMDGPU_RESTART_ERR);
+    } else {
+      if (isVerbose) {
+          std::cout << "\t**" << errorMessage << ": "
+                    << smi_amdgpu_get_status_string(driver_reload_status, false) << std::endl;
+      }
+    }
+    // Tests should fail if the driver reload fails
+    // TODO(amdsmi_team): This is a temporary solution until CQE can update
+    //                    how their containers are ran.
+    //                    This is because the driver reload requires:
+    //                    1) Containers must run serially
+    //                       (i.e. no parallel containers running at the same time)
+    //                    2) Containers must run with extra parameters:
+    //                       --cap-add=SYS_ADMIN -v /lib/modules:/lib/modules
+    //                       See: https://rocm.docs.amd.com/projects/amdsmi/en/latest/how-to/setup-docker-container.html
+    #if 0
+      ASSERT_EQ(driver_reload_status, AMDSMI_STATUS_SUCCESS);
+    #endif
+}
+
 TestMemoryPartitionReadWrite::TestMemoryPartitionReadWrite() : TestBase() {
   set_title("AMDSMI Memory Partition Read Test");
   set_description("The memory partition tests verifies that the memory "
@@ -335,6 +390,26 @@ void TestMemoryPartitionReadWrite::Run(void) {
     }
   }
 
+  // Basic check we can reload the driver, regardless of if changing memory partition
+  // is supported or not
+  // FYI Need to place after saving current compute partitions, since reloading driver will reset
+  // all back to SPX/DPX/etc (whatever is default for that NPS mode; see
+  // `sudo amd-smi partition -a`).
+  IF_VERB(STANDARD) {
+    std::cout << "\t**"
+              << "======== TEST AMDSMI_GPU_DRIVER_RELOAD() BEFORE"
+              << " MEMORY PARTITION CHECKS ===============" << std::endl;
+  }
+  amdsmi_status_t driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
+  std::string preload_message =
+    "\t  Reloading the AMD GPU driver before memory partition checks."
+    " This may take some time, please wait...";
+  ReloadDriverWithMessages(isVerbose, preload_message,
+    "amdsmi_gpu_driver_reload() successful.",
+    "amdsmi_gpu_driver_reload() failed",
+    "amdsmi_gpu_driver_reload() failed with AMDGPU_RESTART_ERR",
+    &driver_reload_status);
+
   // Run memory partition tests
   IF_VERB(STANDARD) {
     std::cout << "\t**=========================================================\n";
@@ -348,7 +423,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
     std::cout << "\t**Total Num Devices: " << current_num_devices << std::endl;
   }
   // Leaving for debug purposes - uncomment to test a specific number of devices
-  // uint32_t num_devices_to_test = promptNumDevicesToTest(current_num_devices);
+  // uint32_t num_devices_to_test = 1;
   uint32_t num_devices_to_test = current_num_devices;
   for (uint32_t dv_ind = 0; dv_ind < num_devices_to_test; ++dv_ind) {
     bool wasSetSuccess = false;
@@ -587,8 +662,34 @@ void TestMemoryPartitionReadWrite::Run(void) {
                   || (ret_set == AMDSMI_STATUS_NOT_SUPPORTED));
       }
 
+      amdsmi_status_t driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
       if (ret_set == AMDSMI_STATUS_SUCCESS) {  // do not continue trying to reset
-        wasSetSuccess = true;
+        // Now we require a separate call to reload the driver, since this operation
+        // has been removed from the amdsmi_set_gpu_memory_partition_mode and
+        // amdsmi_set_gpu_memory_partition().
+        // This is to allow the user to select the appropriate time to reload the driver
+        // since there can be errors if any device has a workload/process running on it.
+        std::string reload_message =
+          "\t  Reloading the AMD GPU driver after setting memory partition to "
+          + memoryPartitionString(new_memory_partition)
+          + ". This may take some time, please wait...";
+        std::string driver_reload_success_message =
+          "amdsmi_gpu_driver_reload() successful after setting memory partition to "
+          + memoryPartitionString(new_memory_partition);
+        std::string failure_message =
+          "amdsmi_gpu_driver_reload() failed after setting memory partition to "
+          + memoryPartitionString(new_memory_partition);
+        std::string restart_error_message =
+          "amdsmi_gpu_driver_reload() failed with AMDGPU_RESTART_ERR after "
+          "setting memory partition to " + memoryPartitionString(new_memory_partition);
+        ReloadDriverWithMessages(isVerbose, reload_message,
+          driver_reload_success_message,
+          failure_message,
+          restart_error_message,
+          &driver_reload_status);
+        if (driver_reload_status == AMDSMI_STATUS_SUCCESS) {
+          wasSetSuccess = true;
+        }
       }
 
       ret = amdsmi_get_gpu_memory_partition_config(processor_handles_[dv_ind],
@@ -613,7 +714,9 @@ void TestMemoryPartitionReadWrite::Run(void) {
                      memoryPartitionString(current_memory_config.mp_mode).c_str());
         CHK_ERR_ASRT(ret_set)
       } else {
-        ASSERT_NE(AMDSMI_STATUS_SUCCESS, ret_set);
+        ASSERT_TRUE(ret_set == AMDSMI_STATUS_SUCCESS
+                    || ret_set == AMDSMI_STATUS_INVAL
+                    || ret_set == AMDSMI_STATUS_NOT_SUPPORTED);
         ASSERT_STRNE(memoryPartitionString(new_memory_partition).c_str(),
                      memoryPartitionString(current_memory_config.mp_mode).c_str());
       }
@@ -664,6 +767,32 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << smi_amdgpu_get_status_string(ret, false) << std::endl;
     }
     CHK_ERR_ASRT(ret)
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+        // Now we require a separate call to reload the driver, since this operation
+        // has been removed from the amdsmi_set_gpu_memory_partition_mode and
+        // amdsmi_set_gpu_memory_partition().
+        // This is to allow the user to select the appropriate time to reload the driver
+        // since there can be errors if any device has a workload/process running on it.
+        driver_reload_status = AMDSMI_STATUS_NOT_SUPPORTED;
+        std::string reload_message =
+          "\t  Reloading the AMD GPU driver after resetting memory partition to "
+          + std::string(orig_memory_partition)
+          + ". This may take some time, please wait...";
+        std::string driver_reload_success_message =
+          "amdsmi_gpu_driver_reload() successful after resetting memory partition to "
+          + std::string(orig_memory_partition);
+        std::string failure_message =
+          "amdsmi_gpu_driver_reload() failed after resetting memory partition to "
+          + std::string(orig_memory_partition);
+        std::string restart_error_message =
+          "amdsmi_gpu_driver_reload() failed with AMDGPU_RESTART_ERR after "
+          "resetting memory partition to " + std::string(orig_memory_partition);
+        ReloadDriverWithMessages(isVerbose, reload_message,
+          driver_reload_success_message,
+          failure_message,
+          restart_error_message,
+          &driver_reload_status);
+    }
     ret = amdsmi_get_gpu_memory_partition(processor_handles_[dv_ind],
                                           current_memory_partition, k255Len);
     CHK_ERR_ASRT(ret)

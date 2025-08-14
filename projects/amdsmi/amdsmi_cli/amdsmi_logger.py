@@ -157,6 +157,9 @@ class AMDSMILogger():
             elif key == 'gpu':
                 stored_gpu = string_value
                 table_values += string_value.rjust(3)
+            elif key == 'xcp':
+                stored_gpu = string_value
+                table_values += string_value.rjust(5)
             elif key == 'timestamp':
                 stored_timestamp = string_value
                 table_values += string_value.rjust(10) + '  '
@@ -170,6 +173,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(7)
             elif key in ('gfx_clk'):
                 table_values += string_value.rjust(10)
+            elif key in ('vram_usage'):
+                table_values += string_value.rjust(16)
             elif key in ('mem_clock', 'vram_used'):
                 table_values += string_value.rjust(11)
             elif key in ('vram_total', 'vram_free'):
@@ -217,6 +222,8 @@ class AMDSMILogger():
                 table_values += string_value.rjust(11)
             elif key == "gfx_clkviol":
                 table_values += string_value.rjust(13)
+            elif key in ("gfxclk_pviol", "gfxclk_tviol", "gfxclk_totalviol", "low_utilviol"):
+                table_values += string_value.rjust(58)
             elif key == "process_list":
                 #Add an additional padding between the first instance of GPU and NAME
                 table_values += '  '
@@ -1006,11 +1013,22 @@ class AMDSMILogger():
         if driver_version == "N/A":
             amdgpu_version = "N/A".ljust(8)
         else:
-            amdgpu_version = str(driver_version['driver_version']).ljust(8)
+            # Example driver version string for amdgpu: 6.8.0-60 : 'Linuxversion6.8.0-60-generic(buildd@lcy02-amd64-098)(x86_64-linux-gnu-gcc-12(Ubuntu12.3.0-1ubuntu1~22.04)12.3.0,GNUld(GNUBinutilsforUbuntu)2.38)#63~22.04.1-UbuntuSMPPREEMPT_DYNAMICTueApr2219:00:15UTC2'
+            # Extract version before "-generic" if it exists
+            if '-generic' in driver_version['driver_version']:
+                # Extract version using regex to find pattern like "6.8.0-60"
+                match = re.search(r'(\d+\.\d+\.\d+-\d+)', driver_version['driver_version'])
+                if match:
+                    amdgpu_version = match.group(1).ljust(8)
+                else:
+                    amdgpu_version = "N/A".ljust(8)
+            else:
+                amdgpu_version = str(driver_version['driver_version'])[:8].ljust(8)
 
         # print GPU info
         print(default_line_1)
         print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
+        print("| Platform: {0:20.20s} {1:46s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")

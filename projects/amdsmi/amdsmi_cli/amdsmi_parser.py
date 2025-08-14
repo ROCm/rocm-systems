@@ -1014,8 +1014,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-l', '--perf-level', action='store_true', required=False, help=perf_level_help)
                 metric_parser.add_argument('-x', '--xgmi-err', action='store_true', required=False, help=xgmi_err_help)
                 metric_parser.add_argument('-E', '--energy', action='store_true', required=False, help=energy_help)
-                metric_parser.add_argument('-v', '--violation', action='store_true', required=False, help=throttle_help)
-                metric_parser.add_argument('-T', '--throttle', dest='violation', action='store_true', required=False, help=argparse.SUPPRESS)
+                metric_parser.add_argument('-v', '--violation', dest='throttle', action='store_true', required=False, help=throttle_help)
+                metric_parser.add_argument('-T', '--throttle', dest='throttle', action='store_true', required=False, help=argparse.SUPPRESS)
 
             # Options to only display to Hypervisors
             if self.helpers.is_hypervisor():
@@ -1323,6 +1323,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_perf_det_help = "Disable performance determinism"
         reset_power_cap_help = "Reset power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
+        reset_gpu_driver_help = "Reset (reload) AMD GPU driver"
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1342,6 +1343,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_exclusive_group.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
             reset_exclusive_group.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
             reset_exclusive_group.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
+            reset_exclusive_group.add_argument('-r', '--reload-driver', action='store_true', required=False, help=reset_gpu_driver_help)
 
         # Add Baremetal and Virtual OS reset arguments
         reset_exclusive_group.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)

@@ -222,6 +222,61 @@ class AmdSmiTemperatureType(IntEnum):
     HBM_3 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HBM_3
     PLX = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_PLX
 
+    # GPU Board Node temperature
+    GPUBOARD_NODE_FIRST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_FIRST
+    GPUBOARD_NODE_RETIMER_X = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_RETIMER_X  # Retimer X temperature
+    GPUBOARD_NODE_OAM_X_IBC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC         # OAM X IBC temperature
+    GPUBOARD_NODE_OAM_X_IBC_2 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_IBC_2       # OAM X IBC 2 temperature
+    GPUBOARD_NODE_OAM_X_VDD18_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_VDD18_VR    # OAM X VDD 1.8V voltage regulator temperature
+    GPUBOARD_NODE_OAM_X_04_HBM_B_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_B_VR # OAM X 0.4V HBM B voltage regulator temperature
+    GPUBOARD_NODE_OAM_X_04_HBM_D_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_OAM_X_04_HBM_D_VR # OAM X 0.4V HBM D voltage regulator temperature
+    GPUBOARD_NODE_LAST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_NODE_LAST
+
+    # GPU Board VR (Voltage Regulator) temperature 
+    GPUBOARD_VR_FIRST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_FIRST
+    GPUBOARD_VDDCR_VDD0 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD0        # VDDCR VDD0 voltage regulator temperature
+    GPUBOARD_VDDCR_VDD1 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD1        # VDDCR VDD1 voltage regulator temperature
+    GPUBOARD_VDDCR_VDD2 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD2        # VDDCR VDD2 voltage regulator temperature
+    GPUBOARD_VDDCR_VDD3 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_VDD3        # VDDCR VDD3 voltage regulator temperature
+    GPUBOARD_VDDCR_SOC_A = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_A       # VDDCR SOC A voltage regulator temperature
+    GPUBOARD_VDDCR_SOC_C = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOC_C       # VDDCR SOC C voltage regulator temperature
+    GPUBOARD_VDDCR_SOCIO_A = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_A     # VDDCR SOCIO A voltage regulator temperature
+    GPUBOARD_VDDCR_SOCIO_C = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_SOCIO_C     # VDDCR SOCIO C voltage regulator temperature
+    GPUBOARD_VDD_085_HBM = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_085_HBM       # VDD 0.85V HBM voltage regulator temperature
+    GPUBOARD_VDDCR_11_HBM_B = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_B    # VDDCR 1.1V HBM B voltage regulator temperature
+    GPUBOARD_VDDCR_11_HBM_D = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDCR_11_HBM_D    # VDDCR 1.1V HBM D voltage regulator temperature
+    GPUBOARD_VDD_USR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDD_USR           # VDD USR voltage regulator temperature
+    GPUBOARD_VDDIO_11_E32 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VDDIO_11_E32      # VDDIO 1.1V E32 voltage regulator temperature
+    GPUBOARD_VR_LAST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_GPUBOARD_VR_LAST
+
+    # Baseboard System temperature 
+    BASEBOARD_FIRST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_FIRST
+    BASEBOARD_UBB_FPGA = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA       # UBB FPGA temperature
+    BASEBOARD_UBB_FRONT = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FRONT         # UBB front temperature
+    BASEBOARD_UBB_BACK = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_BACK          # UBB back temperature
+    BASEBOARD_UBB_OAM7 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM7          # UBB OAM7 temperature
+    BASEBOARD_UBB_IBC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_IBC           # UBB IBC temperature
+    BASEBOARD_UBB_UFPGA = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_UFPGA         # UBB UFPGA temperature
+    BASEBOARD_UBB_OAM1 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_OAM1          # UBB OAM1 temperature
+    BASEBOARD_OAM_0_1_HSC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_HSC       # OAM 0-1 HSC temperature
+    BASEBOARD_OAM_2_3_HSC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_2_3_HSC       # OAM 2-3 HSC temperature
+    BASEBOARD_OAM_4_5_HSC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_HSC       # OAM 4-5 HSC temperature
+    BASEBOARD_OAM_6_7_HSC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_6_7_HSC       # OAM 6-7 HSC temperature
+    BASEBOARD_UBB_FPGA_0V72_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_0V72_VR  # UBB FPGA 0.72V voltage regulator temperature
+    BASEBOARD_UBB_FPGA_3V3_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_UBB_FPGA_3V3_VR   # UBB FPGA 3.3V voltage regulator temperature
+    BASEBOARD_RETIMER_0_1_2_3_1V2_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_2_3_1V2_VR  # Retimer 0-1-2-3 1.2V voltage regulator temperature
+    BASEBOARD_RETIMER_4_5_6_7_1V2_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_6_7_1V2_VR  # Retimer 4-5-6-7 1.2V voltage regulator temperature
+    BASEBOARD_RETIMER_0_1_0V9_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_0_1_0V9_VR # Retimer 0-1 0.9V voltage regulator temperature
+    BASEBOARD_RETIMER_4_5_0V9_VR= amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_4_5_0V9_VR # Retimer 4-5 0.9V voltage regulator temperature
+    BASEBOARD_RETIMER_2_3_0V9_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_2_3_0V9_VR # Retimer 2-3 0.9V voltage regulator temperature
+    BASEBOARD_RETIMER_6_7_0V9_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_RETIMER_6_7_0V9_VR # Retimer 6-7 0.9V voltage regulator temperature
+    BASEBOARD_OAM_0_1_2_3_3V3_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_0_1_2_3_3V3_VR # OAM 0-1-2-3 3.3V voltage regulator temperature
+    BASEBOARD_OAM_4_5_6_7_3V3_VR = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_OAM_4_5_6_7_3V3_VR # OAM 4-5-6-7 3.3V voltage regulator temperature
+    BASEBOARD_IBC_HSC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC_HSC           # IBC HSC temperature
+    BASEBOARD_IBC = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_IBC               # IBC temperature
+    BASEBOARD_LAST = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_BASEBOARD_LAST
+    BASEBOARD__MAX = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE__MAX # Maximum per GPU temperature type
+
 
 class AmdSmiDevPerfLevel(IntEnum):
     AUTO = amdsmi_wrapper.AMDSMI_DEV_PERF_LEVEL_AUTO
@@ -731,6 +786,103 @@ def _notifyTypeToString(notify_type_b):
         return AmdSmiCperNotifyType(hex_value).name
     else:
         return "Unknown"
+
+def _NA_amdsmi_get_gpu_metrics_info() -> Dict[str, str]:
+    """
+    Get 'N/A' metric values for gpu_metric, used for exception handling.
+
+    Parameters:
+        None
+
+    Returns:
+        Dict[str, str]: A dictionary with keys as metric names and values as 'N/A'.
+        This is used to indicate that the metric is not available or applicable.
+
+    Raises:
+        N/A
+    """
+    na_gpu_metrics_info = {
+        "common_header.structure_size": "N/A",
+        "common_header.format_revision": "N/A",
+        "common_header.content_revision": "N/A",
+        "temperature_edge": "N/A",
+        "temperature_hotspot": "N/A",
+        "temperature_mem": "N/A",
+        "temperature_vrgfx": "N/A",
+        "temperature_vrsoc": "N/A",
+        "temperature_vrmem": "N/A",
+        "average_gfx_activity": "N/A",
+        "average_umc_activity": "N/A",
+        "average_mm_activity": "N/A",
+        "average_socket_power": "N/A",
+        "energy_accumulator": "N/A",
+        "system_clock_counter": "N/A",
+        "average_gfxclk_frequency": "N/A",
+        "average_socclk_frequency": "N/A",
+        "average_uclk_frequency": "N/A",
+        "average_vclk0_frequency": "N/A",
+        "average_dclk0_frequency": "N/A",
+        "average_vclk1_frequency": "N/A",
+        "average_dclk1_frequency": "N/A",
+        "current_gfxclk": "N/A",
+        "current_socclk": "N/A",
+        "current_uclk": "N/A",
+        "current_vclk0": "N/A",
+        "current_dclk0": "N/A",
+        "current_vclk1": "N/A",
+        "current_dclk1": "N/A",
+        "throttle_status": "N/A",
+        "current_fan_speed": "N/A",
+        "pcie_link_width": "N/A",
+        "pcie_link_speed": "N/A",
+        "gfx_activity_acc": "N/A",
+        "mem_activity_acc": "N/A",
+        "temperature_hbm": "N/A",
+        "firmware_timestamp": "N/A",
+        "voltage_soc": "N/A",
+        "voltage_gfx": "N/A",
+        "voltage_mem": "N/A",
+        "indep_throttle_status": "N/A",
+        "current_socket_power": "N/A",
+        "vcn_activity": "N/A",
+        "gfxclk_lock_status": "N/A",
+        "xgmi_link_width": "N/A",
+        "xgmi_link_speed": "N/A",
+        "pcie_bandwidth_acc": "N/A",
+        "pcie_bandwidth_inst": "N/A",
+        "pcie_l0_to_recov_count_acc": "N/A",
+        "pcie_replay_count_acc": "N/A",
+        "pcie_replay_rover_count_acc": "N/A",
+        "xgmi_read_data_acc": "N/A",
+        "xgmi_write_data_acc": "N/A",
+        "current_gfxclks": "N/A",
+        "current_socclks": "N/A",
+        "current_vclk0s": "N/A",
+        "current_dclk0s": "N/A",
+        "jpeg_activity": "N/A",
+        "pcie_nak_sent_count_acc": "N/A",
+        "pcie_nak_rcvd_count_acc": "N/A",
+        "accumulation_counter": "N/A",
+        "prochot_residency_acc": "N/A",
+        "ppt_residency_acc": "N/A",
+        "socket_thm_residency_acc": "N/A",
+        "vr_thm_residency_acc": "N/A",
+        "hbm_thm_residency_acc": "N/A",
+        "num_partition": "N/A",
+        "xcp_stats.gfx_busy_inst": "N/A",
+        "xcp_stats.jpeg_busy": "N/A",
+        "xcp_stats.vcn_busy": "N/A",
+        "xcp_stats.gfx_busy_acc": "N/A",
+        "xcp_stats.gfx_below_host_limit_acc": "N/A",
+        "xcp_stats.gfx_below_host_limit_ppt_acc": "N/A",
+        "xcp_stats.gfx_below_host_limit_thm_acc": "N/A",
+        "xcp_stats.gfx_low_utilization_acc": "N/A",
+        "xcp_stats.gfx_below_host_limit_total_acc": "N/A",
+        "pcie_lc_perf_other_end_recovery": "N/A",
+        "vram_max_bandwidth": "N/A",
+        "xgmi_link_status": "N/A"
+    }
+    return na_gpu_metrics_info
 
 
 def amdsmi_get_socket_handles() -> List[c_void_p]:
@@ -2296,9 +2448,9 @@ def amdsmi_get_violation_status(
         "acc_hbm_thrm": _validate_if_max_uint(violation_status.acc_hbm_thrm, MaxUIntegerTypes.UINT64_T),
         "acc_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.acc_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T),
         "acc_gfx_clk_below_host_limit_pwr": list(violation_status.acc_gfx_clk_below_host_limit_pwr),
-        "acc_gfx_clk_below_host_limit_thm": list(violation_status.acc_gfx_clk_below_host_limit_thm),
-        "acc_low_utilization": list(violation_status.acc_low_utilization),
+        "acc_gfx_clk_below_host_limit_thrm": list(violation_status.acc_gfx_clk_below_host_limit_thrm),
         "acc_gfx_clk_below_host_limit_total": list(violation_status.acc_gfx_clk_below_host_limit_total),
+        "acc_low_utilization": list(violation_status.acc_low_utilization),
         "per_prochot_thrm": _validate_if_max_uint(violation_status.per_prochot_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_ppt_pwr": _validate_if_max_uint(violation_status.per_ppt_pwr, MaxUIntegerTypes.UINT64_T, isActivity=True),          #PVIOL
         "per_socket_thrm": _validate_if_max_uint(violation_status.per_socket_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),  #TVIOL
@@ -2306,9 +2458,9 @@ def amdsmi_get_violation_status(
         "per_hbm_thrm": _validate_if_max_uint(violation_status.per_hbm_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.per_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_gfx_clk_below_host_limit_pwr": list(violation_status.per_gfx_clk_below_host_limit_pwr),
-        "per_gfx_clk_below_host_limit_thm": list(violation_status.per_gfx_clk_below_host_limit_thm),
-        "per_low_utilization": list(violation_status.per_low_utilization),
+        "per_gfx_clk_below_host_limit_thrm": list(violation_status.per_gfx_clk_below_host_limit_thrm),
         "per_gfx_clk_below_host_limit_total": list(violation_status.per_gfx_clk_below_host_limit_total),
+        "per_low_utilization": list(violation_status.per_low_utilization),
         "active_prochot_thrm": _validate_if_max_uint(violation_status.active_prochot_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_ppt_pwr": _validate_if_max_uint(violation_status.active_ppt_pwr, MaxUIntegerTypes.UINT8_T, isBool=True),         #PVIOL
         "active_socket_thrm": _validate_if_max_uint(violation_status.active_socket_thrm, MaxUIntegerTypes.UINT8_T, isBool=True), #TVIOL
@@ -2316,9 +2468,9 @@ def amdsmi_get_violation_status(
         "active_hbm_thrm": _validate_if_max_uint(violation_status.active_hbm_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.active_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_gfx_clk_below_host_limit_pwr": list(violation_status.active_gfx_clk_below_host_limit_pwr),
-        "active_gfx_clk_below_host_limit_thm": list(violation_status.active_gfx_clk_below_host_limit_thm),
-        "active_low_utilization": list(violation_status.active_low_utilization),
+        "active_gfx_clk_below_host_limit_thrm": list(violation_status.active_gfx_clk_below_host_limit_thrm),
         "active_gfx_clk_below_host_limit_total": list(violation_status.active_gfx_clk_below_host_limit_total),
+        "active_low_utilization": list(violation_status.active_low_utilization),
     }
 
     # Create 2d array with each XCD's stats
@@ -2326,25 +2478,25 @@ def amdsmi_get_violation_status(
         for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_pwr']):
             xcp_detail = []
             for val in xcp_metrics:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             dict_return['acc_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'acc_gfx_clk_below_host_limit_thm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_thm']):
+    if 'acc_gfx_clk_below_host_limit_thrm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_thrm']):
             xcp_detail = []
             for val in xcp_metrics:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-            dict_return['acc_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
+            dict_return['acc_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
     if 'acc_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['acc_low_utilization']):
             xcp_detail = []
             for val in xcp_metrics:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             dict_return['acc_low_utilization'][xcp_index] = xcp_detail
     if 'acc_gfx_clk_below_host_limit_total' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_total']):
             xcp_detail = []
             for val in xcp_metrics:
-                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
+                xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             dict_return['acc_gfx_clk_below_host_limit_total'][xcp_index] = xcp_detail
 
     if 'per_gfx_clk_below_host_limit_pwr' in dict_return:
@@ -2353,12 +2505,12 @@ def amdsmi_get_violation_status(
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
             dict_return['per_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'per_gfx_clk_below_host_limit_thm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['per_gfx_clk_below_host_limit_thm']):
+    if 'per_gfx_clk_below_host_limit_thrm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['per_gfx_clk_below_host_limit_thrm']):
             xcp_detail = []
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-            dict_return['per_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
+            dict_return['per_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
     if 'per_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['per_low_utilization']):
             xcp_detail = []
@@ -2378,12 +2530,12 @@ def amdsmi_get_violation_status(
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT8_T, isBool=True))
             dict_return['active_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'active_gfx_clk_below_host_limit_thm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['active_gfx_clk_below_host_limit_thm']):
+    if 'active_gfx_clk_below_host_limit_thrm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['active_gfx_clk_below_host_limit_thrm']):
             xcp_detail = []
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT8_T, isBool=True))
-            dict_return['active_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
+            dict_return['active_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
     if 'active_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['active_low_utilization']):
             xcp_detail = []
@@ -3666,6 +3818,9 @@ def amdsmi_reset_gpu(processor_handle: processor_handle):
 
     _check_res(amdsmi_wrapper.amdsmi_reset_gpu(processor_handle))
 
+def amdsmi_gpu_driver_reload():
+    _check_res(amdsmi_wrapper.amdsmi_gpu_driver_reload())
+
 
 def amdsmi_set_gpu_fan_speed(
     processor_handle: processor_handle, sensor_idx: int, fan_speed: int
@@ -4504,14 +4659,28 @@ def amdsmi_get_gpu_od_volt_info(
         )
     )
 
+    sclk_lower = freq_data.curr_sclk_range.lower_bound
+    sclk_upper = freq_data.curr_sclk_range.upper_bound
+    mclk_lower = freq_data.curr_mclk_range.lower_bound
+    mclk_upper = freq_data.curr_mclk_range.upper_bound
+
+    if sclk_lower == MaxUIntegerTypes.UINT64_T:
+        sclk_lower = "N/A"
+    if sclk_upper == MaxUIntegerTypes.UINT64_T:
+        sclk_upper = "N/A"
+    if mclk_lower == MaxUIntegerTypes.UINT64_T:
+        mclk_lower = "N/A"
+    if mclk_upper == MaxUIntegerTypes.UINT64_T:
+        mclk_upper = "N/A"
+
     return {
         "curr_sclk_range": {
-            "lower_bound": freq_data.curr_sclk_range.lower_bound,
-            "upper_bound": freq_data.curr_sclk_range.upper_bound,
+            "lower_bound": sclk_lower,
+            "upper_bound": sclk_upper,
         },
         "curr_mclk_range": {
-            "lower_bound": freq_data.curr_mclk_range.lower_bound,
-            "upper_bound": freq_data.curr_mclk_range.upper_bound,
+            "lower_bound": mclk_lower,
+            "upper_bound": mclk_upper,
         },
         "sclk_freq_limits": {
             "lower_bound": freq_data.sclk_freq_limits.lower_bound,
@@ -4542,6 +4711,9 @@ def amdsmi_get_gpu_metrics_info(
     )
 
     gpu_metrics_output = {
+        "common_header.structure_size": _validate_if_max_uint(gpu_metrics.common_header.structure_size, MaxUIntegerTypes.UINT16_T),
+        "common_header.format_revision": _validate_if_max_uint(gpu_metrics.common_header.format_revision, MaxUIntegerTypes.UINT8_T),
+        "common_header.content_revision": _validate_if_max_uint(gpu_metrics.common_header.content_revision, MaxUIntegerTypes.UINT8_T),
         "temperature_edge": _validate_if_max_uint(gpu_metrics.temperature_edge, MaxUIntegerTypes.UINT16_T),
         "temperature_hotspot": _validate_if_max_uint(gpu_metrics.temperature_hotspot, MaxUIntegerTypes.UINT16_T),
         "temperature_mem": _validate_if_max_uint(gpu_metrics.temperature_mem, MaxUIntegerTypes.UINT16_T),
