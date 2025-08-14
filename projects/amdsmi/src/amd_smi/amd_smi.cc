@@ -65,13 +65,16 @@
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
-static bool initialized_lib = false;
+
+// To enable multiple init and shutdown calls, the reference count is used
+// to track the number of times the library has been initialized.
+static int init_ref_count = 0;
 
 #define	SIZE	10
 char proc_id[SIZE] = "\0";
 
 #define AMDSMI_CHECK_INIT() do { \
-	if (!initialized_lib) { \
+	if (init_ref_count == 0) { \
 		return AMDSMI_STATUS_NOT_INIT; \
 	} \
 } while (0)
@@ -178,25 +181,31 @@ amdsmi_status_t rsmi_wrapper(F && f,
 
 amdsmi_status_t
 amdsmi_init(uint64_t flags) {
-    if (initialized_lib) {
+    if (init_ref_count > 0 ) {
+        init_ref_count++;
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        initialized_lib = true;
+        init_ref_count++;
     }
     return status;
 }
 
 amdsmi_status_t
 amdsmi_shut_down() {
-    if (!initialized_lib)
+    if (init_ref_count == 0) {
         return AMDSMI_STATUS_SUCCESS;
-    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        initialized_lib = false;
     }
+    // Decrement the reference count
+    init_ref_count--;
+    // If the reference count is still greater than 0, return success
+    if (init_ref_count > 0) {
+        return AMDSMI_STATUS_SUCCESS;
+    }
+    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
+
     return status;
 }
 
