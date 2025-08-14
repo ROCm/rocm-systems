@@ -44,14 +44,8 @@ jobs:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        mpi: ['OFF']
-        ompt: ['ON']
-        papi: ['OFF']
         python: ['ON']
-        strip: ['OFF']
-        hidden: ['ON', 'OFF']
         build-type: ['Release']
-        mpi-headers: ['ON', 'OFF']
         build-dyninst: ['ON']
         rocm-version: ['0.0', '6.3', '6.4']
     env:
@@ -100,9 +94,10 @@ jobs:
         GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run: |
         git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
-        git config --global --add safe.directory ${PWD} &&
-        cmake --version
-        ${{ matrix.compiler }} --version
+        git config --global --add safe.directory ${PWD}
+        echo "CMake version: $(cmake --version | head -n 1)"
+        echo "Compiler version: $(${{ matrix.compiler }} --version | head -n 1)"
+        echo "ROCm version: ${{ matrix.rocm-version }}"
         USE_ROCM=OFF
         if [ "${{ matrix.rocm-version }}" != "0.0" ]; then
           CMAKE_PREFIX_PATH_ARG="-DCMAKE_PREFIX_PATH=/opt/rocm"
@@ -121,21 +116,15 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }} \
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems \
           -DROCPROFSYS_BUILD_TESTING=ON \
-          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }} \
           -DROCPROFSYS_USE_ROCM=$USE_ROCM \
-          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }} \
-          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }} \
-          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }} \
-          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }} \
+          -DROCPROFSYS_USE_PYTHON=ON \
           -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_BOOST=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_TBB=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_ELFUTILS=${{ matrix.build-dyninst }} \
           -DROCPROFSYS_BUILD_LIBIBERTY=${{ matrix.build-dyninst }} \
-          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }} \
           -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs \
           -DROCPROFSYS_PYTHON_ENVS="py3.8;py3.9;py3.10;py3.11;py3.12;py3.13" \
-          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }} \
           -DROCPROFSYS_MAX_THREADS=64 \
           -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;openmp-target;lulesh" \
           -DROCPROFSYS_BUILD_NUMBER=1 \
@@ -147,7 +136,7 @@ jobs:
     - name: Install
       timeout-minutes: 10
       working-directory: projects/rocprofiler-systems/
-      run:
+      run: |
         cmake --build build --target install --parallel 2
 
     - name: CPack and Install
