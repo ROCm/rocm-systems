@@ -106,7 +106,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         output=$(sudo apt-get update 2>&1) && exit_status=$? || exit_status=$?
-        sudo apt-get install -y build-essential coreutils cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
+        sudo apt-get install -y build-essential coreutils git cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install -U --user -r requirements.txt --break-system-packages || python3 -m pip install -U --user -r requirements.txt
@@ -134,8 +134,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:$PATH' >> $GITHUB_ENV
+          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
+          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
@@ -234,7 +234,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel-9', 'sles-15']
+        os: ['rhel-8.8', 'rhel-9.1', 'sles-15.4']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
@@ -315,8 +315,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:$PATH' >> $GITHUB_ENV
+          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
+          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
@@ -421,8 +421,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH' >> $GITHUB_ENV
-          echo 'PATH=/opt/rocm-custom/bin:$PATH' >> $GITHUB_ENV
+          echo 'LD_LIBRARY_PATH=/opt/rocm-custom/lib:${LD_LIBRARY_PATH}' >> $GITHUB_ENV
+          echo 'PATH=/opt/rocm-custom/bin:${PATH}' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
           echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
 
