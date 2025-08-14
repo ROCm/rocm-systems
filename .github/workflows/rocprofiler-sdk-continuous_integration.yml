@@ -136,7 +136,6 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
-          echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
@@ -145,11 +144,13 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        RUNNER_HOSTNAME=$(hostname)
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        PATH=/opt/rocm-custom/bin:/usr/bin:$PATH
+        /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.system.ci-flags }}
           --
@@ -235,7 +236,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel-8.8', 'rhel-9.1', 'sles-15.4']
+        os: ['rhel-9.1', 'sles-15.4']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
@@ -285,12 +286,11 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         git config --global --add safe.directory '*'
-        if [ "${OS_TYPE}" == "rhel-9" ]; then
-          dnf makecache
-          dnf groupinstall -y "Development Tools"
-          dnf install -y llvm14-devel
+        if [ "${OS_TYPE}" == "rhel-9.1" ]; then
+          sudo dnf makecache
+          sudo dnf groupinstall -y "Development Tools"
+          sudo dnf install -y llvm14-devel
         fi
-        python3 -m pip install --upgrade pip
         python3 -m pip install -U --user -r requirements.txt
         rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
 
@@ -318,7 +318,6 @@ jobs:
       run: |
           python3 -m pipx install cmake
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
-          echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
@@ -327,11 +326,10 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        python3 -m pipx ensurepath; source ~/.bashrc; LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME=$(hostname) LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.ci-flags }}
           --
@@ -437,7 +435,6 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site ${RUNNER_HOSTNAME}
-          --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --
