@@ -144,7 +144,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        RUNNER_HOSTNAME=$(hostname)
+        RUNNER_HOSTNAME="$(hostname)"
         LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
         PATH=/opt/rocm-custom/bin:/usr/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
@@ -323,7 +323,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME=$(hostname) LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        python3 -m pipx ensurepath; source ~/.bashrc; RUNNER_HOSTNAME="$(hostname)" LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --gpu-targets ${{ matrix.gpu-target }}
@@ -422,7 +422,6 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
           echo 'CMAKE_PREFIX_PATH=/opt/rocm-custom' >> $GITHUB_ENV
-          echo 'RUNNER_HOSTNAME=$(hostname)' >> $GITHUB_ENV
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
 
@@ -431,7 +430,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH /usr/bin/python3 ./source/scripts/run-ci.py -B build
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH PATH=/opt/rocm-custom/bin:/usr/bin:$PATH RUNNER_HOSTNAME="$(hostname)" /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --gpu-targets ${{ matrix.gpu-target }}
