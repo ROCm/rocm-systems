@@ -29,14 +29,14 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <cstdlib>
 #include <iomanip>  // Add this at the top if not already included
-
+#define ENABLE_DEBUG 1
 
 #define NUM_SIZES 9
 //  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
 static const unsigned int Sizes[NUM_SIZES] = {4096,     8192,          65536,     1048576,  4194304,
                                               16777216, 16777216 + 10, 134217728, 536870912};
 // static const unsigned int Sizes[NUM_SIZES] = {134217728};
-static const unsigned int Iterations[2] = {1, 100000};
+static const unsigned int Iterations[2] = {1, 1000};
 
 #define BUF_TYPES 5
 //  25 ways to combine 5 different buffer types
@@ -225,10 +225,10 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   }
 
   // 3. Run all buffer type (default) for all sizes
-  for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
-    unsigned int bufSize_ = Sizes[sizeIdx];
-    for (int srcTest = 0; srcTest < BUF_TYPES; ++srcTest) {
-      for (int dstTest = 0; dstTest < BUF_TYPES; ++dstTest) {
+  for (int srcTest = 0; srcTest < BUF_TYPES; ++srcTest) {
+    for (int dstTest = 0; dstTest < BUF_TYPES; ++dstTest) {
+      for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
+        unsigned int bufSize_ = Sizes[sizeIdx];
         bool hostMalloc[2] = {false};
         bool hostRegister[2] = {false};
         bool unpinnedMalloc[2] = {false};
