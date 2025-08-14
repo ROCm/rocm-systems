@@ -290,7 +290,6 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
 }  // namespace aql_profile_v2
 
 extern "C" {
-
 PUBLIC_API hsa_status_t
 aqlprofile_get_version(aqlprofile_version_t* info)
 {
@@ -450,6 +449,7 @@ aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
             {
                 const auto* info = static_cast<const aqlprofile_agent_info_t*>(agent_info);
                 aqlprofile_agent_info_v1_t info_v1 = {
+                    .size                 = sizeof(aqlprofile_agent_info_v1_t),
                     .agent_gfxip          = info->agent_gfxip,
                     .xcc_num              = info->xcc_num,
                     .se_num               = info->se_num,

@@ -21,7 +21,9 @@
 // THE SOFTWARE.
 
 #include "pm4_factory.h"
+#include "logger.h"
 
+#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 
@@ -61,14 +63,35 @@ get_cache()
 aqlprofile_agent_handle_t
 RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info)
 {
-    aqlprofile_agent_handle_t agent_id;
-    AgentInfo                 int_agent_info;
+    // If assertion fails,
+    // Update handling of new fields
+    // Update size to new size
+    static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
+
+    aqlprofile_agent_handle_t agent_id{};
+    AgentInfo                 int_agent_info{};
+    static_assert(sizeof(int_agent_info.name) == 64);
+
+    if(agent_info->size != 40)
+    {
+        ERR_LOGGING << "Unsupported agent_info size " << agent_info->size;
+        throw std::runtime_error("Unsupported agent_info size");
+    }
+
     int_agent_info.cu_num               = agent_info->cu_num;
     int_agent_info.se_num               = agent_info->se_num;
     int_agent_info.xcc_num              = agent_info->xcc_num;
     int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
     int_agent_info.domain               = agent_info->domain;
     int_agent_info.bdf_id               = agent_info->location_id;
+
+    if(agent_info->agent_gfxip == nullptr)
+    {
+        constexpr auto name_null =
+            std::string_view{"Agent name 'agent_info.agent_gfxip' cannot be null"};
+        ERR_LOGGING << name_null;
+        throw std::runtime_error(name_null.data());
+    }
 
     auto len = strlen(agent_info->agent_gfxip);
     memset(int_agent_info.name, 0, sizeof(int_agent_info.name));

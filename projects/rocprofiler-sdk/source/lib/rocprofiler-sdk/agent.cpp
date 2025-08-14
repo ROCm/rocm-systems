@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/aqlprofile/aql_profile_v2.h"
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -940,6 +942,42 @@ get_agent_mapping()
     return *CHECK_NOTNULL(_v);
 }
 
+aqlprofile_agent_handle_t
+get_aqlprofile_agent_handle(const rocprofiler_agent_t* agent)
+{
+    aqlprofile_agent_handle_t handle = {.handle = 0};
+
+#if defined(AQLPROFILE_VERSION) && AQLPROFILE_VERSION >= 10200
+    // If assertion fails, new fields were added.
+    // Populate agent_info with new fields and information
+    // Increase assertion to check for new size
+    static_assert(sizeof(aqlprofile_agent_info_v1_t) == 40);
+
+    aqlprofile_agent_info_v1_t agent_info = {
+        .size                 = sizeof(agent_info),
+        .agent_gfxip          = agent->name,
+        .xcc_num              = agent->num_xcc,
+        .se_num               = agent->num_shader_banks,
+        .cu_num               = agent->cu_count,
+        .shader_arrays_per_se = agent->simd_arrays_per_engine,
+        .domain               = agent->domain,
+        .location_id          = agent->location_id,
+    };
+
+    ROCP_TRACE << "Using 1.2.0+ aqlprofile aqlprofile_agent_info_v1_t API\n";
+
+    if(aqlprofile_register_agent_info(&handle, &agent_info, AQLPROFILE_AGENT_VERSION_V1) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to register agent " << agent->name;
+    }
+#else
+#    error "rocprofiler-sdk requires aqlprofile>1.2.0"
+#endif
+
+    return handle;
+}
+
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
 {
@@ -948,18 +986,7 @@ get_aql_handles()
             std::vector<aqlprofile_agent_handle_t> agent_handles;
             for(auto& agent : get_agents())
             {
-                aqlprofile_agent_info_t agent_info = {
-                    .agent_gfxip          = agent->name,
-                    .xcc_num              = agent->num_xcc,
-                    .se_num               = agent->num_shader_banks,
-                    .cu_num               = agent->cu_count,
-                    .shader_arrays_per_se = agent->simd_arrays_per_engine};
-                aqlprofile_agent_handle_t handle = {.handle = 0};
-                if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
-                {
-                    ROCP_WARNING << "Failed to register agent " << agent->name;
-                }
-                agent_handles.push_back(handle);
+                agent_handles.push_back(get_aqlprofile_agent_handle(agent));
             }
             return agent_handles;
         }());
