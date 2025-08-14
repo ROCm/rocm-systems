@@ -58,9 +58,10 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'rocprofiler-navi4', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
-          {gpu: 'navi3', runner: 'rocprofiler-navi3', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'},
-          {gpu: 'mi3xx', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo'}
+          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", ci-flags: '--linter clang-tidy'}
         ]
 
     runs-on: ${{ matrix.system.runner }}
@@ -68,12 +69,11 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi3xx
+      CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
     - name: Install Latest ROCm
-      if: ${{matrix.system.gpu == 'mi3xx'}}
       shell: bash
       working-directory: /tmp
       run: |
@@ -104,14 +104,13 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
         git config --global --add safe.directory '*'
-        $PRE_COMMAND apt-get update
-        $PRE_COMMAND apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
-        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        $PRE_COMMAND update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        sudo apt-get update
+        sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev rccl-dev rccl-unittests rocjpeg-dev rocjpeg-test rocdecode-dev rocdecode-test
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
-        $PRE_COMMAND rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
+        sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
 
     - name: List Files
       shell: bash
@@ -131,8 +130,7 @@ jobs:
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
-    - name: MI3xx Special Requirements
-      if: ${{matrix.system.gpu == 'mi3xx'}}
+    - name: Special Requirements
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
@@ -169,9 +167,8 @@ jobs:
       if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
-      run: |
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
-        $PRE_COMMAND cmake --build build --target install --parallel 16
+      run:
+        sudo cmake --build build --target install --parallel 16
 
     - name: Build Packaging
       if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
@@ -200,13 +197,12 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        [ "${GPU_RUNNER}" == "mi3xx" ] && export PRE_COMMAND="sudo"
         export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
         ls -la
         ls -la ./build
-        $PRE_COMMAND dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
-        $PRE_COMMAND dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
-        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do $PRE_COMMAND dpkg --force-all -i ${i}; done;
+        sudo dpkg --force-all -i ./build/rocprofiler-sdk-roctx_*.deb
+        sudo dpkg --force-all -i ./build/rocprofiler-sdk-rocpd_*.deb
+        for i in $(ls -S ./build/rocprofiler-sdk*.deb | egrep -v 'roctx|rocpd'); do sudo dpkg --force-all -i ${i}; done;
 
     - name: Test Installed Packages
       if: ${{ contains(matrix.system.gpu, env.CORE_EXT_RUNNER) }}
