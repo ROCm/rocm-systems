@@ -738,7 +738,7 @@ def run_prof(
 
     console_debug("pmc file: %s" % path(fname).name)
 
-    is_mode_live_attach = ("--pid" in profiler_options) or (profiler_options.get("ROCPROF_ATTACH_PID") is not None)
+    is_mode_live_attach = (isinstance(profiler_options, list) and "--pid" in profiler_options) or (isinstance(profiler_options, dict) and profiler_options.get("ROCPROF_ATTACH_PID") is not None)
 
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
