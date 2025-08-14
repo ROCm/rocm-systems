@@ -37,7 +37,6 @@ TEST_CASE("Unit_hipMallocManaged_FlgParam") {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
-
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
@@ -125,7 +124,6 @@ TEST_CASE("Unit_hipMallocManaged_AccessMultiStream") {
     HipTest::HIP_SKIP_TEST("GPU doesn't support managed memory so skipping test.");
     return;
   }
-
   std::atomic<int> DataMismatch{0};
   bool IfTestPassed = true;
   float *HmmAG = NULL, *HmmAH1 = NULL, *HmmAH2 = NULL, INIT_VAL = 2.5;
