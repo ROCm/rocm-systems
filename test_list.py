@@ -23,7 +23,6 @@ if __name__ == "__main__":
                         arguments = match.group(2).replace('\n', ' ').strip()
                         if "TestParams<" in arguments:
                             for argument in arguments.split("TestParams<")[1:]:
-                                # __import__('pdb').set_trace()
                                 argument = argument.split(">)")[0].replace('"', '').strip()
                                 if argument != "":
                                     test_cases.add(f"{name} - TestParams<{argument}>")
@@ -37,6 +36,7 @@ if __name__ == "__main__":
     print(f"Test cases found: {len(test_cases)}")
 
     config_dir = os.path.join(os.getcwd(), "catch/hipTestMain/config")
+    current_tags = []
     for config_name in os.listdir(config_dir):
         config_content = open(os.path.join(config_dir, config_name), encoding='windows-1251').read()
         base_tag = config_name.replace("config_", "")
@@ -51,14 +51,16 @@ if __name__ == "__main__":
             for line in config_content.split("\n"):
                 if line.strip().startswith("#if defined"):
                     arr = [word.replace("||", "").strip() for word in line.strip()[3:].split("defined") if word.strip() != ""]
-                    if arr[0] == "COMMON":
-                        current_tag = "" + base_tag
-                    else:
-                        current_tag = base_tag + " || " + " || ".join(arr)
+                    current_tags = []
+                    for tag in arr:
+                        if tag != "COMMON":
+                            current_tags.append(tag)
                     continue
-                if test_name := line.replace(',', '').replace('"', '').strip() in test_cases:
-                    disabled_tags[current_tag].append(test_name)
+                if line.replace(',', '').replace('"', '').strip() in test_cases:
+                    test_name = line.replace(',', '').replace('"', '').strip()
                     disabled_tags[base_tag].append(test_name)
+                    for current_tag in current_tags:
+                        disabled_tags[current_tag].append(test_name)
 
 
     headers = ["Test name"]
