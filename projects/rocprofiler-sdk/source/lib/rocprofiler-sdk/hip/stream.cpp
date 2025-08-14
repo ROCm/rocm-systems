@@ -75,14 +75,28 @@ get_stream_map()
     return _v;
 }
 
+auto&
+get_idx_offset()
+{
+    static auto*& _v = common::static_object<uint64_t>::construct(0ul);
+    return *_v;
+}
+
+auto&
+get_stream_thread_counter()
+{
+    static auto*& _v = common::static_object<std::atomic<uint64_t>>::construct(0ul);
+    return *_v;
+}
+
 auto
 add_stream(hipStream_t stream)
 {
     return get_stream_map()->wlock(
         [](stream_map_t& _data, hipStream_t _stream) {
-            static uint64_t idx_offset = 0;
+            auto& idx_offset = get_idx_offset();
 
-            auto idx = _data.size() + idx_offset;
+            auto idx = _data.size() + idx_offset + get_stream_thread_counter().load();
             ROCP_INFO << fmt::format(
                 "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
 
@@ -106,12 +120,40 @@ add_stream(hipStream_t stream)
 }
 
 auto
+create_stream_id()
+{
+    // Get rlock to ensure data size and idx offset are not modified when adding thread counter.
+    // Stream thread counter is atomic to ensure the multiple threads accessing the lambda
+    // get a unique stream ID. Stream ID not stored in the map since there is no associated
+    // hipStream object.
+    return rocprofiler_stream_id_t{.handle = get_stream_map()->rlock([](const stream_map_t& _data) {
+        return _data.size() + get_idx_offset() + get_stream_thread_counter().fetch_add(1);
+    })};
+}
+
+auto
 get_stream_id(hipStream_t stream)
 {
+    // Handle special case where stream is hipStreamLegacy (0x01). Changes sync behavior of
+    // null stream, so the stream is assigned the value of the null stream
+    if(stream == hipStreamLegacy)
+    {
+        stream = nullptr;
+    }
+    // Handle special case where stream is hipStreamPerThread (0x02). Assigns implicit stream id to
+    // each thread
+    else if(stream == hipStreamPerThread)
+    {
+        static thread_local auto thr_stream_id = rocprofiler_stream_id_t{.handle = 0};
+        if(thr_stream_id.handle == 0) thr_stream_id = create_stream_id();
+        return thr_stream_id;
+    }
     return get_stream_map()->rlock(
         [](const stream_map_t& _data, hipStream_t _stream) {
             ROCP_ERROR_IF(_data.count(_stream) == 0)
-                << "failed to retrieve stream ID in " << __FILE__;
+                << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
+                               sdk::utility::as_hex(static_cast<void*>(_stream)),
+                               __FILE__);
             return _data.at(_stream);
         },
         stream);
@@ -271,11 +313,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
 
         if(!callback_contexts.empty())
         {
-            // Handle special case where stream is passed in as hipStreamLegacy (0x01) or
-            // hipStreamPerThread (0x02)
-            auto _stream =
-                (stream == hipStreamLegacy || stream == hipStreamPerThread) ? nullptr : stream;
-            tracer_data.stream_id        = get_stream_id(_stream);
+            tracer_data.stream_id        = get_stream_id(stream);
             tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
             tracing::execute_phase_none_callbacks(callback_contexts,
                                                   thr_id,
@@ -334,11 +372,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
 
         if(!callback_contexts.empty())
         {
-            // Handle special case where stream is passed in as hipStreamLegacy (0x01) or
-            // hipStreamPerThread (0x02)
-            auto _stream =
-                (stream == hipStreamLegacy || stream == hipStreamPerThread) ? nullptr : stream;
-            tracer_data.stream_id        = get_stream_id(_stream);
+            tracer_data.stream_id        = get_stream_id(stream);
             tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
             tracing::execute_phase_enter_callbacks(callback_contexts,
                                                    thr_id,

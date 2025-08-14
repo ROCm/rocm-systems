@@ -60,6 +60,8 @@ def test_stream_trace(json_data):
 
     # Expect stream ids to be set between 1 and 8 inclusive for transpose executable
     expected_stream_ids = set([i for i in range(1, 9)])
+    # 8 threads used in hipStreamPerThread, so expected stream IDs are 9 through 17
+    hip_per_stream_ids = set([i for i in range(9, 17)])
     kernel_stream_id_set = set()
     memory_copy_streams = defaultdict(int)
     # check buffering data
@@ -89,10 +91,13 @@ def test_stream_trace(json_data):
                 memory_copy_streams[stream_id] += 1
     # Exactly 1 kernel executed on streams 1 through 8
     assert kernel_stream_id_set == expected_stream_ids
-    # One extra memory copy with the null stream
+    # One extra memory copy with the null stream due to hipStreamLegacy
     assert memory_copy_streams[0] == 1
     # Exactly 1 memory copy to device and 1 memory copy to host
     for i in expected_stream_ids:
+        assert memory_copy_streams[i] == 2
+    # Check that hipStreamPerThread was assigned correctly
+    for i in hip_per_stream_ids:
         assert memory_copy_streams[i] == 2
 
 
@@ -112,6 +117,8 @@ def test_csv_data(kernel_csv_data, memory_copy_csv_data):
     assert len(memory_copy_csv_data) > 0, "Expected non-empty memory copy csv data"
 
     expected_stream_ids = set([i for i in range(1, 9)])
+    # 8 threads used in hipStreamPerThread, so expected stream IDs are 9 through 17
+    hip_per_stream_ids = set([i for i in range(9, 17)])
     kernel_stream_id_set = set()
     for row in kernel_csv_data:
         assert "Stream_Id" in row
@@ -129,10 +136,13 @@ def test_csv_data(kernel_csv_data, memory_copy_csv_data):
         stream_id = int(row["Stream_Id"])
         memory_copy_streams[stream_id] += 1
 
-    # One extra memory copy with the null stream
+    # One extra memory copy with the null stream due to hipStreamLegacy
     assert memory_copy_streams[0] == 1
     # Exactly 1 memory copy to device and 1 memory copy to host
     for i in expected_stream_ids:
+        assert memory_copy_streams[i] == 2
+    # Check that hipStreamPerThread was assigned correctly
+    for i in hip_per_stream_ids:
         assert memory_copy_streams[i] == 2
 
 
