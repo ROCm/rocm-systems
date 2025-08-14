@@ -78,7 +78,7 @@ jobs:
       run: |
         DISTRIB_CODENAME=$(cat /etc/lsb-release | grep DISTRIB_CODENAME | awk -F '=' '{print $NF}')
         sudo apt-get update
-        sudo apt-get install -y software-properties-common python3 python3-pip build-essential wget curl clang-format-11 git
+        sudo apt-get install -y software-properties-common python3 python3-pip
         python3 -m pip install -r requirements.txt
 
     - name: Run clang-format
@@ -87,12 +87,10 @@ jobs:
         FORMAT_FILES=$(find samples source tests benchmark -type f | egrep '\.(h|hpp|hh|c|cc|cpp)(|\.in)$')
         command -v git
         command -v clang-format
-        command -v clang-format-11
         git --version
         clang-format --version
-        clang-format-11 --version
         set +e
-        FORMAT_OUT=$(clang-format-11 -i ${FORMAT_FILES})
+        FORMAT_OUT=$(clang-format -i ${FORMAT_FILES})
         git status
         if [ $(git diff | wc -l) -ne 0 ]; then
           echo -e "\nError! Code not formatted. Run clang-format (version 11)...\n"
