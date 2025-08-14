@@ -22,6 +22,7 @@
 
 #include "pm4_factory.h"
 
+#include <cstring>
 #include <mutex>
 #include <shared_mutex>
 
@@ -52,14 +53,16 @@ locked_agent_cache& get_cache() {
 }  // namespace
 
 aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_info) {
-  aqlprofile_agent_handle_t agent_id;
-  AgentInfo int_agent_info;
+  aqlprofile_agent_handle_t agent_id {};
+  AgentInfo int_agent_info {};
   int_agent_info.cu_num = agent_info->cu_num;
   int_agent_info.se_num = agent_info->se_num;
   int_agent_info.xcc_num = agent_info->xcc_num;
   int_agent_info.shader_arrays_per_se = agent_info->shader_arrays_per_se;
   int_agent_info.domain = agent_info->domain;
   int_agent_info.bdf_id = agent_info->location_id;
+
+  std::strncpy(int_agent_info.name, int_agent_info.gfxip, 63);
 
   auto len = strlen(agent_info->agent_gfxip);
   memset(int_agent_info.name, 0, sizeof(int_agent_info.name));

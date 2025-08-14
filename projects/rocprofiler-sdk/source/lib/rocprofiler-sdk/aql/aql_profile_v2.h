@@ -44,6 +44,58 @@ typedef enum
     AQLPROFILE_MEMORY_HINT_LAST
 } aqlprofile_memory_hint_t;
 
+typedef enum
+{
+    AQLPROFILE_AGENT_VERSION_NONE = 0,
+    AQLPROFILE_AGENT_VERSION_V0   = 1,
+    AQLPROFILE_AGENT_VERSION_V1   = 2,
+    AQLPROFILE_AGENT_VERSION_LAST
+} aqlprofile_agent_version_t;
+
+/**
+ * @brief Enums for counter blocks.
+ * AQLPROFILE_BLOCK_NAME_RESERVED_X are blocks reserved for npi. Reserving them here can maintain
+ * enum consistency between mainline and npi.
+ * TODO: Move all counter blocks here from hsa_ven_amd_aqlprofile.h
+ */
+typedef enum
+{
+    // Blocks reserved for NPI support
+    AQLPROFILE_BLOCK_NAME_RESERVED_0 = HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER,
+    AQLPROFILE_BLOCK_NAME_RESERVED_1,
+    AQLPROFILE_BLOCK_NAME_RESERVED_2,
+    AQLPROFILE_BLOCK_NAME_RESERVED_3,
+    AQLPROFILE_BLOCK_NAME_RESERVED_4,
+    AQLPROFILE_BLOCK_NAME_RESERVED_5,
+
+    // Blocks available for most ASICs, but not currently in use
+    AQLPROFILE_BLOCK_NAME_CPG,
+    AQLPROFILE_BLOCK_NAME_RLC,
+
+    // New blocks for gc_12_0_x
+    AQLPROFILE_BLOCK_NAME_CHA,
+    AQLPROFILE_BLOCK_NAME_CHC,
+    AQLPROFILE_BLOCK_NAME_GC_CANE,
+    AQLPROFILE_BLOCK_NAME_GC_FFBM,
+    AQLPROFILE_BLOCK_NAME_GC_L2TLB,
+    AQLPROFILE_BLOCK_NAME_GC_UTCL1,
+    AQLPROFILE_BLOCK_NAME_GC_UTCL2,
+    AQLPROFILE_BLOCK_NAME_GC_VML2,
+    AQLPROFILE_BLOCK_NAME_GC_VML2_SPM,
+    AQLPROFILE_BLOCK_NAME_GCEA_SE,
+    AQLPROFILE_BLOCK_NAME_GRBMH,
+    AQLPROFILE_BLOCK_NAME_SQG,
+
+    // Blocks reserved for NPI support
+    AQLPROFILE_BLOCK_NAME_RESERVED_6,
+    AQLPROFILE_BLOCK_NAME_RESERVED_7,
+    AQLPROFILE_BLOCK_NAME_RESERVED_8,
+    AQLPROFILE_BLOCK_NAME_RESERVED_9,
+
+    // Add new blocks above
+    AQLPROFILE_BLOCKS_NUMBER
+} aqlprofile_block_name_t;
+
 /**
  * @brief Flags to describe which agents can access given buffer.
  */
@@ -134,6 +186,27 @@ typedef struct
 } aqlprofile_agent_info_t;
 
 /**
+ * @brief Struct containing information about the agent. User code sets these values
+ * to the describe the agent to profile. Information can be obtained either from HSA
+ * (if loaded) or the KFD topology.
+ */
+typedef struct
+{
+    const char* agent_gfxip; /**< Agent GFXIP (HSA_AGENT_INFO_NAME or KFD.product_name) */
+    uint32_t    xcc_num;     /**< XCC's on the agent (HSA_AMD_AGENT_INFO_NUM_XCC or KFD.num_xcc) */
+    uint32_t    se_num;      /**< SE's on the agent (HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES or
+                                KFD.num_shader_banks) */
+    uint32_t
+        cu_num; /**< CU's on the agent (HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT or KFD.cu_count) */
+    uint32_t shader_arrays_per_se; /**< Shader arrays per SE of agent
+                                      (HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE or
+                                      KFD.simd_arrays_per_engine)*/
+    uint32_t domain; /**< PCI domain of the GPU agent (HSA_AMD_AGENT_INFO_DOMAIN or KFD.domain) */
+    uint32_t location_id; /**< BDF (Bus/Device/function number) of the GPU agent
+                             (HSA_AMD_AGENT_INFO_BDFID or KFD.location_id)*/
+} aqlprofile_agent_info_v1_t;
+
+/**
  * @brief Struct containing a handle to a registered agent
  *
  */
@@ -153,6 +226,18 @@ hsa_status_t
 aqlprofile_register_agent(aqlprofile_agent_handle_t*     agent_id,
                           const aqlprofile_agent_info_t* agent_info);
 
+/**
+ * @brief Registers an agent to be used with AQL profile.
+ * @param[out] agent_id Handle to newly registered agent
+ * @param[in] agent_info Info to register a new agent with AQL Profiler
+ * @param[in] version Version of the agent info structure
+ * @retval HSA_STATUS_SUCCESS registration ok
+ * @retval HSA_STATUS_ERROR registration failed
+ */
+hsa_status_t
+aqlprofile_register_agent_info(aqlprofile_agent_handle_t* agent_id,
+                               const void*                agent_info,
+                               aqlprofile_agent_version_t version);
 /**
  * @brief AQLprofile struct containing information for perfmon events
  */
