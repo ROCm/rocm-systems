@@ -289,6 +289,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative") {
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
     ret = hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal);
     REQUIRE(hipErrorIllegalState == ret);
+    hipGraph_t graph;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("Creating hipStream with invalid mode") {
     ret = hipStreamBeginCapture(stream, hipStreamCaptureMode(-1));
@@ -308,6 +311,15 @@ TEST_CASE("Unit_hipStreamBeginCapture_Basic") {
 
   HIP_CHECK(hipStreamCreate(&s3));
   HIP_CHECK(hipStreamBeginCapture(s3, hipStreamCaptureModeRelaxed));
+
+  hipGraph_t g1, g2, g3;
+  HIP_CHECK(hipStreamEndCapture(s1, &g1));
+  HIP_CHECK(hipStreamEndCapture(s2, &g2));
+  HIP_CHECK(hipStreamEndCapture(s3, &g3));
+
+  HIP_CHECK(hipGraphDestroy(g1));
+  HIP_CHECK(hipGraphDestroy(g2));
+  HIP_CHECK(hipGraphDestroy(g3));
 
   HIP_CHECK(hipStreamDestroy(s1));
   HIP_CHECK(hipStreamDestroy(s2));
@@ -646,6 +658,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_multiplestrms") {
     REQUIRE(numNodes3 == 1);
     HIP_CHECK(hipEventDestroy(event2));
     HIP_CHECK(hipEventDestroy(event1));
+    HIP_CHECK(hipGraphDestroy(graph1));
+    HIP_CHECK(hipGraphDestroy(graph2));
+    HIP_CHECK(hipGraphDestroy(graph3));
   }
   SECTION("Capture Multiple stream with single event") {
     hipEvent_t event1;
@@ -669,6 +684,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_multiplestrms") {
     REQUIRE(numNodes2 == 1);
     REQUIRE(numNodes3 == 1);
     HIP_CHECK(hipEventDestroy(event1));
+    HIP_CHECK(hipGraphDestroy(graph1));
+    HIP_CHECK(hipGraphDestroy(graph2));
+    HIP_CHECK(hipGraphDestroy(graph3));
   }
   HIP_CHECK(hipStreamDestroy(stream3));
   HIP_CHECK(hipStreamDestroy(stream2));
@@ -774,8 +792,12 @@ TEST_CASE("Unit_hipStreamBeginCapture_DetectingInvalidCapture") {
   // Since stream2 is already in capture mode due to event wait
   // hipStreamBeginCapture on stream2 is expected to return error.
   REQUIRE(hipSuccess != hipStreamBeginCapture(stream2, hipStreamCaptureModeGlobal));
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream1, &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipStreamDestroy(stream1));
+  HIP_CHECK(hipEventDestroy(event));
 }
 /* Test scenario 12
  */
