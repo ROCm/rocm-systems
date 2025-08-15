@@ -149,9 +149,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       DEBUG_PRINT("%f\n", perf_pre);
       perf *= static_cast<double>(1e-09);
       CONSOLE_PRINT("%f\n", perf);
-      CONSOLE_PRINT("HIPPerfBufferCopySpeed[P2P] ( %u ) s:dev0 d:dev1 i:%u (GB/s) perf %f\n",
+      CONSOLE_PRINT("HIPPerfBufferCopySpeedP2P[%d] %u s:dev0 d:dev1 i:%u (GB/s) perf %f\n", test,
                     bufSize_, numIter, (float)perf);
-      CONSOLE_PRINT("P2P,%u,dev0,dev1,%u,%f\n", bufSize_, numIter, (float)perf);
+      CONSOLE_PRINT("P2P,%d,%u,dev0,dev1,%u,%f\n", test, bufSize_, numIter, (float)perf);
       test++;
       void* temp = malloc(bufSize_ + 4096);
       void* chkBuf = reinterpret_cast<void*>(temp);
@@ -211,9 +211,9 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     DEBUG_PRINT("%f\n", perf_pre);
     perf *= static_cast<double>(1e-09);
     CONSOLE_PRINT("%f\n", perf);
-    CONSOLE_PRINT("HIPPerfBufferCopySpeed[IntraD2DNoCU] ( %u ) s:dev0 d:dev0 i:%u (GB/s) perf %f\n",
+    CONSOLE_PRINT("HIPPerfBufferCopySpeedNoCU[%d]  %u  s:dev0 d:dev0 i:%u (GB/s) perf %f\n", test,
                   bufSize_, numIter, (float)perf);
-    CONSOLE_PRINT("NoCU,%u,dev0,dev0,%u,%f\n", bufSize_, numIter, (float)perf);
+    CONSOLE_PRINT("NoCU,%d,%u,dev0,dev0,%u,%f\n", test, bufSize_, numIter, (float)perf);
     test++;
     void* temp = malloc(bufSize_ + 4096);
     void* chkBuf = reinterpret_cast<void*>(temp);
@@ -359,7 +359,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         if ((hostMalloc[0] || hostRegister[0] || unpinnedMalloc[0]) &&
             (hostMalloc[1] || hostRegister[1] || unpinnedMalloc[1]))
           perf *= 2.0;
-        CONSOLE_PRINT("HIPPerfBufferCopySpeed[%d] ( %u ) s:%s d:%s i:%u (GB/s) perf %f\n", test,
+        CONSOLE_PRINT("HIPPerfBufferCopySpeed[%d] %u s:%s d:%s i:%u (GB/s) perf %f\n", test,
                       bufSize_, strSrc, strDst, numIter, (float)perf);
         std::cout << "Type," << bufSize_ << "," << strSrc << "," << strDst << "," << numIter << ","
                   << (float)perf << std::endl;
