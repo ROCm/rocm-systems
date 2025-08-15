@@ -19,7 +19,6 @@ This table provides the current status of the migration of specific ROCm systems
 | `hip`                  | EMU             | Pending          |                                       |                                       |
 | `hipother`             | EMU             | Pending          |                                       |                                       |
 | `hip-tests`            | EMU             | Pending          |                                       |                                       |
-| `rccl`                 | Public          | Pending          |                                       |                                       |
 | `rdc`                  | Public          | Completed        |                                       |                                       |
 | `rocm-core`            | Public          | Completed        |                                       |                                       |
 | `rocminfo`             | Public          | Completed        |                                       |                                       |
@@ -30,7 +29,6 @@ This table provides the current status of the migration of specific ROCm systems
 | `rocprofiler-sdk`      | Public          | Completed        |                                       | [![Code Coverage Integration](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-code_coverage.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-code_coverage.yml) <br> [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-continuous_integration.yml) <br> [![Documentation](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-docs.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-docs.yml) <br> [![Formatting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-formatting.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-formatting.yml) <br> [![Python Linting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-python.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-python.yml) <br> [![Restrictions](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-restrictions.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-restrictions.yml) <br> [![Release Compatibility](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-rocm_release_compatibility.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-sdk-rocm_release_compatibility.yml) |
 | `rocprofiler-systems`  | Public          | Completed        |                                       | [![Containers](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-containers.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-containers.yml) <br> [![CPack](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-cpack.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-cpack.yml) <br> [![Formatting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-formatting.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-formatting.yml) <br> [![OpenSUSE](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-opensuse.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-opensuse.yml) <br> [![Python Linting](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-python.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-python.yml) <br> [![RedHat Linux](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-redhat.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-redhat.yml) <br> [![Ubuntu Jammy](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-jammy.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-jammy.yml) <br> [![Ubuntu Noble](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-noble.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/rocprofiler-systems-ubuntu-noble.yml) |
 | `rocr-runtime`         | Public          | Completed        |                                       |                                       |
-| `rocshmem`             | Public          | Pending          |                                       |                                       |
 | `roctracer`            | Public          | Completed        |                                       |                                       |
 
 
@@ -38,10 +36,10 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `clr`                  | 8/21           |
-| `hip`                  | 8/21           |
-| `hipother`             | 8/21           |
-| `hip-tests`            | 8/21           |
+| `clr`                  | 8/18           |
+| `hip`                  | 8/18           |
+| `hipother`             | 8/18           |
+| `hip-tests`            | 8/18           |
 
 *Remaining schedule to be determined.
 
