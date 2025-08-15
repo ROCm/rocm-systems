@@ -118,7 +118,7 @@ jobs:
         repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
-        path: '${GITHUB_WORKSPACE}/rocDecode'
+        path: 'rocDecode'
 
     - name: Clone ROCJPEG
       uses: actions/checkout@v4
@@ -126,7 +126,7 @@ jobs:
         repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
-        path: '${GITHUB_WORKSPACE}/rocJPEG'
+        path: 'rocJPEG'
 
     - name: Install requirements
       timeout-minutes: 10
