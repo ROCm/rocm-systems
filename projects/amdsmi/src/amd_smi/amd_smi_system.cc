@@ -104,7 +104,7 @@ amdsmi_status_t AMDSmiSystem::get_cpu_model_name(uint32_t socket_id, std::string
       std::cerr << "Failed to open /proc/cpuinfo:" << strerror(errno) << std::endl;
       return AMDSMI_STATUS_FILE_ERROR;
     } else {
-      uint32_t current_socket_id = -1;
+      int current_socket_id = -1;
       while (std::getline(cpu_info, info)) {
         if (info.find("processor") != std::string::npos) {
           current_socket_id = std::stoi(info.substr(info.find(':') + 1));
