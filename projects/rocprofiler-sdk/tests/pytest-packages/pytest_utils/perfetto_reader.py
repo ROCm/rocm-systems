@@ -285,23 +285,21 @@ class PerfettoReader:
 
         counter_df = self.query_tp(
             """SELECT
-                begin.id as slice_id,
-                begin.track_id,
-                CASE
-                    WHEN counter_track.name LIKE '%SCRATCH MEMORY%' THEN 'scratch_memory'
-                    WHEN counter_track.name LIKE '%ALLOCATE BYTES%' THEN 'memory_allocation'
-                    ELSE 'counter_collection'
-                END as category,
+                counter_track.id as slice_id,
+                counter.track_id,
+                counter_track.name as track_name,
+                'counter_collection' as category,
                 0 as depth,
                 0 as stack_id,
-                  0 as parent_stack_id,
-                begin.ts as ts,
-                end.ts - begin.ts as dur,
+                0 as parent_stack_id,
+                MIN(CASE WHEN counter.value > 0 THEN counter.ts ELSE NULL END) as ts,
+                0 as dur,
                 counter_track.name as name
-            FROM counter AS begin
-            JOIN counter AS end ON begin.id + 1 == end.id AND end.track_id == begin.track_id AND begin.value == end.value
-            JOIN counter_track ON begin.track_id = counter_track.id
-            WHERE (counter_track.name LIKE '%SCRATCH MEMORY%') AND begin.id % 2 == 1"""
+            FROM counter_track
+            JOIN counter ON counter.track_id = counter_track.id
+            WHERE counter_track.name LIKE 'AGENT%'
+            AND counter.value >= 0
+            GROUP BY counter.track_id"""
         )
 
         # Transform counter data to match the main dataframe schema
@@ -330,7 +328,7 @@ class PerfettoReader:
                     "tp_index": counter_df["tp_index"],
                     "slice_id": counter_df["slice_id"],
                     "track_id": counter_df["track_id"],
-                    "category": counter_df["category"],
+                    "category": "counter_collection",
                     "depth": 0,
                     "stack_id": 0,
                     "parent_stack_id": 0,
@@ -344,6 +342,47 @@ class PerfettoReader:
             self.dataframe = pd.concat(
                 [self.dataframe, counter_collection_df], ignore_index=True
             )
+
+        scratch_df = self.query_tp(
+            """SELECT
+                begin.id as slice_id,
+                begin.track_id,
+                'scratch_memory' as category,
+                0 as depth,
+                0 as stack_id,
+                0 as parent_stack_id,
+                begin.ts as ts,
+                end.ts - begin.ts as dur,
+                counter_track.name as name
+            FROM counter AS begin
+            JOIN counter AS end ON begin.id + 1 == end.id AND
+                end.track_id == begin.track_id AND begin.value == end.value
+            JOIN counter_track ON begin.track_id = counter_track.id
+            WHERE counter_track.name LIKE '%SCRATCH MEMORY%' AND begin.id % 2 == 1"""
+        )
+
+        # Transform scratch memory data to match the main dataframe schema
+        if not scratch_df.empty:
+            # Register counter track IDs in self.track_ids before adding to dataframe
+            for row in scratch_df.itertuples():
+                if (
+                    row.tp_index < len(self.track_ids)
+                    and row.track_id not in self.track_ids[row.tp_index]
+                ):
+                    # Add the counter track to track_ids with reasonable default values
+                    self.track_ids[row.tp_index][row.track_id] = {
+                        "tp_index": row.tp_index,
+                        "pid": 0,
+                        "tid": 0,
+                        "rank": 0,
+                        "thread": 0,
+                        "prio": 2,
+                        "process_name": "scratch_process",
+                        "thread_name": f"scratch_track_{row.category}",
+                    }
+
+            # Concatenate with main dataframe
+            self.dataframe = pd.concat([self.dataframe, scratch_df], ignore_index=True)
 
         self.df_categories = sorted(list(self.dataframe["category"].unique()))
 
