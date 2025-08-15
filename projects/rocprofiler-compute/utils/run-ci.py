@@ -108,14 +108,11 @@ set(CTEST_BUILD_NAME "{args.build_name}")
 set(CTEST_SOURCE_DIRECTORY "{args.source_dir}")
 set(CTEST_BINARY_DIRECTORY "{args.binary_dir}")
 
-# Start the dashboard submission
 ctest_start({args.mode})
 
-# Configure for coverage submission
 set(CTEST_COVERAGE_COMMAND "python3")
 set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml")
 
-# Use ctest_coverage to process and submit
 file(COPY "{args.coverage_file}" DESTINATION "${{CTEST_BINARY_DIRECTORY}}")
 ctest_coverage()
 ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)

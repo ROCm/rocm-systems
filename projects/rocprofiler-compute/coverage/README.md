@@ -14,7 +14,7 @@ monorepo/
 │       ├── coverage/
 │       │   └── coverage-latest.xml  # committed coverage file
 │       ├── utils/
-│       │   ├── generate_coverage.sh  # coverage generation script
+│       │   ├── update_coverage.sh  # coverage generation/update script
 │       │   └── run-ci.py             # CDash upload script
 │       └── ...
 └── .github/
