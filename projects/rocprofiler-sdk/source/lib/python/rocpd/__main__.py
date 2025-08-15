@@ -38,6 +38,7 @@ def main(argv=None, config=None):
 
     """
     import argparse
+    import time
     from . import csv
     from . import merge
     from . import otf2
@@ -272,6 +273,32 @@ Example usage:
     # convert to real number of DB input files
     input_files = package.flatten_rocpd_yaml_input_file(args.input)
     db_count = len(input_files)
+
+    max_groups = 5
+    if db_count > max_groups:
+
+        # Compute the base group size
+        base_size = db_count // max_groups
+        remainder = db_count % max_groups
+
+        # Create groups
+        db_groups = []
+        index = 0
+        for i in range(max_groups):
+            size = base_size + (1 if i < remainder else 0)
+            db_groups.append(input_files[index : index + size])
+            index = size
+
+        output_path = args.output_path + "/merged_" + format(int(time.time()), "x") + "/"
+
+        merged_bases = []
+        for i in range(len(db_groups)):
+            result_path = output_path + "result_" + str(i + 1) + ".db"
+            with merge.RocpdMerger(db_groups[i], result_path) as merger:
+                merger.merge()
+            merged_bases.append(result_path)
+
+        input_files = merged_bases
 
     # TODO: add logic to determine how many DBs to merge into
     ## SQLITE_MAX_ATTACHED == 10, can query once you have connection
