@@ -37,8 +37,7 @@
 // NOTE: This is a *temporary solution* until we get a better approach, likely
 //       a driver API that can give us the capabilities of a GPU in question.
 //
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 const AMDGpuOpModeList_t amdgpu_opmode_check_list {
   {AMDGpuPropertyOpModeTypes_t::kBareMetal, "Bare Metal"},
@@ -541,5 +540,4 @@ rsmi_status_t Device::run_amdgpu_property_reinforcement_query(const AMDGpuProper
 }
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

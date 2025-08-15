@@ -31,8 +31,7 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 uint32_t AMDSmiGPUDevice::get_gpu_id() const {
     return gpu_id_;
@@ -311,5 +310,4 @@ std::vector<uint64_t> AMDSmiGPUDevice::get_bitmask_from_numa_node(int32_t node_i
     return bitmask;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

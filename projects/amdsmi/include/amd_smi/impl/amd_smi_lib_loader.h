@@ -29,8 +29,7 @@
 #include "amd_smi/amdsmi.h"
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 class AMDSmiLibraryLoader {
  public:
      AMDSmiLibraryLoader();
@@ -76,8 +75,7 @@ template<typename T> amdsmi_status_t AMDSmiLibraryLoader::load_symbol(
     return AMDSMI_STATUS_SUCCESS;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_

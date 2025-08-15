@@ -34,8 +34,7 @@
     throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__); \
   }
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 /// @brief Exception type which carries an error code to return to the user.
 class rsmi_exception : public std::exception {
@@ -50,8 +49,7 @@ class rsmi_exception : public std::exception {
   std::string desc_;
 };
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_EXCEPTION_H_
 

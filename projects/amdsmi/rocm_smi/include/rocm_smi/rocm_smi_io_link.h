@@ -30,8 +30,7 @@
 
 #include "rocm_smi/rocm_smi.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 typedef enum _IO_LINK_TYPE {
   IOLINK_TYPE_UNDEFINED      = 0,
@@ -130,7 +129,6 @@ IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx,
                                                      uint32_t dst_node_idx);
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_IO_LINK_H_

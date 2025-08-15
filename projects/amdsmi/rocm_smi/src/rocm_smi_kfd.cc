@@ -43,8 +43,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 static const char *kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
@@ -1131,5 +1130,4 @@ int KFDNode::get_node_id(uint32_t *node_id) {
   return ret;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

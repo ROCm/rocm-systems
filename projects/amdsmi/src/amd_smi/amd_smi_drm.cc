@@ -32,8 +32,7 @@
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 
 std::string AMDSmiDrm::find_file_in_folder(const std::string& folder,
@@ -204,6 +203,4 @@ uint32_t AMDSmiDrm::get_vendor_id() {
     return vendor_id;
 }
 
-}  // namespace smi
-}  // namespace amd
-
+} // namespace amd::smi

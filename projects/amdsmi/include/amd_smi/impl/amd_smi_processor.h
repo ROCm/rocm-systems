@@ -26,8 +26,7 @@
 #include <string>
 #include "amd_smi/amdsmi.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 class AMDSmiProcessor {
  public:
@@ -43,7 +42,6 @@ class AMDSmiProcessor {
     uint32_t pindex_;
     std::string processor_identifier_;
 };
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_PROCESSOR_H_

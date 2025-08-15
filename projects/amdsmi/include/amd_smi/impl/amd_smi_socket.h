@@ -28,8 +28,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 class AMDSmiSocket {
  public:
@@ -76,7 +75,6 @@ class AMDSmiSocket {
     std::vector<AMDSmiProcessor*> cpu_core_processors_;
 };
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_SOCKET_H_

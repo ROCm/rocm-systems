@@ -29,8 +29,7 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_drm.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 
 // PID, amdsmi_proc_info_t
@@ -90,7 +89,6 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
 };
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_

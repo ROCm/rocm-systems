@@ -41,8 +41,7 @@
 #define CRAT_IOLINK_FLAGS_BI_DIRECTIONAL          (1 << 31)
 #define CRAT_IOLINK_FLAGS_RESERVED_MASK           0x7fffffe0
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 static const char *kKFDNodesPathRoot = "/sys/class/kfd/kfd/topology/nodes";
 static const char *kKFDLinkPath[] = {"io_links", "p2p_links"};
@@ -450,5 +449,4 @@ IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx, uint
 }
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

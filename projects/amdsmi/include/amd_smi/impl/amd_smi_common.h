@@ -34,8 +34,7 @@ extern "C" {
 }
 #endif
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 // Define a map of rsmi status codes to amdsmi status codes
 const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
@@ -110,7 +109,6 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
 #endif
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // AMD_SMI_INCLUDE_AMD_SMI_COMMON_H_

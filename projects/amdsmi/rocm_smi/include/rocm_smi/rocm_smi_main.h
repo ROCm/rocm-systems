@@ -41,8 +41,7 @@
 #include "rocm_smi/rocm_smi_power_mon.h"
 #include "rocm_smi/rocm_smi_common.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 class RocmSMI {
  public:
@@ -134,7 +133,6 @@ class RocmSMI {
                           // by bootstrap_mutex_
 };
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_MAIN_H_

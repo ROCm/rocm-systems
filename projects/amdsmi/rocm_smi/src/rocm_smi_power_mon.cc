@@ -30,8 +30,7 @@
 #include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi_exception.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 
 static const char *kPowerMonPMName = "amdgpu_pm_info";
@@ -127,5 +126,4 @@ int PowerMon::readPowerValue(PowerMonTypes type, uint64_t *power) {
   return parse_power_str(fstr, type, power);
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

@@ -53,8 +53,7 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 const std::string kTmpFilePrefix = "rocmsmi_";
 
 // Return 0 if same file, 1 if not, and -1 for error
@@ -1337,5 +1336,4 @@ uint64_t get_multiplier_from_char(char units_char) {
   return multiplier;
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi

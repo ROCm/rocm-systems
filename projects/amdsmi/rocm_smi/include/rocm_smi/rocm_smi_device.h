@@ -42,8 +42,7 @@
 #include "rocm_smi/rocm_smi_gpu_metrics.h"
 #include "shared_mutex.h"   //NOLINT
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 enum DevKFDNodePropTypes {
   kDevKFDNodePropCachesCnt,
@@ -311,7 +310,6 @@ class Device {
 };
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_

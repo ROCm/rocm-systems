@@ -29,8 +29,7 @@
 #include <map>
 
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 //
 // Property reinforcement check list
@@ -132,7 +131,6 @@ rsmi_status_t validate_property_reinforcement_query(uint32_t dv_ind,
 void dump_amdgpu_property_reinforcement_list();
 
 
-}   // namespace smi
-}   // namespace amd
+} // namespace amd::smi
 
 #endif  // INCLUDE_ROCM_SMI_ROCM_SMI_DEVICE_H_

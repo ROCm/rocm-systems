@@ -41,9 +41,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include "rocm_smi/rocm_smi_device.h"
 
-namespace amd {
-namespace smi {
-namespace evt {
+namespace amd::smi::evt {
 
 static const char *kPathDeviceEventRoot = "/sys/bus/event_source/devices";
 
@@ -410,6 +408,4 @@ amd::smi::evt::Event::getValue(rsmi_counter_value_t *val) {
   return 0;
 }
 
-}  // namespace evt
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi::evt

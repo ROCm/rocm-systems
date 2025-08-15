@@ -34,8 +34,7 @@
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 struct MonitorNameEntry {
     MonitorTypes type;
@@ -637,5 +636,4 @@ void Monitor::fillSupportedFuncs(SupportedFuncMap *supported_funcs) {
   }
 }
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
