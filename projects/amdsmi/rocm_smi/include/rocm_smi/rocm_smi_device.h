@@ -32,8 +32,6 @@
 #include <vector>
 #include <unordered_set>
 #include <map>
-#include <type_traits>
-#include <optional>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_power_mon.h"

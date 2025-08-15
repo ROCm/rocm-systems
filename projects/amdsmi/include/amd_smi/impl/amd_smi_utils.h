@@ -27,9 +27,6 @@
 #include <limits>
 #include <type_traits>
 #include <string>
-#include <utility>
-#include <functional>
-#include <memory>
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"

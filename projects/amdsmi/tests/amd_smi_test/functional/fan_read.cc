@@ -20,15 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "fan_read.h"
-#include "../test_common.h"
 
 TestFanRead::TestFanRead() : TestBase() {
   set_title("AMDSMI Fan Read Test");

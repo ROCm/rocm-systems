@@ -23,7 +23,6 @@
 #ifndef INCLUDE_ROCM_SMI_ROCM_SMI_PROPERTIES_H_
 #define INCLUDE_ROCM_SMI_ROCM_SMI_PROPERTIES_H_
 
-#include "rocm_smi/rocm_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 
 #include <cstdint>

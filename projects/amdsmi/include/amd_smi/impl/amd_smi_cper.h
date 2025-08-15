@@ -21,6 +21,7 @@
  */
 
 #pragma once
+#include <vector>
 
 #include "amd_smi/amdsmi.h"
 

@@ -20,7 +20,6 @@
  * THE SOFTWARE.
  */
 
-#include <functional>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_common.h"
 

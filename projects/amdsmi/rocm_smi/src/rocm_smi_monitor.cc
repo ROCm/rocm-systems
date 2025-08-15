@@ -25,12 +25,9 @@
 #include <algorithm>
 #include <cassert>
 #include <cstdint>
-#include <fstream>
 #include <iostream>
-#include <map>
 #include <regex>  // NOLINT
 #include <string>
-#include <vector>
 
 #include "rocm_smi/rocm_smi_monitor.h"
 #include "rocm_smi/rocm_smi_utils.h"

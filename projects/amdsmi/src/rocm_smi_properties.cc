@@ -27,7 +27,6 @@
 #include "rocm_smi/rocm_smi_device.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
-#include <algorithm>
 #include <cassert>
 #include <sstream>
 

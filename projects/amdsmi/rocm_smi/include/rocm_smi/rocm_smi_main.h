@@ -29,7 +29,6 @@
 #include <set>
 #include <string>
 #include <cstdint>
-#include <unordered_map>
 #include <map>
 #include <mutex>  // NOLINT
 #include <utility>

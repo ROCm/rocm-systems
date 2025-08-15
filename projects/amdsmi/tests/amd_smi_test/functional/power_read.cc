@@ -29,7 +29,6 @@
 
 #include "amd_smi/amdsmi.h"
 #include "power_read.h"
-#include "../test_common.h"
 
 TestPowerRead::TestPowerRead() : TestBase() {
   set_title("AMDSMI Power Read Test");

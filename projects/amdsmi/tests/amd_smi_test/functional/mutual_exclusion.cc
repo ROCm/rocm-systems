@@ -20,17 +20,14 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
-#include <map>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "mutual_exclusion.h"
-#include "../test_common.h"
 
 #define  AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 

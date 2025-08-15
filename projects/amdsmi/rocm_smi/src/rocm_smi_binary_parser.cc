@@ -30,21 +30,12 @@
 #include "rocm_smi/rocm_smi_logger.h"
 
 #include <dirent.h>
-#include <inttypes.h>
+#include <cinttypes>
 #include <pthread.h>
 
-#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
-#include <fstream>
-#include <iostream>
-#include <map>
-#include <memory>
-#include <string>
-#include <utility>
-#include <variant>
-#include <vector>
 
 namespace amd::smi {
 static uint64_t get_value(uint8_t **ptr, struct metric_field *field) {

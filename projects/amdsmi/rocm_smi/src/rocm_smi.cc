@@ -28,7 +28,7 @@
 #include <sys/ioctl.h>
 #include <sys/utsname.h>
 #include <unistd.h>
-#include <inttypes.h>
+#include <cinttypes>
 
 #include <algorithm>
 #include <bitset>
@@ -39,13 +39,8 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <iterator>
-#include <map>
 #include <sstream>
-#include <type_traits>
 #include <vector>
-#include <unordered_map>
-#include <unordered_set>
 
 #include "rocm_smi/rocm_smi_common.h"  // Should go before rocm_smi.h
 #include "rocm_smi/rocm_smi.h"
@@ -63,7 +58,6 @@
 
 using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
-using amd::smi::AMDGpuMetricsUnitType_t;
 using amd::smi::AMDGpuMetricTypeId_t;
 auto &devInfoTypesStrings = amd::smi::Device::devInfoTypesStrings;
 

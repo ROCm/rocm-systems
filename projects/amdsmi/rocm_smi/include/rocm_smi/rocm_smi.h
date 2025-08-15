@@ -25,12 +25,13 @@
 
 #ifdef __cplusplus
 extern "C" {
-#include <cstdint>
-#else
 #include <stdint.h>
+#include <stddef.h>
+#else
+#include <cstdint>
+#include <cstddef>
 #endif  // __cplusplus
 
-#include <stddef.h>
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"

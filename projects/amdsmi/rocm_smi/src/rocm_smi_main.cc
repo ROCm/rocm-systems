@@ -30,15 +30,10 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
-#include <functional>
 #include <iostream>
-#include <memory>
 #include <algorithm>
-#include <set>
 #include <sstream>
 #include <string>
-#include <utility>
-#include <vector>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"

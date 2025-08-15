@@ -20,16 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
-#include <map>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "version_read.h"
-#include "../test_common.h"
 
 TestVersionRead::TestVersionRead() : TestBase() {
   set_title("AMDSMI Version Read Test");

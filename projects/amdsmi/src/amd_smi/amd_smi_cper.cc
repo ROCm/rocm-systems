@@ -27,7 +27,6 @@
 #include <memory>
 #include <cstring>
 #include <sstream>
-#include <vector>
 
 extern "C" {
 #include "aca-decode/aca_decode.h"

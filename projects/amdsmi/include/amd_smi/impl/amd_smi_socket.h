@@ -24,7 +24,6 @@
 #define AMD_SMI_INCLUDE_AMD_SMI_SOCKET_H_
 
 #include <string>
-#include <algorithm>
 #include <vector>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_processor.h"

@@ -27,11 +27,7 @@
 #include <cassert>
 #include <cstdint>
 #include <fstream>
-#include <iostream>
-#include <memory>
-#include <sstream>
 #include <string>
-#include <unordered_set>
 
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_io_link.h"

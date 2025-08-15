@@ -24,9 +24,8 @@
 #include <sys/ioctl.h>
 #include <libdrm/amdgpu.h>
 #include <libdrm/drm.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <stdint.h>
+#include <cstdint>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

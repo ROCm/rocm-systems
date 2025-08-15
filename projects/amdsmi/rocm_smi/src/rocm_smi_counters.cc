@@ -26,7 +26,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include <algorithm>
 #include <cassert>
 #include <cstdio>
 #include <cstring>
@@ -34,7 +33,6 @@
 #include <iostream>
 #include <map>
 #include <sstream>
-#include <unordered_set>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_counters.h"

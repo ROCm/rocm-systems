@@ -32,13 +32,11 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
-#include <iterator>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <sstream>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "rocm_smi/rocm_smi_main.h"

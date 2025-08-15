@@ -6,7 +6,7 @@ This chapter contains the ROCm SMI C++ API tutorials.
 
 .. code-block:: c++
 
-    #include <stdint.h>
+    #include <cstdint>
     #include "rocm_smi/rocm_smi.h"
     int main() {
 

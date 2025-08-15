@@ -28,7 +28,6 @@
 #include <map>
 #include <string>
 
-#include "test_base.h"
 #include "test_common.h"
 #include "amd_smi/amdsmi.h"
 

@@ -22,8 +22,8 @@
 
 #define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
                       // _GNU_SOURCE functions which check
-#include <assert.h>
-#include <errno.h>
+#include <cassert>
+#include <cerrno>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <dirent.h>
@@ -46,7 +46,6 @@
 #include <cmath>
 
 #include "rocm_smi/rocm_smi.h"
-#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_main.h"

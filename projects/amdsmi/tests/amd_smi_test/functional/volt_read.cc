@@ -20,12 +20,10 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
-#include <map>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"

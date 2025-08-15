@@ -25,7 +25,6 @@
 
 #include <vector>
 #include <set>
-#include <map>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_processor.h"

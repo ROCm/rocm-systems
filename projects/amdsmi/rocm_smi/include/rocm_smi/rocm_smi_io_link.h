@@ -24,8 +24,6 @@
 #define INCLUDE_ROCM_SMI_ROCM_SMI_IO_LINK_H_
 
 #include <string>
-#include <vector>
-#include <unordered_set>
 #include <memory>
 #include <map>
 #include <utility>

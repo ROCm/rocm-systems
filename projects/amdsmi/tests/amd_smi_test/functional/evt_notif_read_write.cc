@@ -20,15 +20,13 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "evt_notif_read_write.h"
-#include "../test_common.h"
 #include "../test_utils.h"
 
 TestEvtNotifReadWrite::TestEvtNotifReadWrite() : TestBase() {

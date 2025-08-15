@@ -23,8 +23,7 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_LIB_LOADER_H_
 #include <dlfcn.h>
-#include <string.h>
-#include <map>
+#include <cstring>
 #include <iostream>
 #include <mutex>   //  NOLINT(build/c++11)
 #include "amd_smi/amdsmi.h"

@@ -20,8 +20,7 @@
  * THE SOFTWARE.
  */
 
-#include <stdint.h>
-#include <stddef.h>
+#include <cstdint>
 
 #include <iostream>
 #include <string>
@@ -30,7 +29,6 @@
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
 #include "temp_read.h"
-#include "../test_common.h"
 
 
 static const std::map<uint32_t, std::string> kTempSensorNameMap = {

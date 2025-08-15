@@ -23,10 +23,11 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
+#include <map>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "amd_smi/impl/amd_smi_drm.h"
-#include "shared_mutex.h"  // NOLINT
 
 namespace amd {
 namespace smi {

@@ -40,17 +40,11 @@
 #include <cstdint>
 #include <cstring>
 #include <ctime>
-#include <fstream>
-#include <iostream>
 #include <map>
-#include <memory>
-#include <optional>
 #include <regex>  // NOLINT
 #include <string>
 #include <tuple>
 #include <type_traits>
-#include <utility>
-#include <variant>
 #include <vector>
 
 using namespace amd::smi;
