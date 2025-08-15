@@ -25,8 +25,8 @@
 #include "amd_smi/impl/amd_smi_common.h"
 
 
-namespace amd {
-namespace smi {
+
+namespace amd::smi {
 
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
     amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;
@@ -70,5 +70,5 @@ amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status) {
 }
 #endif
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
+

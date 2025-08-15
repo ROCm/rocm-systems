@@ -33,8 +33,7 @@
 #include "rocm_smi/rocm_smi_main.h"
 #include <map>
 
-namespace amd {
-namespace smi {
+namespace amd::smi {
 
 
 #define  AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
@@ -470,5 +469,5 @@ amdsmi_status_t AMDSmiSystem::gpu_index_to_handle(uint32_t gpu_index,
 }
 
 
-}  // namespace smi
-}  // namespace amd
+} // namespace amd::smi
+
