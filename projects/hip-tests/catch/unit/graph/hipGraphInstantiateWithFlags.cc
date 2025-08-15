@@ -70,6 +70,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative") {
     hipGraph_t graph;
     HIP_CHECK(hipGraphCreate(&graph, 0));
     REQUIRE(hipGraphInstantiateWithFlags(nullptr, graph, 0) == hipErrorInvalidValue);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 
   SECTION("Passing nullptr to graph") {
@@ -82,6 +83,7 @@ TEST_CASE("Unit_hipGraphInstantiateWithFlags_Negative") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
     hipGraphExec_t graphExec;
     REQUIRE(hipGraphInstantiateWithFlags(&graphExec, graph, 10) != hipSuccess);
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 }
 /*
