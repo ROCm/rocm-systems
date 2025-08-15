@@ -66,7 +66,7 @@ jobs:
         ]
 
     runs-on: ${{ matrix.system.runner }}
-    container: ubuntu:22.04
+    container: rocm/rocprofiler-private:${{ matrix.system.os }}
 
     # define this for containers
     env:
@@ -80,7 +80,7 @@ jobs:
       working-directory: /tmp
       run: |
         apt update
-        apt install -y curl wget python3 python3-pip git
+        apt install -y curl wget python3 python3-pip git build-essential coreutils cmake
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
@@ -111,7 +111,7 @@ jobs:
     - name: Clone ROCDecode
       uses: actions/checkout@v4
       with:
-        repository: 'https://github.com/ROCm/rocDecode.git'
+        repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: '${GITHUB_WORKSPACE}/rocDecode'
@@ -119,7 +119,7 @@ jobs:
     - name: Clone ROCJPEG
       uses: actions/checkout@v4
       with:
-        repository: 'https://github.com/ROCm/rocJPEG.git'
+        repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: '${GITHUB_WORKSPACE}/rocJPEG'
@@ -130,7 +130,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         apt-get update
-        apt-get install -y build-essential coreutils git cmake g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libomp-14-dev
+        apt-get install -y g++-11 g++-12 python3-pip libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libomp-14-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install -U --user -r requirements.txt --break-system-packages || python3 -m pip install -U --user -r requirements.txt
@@ -402,7 +402,7 @@ jobs:
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
-    container: ubuntu:22.04
+    container: rocm/rocprofiler-private:${{ matrix.system.os }}
 
     # define this for containers
     env:
@@ -415,7 +415,7 @@ jobs:
       working-directory: /tmp
       run: |
         apt update
-        apt install -y curl wget python3 python3-pip git
+        apt install -y curl wget python3 python3-pip git build-essential coreutils cmake
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
@@ -445,7 +445,7 @@ jobs:
     - name: Clone ROCDecode
       uses: actions/checkout@v4
       with:
-        repository: 'https://github.com/ROCm/rocDecode.git'
+        repository: 'ROCm/rocDecode'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: '${GITHUB_WORKSPACE}/rocDecode'
@@ -453,7 +453,7 @@ jobs:
     - name: Clone ROCJPEG
       uses: actions/checkout@v4
       with:
-        repository: 'https://github.com/ROCm/rocJPEG.git'
+        repository: 'ROCm/rocJPEG'
         ref: 'release/rocm-rel-7.0'
         set-safe-directory: true
         path: '${GITHUB_WORKSPACE}/rocJPEG'
@@ -467,7 +467,7 @@ jobs:
         apt-get update
         apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
         rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev  libdrm-dev file autoconf pkg-config libomp-14-dev
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libomp-14-dev
         apt-get upgrade -y
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
