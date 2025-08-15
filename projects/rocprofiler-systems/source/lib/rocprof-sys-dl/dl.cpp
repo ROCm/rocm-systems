@@ -514,8 +514,8 @@ get_active()
 auto&
 get_user_api_active()
 {
-    static bool* _v = new bool{ false };
-    return *_v;
+    static bool _v{ false };
+    return _v;
 }
 
 auto&
