@@ -26,7 +26,7 @@ declare -a MATRIX_ROCM_VERSIONS=()
 
 load-matrix()
 {
-    local container_file="$(realpath "${SCRIPT_DIR}/../scripts/containers.yml")"
+    local container_file="$(realpath "${SCRIPT_DIR}/containers.yml")"
     if [ ! -f "${container_file}" ]; then
         echo -e "\n Error: Cannot find ${container_file}"
         exit 1
