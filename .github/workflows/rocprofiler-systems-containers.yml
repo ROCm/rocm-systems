@@ -21,6 +21,23 @@ env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
+  prepare_release_matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix.outputs.matrix_data }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Output data for containers matrix
+        id: generate_release_matrix
+        run: |
+          pushd projects/rocprofiler-systems/docker
+          MATRIX_CONTENT=$(yq '.matrix' containers.yml -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+
   rocprofiler-systems-ci:
     runs-on: ubuntu-latest
 
@@ -76,81 +93,14 @@ jobs:
             popd
 
   rocprofiler-systems-release:
-
+    needs: prepare_release_matrix
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # ubuntu 22.04
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.3"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.4"
-          # ubuntu 24.04
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "6.3"
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "6.4"
-          # opensuse 15.5
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "6.3"
-          # opensuse 15.6
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "6.3"
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "6.4"
-          # RHEL 8.10
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "6.4"
-          # RHEL 9.4
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "6.4"
-          # RHEL 9.5
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "6.4"
-
+        include: ${{ fromJSON(needs.prepare_release_matrix.outputs.matrix_data) }}
+          
     steps:
       - uses: actions/checkout@v4
         with:
