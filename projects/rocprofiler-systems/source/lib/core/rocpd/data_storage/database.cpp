@@ -33,6 +33,10 @@
 #include <timemory/utility/filepath.hpp>
 #include <unistd.h>
 
+#if ROCPROFILER_VERSION > 1000
+#include <rocprofiler-sdk-rocpd/rocpd.h>
+#endif
+
 namespace
 {
 void
@@ -44,6 +48,17 @@ create_directory_for_database_file(const std::string& db_file)
         tim::filepath::makedir(_db_dirname);
     }
 }
+#if defined(ROCPROFILER_VERSION) && ROCPROFILER_VERSION > 1000
+void
+load_schema_cb(rocpd_sql_engine_t, rocpd_sql_schema_kind_t, rocpd_sql_options_t,
+               const rocpd_sql_schema_jinja_variables_t*, const char*,
+               const char* schema_content, void* user_data)
+{
+    auto* query = static_cast<std::string*>(user_data);
+    *query      = schema_content;
+}
+#endif
+
 }  // namespace
 namespace rocprofsys
 {
@@ -75,6 +90,29 @@ database::~database()
 void
 database::initialize_schema()
 {
+    #if defined(ROCPROFILER_VERSION) && ROCPROFILER_VERSION > 1000
+    auto                               upid = get_upid();
+    rocpd_sql_schema_jinja_variables_t info{ 2 * upid.size(), upid.c_str(),
+                                             upid.c_str() };
+
+    const std::vector<rocpd_sql_schema_kind_t> schema_kinds = {
+        ROCPD_SQL_SCHEMA_ROCPD_TABLES, ROCPD_SQL_SCHEMA_ROCPD_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_DATA_VIEWS, ROCPD_SQL_SCHEMA_ROCPD_MARKER_VIEWS,
+        ROCPD_SQL_SCHEMA_ROCPD_SUMMARY_VIEWS
+    };
+
+    for(const auto& shema_kind : schema_kinds)
+    {
+        std::string query;
+        rocpd_sql_load_schema(ROCPD_SQL_ENGINE_SQLITE3, shema_kind,
+                              ROCPD_SQL_OPTIONS_NONE, &info, load_schema_cb, nullptr, 0,
+                              &query);
+
+        validate_sqlite3_result(sqlite3_exec(_sqlite3_db_temp, query.c_str(), 0, 0, 0),
+                                query.c_str(),
+                                std::string("Invalid schema, init database failed!"));
+    }
+#else
     auto get_file_path = [](const std::string_view filename) {
         auto _rocprofsys_root = tim::get_env<std::string>(
             "rocprofiler_systems_ROOT", tim::get_env<std::string>("ROCPROFSYS_ROOT", ""));
@@ -127,6 +165,7 @@ database::initialize_schema()
             std::string("Invalid schema file, init database failed!").append(file_path));
         file.close();
     }
+#endif
 }
 
 void
