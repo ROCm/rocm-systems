@@ -1899,11 +1899,6 @@ tool_fini(void* callback_data)
 void
 setup()
 {
-    if(int status = 0;
-       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
-    {
-        // ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure));
-    }
 }
 
 void
