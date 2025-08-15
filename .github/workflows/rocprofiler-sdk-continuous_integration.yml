@@ -141,9 +141,23 @@ jobs:
         apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
+    - name: Special Requirements
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/usr/lib/llvm-14' >> $GITHUB_ENV
+
     - name: Install Missing ROCm Dependencies
       shell: bash
       run: |
+        export PATH=/usr/lib/llvm-14/bin:${{ env.ROCM_PATH }}/bin:$PATH
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         echo -e "Building & Installing ROCDecode..."
         cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/llvm/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
         cmake --build build-rocdecode --target all --parallel 16
@@ -172,18 +186,6 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Special Requirements
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
-          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
-          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-          echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'LLVM_PATH=/usr/lib/llvm-14' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -447,23 +449,8 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
+        submodules: false
         set-safe-directory: true
-
-    - name: Clone ROCDecode
-      uses: actions/checkout@v4
-      with:
-        repository: 'ROCm/rocDecode'
-        ref: 'release/rocm-rel-7.0'
-        set-safe-directory: true
-        path: '${GITHUB_WORKSPACE}/rocDecode'
-
-    - name: Clone ROCJPEG
-      uses: actions/checkout@v4
-      with:
-        repository: 'ROCm/rocJPEG'
-        ref: 'release/rocm-rel-7.0'
-        set-safe-directory: true
-        path: '${GITHUB_WORKSPACE}/rocJPEG'
 
     - name: Install requirements
       timeout-minutes: 10
