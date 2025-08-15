@@ -27,7 +27,7 @@ concurrency:
 
 env:
   # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
-  ROCM_PATH: "/opt/rocm-custom"
+  ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
   PATH: "/usr/bin:$PATH"
   CDASH_URL: "https://my.cdash.org/submit.php?project=rocprofiler-sdk"
@@ -97,8 +97,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        mkdir -p /opt/rocm
-        tar -xf *.tar.gz -C /opt/rocm
+        mkdir -p ${{ env.ROCM_PATH }}
+        tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}
         mkdir --parents --mode=0755 /etc/apt/keyrings
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
@@ -109,7 +109,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
-        submodules: true
+        submodules: false
         set-safe-directory: true
 
     - name: Clone ROCDecode
@@ -139,18 +139,18 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install -U --user -r requirements.txt --break-system-packages || python3 -m pip install -U --user -r requirements.txt
         apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
+        rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
     - name: Install Missing ROCm Dependencies
       shell: bash
       run: |
         echo -e "Building & Installing ROCDecode..."
-        cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
+        cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/llvm/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
         cmake --build build-rocdecode --target all --parallel 16
         cmake --build build-rocdecode --target install
         echo -e "ROCDecode Installed Successfully!"
         echo -e "Building & Installing ROCJPEG..."
-        cmake -B build-rocjpeg -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCMAKE_PREFIX_PATH=/opt/rocm -DCMAKE_CXX_COMPILER=/opt/rocm/llvm/bin/amdclang++ ${GITHUB_WORKSPACE}/rocJPEG
+        cmake -B build-rocjpeg -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/llvm/bin/amdclang++ ${GITHUB_WORKSPACE}/rocJPEG
         cmake --build build-rocjpeg --target all --parallel 16
         cmake --build build-rocjpeg --target install
         echo -e "ROCJPEG Installed Successfully!"
@@ -163,7 +163,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -181,8 +181,8 @@ jobs:
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=/opt/rocm/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
           echo 'LLVM_PATH=/usr/lib/llvm-14' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
@@ -190,8 +190,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        PATH=/usr/lib/llvm-14/bin:/opt/rocm/bin:$PATH
-        LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+        PATH=/usr/lib/llvm-14/bin:${{ env.ROCM_PATH }}/bin:$PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
@@ -204,8 +204,8 @@ jobs:
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DOMP_TARGET_COMPILER=/usr/bin/clang++-14
-          -DCPACK_PACKAGING_INSTALL_PREFIX='/opt/rocm-custom'
-          -DCMAKE_PREFIX_PATH='/opt/rocm;/opt/rocm/llvm'
+          -DCPACK_PACKAGING_INSTALL_PREFIX='${{ env.ROCM_PATH }}'
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE='/usr/bin/python3'
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -259,8 +259,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
+        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
@@ -317,9 +317,9 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
-        sudo ln -s /opt/rocm-custom /opt/rocm
+        sudo mkdir -p ${{ env.ROCM_PATH }}
+        sudo tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-custom
+        sudo ln -s ${{ env.ROCM_PATH }}-custom ${{ env.ROCM_PATH }}
 
     - name: Checkout
       uses: actions/checkout@v4
@@ -335,8 +335,8 @@ jobs:
         python3 -m pip install -U --user -r requirements.txt
         python3 -m pip install -U pip pipx
         python3 -m pipx install cmake
-        sudo rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
-        sudo rm -rf /opt/rocm-custom/lib/*rocprofiler-sdk* /opt/rocm-custom/lib/cmake/*rocprofiler-sdk* /opt/rocm-custom/share/*rocprofiler-sdk* /opt/rocm-custom/libexec/*rocprofiler-sdk*
+        sudo rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
+        sudo rm -rf ${{ env.ROCM_PATH }}-custom/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}-custom/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}-custom/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}-custom/libexec/*rocprofiler-sdk*
 
     - name: Special Requirements
       shell: bash
@@ -346,10 +346,10 @@ jobs:
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=amdclang' >> $GITHUB_ENV
-          echo 'HIP_CLANG_PATH=/opt/rocm-custom/llvm/bin' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HSA_PATH=/opt/rocm-custom' >> $GITHUB_ENV
+          echo 'HIP_CLANG_PATH=${{ env.ROCM_PATH }}/llvm/bin' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HSA_PATH=${{ env.ROCM_PATH }}' >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -359,7 +359,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -375,8 +375,8 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         python3 -m pipx ensurepath; source ~/.bashrc;
-        LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
-        PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
@@ -388,7 +388,7 @@ jobs:
           -DROCPROFILER_BUILD_DOCS=OFF
           -DOPENMP_GPU_TARGETS=''
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -436,8 +436,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        mkdir -p /opt/rocm
-        tar -xf *.tar.gz -C /opt/rocm
+        mkdir -p ${{ env.ROCM_PATH }}
+        tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}
         mkdir --parents --mode=0755 /etc/apt/keyrings
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
@@ -447,7 +447,6 @@ jobs:
       uses: actions/checkout@v4
       with:
         sparse-checkout: projects/rocprofiler-sdk
-        submodules: true
         set-safe-directory: true
 
     - name: Clone ROCDecode
@@ -474,7 +473,7 @@ jobs:
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk* /opt/rocm*/lib/python*/site-packages/roctx /opt/rocm*/lib/python*/site-packages/rocpd
+        rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libomp-14-dev
         apt-get upgrade -y
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
@@ -487,7 +486,7 @@ jobs:
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -504,8 +503,8 @@ jobs:
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=/opt/rocm/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
+          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
           echo 'LLVM_PATH=/usr/lib/llvm-14' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
@@ -513,8 +512,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        PATH=/usr/lib/llvm-14/bin:/opt/rocm/bin:$PATH
-        LD_LIBRARY_PATH=/opt/rocm/lib:$LD_LIBRARY_PATH
+        PATH=/usr/lib/llvm-14/bin:${{ env.ROCM_PATH }}/bin:$PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
@@ -524,8 +523,9 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
-          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
-          -DOPENMP_GPU_TARGETS=''
+          -DOMP_TARGET_COMPILER=/usr/bin/clang++-14
+          -DCPACK_PACKAGING_INSTALL_PREFIX='${{ env.ROCM_PATH }}'
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
