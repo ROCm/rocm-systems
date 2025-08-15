@@ -66,7 +66,11 @@ jobs:
         ]
 
     runs-on: ${{ matrix.system.runner }}
-    container: rocm/rocprofiler-private:${{ matrix.system.os }}
+    container:
+      image: rocm/rocprofiler-private:${{ matrix.system.os }}
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
 
     # define this for containers
     env:
@@ -402,7 +406,11 @@ jobs:
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
-    container: rocm/rocprofiler-private:${{ matrix.system.os }}
+    container:
+      image: rocm/rocprofiler-private:${{ matrix.os }}
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
 
     # define this for containers
     env:
