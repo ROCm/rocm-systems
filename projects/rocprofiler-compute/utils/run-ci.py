@@ -157,9 +157,6 @@ def main():
     parser.add_argument("--mode", default="Experimental",
                        choices=["Experimental", "Nightly", "Continuous"],
                        help="CTest dashboard mode")
-    parser.add_argument("--dry-run", action="store_true",
-                       help="Generate script but don't execute")
-
     args = parser.parse_args()
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
@@ -209,12 +206,6 @@ def main():
         print(f"Warning: Could not parse coverage percentage: {e}")
 
     script_content = create_ctest_script(args)
-
-    if args.dry_run:
-        print("\nGenerated CTest script:")
-        print("=" * 50)
-        print(script_content)
-        return 0
 
     try:
         with tempfile.NamedTemporaryFile(mode='w', suffix='.cmake', delete=False) as f:
