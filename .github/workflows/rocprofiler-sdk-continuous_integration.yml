@@ -59,8 +59,8 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy'},
-          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X", ci-flags: '--linter clang-tidy'},
+          {gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X", ci-flags: '--linter clang-tidy'},
           {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X", ci-flags: '--linter clang-tidy'},
           {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950", ci-flags: '--linter clang-tidy'}
         ]
@@ -144,7 +144,7 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -U --user -r requirements.txt
-        apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
+        apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev llvm-amdgpu-dev llvm-amdgpu
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
     - name: Special Requirements
@@ -472,7 +472,7 @@ jobs:
       run: |
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
-        apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev
+        apt-get install -y llvm-14 llvm-14-linker-tools clang-tools-14 libomp-14-dev llvm-amdgpu-dev llvm-amdgpu
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
         apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config libomp-14-dev
         apt-get upgrade -y
