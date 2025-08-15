@@ -331,7 +331,6 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
 
     // if getting sclk or mclk info, read pp_od_clk_voltage for min and max info
     if (sclk || mclk) {
-        unsigned int dpm_level;
         std::ifstream smclk_ranges(smclk_min_max_fullpath.c_str());
         unsigned int smax = 0;
         unsigned int mmax = 0;

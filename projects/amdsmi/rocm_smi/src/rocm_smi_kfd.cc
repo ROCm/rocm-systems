@@ -454,10 +454,6 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
   proc->sdma_usage = 0;
   proc->cu_occupancy = 0;
 
-  static amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-  static std::map<uint64_t, std::shared_ptr<KFDNode>>& kfd_node_map =
-                                                           smi.kfd_node_map();
-
   for (itr = gpu_set->begin(); itr != gpu_set->end(); itr++) {
     uint64_t gpu_id = (*itr);
 

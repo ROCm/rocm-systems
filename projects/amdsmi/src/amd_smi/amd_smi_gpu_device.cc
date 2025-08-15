@@ -129,7 +129,6 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& 
      */
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
     auto num_running_processes = uint32_t(0);
-    auto list_process_allocation_size = uint32_t(0);
 
     status_code = rsmi_compute_process_info_get(nullptr, &num_running_processes);
     if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (num_running_processes <= 0)) {
