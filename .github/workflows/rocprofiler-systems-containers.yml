@@ -39,7 +39,7 @@ jobs:
         id: generate_release_matrix
         run: |
           pushd projects/rocprofiler-systems/docker
-          MATRIX_CONTENT=$(yq '.matrix' containers.yml -o=json)
+          MATRIX_CONTENT=$(cat containers.yml | yq '.matrix' -o=json)
           echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
 
   rocprofiler-systems-ci:
