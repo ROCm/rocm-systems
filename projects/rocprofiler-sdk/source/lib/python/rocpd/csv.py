@@ -371,23 +371,6 @@ def write_region_csv(importData, config) -> None:
         SELECT
             guid AS Guid,
             category AS Domain,
-            name AS Function,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
-        FROM "regions"
-        WHERE
-            category LIKE 'HIP_%' OR
-            category LIKE 'HSA_%' OR
-            category LIKE 'RCCL_%' OR
-            category LIKE 'ROCDECODE_%' OR
-            category LIKE 'ROCJPEG_%'
-        UNION ALL
-                SELECT
-            guid AS Guid,
-            category AS Domain,
             CASE
                 WHEN json_extract(extdata, '$.message') IS NOT NULL
                 THEN json_extract(extdata, '$.message')
@@ -399,8 +382,6 @@ def write_region_csv(importData, config) -> None:
             start AS Start_Timestamp,
             end AS End_Timestamp
         FROM "regions_and_samples"
-        WHERE
-            category LIKE 'MARKER_%'
         ORDER BY
             guid ASC, start ASC, end DESC
     """
