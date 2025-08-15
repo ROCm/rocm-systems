@@ -300,6 +300,8 @@ Example usage:
 
         input_files = merged_bases
 
+        metadata_path = package.create_metadata_file(input_files, output_path)
+
     # TODO: add logic to determine how many DBs to merge into
     ## SQLITE_MAX_ATTACHED == 10, can query once you have connection
     ## if db_count > 10
