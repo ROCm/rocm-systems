@@ -5945,7 +5945,10 @@ class AMDSMICommands():
                 monitor_values['vram_used'] = vram_used
                 monitor_values['vram_free'] = vram_total - vram_used
                 monitor_values['vram_total'] = vram_total
-                monitor_values['vram_percent'] = round ((vram_used / vram_total), 2)
+                if vram_total != 0:
+                    monitor_values['vram_percent'] = round ((vram_used / vram_total) * 100, 2)
+                else:
+                    monitor_values['vram_percent'] = "N/A"
 
                 vram_usage_unit = "MB"
                 vram_percent_unit = "%"
