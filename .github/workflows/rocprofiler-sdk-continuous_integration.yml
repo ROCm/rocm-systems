@@ -71,6 +71,9 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
 
     # define this for containers
     env:
@@ -297,6 +300,7 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      options: --privileged
 
     # define this for containers
     env:
@@ -416,6 +420,9 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
 
     # define this for containers
     env:
