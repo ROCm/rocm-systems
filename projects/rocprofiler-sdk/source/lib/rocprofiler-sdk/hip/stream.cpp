@@ -68,35 +68,29 @@ using stream_map_t = std::unordered_map<hipStream_t, rocprofiler_stream_id_t>;
 
 namespace
 {
+struct stream_info
+{
+    stream_map_t stream_map{};
+    uint64_t     idx_offset{0};
+    uint64_t     thread_counter{0};
+};
+
 auto*
-get_stream_map()
+get_stream_info()
 {
-    static auto*& _v = common::static_object<common::Synchronized<stream_map_t>>::construct();
+    static auto*& _v = common::static_object<common::Synchronized<stream_info>>::construct();
     return _v;
-}
-
-auto&
-get_idx_offset()
-{
-    static auto*& _v = common::static_object<uint64_t>::construct(0ul);
-    return *_v;
-}
-
-auto&
-get_stream_thread_counter()
-{
-    static auto*& _v = common::static_object<std::atomic<uint64_t>>::construct(0ul);
-    return *_v;
 }
 
 auto
 add_stream(hipStream_t stream)
 {
-    return get_stream_map()->wlock(
-        [](stream_map_t& _data, hipStream_t _stream) {
-            auto& idx_offset = get_idx_offset();
+    return get_stream_info()->wlock(
+        [](stream_info& _info, hipStream_t _stream) {
+            auto& _data      = _info.stream_map;
+            auto& idx_offset = _info.idx_offset;
 
-            auto idx = _data.size() + idx_offset + get_stream_thread_counter().load();
+            auto idx = _data.size() + idx_offset + _info.thread_counter;
             ROCP_INFO << fmt::format(
                 "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
 
@@ -122,12 +116,11 @@ add_stream(hipStream_t stream)
 auto
 create_stream_id()
 {
-    // Get rlock to ensure data size and idx offset are not modified when adding thread counter.
-    // Stream thread counter is atomic to ensure the multiple threads accessing the lambda
-    // get a unique stream ID. Stream ID not stored in the map since there is no associated
-    // hipStream object.
-    return rocprofiler_stream_id_t{.handle = get_stream_map()->rlock([](const stream_map_t& _data) {
-        return _data.size() + get_idx_offset() + get_stream_thread_counter().fetch_add(1);
+    // Get wlock so that stream map size, idx_offset, and thread counter are safe.
+    // wlock needed since thread counter is modified. No associated hip stream key, so the
+    // stream map itself is not modified.
+    return rocprofiler_stream_id_t{.handle = get_stream_info()->wlock([](stream_info& _info) {
+        return _info.stream_map.size() + _info.idx_offset + _info.thread_counter++;
     })};
 }
 
@@ -148,13 +141,13 @@ get_stream_id(hipStream_t stream)
         if(thr_stream_id.handle == 0) thr_stream_id = create_stream_id();
         return thr_stream_id;
     }
-    return get_stream_map()->rlock(
-        [](const stream_map_t& _data, hipStream_t _stream) {
-            ROCP_ERROR_IF(_data.count(_stream) == 0)
+    return get_stream_info()->rlock(
+        [](const stream_info& _info, hipStream_t _stream) {
+            ROCP_ERROR_IF(_info.stream_map.count(_stream) == 0)
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
-            return _data.at(_stream);
+            return _info.stream_map.at(_stream);
         },
         stream);
 }
