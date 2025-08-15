@@ -110,6 +110,7 @@ Example usage:
     $ rocpd summary -i db{0,1}.db --region-categories HIP MARKERS --domain-summary --format html
 
 """
+    input_help_string = "Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders"
 
     # Add the subparsers
     parser = argparse.ArgumentParser(
@@ -177,7 +178,7 @@ Example usage:
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s)",
+        help=input_help_string,
     )
     converter_required_params.add_argument(
         "-f",
@@ -197,7 +198,7 @@ Example usage:
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s)",
+        help=input_help_string,
     )
 
     packager_required_params = packager.add_argument_group("Required options")
@@ -207,7 +208,7 @@ Example usage:
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s)",
+        help=input_help_string,
     )
 
     query_required_params = query_reporter.add_argument_group("Required options")
@@ -217,7 +218,7 @@ Example usage:
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s)",
+        help=input_help_string,
     )
 
     summary_required_params = generate_summary.add_argument_group("Required options")
@@ -227,7 +228,7 @@ Example usage:
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s)",
+        help=input_help_string,
     )
 
     # converter: add args from any sub-modules
@@ -274,11 +275,11 @@ Example usage:
     db_count = len(input_files)
 
     # TODO: add logic to determine how many DBs to merge into
-    ## SQLITE_MAX_ATTACHED == 10, can query once you have connection
-    ## if db_count > 10
-    ##  call merge to combine to fewer DBs
-    ##  optionally, can also package up into own .rpdb package
-    ## Only after DBs have been merged and < SQLITE_MAX_ATTACHED, then we can call importer to attach DBs for analysis/convert
+    # SQLITE_MAX_ATTACHED == 10, can query once you have connection
+    # if db_count > 10
+    #  call merge to combine to fewer DBs
+    #  optionally, can also package up into own .rpdb package
+    # Only after DBs have been merged and < SQLITE_MAX_ATTACHED, then we can call importer to attach DBs for analysis/convert
 
     # if the user requested converter, process the conversion
     if args.command == "convert":

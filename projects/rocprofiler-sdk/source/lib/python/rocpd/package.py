@@ -1,6 +1,29 @@
-import os
+#!/usr/bin/env python3
+###############################################################################
+# MIT License
+#
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+# THE SOFTWARE.
+###############################################################################
 
-# import json
+import os
 import shutil
 import datetime
 import yaml
@@ -8,36 +31,75 @@ import argparse
 from . import output_config
 
 rocpd_package_version = "1.0"
-
 rocpd_metadata_param_version = "rocpd_package_version"
-rocpd_metadata_param_current_directory = "rocpd_current_directory"
-rocpd_metadata_param_database_files = "rocpd_relative_path_to_database_files"
+
+IDEAL_NUMBER_OF_DATABASE_FILES = 5
 
 
 def flatten_rocpd_yaml_input_file(input) -> list:
     """
-    Processes a YAML file containing rocPD metadata and returns a list of database files.
+    Processes a YAML file containing rocprofiler-sdk/rocpd metadata and returns a list of database files.
+    Also expands wildcards in both YAML 'files' and direct input parameters.
+    Supports .rpdb folders containing index.yaml.
 
     Args:
-        input (str): Path to the YAML file.
+        input (list of str): List of input file paths (YAML, DB, or .rpdb folder).
 
     Returns:
         list: List of database file paths.
     """
-    # Flatten input list if any YAML file is provided
+    import glob
+
+    def parse_yaml_file(yaml_path, base_dir=None):
+        """Parse a rocprofiler-sdk YAML file and expand wildcards."""
+        with open(yaml_path, "r") as f:
+            meta = yaml.safe_load(f)
+            rocpd_meta = meta.get("rocprofiler-sdk", {}).get("rocpd", {})
+            version = rocpd_meta.get(rocpd_metadata_param_version, "0.1")
+            if version < rocpd_package_version:
+                print(
+                    f"Warning: {yaml_path} is using an outdated version of rocpd package ({version})."
+                )
+            cwd = rocpd_meta.get("path", os.getcwd())
+            # If base_dir is provided (e.g., for .rpdb), override cwd
+            if base_dir is not None:
+                cwd = base_dir
+            dbs = rocpd_meta.get("files", [])
+            if isinstance(dbs, str):
+                dbs = [dbs]
+            files = []
+            for db in dbs:
+                db_path = os.path.join(cwd, db) if not os.path.isabs(db) else db
+                if "*" in db_path or "?" in db_path or "[" in db_path:
+                    files.extend(glob.glob(db_path))
+                else:
+                    files.append(db_path)
+            return files
+
     input_files = []
     for item in input:
-        if item.endswith((".yaml", ".yml")):
-            with open(item, "r") as f:
-                meta = yaml.safe_load(f)
-                cwd = meta.get(rocpd_metadata_param_current_directory, os.getcwd())
-                dbs = meta.get(rocpd_metadata_param_database_files, [])
-                new_relative_dbs = [
-                    os.path.join(cwd, db) if not os.path.isabs(db) else db for db in dbs
-                ]
-                input_files.extend(new_relative_dbs)
+        # Handle .rpdb folder: look for index.yaml inside and flatten it
+        if item.endswith(".rpdb") and os.path.isdir(item):
+            index_yaml = os.path.join(item, "index.yaml")
+            if os.path.isfile(index_yaml):
+                input_files.extend(
+                    parse_yaml_file(index_yaml, base_dir=os.path.abspath(item))
+                )
+            else:
+                # If no index.yaml, treat as a directory and look for *.db files
+                input_files.extend(glob.glob(os.path.join(item, "*.db")))
+        elif item.endswith((".yaml", ".yml")):
+            input_files.extend(parse_yaml_file(item))
         else:
-            input_files.append(item)
+            # Expand wildcards in direct input parameters as well
+            if "*" in item or "?" in item or "[" in item:
+                input_files.extend(glob.glob(item))
+            else:
+                input_files.append(item)
+
+    num_dbs = len(input_files)
+    print(f"Found {num_dbs} database files.")
+
     return input_files
 
 
@@ -45,7 +107,7 @@ def create_metadata_file(
     db_files, output_path=".", metadata_filename="index.yaml", consolidate=False
 ):
     """
-    Creates a metadata file listing the relative paths to the provided SQL database files.
+    Creates a metadata file in a custom YAML format for rocprofiler-sdk/rocpd.
 
     Args:
         db_files (list of str): List of absolute or relative paths to SQL database files.
@@ -61,21 +123,24 @@ def create_metadata_file(
     # Compute relative paths
     rel_paths = [os.path.relpath(db_file, output_path) for db_file in db_files]
 
-    # If consolidating, set current directory to .
-    if consolidate:
-        current_directory = "."
-    else:
-        current_directory = os.path.normpath(os.path.join(os.getcwd(), output_path))
-
+    # Compose the YAML structure as requested
     metadata = {
-        rocpd_metadata_param_version: rocpd_package_version,
-        rocpd_metadata_param_current_directory: current_directory,
-        rocpd_metadata_param_database_files: rel_paths,
+        "rocprofiler-sdk": {
+            "rocpd": {
+                rocpd_metadata_param_version: rocpd_package_version,
+                # "source": "rocprofv3",  # omitting source, not sure why we need this, and how we determine the source as rocprof-sys, for example.
+                "path": ".",
+                "files": (
+                    rel_paths
+                    if len(rel_paths) > 1
+                    else (rel_paths[0] if rel_paths else "")
+                ),
+            }
+        }
     }
 
     metadata_path = os.path.join(output_path, metadata_filename)
     with open(metadata_path, "w") as f:
-        # json.dump(metadata, f, indent=4)  # Uncomment for JSON format
         yaml.safe_dump(metadata, f, default_flow_style=False)
 
     return metadata_path
@@ -168,7 +233,7 @@ def main(argv=None):
         required=True,
         type=output_config.check_file_exists,
         nargs="+",
-        help="Input path and filename to one or more database(s), separated by spaces",
+        help="Input path and filename to one or more database(s). Wildcards accepted, as well as .rpdb folders",
     )
 
     valid_args = add_args(parser)
