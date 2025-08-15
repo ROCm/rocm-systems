@@ -18,13 +18,14 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
+// #define ENABLE_DEBUG 1
 #include <hip_test_common.hh>
 
 #define ARRAY_SIZE 16
@@ -33,7 +34,7 @@ typedef struct d_uint16 {
   uint data[ARRAY_SIZE];
 } d_uint16;
 
-__global__ static void read_kernel(d_uint16 *src, ulong N, uint *dst) {
+__global__ static void read_kernel(d_uint16* src, ulong N, uint* dst) {
   size_t idx = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -59,8 +60,8 @@ static bool hipPerfDevMemReadSpeed_test() {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
 
-  INFO("info: running on bus " << "0x" << props.pciBusID << " " <<
-       props.name << " with " << props.multiProcessorCount << " CUs \n");
+  CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
+                props.multiProcessorCount);
 
   const unsigned threadsPerBlock = 64;
   const unsigned blocks = props.multiProcessorCount * 4;
@@ -70,7 +71,7 @@ static bool hipPerfDevMemReadSpeed_test() {
 
   hSrc = new d_uint16[nBytes];
   REQUIRE(hSrc != nullptr);
-  hDst =  new uint;
+  hDst = new uint;
   REQUIRE(hDst != nullptr);
   hDst[0] = 0;
 
@@ -88,15 +89,15 @@ static bool hipPerfDevMemReadSpeed_test() {
   HIP_CHECK(hipMemcpy(dSrc, hSrc, nBytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dDst, hDst, sizeof(uint), hipMemcpyHostToDevice));
 
-  hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock),
-                                  0, stream, dSrc, N, dDst);
+  hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dSrc, N, dDst);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(hDst, dDst, sizeof(uint), hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
 
   if (hDst[0] != (nBytes / sizeof(uint))) {
-    INFO("hipPerfDevMemReadSpeed - Data validation failed for warm up run!" <<
-         " expected " << nBytes / sizeof(uint) << " got " << hDst[0]);
+    DEBUG_PRINT(
+        "hipPerfDevMemReadSpeed - Data validation failed for warm up run! expected %u got %u\n",
+        nBytes / sizeof(uint), hDst[0]);
     return false;
   }
 
@@ -104,8 +105,7 @@ static bool hipPerfDevMemReadSpeed_test() {
   auto all_start = std::chrono::steady_clock::now();
 
   for (int i = 0; i < nIter; i++) {
-    hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock),
-                                    0, stream, dSrc, N, dDst);
+    hipLaunchKernelGGL(read_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dSrc, N, dDst);
     HIP_CHECK(hipGetLastError());
   }
   HIP_CHECK(hipDeviceSynchronize());
@@ -114,14 +114,14 @@ static bool hipPerfDevMemReadSpeed_test() {
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
   // read speed in GB/s
-  double perf = (static_cast<double>(nBytes * nIter * (1e-09))) /
-                                     all_kernel_time.count();
+  double perf = (static_cast<double>(nBytes * nIter * (1e-09))) / all_kernel_time.count();
 
-  INFO("hipPerfDevMemReadSpeed - info: average read speed of " <<
-        perf << " GB/s " << "achieved for memory size of " <<
-        nBytes / (1024 * 1024) << " MB");
+  CONSOLE_PRINT(
+      "hipPerfDevMemReadSpeed - average read speed of %.2f GB/s achieved for memory size of %u "
+      "MB\n",
+      perf, nBytes / (1024 * 1024));
 
-  delete [] hSrc;
+  delete[] hSrc;
   delete hDst;
   HIP_CHECK(hipFree(dSrc));
   HIP_CHECK(hipFree(dDst));
@@ -130,30 +130,31 @@ static bool hipPerfDevMemReadSpeed_test() {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfDevMemReadSpeed status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfDevMemReadSpeed.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfDevMemReadSpeed status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfDevMemReadSpeed.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfDevMemReadSpeed_test") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED("Skipped testcase hipPerfDevMemReadSpeed as"
-            "there is no device to test.");
+    SUCCEED(
+        "Skipped testcase hipPerfDevMemReadSpeed as"
+        "there is no device to test.");
   } else {
     REQUIRE(true == hipPerfDevMemReadSpeed_test());
   }
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */
