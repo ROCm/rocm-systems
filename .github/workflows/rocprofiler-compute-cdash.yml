@@ -72,7 +72,7 @@ jobs:
           python3 utils/run-ci.py \
             --coverage-file "${{ env.COVERAGE_FILE }}" \
             --build-name "${BRANCH_NAME}-${GIT_SHA_SHORT}-$(date +%Y%m%d)" \
-            --mode "Nightly" \
+            --mode "Continuous" \
             --site "Monorepo-Upload" \
             --project-name "rocprofiler-compute" \
             --source-dir "." \
