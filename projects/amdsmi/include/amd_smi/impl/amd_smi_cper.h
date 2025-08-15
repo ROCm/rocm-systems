@@ -29,7 +29,7 @@
 
 #define CPER_MAX_OAM_COUNT    (8)
 
-typedef enum cper_error_severity {
+enum cper_error_severity {
     CPER_SEV_FATAL_UNCORRECTED = 0,
     CPER_SEV_FATAL             = 1,
     CPER_SEV_FATAL_CORRECTED   = 2,
@@ -37,7 +37,7 @@ typedef enum cper_error_severity {
     CPER_SEV_UNUSED            = 10,
 };
 
-typedef enum cper_aca_reg {
+enum cper_aca_reg {
     CPER_ACA_REG_CTL_LO    = 0,
     CPER_ACA_REG_CTL_HI    = 1,
     CPER_ACA_REG_STATUS_LO = 2,
