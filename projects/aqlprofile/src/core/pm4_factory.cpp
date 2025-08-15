@@ -62,7 +62,7 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   int_agent_info.domain = agent_info->domain;
   int_agent_info.bdf_id = agent_info->location_id;
 
-  std::strncpy(int_agent_info.name, int_agent_info.gfxip, 63);
+  static_assert(sizeof(int_agent_info.name) == 64);
 
   auto len = strlen(agent_info->agent_gfxip);
   memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
