@@ -195,6 +195,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Parameters") {
     HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal),
                     hipErrorIllegalState);
+    hipGraph_t graph;
+    HIP_CHECK(hipStreamEndCapture(stream, &graph));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
   SECTION("Creating hipStream with invalid mode") {
     HIP_CHECK_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureMode(-1)), hipErrorInvalidValue);
@@ -315,6 +318,7 @@ static void colligatedStrmCapture(const hipStream_t& stream1, const hipStream_t&
   HIP_CHECK(hipGraphExecDestroy(graphExec1));
   HIP_CHECK(hipGraphDestroy(graph2));
   HIP_CHECK(hipGraphDestroy(graph1));
+  HIP_CHECK(hipEventDestroy(event));
 }
 
 /* Local function for colligated stream capture functionality
@@ -653,6 +657,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Positive_Multiplestrms") {
     REQUIRE(numNodes1 == 1);
     REQUIRE(numNodes2 == 1);
     REQUIRE(numNodes3 == 1);
+    HIP_CHECK(hipEventDestroy(event));
   }
 
   for (int i = 0; i < 3; i++) {
@@ -754,6 +759,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_DetectingInvalidCapture") {
   HIP_CHECK_ERROR(hipStreamBeginCapture(streams[1], hipStreamCaptureModeGlobal),
                   hipErrorIllegalState);
   HIP_CHECK(hipStreamEndCapture(streams[0], &graph));
+  HIP_CHECK(hipGraphDestroy(graph));
 }
 
 /**
@@ -846,6 +852,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_CheckingSyncDuringCapture") {
     HIP_CHECK(hipEventRecord(e, stream));
     HIP_CHECK_ERROR(hipEventQuery(e), hipErrorCapturedEvent);
   }
+
+  hipGraph_t graph;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
@@ -880,21 +889,40 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
   HIP_CHECK(hipStreamBeginCapture(stream, captureMode));
   SECTION("Synchronize stream during capture") {
     streamSync func;
+    hipGraph_t gr;
     hipError_t expected = hipSuccess;
-    if (captureMode == hipStreamCaptureModeGlobal) expected = hipErrorStreamCaptureUnsupported;
+    hipError_t capture_err = hipSuccess;
+    if (captureMode == hipStreamCaptureModeGlobal) {
+      expected = hipErrorStreamCaptureUnsupported;
+      capture_err = hipErrorStreamCaptureInvalidated;
+    }
 
     std::thread t(std::ref(func), concurrent_stream);
     t.join();
     REQUIRE(func.result_status == expected);
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
+    if (capture_err == hipSuccess) {
+      HIP_CHECK(hipGraphDestroy(gr));
+    }
   }
   SECTION("Query stream during capture") {
     streamQuery func;
+    hipGraph_t gr;
     hipError_t expected = hipSuccess;
-    if (captureMode == hipStreamCaptureModeGlobal) expected = hipErrorStreamCaptureUnsupported;
+    hipError_t capture_err = hipSuccess;
+    if (captureMode == hipStreamCaptureModeGlobal) {
+      expected = hipErrorStreamCaptureUnsupported;
+      capture_err = hipErrorStreamCaptureInvalidated;
+    }
 
     std::thread t(std::ref(func), concurrent_stream);
     t.join();
     REQUIRE(func.result_status == expected);
+
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), capture_err);
+    if (capture_err == hipSuccess) {
+      HIP_CHECK(hipGraphDestroy(gr));
+    }
   }
   SECTION("Synchronize device during capture") {
     deviceSync func;
@@ -903,6 +931,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func));
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream, &gr), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Synchronize event during capture") {
     eventSync func;
@@ -911,6 +941,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func), e);
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK(hipStreamEndCapture(stream, &gr));
+    HIP_CHECK(hipGraphDestroy(gr));
   }
   SECTION("Query for an event during capture") {
     eventQuery func;
@@ -919,6 +952,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_Concurrent_CheckingSyncDuringCapt
     std::thread t(std::ref(func), e);
     t.join();
     REQUIRE(func.result_status == expected);
+    hipGraph_t gr;
+    HIP_CHECK(hipStreamEndCapture(stream, &gr));
+    HIP_CHECK(hipGraphDestroy(gr));
   }
 }
 
@@ -961,6 +997,9 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_UnsafeCallsDuringCapture") {
   SECTION("hipMemset during capture") {
     HIP_CHECK_ERROR(hipMemset(devMem.ptr(), 0, sizeof(int)), hipErrorStreamCaptureImplicit);
   }
+
+  hipGraph_t graph;
+  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
 }
 
 /**
@@ -996,6 +1035,7 @@ TEST_CASE("Unit_hipStreamBeginCapture_Negative_EndingCapwhenCapInProg") {
     HIP_CHECK(hipStreamWaitEvent(stream2, e, 0));
     dummyKernel<<<1, 1, 0, stream2>>>();
     HIP_CHECK_ERROR(hipStreamEndCapture(stream1, &graph), hipErrorStreamCaptureUnjoined);
+    HIP_CHECK(hipEventDestroy(e));
   }
   SECTION("End strm capture when forked strm still has operations") {
     EventsGuard events_guard(2);
@@ -1524,6 +1564,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
                              stream[1]));
     error = hipStreamSynchronize(stream[1]);
     REQUIRE(error == hipErrorStreamCaptureUnsupported);
+    hipGraph_t graph;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream[0], &graph), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Capture Flag = hipStreamCaptureModeThreadLocal Single Threaded") {
     StreamsGuard stream(2);
@@ -1535,6 +1577,8 @@ TEST_CASE("Unit_hipStreamBeginCapture_StreamSync_OngoingCapture_MThread") {
                              stream[1]));
     error = hipStreamSynchronize(stream[1]);
     REQUIRE(error == hipErrorStreamCaptureUnsupported);
+    hipGraph_t graph;
+    HIP_CHECK_ERROR(hipStreamEndCapture(stream[0], &graph), hipErrorStreamCaptureInvalidated);
   }
   SECTION("Capture Flag = hipStreamCaptureModeGlobal Multithreaded") {
     captureStrmThread(&graph, Ah.host_ptr(), Ad.ptr(), Bh.host_ptr(), Bd.ptr(), BLOCKSIZE, GRIDSIZE,

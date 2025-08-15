@@ -144,5 +144,6 @@ TEST_CASE("Unit_hipGraphChildGraphNodeGetGraph_Negative") {
   }
 #endif
   HipTest::freeArrays(A_d, B_d, C_d, A_h, B_h, C_h, false);
+  HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipGraphDestroy(childgraph1));
 }
