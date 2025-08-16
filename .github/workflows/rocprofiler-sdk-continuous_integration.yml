@@ -232,8 +232,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
-        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DGPU_TARGETS="gfx942" tests
+        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples -DOPENMP_GPU_TARGETS="${{ matrix.system.gpu-target }}" samples
+        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests -DOPENMP_GPU_TARGETS="${{ matrix.system.gpu-target }}" -DGPU_TARGETS="gfx942" tests
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
@@ -259,8 +259,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
-        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
-        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DGPU_TARGETS="gfx942" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
+        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb -DOPENMP_GPU_TARGETS="${{ matrix.system.gpu-target }}" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
+        CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb -DOPENMP_GPU_TARGETS="${{ matrix.system.gpu-target }}" -DGPU_TARGETS="${{ matrix.system.gpu-target }}" ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb -LE "${${{ matrix.system.runner }}_EXCLUDE_LABEL_REGEX}" -E "${${{ matrix.system.runner }}_EXCLUDE_TESTS_REGEX}" --output-on-failure
