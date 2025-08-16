@@ -36,7 +36,29 @@ rocpd_metadata_param_version = "rocpd_package_version"
 IDEAL_NUMBER_OF_DATABASE_FILES = 5
 
 
-def flatten_rocpd_yaml_input_file(input) -> list:
+def create_output_folder(output_path, consolidate) -> str:
+    """
+    Creates the output folder if it doesn't exist.
+
+    Args:
+        output_path (str): The path to the output folder.
+        consolidate (bool): Whether to consolidate output files.
+
+    Returns:
+        str: The path to the created output folder.
+    """
+    if output_path != ".":
+        if not output_path.endswith(".rpdb"):
+            output_path = f"{output_path}.rpdb"
+    else:
+        # Create a new folder with current date and time for unique folder to consolidate files to
+        if consolidate:
+            date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+            output_path = f"rocpd-{date_str}.rpdb"
+    return output_path
+
+
+def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
     """
     Processes a YAML file containing rocprofiler-sdk/rocpd metadata and returns a list of database files.
     Also expands wildcards in both YAML 'files' and direct input parameters.
@@ -76,6 +98,7 @@ def flatten_rocpd_yaml_input_file(input) -> list:
                     files.append(db_path)
             return files
 
+    return_list = []
     input_files = []
     for item in input:
         # Handle .rpdb folder: look for index.yaml inside and flatten it
@@ -99,8 +122,79 @@ def flatten_rocpd_yaml_input_file(input) -> list:
 
     num_dbs = len(input_files)
     print(f"Found {num_dbs} database files.")
+    return_list = input_files
 
-    return input_files
+    if skip_auto_merge:
+        print("Skip auto merge and packaging.")
+    else:
+        if num_dbs > IDEAL_NUMBER_OF_DATABASE_FILES:
+            print(
+                f"More than {IDEAL_NUMBER_OF_DATABASE_FILES} database files found. It is recommended to merge and package databases"
+            )
+            fewer_input_files = merge_and_repackage(input_files)
+            print(f"Reduced to {len(fewer_input_files)} database files.")
+            return_list = fewer_input_files
+
+    return return_list
+
+
+def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -> list:
+    """
+    Merges and repackages the input database files.
+
+    Args:
+        input_files (list of str): List of database file paths.
+
+    Returns:
+        list: List of merged and repackaged database file paths.
+    """
+    from . import merge
+
+    # Implement merging and repackaging logic here
+
+    original_num_dbs = len(input_files)
+
+    if original_num_dbs <= max_limit:
+        print(
+            f"Number of database files ({original_num_dbs}) is within the limit ({max_limit}). No merging needed."
+        )
+        return input_files
+
+    target_num_dbs_to_merge = (original_num_dbs // IDEAL_NUMBER_OF_DATABASE_FILES) + (
+        original_num_dbs % IDEAL_NUMBER_OF_DATABASE_FILES > 0
+    )
+    print(
+        f"Original number of DBs: {original_num_dbs}, Target number of DBs to merge: {target_num_dbs_to_merge}"
+    )
+
+    merged_output_folder = create_output_folder(".", consolidate=True)
+    os.makedirs(merged_output_folder, exist_ok=True)
+
+    reduced_file_list = []
+    for i in range(0, original_num_dbs, target_num_dbs_to_merge):
+        batch_files = input_files[i : i + target_num_dbs_to_merge]
+        time_str = datetime.datetime.now().strftime("%H%M%S")
+        merged_filename = f"merged_db_{i // target_num_dbs_to_merge}_{time_str}.db"
+        args = {"output_path": merged_output_folder, "output_file": merged_filename}
+        if len(batch_files) > 1:
+            reduced_file_list.append(str(merge.execute(batch_files, **args)))
+        elif len(batch_files) == 1:
+            # optimize, if just 1 db, no need to call merge, just copy it
+            dest_file = os.path.join(merged_output_folder, merged_filename)
+            shutil.copy2(batch_files[0], dest_file)
+            reduced_file_list.append(str(dest_file))
+
+    for item in reduced_file_list:
+        print(f"Reduced file list: {item}")
+
+    # package and create the metadata .yaml file
+    create_metadata_file(reduced_file_list, output_path=merged_output_folder)
+
+    print(
+        f"\033[1;34mMerge and repackage completed. Output files are located in: {merged_output_folder}\033[0m"
+    )
+
+    return reduced_file_list
 
 
 def create_metadata_file(
@@ -186,16 +280,10 @@ def process_args(args, valid_args):
 
 def execute(input_files, **kwargs):
 
-    output_path = kwargs.get("output_path", ".")
+    output_path_kw = kwargs.get("output_path", ".")
     consolidate = kwargs.get("consolidate", False)
 
-    if output_path != ".":
-        output_path = f"{output_path}.rpdb"
-    else:
-        # Create a new folder with current date and time for unique folder to consolidate files to
-        if consolidate:
-            date_str = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-            output_path = f"rocpd-{date_str}.rpdb"
+    output_path = create_output_folder(output_path_kw, consolidate)
 
     if consolidate:
         # Create a new folder with current date and time

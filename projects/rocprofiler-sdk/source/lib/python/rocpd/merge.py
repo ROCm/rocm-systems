@@ -1,7 +1,8 @@
+#!/usr/bin/env python3
 ###############################################################################
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc.
+# Copyright (c) 2025 Advanced Micro Devices, Inc.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -218,12 +219,14 @@ def process_args(args, valid_args):
     return ret
 
 
-def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> None:
+def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> str:
 
     start_time = time.time()
 
     output_path = kwargs.get("output_path")
-    output_filename = kwargs.get("output_file") + ".db"
+    output_filename = kwargs.get("output_file")
+    if not output_filename.endswith(".db"):
+        output_filename += ".db"
     output = Path(output_path, output_filename)
 
     with RocpdMerger(inputs, output) as merger:
@@ -233,6 +236,7 @@ def execute(inputs: List[str], **kwargs: Dict[str, Any]) -> None:
 
     print(f"Merge completed successfully! Output saved to: {output}")
     print(f"Time: {elapsed_time:.2f} sec")
+    return str(output)
 
 
 def main(argv=None) -> int:

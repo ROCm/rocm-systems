@@ -72,14 +72,28 @@ Example usage:
 
 Example usage:
 
-    TODO: Add examples for merge command
+    Merge the three databases and output to a folder called merged3DBs
+    $ rocpd merge -i db0.db db1.db db2.db -d merged3DBs
+
+    Merge all the databases from the node0 folder and output to the node0_output folder, with filename called massiveMerged.db
+    $ rocpd merge -i node0/*.db -d node0_output -o massiveMerged
 """
 
     package_examples = """
 
 Example usage:
 
-    TODO: Add examples for package command
+    Index the three databases into a metadata file (index.yaml) in the current folder, just reference the databases where they are on the filesystem
+    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db
+
+    Package and copy/consolidate all the databases into a my_MPI_run_1.rpdb folder so it can be managed easier
+    $ rocpd package -i node0/db0.db node1/db1.db node2/db2.db -d my_MPI_run_1 --consolidate
+
+    Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node5/db5.db and make new folder
+    $ rocpd package -i my_MPI_run_1.rpdb node5/db5.db -d my_MPI_run_1_append_5 --consolidate
+
+    Package and copy/consolidate all the databases from my_MPI_run_1.rpdb folder append node7/db7.db and re-use same .rpdb folder
+    $ rocpd package -i my_MPI_run_1.rpdb node7/db7.db -d my_MPI_run_1 --consolidate
 """
 
     query_examples = """
@@ -271,7 +285,13 @@ Example usage:
         return
 
     # convert to real number of DB input files
-    input_files = package.flatten_rocpd_yaml_input_file(args.input)
+    if args.command == "package" or args.command == "merge":
+        input_files = package.flatten_rocpd_yaml_input_file(
+            args.input, skip_auto_merge=True
+        )
+    else:
+        input_files = package.flatten_rocpd_yaml_input_file(args.input)
+
     db_count = len(input_files)
 
     # TODO: add logic to determine how many DBs to merge into
