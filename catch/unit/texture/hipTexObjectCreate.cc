@@ -305,7 +305,7 @@ TEST_CASE("Unit_TexObjectCreate_TypeMipmaped_IncompleteInit") {
   SECTION("Array is nullptr") {
     res_desc.res.mipmap.hMipmappedArray = nullptr;
     HIP_CHECK_ERROR(hipTexObjectCreate(&tex_object, &res_desc, &tex_desc, nullptr),
-                    hipErrorInvalidValue);
+                    hipErrorInvalidChannelDescriptor);
   }
 
   HIP_CHECK(hipFreeMipmappedArray(mipmapped_array));
