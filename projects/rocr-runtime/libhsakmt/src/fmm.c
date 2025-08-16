@@ -3672,7 +3672,7 @@ int hsakmt_fmm_unmap_from_gpu(void *address)
 /*
  * Get memory @handle [OUT] for a given @address [IN]
  *  @size_offset [IN/OUT] If specified, then address can in fact be a range.
- *  And size_offset [IN] is is provided to validate that [offset of address] +
+ *  And size_offset [IN] is provided to validate that [offset of address] +
  *  @size_offset [IN] is within the range of the object. If within range,
  *  then @size_offset [OUT] is set to the offset of the address from the
  *  base of the object.
