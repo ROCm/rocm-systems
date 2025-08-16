@@ -93,7 +93,7 @@ jobs:
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, '${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
+          --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
         test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
@@ -147,6 +147,10 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
     - name: Install Missing ROCm Dependencies
@@ -186,6 +190,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        PATH=${{ env.ROCM_PATH }}/bin:$PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
@@ -306,7 +312,7 @@ jobs:
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+          --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
         test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
@@ -442,13 +448,13 @@ jobs:
         python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
-          --bucket therock-nightly-tarball \
+          --bucket therock-dev-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, '${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
+          --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
-        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-dev-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         export ORIGINAL_ROCM_PATH=$(realpath /opt/rocm)
@@ -501,6 +507,10 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=${{ env.ROCM_PATH }}/llvm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
@@ -508,6 +518,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        PATH=${{ env.ROCM_PATH }}/bin:$PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
