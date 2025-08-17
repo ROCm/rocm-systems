@@ -146,15 +146,15 @@ jobs:
         python3 -m pip install -U --user -r requirements.txt
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
-    # - name: Special Requirements
-    #   shell: bash
-    #   working-directory: projects/rocprofiler-sdk
-    #   run: |
-    #       echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-    #       echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-    #       echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+    - name: Special Requirements
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
     # - name: Install Missing ROCm Dependencies
     #   shell: bash
@@ -314,13 +314,13 @@ jobs:
       working-directory: /tmp
       run: |
         sudo tee /etc/yum.repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1] \
-        name=ROCm7.0_rc1 \
-        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main \
-        enabled=1 \
-        priority=50 \
-        gpgcheck=1 \
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+        [ROCm-7.0_rc1]
+        name=ROCm7.0_rc1
+        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main
+        enabled=1
+        priority=50
+        gpgcheck=1
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo dnf clean all
         sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
@@ -331,12 +331,12 @@ jobs:
       working-directory: /tmp
       run: |
         sudo tee /etc/zypp/repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1] \
-        name=ROCm7.0_rc1 \
-        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main \
-        enabled=1 \
-        gpgcheck=1 \
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+        [ROCm-7.0_rc1]
+        name=ROCm7.0_rc1
+        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main
+        enabled=1
+        gpgcheck=1
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
         sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
@@ -381,17 +381,15 @@ jobs:
         python3 -m pipx install cmake
         sudo rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
-    # - name: Special Requirements
-    #   shell: bash
-    #   working-directory: projects/rocprofiler-sdk
-    #   run: |
-    #       echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-    #       echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-    #       echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-    #       echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-    #       echo 'LLVM_PATH=/usr' >> $GITHUB_ENV
+    - name: Special Requirements
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -536,15 +534,15 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
-    # - name: Special Requirements
-    #   shell: bash
-    #   working-directory: projects/rocprofiler-sdk
-    #   run: |
-    #       echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
-    #       echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-    #       echo 'HIP_COMPILER=clang++' >> $GITHUB_ENV
-    #       echo 'LLVM_PATH=${{ env.ROCM_PATH }}/llvm' >> $GITHUB_ENV
+    - name: Special Requirements
+      shell: bash
+      working-directory: projects/rocprofiler-sdk
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
     - name: Install AQLProfile
       shell: bash
