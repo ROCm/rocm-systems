@@ -83,12 +83,13 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
+        apt-get update
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
         mkdir --parents --mode=0755 /etc/apt/keyrings
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y curl wget python3 python3-pip build-essential coreutils software-properties-common
         apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
@@ -310,33 +311,33 @@ jobs:
       if: ${{ matrix.os == 'rhel-9.1' }}
       shell: bash
       working-directory: /tmp
-      run:
-        sudo tee /etc/yum.repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1]
-        name=ROCm7.0_rc1
-        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main
-        enabled=1
-        priority=50
-        gpgcheck=1
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-        EOF;
-        sudo dnf clean all;
+      run: |
+        sudo tee /etc/yum.repos.d/rocm.repo <<EOF \
+        [ROCm-7.0_rc1] \
+        name=ROCm7.0_rc1 \
+        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main \
+        enabled=1 \
+        priority=50 \
+        gpgcheck=1 \
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+        EOF
+        sudo dnf clean all
         sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
       shell: bash
       working-directory: /tmp
-      run:
-        sudo tee /etc/zypp/repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1]
-        name=ROCm7.0_rc1
-        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main
-        enabled=1
-        gpgcheck=1
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-        EOF;
-        sudo zypper --gpg-auto-import-keys refresh;
+      run: |
+        sudo tee /etc/zypp/repos.d/rocm.repo <<EOF \
+        [ROCm-7.0_rc1] \
+        name=ROCm7.0_rc1 \
+        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main \
+        enabled=1 \
+        gpgcheck=1 \
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+        EOF
+        sudo zypper --gpg-auto-import-keys refresh
         sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
 
     - name: Install Latest ROCm
@@ -469,12 +470,13 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
+        apt-get update
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
         mkdir --parents --mode=0755 /etc/apt/keyrings
         wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y curl wget python3 python3-pip build-essential coreutils software-properties-common
         apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
