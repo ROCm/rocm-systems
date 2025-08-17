@@ -119,21 +119,21 @@ jobs:
         submodules: true
         set-safe-directory: true
 
-    # - name: Clone ROCDecode
-    #   uses: actions/checkout@v5
-    #   with:
-    #     repository: 'ROCm/rocDecode'
-    #     ref: 'release/rocm-rel-7.0'
-    #     set-safe-directory: true
-    #     path: 'rocDecode'
+    - name: Clone ROCDecode
+      uses: actions/checkout@v5
+      with:
+        repository: 'ROCm/rocDecode'
+        ref: 'release/rocm-rel-7.0'
+        set-safe-directory: true
+        path: 'rocDecode'
 
-    # - name: Clone ROCJPEG
-    #   uses: actions/checkout@v5
-    #   with:
-    #     repository: 'ROCm/rocJPEG'
-    #     ref: 'release/rocm-rel-7.0'
-    #     set-safe-directory: true
-    #     path: 'rocJPEG'
+    - name: Clone ROCJPEG
+      uses: actions/checkout@v5
+      with:
+        repository: 'ROCm/rocJPEG'
+        ref: 'release/rocm-rel-7.0'
+        set-safe-directory: true
+        path: 'rocJPEG'
 
     - name: Install requirements
       timeout-minutes: 10
@@ -156,19 +156,19 @@ jobs:
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
-    # - name: Install Missing ROCm Dependencies
-    #   shell: bash
-    #   run: |
-    #     echo -e "Building & Installing ROCDecode..."
-    #     cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
-    #     cmake --build build-rocdecode --target all --parallel 16
-    #     cmake --build build-rocdecode --target install
-    #     echo -e "ROCDecode Installed Successfully!"
-    #     echo -e "Building & Installing ROCJPEG..."
-    #     cmake -B build-rocjpeg -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }} -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocJPEG
-    #     cmake --build build-rocjpeg --target all --parallel 16
-    #     cmake --build build-rocjpeg --target install
-    #     echo -e "ROCJPEG Installed Successfully!"
+    - name: Install Missing ROCm Dependencies
+      shell: bash
+      run: |
+        echo -e "Building & Installing ROCDecode..."
+        cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
+        cmake --build build-rocdecode --target all --parallel 16
+        cmake --build build-rocdecode --target install
+        echo -e "ROCDecode Installed Successfully!"
+        echo -e "Building & Installing ROCJPEG..."
+        cmake -B build-rocjpeg -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocJPEG
+        cmake --build build-rocjpeg --target all --parallel 16
+        cmake --build build-rocjpeg --target install
+        echo -e "ROCJPEG Installed Successfully!"
 
     - name: List Files
       shell: bash
@@ -201,6 +201,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
@@ -314,8 +316,8 @@ jobs:
       working-directory: /tmp
       run: |
         sudo tee /etc/yum.repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1]
-        name=ROCm7.0_rc1
+        [ROCm-7.0.0]
+        name=ROCm7.0.0
         baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main
         enabled=1
         priority=50
@@ -323,7 +325,7 @@ jobs:
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
+        sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
@@ -331,15 +333,15 @@ jobs:
       working-directory: /tmp
       run: |
         sudo tee /etc/zypp/repos.d/rocm.repo <<EOF
-        [ROCm-7.0_rc1]
-        name=ROCm7.0_rc1
+        [ROCm-7.0.0]
+        name=ROCm7.0.0
         baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main
         enabled=1
         gpgcheck=1
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hsa-rocr-dbgsym hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-devel rocjpeg rocjpeg-devel
+        sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
 
     - name: Install Latest ROCm
       shell: bash
@@ -557,8 +559,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
-        PATH=${{ env.ROCM_PATH }}/bin:$PATH
-        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:$LD_LIBRARY_PATH
+        LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         /usr/bin/python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
