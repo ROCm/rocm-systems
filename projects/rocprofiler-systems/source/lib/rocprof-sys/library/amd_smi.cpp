@@ -28,6 +28,7 @@
 
 #include "core/agent.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/cache_utility.hpp"
 #if defined(NDEBUG)
 #    undef NDEBUG
 #endif
@@ -130,25 +131,27 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_mm_busy>::value, "Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
-          COMPONENT, "%", "ABS", BLOCK, EXPRESSION, 0, 0, "{}" });
+          COMPONENT, trace_cache::PERCENTAGE, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
+          0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_temp>::value, "Temp",
           trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
-          CELSIUS_DEGREES, "ABS", BLOCK, EXPRESSION, 0, 0 });
+          CELSIUS_DEGREES, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_power>::value, "Pow",
           trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
-          "w", "ABS", BLOCK, EXPRESSION, 0, 0 });
+          "W", trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-          COMPONENT, "MB", "ABS", BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, tim::units::mem_repr(tim::units::megabyte), trace_cache::ABSOLUTE,
+          BLOCK, EXPRESSION, 0, 0 });
 }
 
 void

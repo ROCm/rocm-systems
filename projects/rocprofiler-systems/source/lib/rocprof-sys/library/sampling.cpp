@@ -44,7 +44,6 @@
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 
-#include <string_view>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -85,6 +84,7 @@
 #include <regex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <type_traits>
 
 #include <pthread.h>

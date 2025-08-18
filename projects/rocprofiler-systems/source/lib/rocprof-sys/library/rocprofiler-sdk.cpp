@@ -43,7 +43,6 @@
 #include "library/rocprofiler-sdk/rccl.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
-#include "rocprofiler-systems/categories.h"
 
 #include <algorithm>
 #include <timemory/components/timing/wall_clock.hpp>
@@ -297,7 +296,7 @@ save_args(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*operation*/,
     return 0;
 }
 
-// IAdditional mplementation of rocprofiler_callback_tracing_operation_args_cb_t
+// Additional implementation of rocprofiler_callback_tracing_operation_args_cb_t
 // for iterating through arguments in a callback for rocpd_arg table in database
 int
 iterate_args_callback(rocprofiler_callback_tracing_kind_t /*kind*/, int32_t /*operation*/,
@@ -996,8 +995,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             default:
             {
-                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record kind: %i\n",
-                                    record.kind);
+                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record: \n\t%s\n",
+                                    info.str().c_str());
                 break;
             }
         }
@@ -1104,8 +1103,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             default:
             {
-                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record kind: %i\n",
-                                    record.kind);
+                ROCPROFSYS_CI_ABORT(true, "Unhandled callback record\n\t%s\n",
+                                    info.str().c_str());
                 break;
             }
         }
@@ -1190,7 +1189,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 uint64_t _stream_id = get_stream_id(record).handle;
                 if(_stream_id == 0)
                 {
-                    // memory_copy is not associated with a HIP stream
+                    // kernel_dispatch is not associated with a HIP stream
                     _group_by_queue = true;
                 }
 
@@ -1898,8 +1897,7 @@ tool_fini(void* callback_data)
 
 void
 setup()
-{
-}
+{}
 
 void
 shutdown()

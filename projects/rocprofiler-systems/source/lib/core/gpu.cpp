@@ -126,17 +126,17 @@ query_rocm_agents()
         {
             const auto* _agent    = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
             auto        cur_agent = agent{
-                (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
-                                                                   : agent_type::CPU),
-                _agent->id.handle,
-                _agent->device_id,
-                _agent->node_id,
-                _agent->logical_node_id,
-                _agent->logical_node_type_id,
-                std::string(_agent->name),
-                std::string(_agent->model_name),
-                std::string(_agent->vendor_name),
-                std::string(_agent->product_name),
+                       .type = (_agent->type == ROCPROFILER_AGENT_TYPE_GPU ? agent_type::GPU
+                                                                           : agent_type::CPU),
+                       .handle               = _agent->id.handle,
+                       .device_id            = _agent->device_id,
+                       .node_id              = _agent->node_id,
+                       .logical_node_id      = _agent->logical_node_id,
+                       .logical_node_type_id = _agent->logical_node_type_id,
+                       .name                 = std::string(_agent->name),
+                       .model_name           = std::string(_agent->model_name),
+                       .vendor_name          = std::string(_agent->vendor_name),
+                       .product_name         = std::string(_agent->product_name),
             };
             _agent_manager.insert_agent(cur_agent);
         }

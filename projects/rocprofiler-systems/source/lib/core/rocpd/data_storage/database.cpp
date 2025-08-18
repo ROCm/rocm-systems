@@ -93,6 +93,7 @@ database::initialize_schema()
                 return new_file_path;
             }
         }
+        // TODO:  Update to look for the system's rocpd schema
         return std::string("source/lib/core/rocpd/data_storage/schema/").append(filename);
     };
 
