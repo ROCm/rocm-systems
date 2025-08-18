@@ -103,7 +103,6 @@ def binary_handler_profile_rocprof_compute(request):
             if check_success:
                 assert process.returncode == 0
             return process.returncode
-            return 0
         else:
             baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
             if not roof:
