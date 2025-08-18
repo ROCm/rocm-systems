@@ -1,7 +1,7 @@
 project(opencl)
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-
+          
 # Set default libdir to be "lib" for ROCm, distros will override this anyway:
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
 
