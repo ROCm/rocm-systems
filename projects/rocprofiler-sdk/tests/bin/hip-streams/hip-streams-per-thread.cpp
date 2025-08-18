@@ -19,7 +19,6 @@
 static void
 copy_to_dev(const hipStream_t stream)
 {
-    (void) stream;
     unsigned int n   = (32 * 1024);  // 32KB
     double*      A_h = nullptr;
     double*      A_d = nullptr;
