@@ -284,7 +284,8 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
       notify_event_ = command;
     }
   } else {
-    if ((status() > CL_COMPLETE) && (nullptr != queue) && !notified_.test_and_set()) {
+    if ((status() > CL_COMPLETE) && (nullptr != queue) &&
+        (!notified_.test_and_set()) && (HwEvent() == nullptr)) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this);
       if (command == NULL) {
