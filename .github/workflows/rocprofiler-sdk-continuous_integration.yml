@@ -179,21 +179,23 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
-
+        
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        /usr/bin/cmake --build build --target all --parallel 16
+        sudo /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.runner, 'mi200') || contains(matrix.system.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Install AQLProfile
-      shell: bash
-      working-directory: projects/aqlprofile
-      run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -382,7 +384,7 @@ jobs:
           projects/aqlprofile
         submodules: true
         set-safe-directory: true
-
+        
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -414,20 +416,25 @@ jobs:
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        python3 -m pipx ensurepath; source ~/.bashrc;
+        LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
+        PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        /usr/bin/cmake --build build --target all --parallel 16
+        sudo /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Install AQLProfile
-      shell: bash
-      working-directory: projects/aqlprofile
-      run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -539,7 +546,7 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
-
+  
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
@@ -556,13 +563,17 @@ jobs:
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
-    - name: Install AQLProfile
+    - name: Build and Install Aqlprofile
       shell: bash
       working-directory: projects/aqlprofile
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=/opt/rocm-custom/lib:$LD_LIBRARY_PATH
+        export PATH=/opt/rocm-custom/bin:$PATH
+        /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        /usr/bin/cmake --build build --target all --parallel 16
+        sudo /usr/bin/cmake --build build --target install
+        echo "✅ Installation complete!"
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
