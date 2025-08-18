@@ -254,6 +254,8 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrTyp
     return;
   }
 
+  GENERATE_CAPTURE();
+
   using UIntT = typename TestType::UIntType;
   constexpr auto ptrType = TestType::ptrType;
   constexpr auto writeValue = testValue<UIntT>::value;
@@ -269,7 +271,11 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Write", "", (TestParams<uint32_t, PtrTyp
   // Allocate Host Memory
   auto ptr = allocMem<ptrType, UIntT>();
   UIntT* target = ptr.ptr + offset;
+
+  BEGIN_CAPTURE(stream);
   HIP_CHECK(writeFunc<UIntT>(stream, target, writeValue, writeFlag));
+  END_CAPTURE(stream);
+
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(ptr.getValue(offset) == writeValue);
 
@@ -305,6 +311,9 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
   }
+
+  GENERATE_CAPTURE();
+
   using UIntT = typename TestType::UIntType;
   constexpr auto ptrType = TestType::ptrType;
   constexpr UIntT defaultMask = ~static_cast<UIntT>(0);
@@ -335,6 +344,8 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[0]), DATA_UPDATE, writeFlag));
   HIP_CHECK(hipEventRecord(events[0], stream));
 
+  BEGIN_CAPTURE(stream);
+
   if (tc.mask != defaultMask) {
     HIP_CHECK(waitFunc<UIntT>(stream, target, tc.waitValue, tc.compareOp, tc.mask));
   } else {
@@ -342,6 +353,8 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   }
 
   HIP_CHECK(writeFunc<UIntT>(stream, &(dataPtr.get()[1]), DATA_UPDATE, writeFlag));
+
+  END_CAPTURE(stream);
 
   HIP_CHECK(hipEventRecord(events[1], stream));
 
@@ -487,6 +500,9 @@ TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
   const auto compareOp = hipStreamWaitValueGte;
   const auto expectedError = hipErrorInvalidValue;
 
+  GENERATE_CAPTURE();
+  BEGIN_CAPTURE(stream);
+
   // Memory pointer negative tests
   SECTION("Invalid Memory Pointer for hipStreamWriteValue32") {
     HIP_CHECK_ERROR(hipStreamWriteValue32(stream, nullptr, 0, writeFlag), expectedError);
@@ -500,6 +516,8 @@ TEST_CASE("Unit_hipStreamValue_Negative_InvalidMemory") {
   SECTION("Invalid Memory Pointer for hipStreamWaitValue32") {
     HIP_CHECK_ERROR(hipStreamWaitValue64(stream, nullptr, 0, compareOp), expectedError);
   }
+
+  END_CAPTURE(stream);
 
   // Cleanup
   HIP_CHECK(hipStreamDestroy(stream));
@@ -548,6 +566,8 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_InvalidFlag", "", uint32_t, uin
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
 
+  GENERATE_CAPTURE();
+
   // Allocate Host Memory
   auto hostPtr = std::make_unique<TestType>();
 
@@ -557,7 +577,11 @@ TEMPLATE_TEST_CASE("Unit_hipStreamValue_Negative_InvalidFlag", "", uint32_t, uin
   // Set dummy data
   *hostPtr = 0x0;
 
+  BEGIN_CAPTURE(stream);
+
   HIP_CHECK_ERROR(waitFunc<TestType>(stream, hostPtr.get(), 0, -1), hipErrorInvalidValue);
+
+  END_CAPTURE(stream);
 
   // Cleanup
   HIP_CHECK(hipHostUnregister(hostPtr.get()));
@@ -574,6 +598,8 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Default", "", uint32_t, uint64_t) {
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(stream != nullptr);
 
+  GENERATE_CAPTURE();
+
   // Allocate Host Memory
   auto hostPtr = std::make_unique<TestType>();
 
@@ -583,7 +609,11 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWriteValue_Default", "", uint32_t, uint64_t) {
   // Set dummy data
   *hostPtr = 0x0;
 
+  BEGIN_CAPTURE(stream);
+
   HIP_CHECK(writeFunc<TestType>(stream, hostPtr.get(), 0, writeFlag));
+
+  END_CAPTURE(stream);
 
   // Cleanup
   HIP_CHECK(hipHostUnregister(hostPtr.get()));
@@ -600,6 +630,8 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
     HipTest::HIP_SKIP_TEST("hipStreamWaitValue not supported on this device.");
     return;
   }
+
+  GENERATE_CAPTURE();
 
   auto size = GENERATE(as<size_t>{}, 100, 500, 1000);
   // Create test data
@@ -630,6 +662,9 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
   HIP_CHECK(hipHostRegister(hostPtr.get(), sizeof(TestType), 0));
   *hostPtr = 0x0;
 
+  BEGIN_CAPTURE(dataCopyStream);
+  BEGIN_CAPTURE(kernelExecStream);
+
   // Perform copy operations on dataCopyStream
   HIP_CHECK(hipMemcpyAsync(d_a, a.data(), sizeof(uint32_t) * size, hipMemcpyHostToDevice,
                            dataCopyStream));
@@ -641,6 +676,9 @@ TEMPLATE_TEST_CASE("Unit_hipStreamWaitValue_Default", "", uint32_t, uint64_t) {
   HIP_CHECK(waitFunc<TestType>(kernelExecStream, hostPtr.get(), 1, hipStreamWaitValueGte));
   add<<<1, size, 0, kernelExecStream>>>(d_a, d_b, d_c, size);
   HIP_CHECK(hipGetLastError());
+
+  END_CAPTURE(dataCopyStream);
+  END_CAPTURE(kernelExecStream);
 
   // Synchronize both streams, copy output to host and synchronize globally
   HIP_CHECK(hipStreamSynchronize(dataCopyStream));
