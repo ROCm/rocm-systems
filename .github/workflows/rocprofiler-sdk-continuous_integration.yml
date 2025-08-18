@@ -525,7 +525,7 @@ jobs:
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
-        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common clang-15 libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config
         apt-get upgrade -y
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }}
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
