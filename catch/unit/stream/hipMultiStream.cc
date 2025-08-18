@@ -50,8 +50,9 @@ TEST_CASE("Unit_hipMultiStream_sameDevice") {
     HIP_CHECK(hipMalloc(&data[i], NN * sizeof(float)));
     hipLaunchKernelGGL(kernel, dim3(1), dim3(1), 0, streams[i], data[i], xd, NN);
     HIP_CHECK(hipGetLastError());
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(nKernel), dim3(1), dim3(1), 0, 0, yd);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(nKernel), dim3(1), dim3(1), 0, streams[i], yd);
     HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipStreamSynchronize(streams[i]));
     HIP_CHECK(hipFree(data[i]));
     HIP_CHECK(hipStreamDestroy(streams[i]));
   }
