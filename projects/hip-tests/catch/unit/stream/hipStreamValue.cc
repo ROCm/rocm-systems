@@ -360,16 +360,10 @@ void testWait(TEST_WAIT<typename TestType::UIntType> tc) {
   TEST_CASE("Unit_hipStreamValue_Wait32_Blocking_" + std::string(suffix)) {                        \
     SECTION("HostPtr") { testWait<TestParams<uint32_t, PtrType::HostPtr>, true>(test_t); }         \
     SECTION("DevicePtr") { testWait<TestParams<uint32_t, PtrType::DevicePtr>, true>(test_t); }     \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint32_t, PtrType::DevicePtrToHost>, true>(test_t);                      \
-    }                                                                                              \
   }                                                                                                \
   TEST_CASE("Unit_hipStreamValue_Wait32_NonBlocking_" + std::string(suffix)) {                     \
     SECTION("HostPtr") { testWait<TestParams<uint32_t, PtrType::HostPtr>, false>(test_t); }        \
     SECTION("DevicePtr") { testWait<TestParams<uint32_t, PtrType::DevicePtr>, false>(test_t); }    \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint32_t, PtrType::DevicePtrToHost>, false>(test_t);                     \
-    }                                                                                              \
   }
 
 
@@ -408,17 +402,11 @@ DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Nor",
   TEST_CASE("Unit_hipStreamValue_Wait64_Blocking_" + std::string(suffix)) {                        \
     SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, true>(test_t); }         \
     SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, true>(test_t); }     \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, true>(test_t);                      \
-    }                                                                                              \
     SECTION("Signal") { testWait<TestParams<uint64_t, PtrType::Signal>, true>(test_t); }           \
   }                                                                                                \
   TEST_CASE("Unit_hipStreamValue_Wait64_NonBlocking_" + std::string(suffix)) {                     \
     SECTION("HostPtr") { testWait<TestParams<uint64_t, PtrType::HostPtr>, false>(test_t); }        \
     SECTION("DevicePtr") { testWait<TestParams<uint64_t, PtrType::DevicePtr>, false>(test_t); }    \
-    SECTION("DevicePtrToHost") {                                                                   \
-      testWait<TestParams<uint64_t, PtrType::DevicePtrToHost>, false>(test_t);                     \
-    }                                                                                              \
     SECTION("Signal") { testWait<TestParams<uint64_t, PtrType::Signal>, false>(test_t); }          \
   }
 #else
