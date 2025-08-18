@@ -76,9 +76,14 @@ jobs:
       run: |
         apt-get update
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
+        mkdir --parents --mode=0755 /etc/apt/keyrings
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         add-apt-repository ppa:git-core/ppa
         apt-get update
-        apt-get install -y git
+        apt-get install -y git rocm-llvm-dev
         python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
@@ -91,10 +96,10 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+        tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        ln -s /opt/rocm-7.0.0 /opt/rocm
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
@@ -104,10 +109,10 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        output=$(sudo apt-get update 2>&1) && exit_status=$? || exit_status=$?
-        sudo apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev rocm-llvm-dev
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
-        sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
+        apt-get update
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
     - name: List Files
       shell: bash
@@ -120,11 +125,23 @@ jobs:
         ls -la
         pwd
 
+    - name: Special Requirements
+      shell: bash
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
-        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm-custom/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm-custom /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
+        PATH=/opt/rocm/bin:$PATH
+        CMAKE_PREFIX_PATH=/opt/rocm
+        /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
@@ -138,9 +155,8 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'mi325', os: 'rhel-8.8', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
-          {gpu: 'mi325', os: 'rhel-9.1', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''},
-          {gpu: 'mi325', os: 'sles-15.4', build-type: 'RelWithDebInfo', ci-flags: '--linter clang-tidy', container: ''}
+          {gpu: 'mi325', os: 'rhel-9.1', build-type: 'RelWithDebInfo', container: ''},
+          {gpu: 'mi325', os: 'sles-15.4', build-type: 'RelWithDebInfo', container: ''}
         ]
 
     runs-on: linux-mi325-1gpu-ossci-rocm
@@ -149,6 +165,7 @@ jobs:
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+      options: --privileged
 
     permissions:
       contents: read
@@ -159,6 +176,45 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    - uses: actions/checkout@v5
+      with:
+        sparse-checkout: projects/aqlprofile
+        set-safe-directory: true
+
+    - name: Install Latest ROCm LLVM for RHEL
+      if: ${{ matrix.system.os == 'rhel-9.1' }}
+      shell: bash
+      working-directory: /tmp
+      run: |
+        sudo tee /etc/yum.repos.d/rocm.repo <<EOF
+        [ROCm-7.0.0]
+        name=ROCm7.0.0
+        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main
+        enabled=1
+        priority=50
+        gpgcheck=1
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+        EOF
+        sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
+        sudo dnf clean all
+        sudo dnf install -y git rocm-llvm-devel rocm-openmp-sdk
+
+    - name: Install Latest ROCm LLVM for SLES
+      if: ${{ matrix.system.os == 'sles-15.4' }}
+      shell: bash
+      working-directory: /tmp
+      run: |
+        sudo tee /etc/zypp/repos.d/rocm.repo <<EOF
+        [ROCm-7.0.0]
+        name=ROCm7.0.0
+        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main
+        enabled=1
+        gpgcheck=1
+        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
+        EOF
+        sudo zypper --gpg-auto-import-keys refresh
+        sudo zypper install -y git rocm-llvm-devel rocm-openmp-sdk
+
     - name: Install Latest ROCm
       shell: bash
       working-directory: /tmp
@@ -177,14 +233,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
-        sudo ln -s /opt/rocm-custom /opt/rocm
-
-    - uses: actions/checkout@v4
-      with:
-        sparse-checkout: projects/aqlprofile
-        set-safe-directory: true
+        sudo tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        sudo ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - name: Install requirements
       timeout-minutes: 10
@@ -204,17 +254,29 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat /opt/rocm-7.0.0/.info/version
         ls -la
         pwd
+
+    - name: Special Requirements
+      shell: bash
+      run: |
+          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
+          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
         python3 -m pipx ensurepath; source ~/.bashrc;
-        PATH=/opt/rocm/bin:$PATH LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH CMAKE_PREFIX_PATH=/opt/rocm ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
-          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
+        PATH=/opt/rocm/bin:$PATH
+        LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
+        CMAKE_PREFIX_PATH=/opt/rocm
+        ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
+          -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="linux-mi325-1gpu-ossci-rocm"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           -DCMAKE_CTEST_ARGUMENTS=""
           -DAQLPROFILE_BUILD_TESTS=ON
