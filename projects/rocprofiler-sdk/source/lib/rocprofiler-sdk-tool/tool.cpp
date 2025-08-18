@@ -188,22 +188,23 @@ is_handled_signal(int signum)
 
 struct buffer_ids
 {
-    rocprofiler_buffer_id_t hsa_api_trace           = {};
-    rocprofiler_buffer_id_t hip_api_trace           = {};
-    rocprofiler_buffer_id_t kernel_trace            = {};
-    rocprofiler_buffer_id_t memory_copy_trace       = {};
-    rocprofiler_buffer_id_t memory_allocation_trace = {};
-    rocprofiler_buffer_id_t counter_collection      = {};
-    rocprofiler_buffer_id_t scratch_memory          = {};
-    rocprofiler_buffer_id_t rccl_api_trace          = {};
-    rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
-    rocprofiler_buffer_id_t rocdecode_api_trace     = {};
-    rocprofiler_buffer_id_t rocjpeg_api_trace       = {};
-    rocprofiler_buffer_id_t pc_sampling_stochastic  = {};
+    rocprofiler_buffer_id_t hsa_api_trace                = {};
+    rocprofiler_buffer_id_t hip_api_trace                = {};
+    rocprofiler_buffer_id_t kernel_trace                 = {};
+    rocprofiler_buffer_id_t memory_copy_trace            = {};
+    rocprofiler_buffer_id_t memory_allocation_trace      = {};
+    rocprofiler_buffer_id_t counter_collection           = {};
+    rocprofiler_buffer_id_t scratch_memory               = {};
+    rocprofiler_buffer_id_t rccl_api_trace               = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap        = {};
+    rocprofiler_buffer_id_t rocdecode_api_trace          = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace            = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic       = {};
+    rocprofiler_buffer_id_t sampling_performance_monitor = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 12>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 13>{hsa_api_trace,
                                                        hip_api_trace,
                                                        kernel_trace,
                                                        memory_copy_trace,
@@ -214,7 +215,8 @@ struct buffer_ids
                                                        pc_sampling_host_trap,
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
-                                                       pc_sampling_stochastic};
+                                                       pc_sampling_stochastic,
+                                                       sampling_performance_monitor};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -259,8 +261,6 @@ using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprof
 using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, size_t>;
 using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
 using kernel_rename_stack_t = std::stack<uint64_t>;
-using spm_value_map_t       = std::unordered_map<rocprofiler_counter_id_t, uint64_t>;
-using spm_att_record_t      = std::pair<rocprofiler_agent_id_t, std::vector<std::vector<char>>>;
 
 auto*      tool_metadata     = as_pointer<tool::metadata>(tool::metadata::inprocess{});
 auto       target_kernels    = common::Synchronized<targeted_kernels_map_t>{};
@@ -1488,7 +1488,7 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
 }
 
 int
-spm_dispatch_callback(rocprofiler_agent_id_t agent_id,
+spm_dispatch_callback(rocprofiler_agent_id_t /**/,
                       rocprofiler_queue_id_t /* queue_id */,
                       rocprofiler_kernel_id_t   kernel_id,
                       rocprofiler_dispatch_id_t dispatch_id,
@@ -1501,92 +1501,20 @@ spm_dispatch_callback(rocprofiler_agent_id_t agent_id,
     {
         return 0;
     }
-
-    tool::spm_output_pair_t filenames{};
-    filenames.first = agent_id;
-
-    for(size_t buf = 0; buf < tool_metadata->spm_descriptors.at(agent_id).num_buffers; buf++)
-    {
-        auto name = rocprofiler::tool::get_spm_filename(
-            tool::get_config(), agent_id.handle, dispatch_id, buf);
-        std::ofstream file(name, std::ios::binary);
-        ROCP_FATAL_IF(!file.is_open()) << "Unable to open SPM file " << name;
-
-        filenames.second.emplace_back(std::move(file));
-    }
-
     userdata->value = dispatch_id;
-
-    auto lk = std::unique_lock{tool_metadata->spm_mut};
-    tool_metadata->spm_output_files.emplace(dispatch_id, std::move(filenames));
-
-    tool::spm_dispatch_record_t record{};
-    record.agent    = agent_id;
-    record.dispatch = dispatch_id;
-    tool::write_ring_buffer(record, domain_type::SPM_DISPATCH_RECORDS);
-
     return 1;
 }
 
 void
-spm_data_callback(rocprofiler_agent_id_t        agent,
-                  rocprofiler_spm_record_type_t type,
-                  void*                         payload,
-                  rocprofiler_user_data_t       userdata)
+spm_data_callback(rocprofiler_spm_counter_record_t* records,
+                  size_t                            record_count,
+                  rocprofiler_user_data_t* /**/)
 {
-    if(type >= ROCPROFILER_SPM_RECORD_TYPE_LAST)
+    for(size_t i = 0; i < record_count; i++)
     {
-        ROCP_CI_LOG(ERROR) << "Invalid SPM record type " << type;
-        return;
+        rocprofiler::tool::write_ring_buffer(records[i], domain_type::SAMPLING_PERFORMANCE_MONITOR);
     }
-
-    if(type == ROCPROFILER_SPM_RECORD_TYPE_DISPATCH_END)
-    {
-        auto lk = std::shared_lock{tool_metadata->spm_mut};
-        tool_metadata->spm_output_files.erase(userdata.value);
-        return;
-    }
-
-    ROCP_FATAL_IF(!payload) << "SPM payload not set";
-
-    if(type == ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC)
-    {
-        auto& desc = *reinterpret_cast<rocprofiler_spm_descriptor_t*>(payload);
-
-        // Write raw aqlprofile descriptor
-        {
-            std::stringstream ss;
-            ss << "spm_agent_" << agent.handle << "_aqlprofile_descriptor";
-
-            auto& config   = tool::get_config();
-            auto  filename = rocprofiler::tool::get_output_filename(config, ss.str(), ".spm");
-            std::ofstream fstream(filename, std::ios::binary);
-            ROCP_FATAL_IF(!fstream.is_open()) << "Could not open " << filename;
-            fstream.write((char*) desc.data, desc.size);
-        }
-
-        auto info        = tool::spm_descriptor_info_t{};
-        info.desc_data   = std::vector<char>((char*) desc.data, (char*) desc.data + desc.size);
-        info.num_buffers = desc.buffer_num;
-
-        auto lk = std::shared_lock{tool_metadata->spm_mut};
-        tool_metadata->spm_descriptors.emplace(agent, std::move(info));
-        return;
-    }
-
-    auto& data = *reinterpret_cast<rocprofiler_spm_data_record_t*>(payload);
-
-    if(type == ROCPROFILER_SPM_RECORD_TYPE_DATA_LOST)
-    {
-        ROCP_CI_LOG(WARNING) << "Data Lost. Agent:" << agent.handle << " xcc:" << data.buffer_id;
-    }
-
-    auto  lk   = std::shared_lock{tool_metadata->spm_mut};
-    auto& file = tool_metadata->spm_output_files.at(userdata.value).second.at(data.buffer_id);
-
-    file.write(reinterpret_cast<char*>(data.data), data.data_size);
 }
-
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
@@ -2560,106 +2488,6 @@ generate_output(tool::buffered_output<Tp, DomainT>& output_v,
 }
 
 void
-spm_decode_callback(rocprofiler_counter_id_t id,
-                    rocprofiler_spm_coord_t* /* dimensions */,
-                    uint64_t /* num_dimensions */,
-                    const uint64_t* /* timestamps */,
-                    const uint64_t* values,
-                    uint64_t        count,
-                    void*           userdata)
-{
-    size_t total = 0;
-    for(size_t i = 0; i < count; i++)
-        total += values[i];
-
-    auto& map = *static_cast<spm_value_map_t*>(userdata);
-    if(map.find(id) == map.end()) map[id] = 0;
-    map.at(id) += total;
-};
-
-std::map<rocprofiler_dispatch_id_t, spm_att_record_t>
-decode_spm_files(tool::spm_dispatch_buffered_output_t& buffer_record)
-{
-    static const auto gpu_agents_counter_info = get_agent_counter_info();
-
-    std::map<rocprofiler_agent_id_t, std::map<rocprofiler_counter_id_t, std::string>> id_names{};
-
-    for(const auto* agent : get_gpu_agents())
-    {
-        std::map<rocprofiler_counter_id_t, std::string> counter_list{};
-        for(const auto& citr : gpu_agents_counter_info.at(agent->id))
-            counter_list[citr.id] = std::string(citr.name);
-
-        id_names[agent->id] = std::move(counter_list);
-    }
-
-    auto lk      = std::unique_lock{tool_metadata->spm_mut};
-    auto att_map = std::map<rocprofiler_dispatch_id_t, spm_att_record_t>{};
-
-    buffer_record.flush();
-    auto records = buffer_record.load_all();
-
-    for(auto& record : records)
-    {
-        auto& tool_desc = tool_metadata->spm_descriptors.at(record.agent);
-        auto  desc      = rocprofiler_spm_descriptor_t{};
-        desc.buffer_num = tool_desc.num_buffers;
-        desc.data       = tool_desc.desc_data.data();
-        desc.size       = tool_desc.desc_data.size();
-
-        spm_value_map_t accumulated{};
-
-        for(size_t buffer_id = 0; buffer_id < desc.buffer_num; buffer_id++)
-        {
-            std::vector<char> spm_counter_data{};
-            {
-                auto filename = rocprofiler::tool::get_spm_filename(
-                    tool::get_config(), record.agent.handle, record.dispatch, buffer_id);
-                std::ifstream fstream(filename, std::ios::binary);
-                ROCP_FATAL_IF(!fstream.is_open()) << "Could not open " << filename;
-
-                fstream.seekg(0, std::ios::end);
-                if(fstream.tellg() == 0) continue;
-
-                spm_counter_data.resize(fstream.tellg());
-                fstream.seekg(0);
-                fstream.read(spm_counter_data.data(), spm_counter_data.size());
-            }
-
-            ROCPROFILER_CALL(rocprofiler_spm_decode(desc,
-                                                    buffer_id,
-                                                    spm_decode_callback,
-                                                    spm_counter_data.data(),
-                                                    spm_counter_data.size(),
-                                                    &accumulated),
-                             "spm decode");
-
-            if(tool::get_config().advanced_thread_trace)
-            {
-                auto& att_record = att_map[record.dispatch];
-                att_record.first = record.agent;
-                att_record.second.emplace_back(std::move(spm_counter_data));
-            }
-        }
-
-        ROCP_ERROR_IF(accumulated.empty()) << "No counters found for SPM record";
-
-        auto counter_record        = tool::tool_spm_counter_record_t{};
-        counter_record.dispatch_id = record.dispatch;
-        auto serialized_records    = std::vector<tool::tool_counter_value_t>{};
-
-        serialized_records.reserve(accumulated.size());
-        for(auto& [id, cnt] : accumulated)
-            serialized_records.push_back({{id}, static_cast<double>(cnt)});
-
-        counter_record.write(serialized_records);
-        tool::write_ring_buffer(counter_record, domain_type::SPM_ACCUMULATED_VALUES);
-    }
-
-    return att_map;
-}
-
-void
 tool_fini(void* /*tool_data*/)
 {
     static bool _first = true;
@@ -2694,8 +2522,6 @@ tool_fini(void* /*tool_data*/)
         tool::counter_collection_buffered_output_t{tool::get_config().counter_collection};
     auto spm_counters_output =
         tool::spm_counter_collection_buffered_output_t{tool::get_config().spm_counter_collection};
-    auto spm_dispatch_records =
-        tool::spm_dispatch_buffered_output_t{tool::get_config().spm_counter_collection};
     auto scratch_memory_output =
         tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
@@ -2748,8 +2574,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(pc_sampling_host_trap_output, outdata, contributions, cleanups);
     generate_output(rocjpeg_output, outdata, contributions, cleanups);
     generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
-
-    auto att_map = decode_spm_files(spm_dispatch_records);
+    generate_output(pc_sampling_stochastic_output, outdata, contributions, cleanups);
     generate_output(spm_counters_output, outdata, contributions, cleanups);
 
     if(tool::get_config().advanced_thread_trace && !tool_metadata->att_filenames.empty())
@@ -2796,7 +2621,8 @@ tool_fini(void* /*tool_data*/)
                          rocdecode_output.get_generator(),
                          rocjpeg_output.get_generator(),
                          pc_sampling_host_trap_output.get_generator(),
-                         pc_sampling_stochastic_output.get_generator());
+                         pc_sampling_stochastic_output.get_generator(),
+                         spm_counters_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -2909,24 +2735,6 @@ tool_fini(void* /*tool_data*/)
             auto in_path  = std::string(".");
 
             decoder.parse(in_path, out_path, att_filename_data.second, codeobj, perf, formats);
-
-            if(auto it = att_map.find(dispatch_id); it != att_map.end())
-            {
-                static const auto gpu_agents_counter_info = get_agent_counter_info();
-                auto              spm_ids = std::map<rocprofiler_counter_id_t, std::string>();
-
-                for(auto desired_counter : rocprofiler::tool::get_config().spm_counters)
-                {
-                    for(const auto& citr : gpu_agents_counter_info.at(it->second.first))
-                    {
-                        if(std::string_view{desired_counter} == std::string_view{citr.name})
-                            spm_ids[citr.id] = citr.name;
-                    }
-                }
-
-                auto& descriptor = tool_metadata->spm_descriptors.at(it->second.first).desc_data;
-                decoder.addSpm(out_path, spm_ids, descriptor, it->second.second);
-            }
         }
     }
 

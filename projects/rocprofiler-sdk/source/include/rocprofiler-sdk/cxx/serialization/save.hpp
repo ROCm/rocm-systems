@@ -32,6 +32,7 @@
 #include <rocprofiler-sdk/counters.h>
 #include <rocprofiler-sdk/device_counting_service.h>
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/spm/core.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip.h>
@@ -215,6 +216,16 @@ save(ArchiveT& ar, rocprofiler_async_correlation_id_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(internal);
     ROCP_SDK_SAVE_DATA_VALUE("external", external.value);
+}
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_spm_counter_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(flags);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(instance);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(value);
 }
 
 template <typename ArchiveT>

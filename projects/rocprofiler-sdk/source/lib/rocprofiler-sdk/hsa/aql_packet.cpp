@@ -21,12 +21,14 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
-#include <fmt/core.h>
-#include <cstdlib>
-#include <iostream>
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+
+#include <fmt/core.h>
+#include <cstdlib>
+#include <iostream>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -258,9 +260,9 @@ SPMPacket::SPMPacket(const aqlprofile_spm_profile_t& profile, rocprofiler_agent_
     packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
     packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
 
-    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE, &desc.seg_size);
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_SEG_SIZE, &spm_desc.seg_size);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM seg_size";
-    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &desc.buffer_num);
+    status = sym.spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_NUM_XCC, &spm_desc.buffer_num);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Failed to query SPM buffer_num";
 
     is_valid = true;
@@ -295,7 +297,7 @@ SPMPacket::kfd_start()
         return;
     }
 
-    auto status = sym.spm_start_fn(this->handle, &SPMPacket::aql_data_callback, this);
+    auto status = sym.spm_start_fn(this->handle, SPM::aql_data_callback, this);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS) << "Unable to acquire KFD thread";
 }
 
@@ -307,25 +309,15 @@ SPMPacket::kfd_stop()
     else
         ROCP_WARNING << "Double call to KFD stop!";
 
-    ROCP_FATAL_IF(!data_fn) << "data_fn null";
-    data_fn(agent_id, ROCPROFILER_SPM_RECORD_TYPE_DISPATCH_END, nullptr, user_data);
-}
+    ROCP_FATAL_IF(!decode_data_fn) << " decode data_fn null";
 
-void
-SPMPacket::aql_data_callback(aqlprofile_spm_buffer_handle_t handle,
-                             void*                          data,
-                             size_t                         size,
-                             int /* flags */,
-                             void* userdata)
-{
-    ROCP_ERROR_IF(!userdata) << "SPM callback passed null!";
-    auto& pkt = *static_cast<SPMPacket*>(userdata);
-
-    rocprofiler_spm_data_record_t record{};
-    record.buffer_id = handle;
-    record.data      = data;
-    record.data_size = size;
-    pkt.data_fn(pkt.agent_id, ROCPROFILER_SPM_RECORD_TYPE_DATA, &record, pkt.user_data);
+    auto record =
+        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END,
+                                         .agent_id  = this->agent_id,
+                                         .instance  = 0,
+                                         .timestamp = 0,
+                                         .value     = 0};
+    this->decode_data_fn(&record, 1, &user_data);
 }
 
 SPMPacket::~SPMPacket()

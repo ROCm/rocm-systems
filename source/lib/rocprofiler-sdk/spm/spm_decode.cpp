@@ -21,12 +21,13 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/spm/spm_decode.hpp"
-#include <rocprofiler-sdk/experimental/spm/decode.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/intercept_table.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/spm/spm_dlsym.hpp"
 
 #include <atomic>
@@ -34,7 +35,6 @@
 #include <mutex>
 #include <stdexcept>
 #include <string>
-#include <vector>
 
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \
@@ -46,22 +46,10 @@
         }                                                                                          \
     }
 
-namespace SPMDecode
+namespace rocprofiler
 {
-struct values_vec_t
+namespace SPM
 {
-    std::vector<uint64_t> timestamps;
-    std::vector<uint64_t> values;
-};
-
-struct instances_t
-{
-    std::vector<values_vec_t> shaders;
-    bool                      is_global = false;
-};
-
-typedef std::vector<instances_t> counter_vec;
-
 void
 decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine, void* userdata)
 {
@@ -74,66 +62,40 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
         shader_engine                = 0;
     }
 
-    if(counters.at(index).shaders.size() <= shader_engine)
+    if(counters.at(index).shaders.size() <= static_cast<size_t>(shader_engine))
         counters.at(index).shaders.resize(shader_engine + 1);
 
     auto& instance = counters.at(index).shaders.at(shader_engine);
     instance.timestamps.push_back(timestamp);
     instance.values.push_back(value);
-    if(shader_engine < 0) counters.at(index).is_global = true;
 }
-}  // namespace SPMDecode
 
-extern "C" {
-
-rocprofiler_status_t
-rocprofiler_spm_decode(rocprofiler_spm_descriptor_t      _desc,
-                       rocprofiler_spm_buffer_id_t       buffer_id,
-                       rocprofiler_spm_decode_callback_t decode_cb,
-                       void*                             data,
-                       size_t                            size,
-                       void*                             userdata)
+void
+aql_data_callback(size_t /**/, void* data, size_t size, int /* flags */, void* userdata)
 {
-    static auto*& sym = rocprofiler::common::static_object<rocprofiler::SPM::Dlsym>::construct();
-    if(!sym->valid()) return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+    SPM::counter_vec counters{};
+    auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
 
-    if(!size || !_desc.data || _desc.size < sizeof(rocprofiler::SPM::spm_desc_v0_t))
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(spm_packet->spm_desc.data);
 
-    auto& desc_v0 = *static_cast<rocprofiler::SPM::spm_desc_v0_t*>(_desc.data);
-    if(!desc_v0.valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-
-    SPMDecode::counter_vec       counters{};
-    aqlprofile_spm_buffer_desc_t aql_desc{.data = desc_v0.aqlprofile_desc(),
-                                          .size = desc_v0.aql_desc_size};
-
+    if(!desc_v0.valid()) return;
     {
         uint64_t count = 0;
 
-        auto status = sym->spm_query_fn(aql_desc, AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT, &count);
-        if(status != HSA_STATUS_SUCCESS) return ROCPROFILER_STATUS_ERROR;
-        if(count != desc_v0.num_events) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        auto status = spm_packet->sym.spm_query_fn(
+            spm_packet->aql_desc, AQLPROFILE_SPM_DECODE_QUERY_EVENT_COUNT, &count);
+        if(status != HSA_STATUS_SUCCESS) return;
+        if(count != desc_v0.num_events) return;
         counters.resize(count);
     }
-
     // Prealloc SE_NUM for MI300.
     for(auto& v : counters)
         v.shaders.resize(4);
 
-    auto status = sym->spm_decode_fn(aql_desc, SPMDecode::decode_cb, data, size, &counters);
-    if(status != HSA_STATUS_SUCCESS) return ROCPROFILER_STATUS_ERROR;
-
-    std::array<rocprofiler_spm_coord_t, 3> se_coords{};
-    se_coords.at(0).name  = "XCC";
-    se_coords.at(0).coord = buffer_id;
-    se_coords.at(1).name  = "SE";
-    se_coords.at(2).name  = "INSTANCE";
-
-    std::array<rocprofiler_spm_coord_t, 2> global_coords{};
-    global_coords.at(0).name  = "XCC";
-    global_coords.at(0).coord = buffer_id;
-    global_coords.at(1).name  = "INSTANCE";
-
+    auto status =
+        spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, size, &counters);
+    if(status != HSA_STATUS_SUCCESS) return;
+    auto records = std::vector<rocprofiler_spm_counter_record_t>{};
     for(size_t i = 0; i < counters.size(); i++)
     {
         auto& event = desc_v0.events()[i];
@@ -142,35 +104,53 @@ rocprofiler_spm_decode(rocprofiler_spm_descriptor_t      _desc,
             const auto& times  = counters.at(i).shaders.at(se).timestamps;
             const auto& values = counters.at(i).shaders.at(se).values;
 
-            size_t size = std::min(times.size(), values.size());
-            if(!size) continue;
+            size_t size_1 = std::min(times.size(), values.size());
+            if(!size_1) continue;
 
             if(counters.at(i).is_global)
             {
-                global_coords.at(1).coord = event.instance;
-                decode_cb(event.id,
-                          global_coords.data(),
-                          global_coords.size(),
-                          times.data(),
-                          values.data(),
-                          size,
-                          userdata);
+                auto instance_id = rocprofiler_counter_instance_id_t{};
+                counters::set_dim_in_rec(instance_id,
+                                         rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
+                                         spm_packet->spm_desc.buffer_num);
+                counters::set_dim_in_rec(
+                    instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
+                counters::set_counter_in_rec(instance_id, event.id);
+                for(size_t it = 0; it < size_1; it++)
+                {
+                    records.emplace_back(
+                        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_DATA,
+                                                         .agent_id  = spm_packet->agent_id,
+                                                         .instance  = instance_id,
+                                                         .timestamp = times[it],
+                                                         .value     = values[it]});
+                }
             }
             else
             {
-                se_coords.at(1).coord = se;
-                se_coords.at(2).coord = event.instance;
-                decode_cb(event.id,
-                          se_coords.data(),
-                          se_coords.size(),
-                          times.data(),
-                          values.data(),
-                          size,
-                          userdata);
+                auto instance_id = rocprofiler_counter_instance_id_t{};
+                counters::set_dim_in_rec(instance_id,
+                                         rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
+                                         spm_packet->spm_desc.buffer_num);
+                counters::set_dim_in_rec(
+                    instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
+                counters::set_dim_in_rec(instance_id,
+                                         rocprofiler::counters::ROCPROFILER_DIMENSION_INSTANCE,
+                                         event.instance);
+                counters::set_counter_in_rec(instance_id, event.id);
+                for(size_t it = 0; it < size_1; it++)
+                {
+                    records.emplace_back(
+                        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_DATA,
+                                                         .agent_id  = spm_packet->agent_id,
+                                                         .instance  = instance_id,
+                                                         .timestamp = times[it],
+                                                         .value     = values[it]});
+                }
             }
         }
     }
-
-    return ROCPROFILER_STATUS_SUCCESS;
+    spm_packet->decode_data_fn(&records[0], records.size(), &(spm_packet->user_data));
 }
-}
+}  // namespace SPM
+}  // namespace rocprofiler

@@ -88,8 +88,8 @@ SPMQueue::start()
     std::unique_lock<std::mutex> lk(mut);
     ROCP_FATAL_IF(!packet) << "SPM packet not initialized";
 
-    packet->data_fn   = params.data_fn;
-    packet->user_data = params.user_data;
+    packet->decode_data_fn = params.data_fn;
+    packet->user_data      = params.user_data;
     packet->kfd_start();
     return SubmitAndSignalLast(packet->before_krn_pkt);
 }
@@ -124,9 +124,7 @@ SPMAgentManager::resource_init()
 
         auto queue = std::make_unique<SPMQueue>(
             pack, *CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocp_agent)));
-        auto& desc = CHECK_NOTNULL(queue->packet.get())->desc;
-
-        pack.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC, &desc, pack.user_data);
+       
         queues[id] = std::move(queue);
     }
 }
@@ -163,8 +161,14 @@ SPMAgentManager::stop_context()
 
     for(auto& [id, queue] : queues)
     {
-        const auto& pack = queue->params;
-        pack.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_AGENT_DATA_END, nullptr, pack.user_data);
+        auto pack = queue->params;
+        auto record =
+        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_AGENT_END,
+                                         .agent_id  = id,
+                                         .instance  = 0,
+                                         .timestamp = 0,
+                                         .value     = 0};
+        pack.data_fn(&record, 1, &(pack.user_data));
     }
 }
 
@@ -188,7 +192,7 @@ SPMDispatchManager::resource_init()
         aql::SPMPacketFactory factory(*rocp_agent, pack, pool);
         auto                  packet = factory.construct();
 
-        pack.data_fn(id, ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC, &packet->desc, pack.user_data);
+       
         packets.push_back({id, std::move(packet)});
     }
 }
@@ -319,8 +323,9 @@ SPMDispatchManager::pre_kernel_call(const hsa::Queue&         queue,
         << "Error: hsa_amd_signal_async_handler failed with error code " << status
         << " :: " << hsa::get_hsa_status_string(status);
 
-    packet->user_data = *user_data;
-    packet->data_fn   = param.data_fn;
+    packet->user_data      = *user_data;
+    packet->decode_data_fn = param.data_fn;
+
     return {std::move(packet), true};
 }
 

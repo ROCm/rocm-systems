@@ -29,18 +29,6 @@
 
 typedef uint64_t rocprofiler_spm_buffer_id_t;
 
-typedef struct
-{
-    void*  data;
-    size_t size;
-    size_t seg_size;
-    size_t buffer_num;
-} rocprofiler_spm_descriptor_t;
-
-typedef void (*rocprofiler_spm_desc_callback_t)(rocprofiler_agent_id_t       agent,
-                                                rocprofiler_spm_descriptor_t desc,
-                                                void*                        userdata);
-
 typedef enum
 {
     ROCPROFILER_SPM_PARAMETER_SAMPLE_FREQUENCY = 0,  ///< SPM sample frequency for Sclock
@@ -49,41 +37,42 @@ typedef enum
     ROCPROFILER_SPM_PARAMETER_LAST
 } rocprofiler_spm_parameter_type_t;
 
-typedef struct
+typedef enum rocprofiler_spm_record_flags_t
 {
-    rocprofiler_spm_parameter_type_t type;
-    uint64_t                         value;
-} rocprofiler_spm_parameter_t;
+    ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST = 1,
+    ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END,
+    ROCPROFILER_SPM_RECORD_FLAG_AGENT_END,
+    ROCPROFILER_SPM_RECORD_FLAG_DATA
+} rocprofiler_spm_record_flags_t;
 
 typedef struct
 {
-    rocprofiler_spm_buffer_id_t buffer_id;
-    void*                       data;
-    size_t                      data_size;
-} rocprofiler_spm_data_record_t;
+    uint64_t               flags;  // E.g. DATA LOST
+    rocprofiler_agent_id_t agent_id;
+    // XCC,  shader, counter id, block instance Id
+    rocprofiler_counter_instance_id_t instance;
 
-typedef enum
-{
-    ROCPROFILER_SPM_RECORD_TYPE_DATA = 0,        ///< "payload" is a rocprofiler_spm_data_record_t.
-    ROCPROFILER_SPM_RECORD_TYPE_DATA_LOST,       ///< Data lost. "payload" is a _spm_data_record_t.
-    ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC,        ///< "payload" is a rocprofiler_spm_descriptor_t.
-    ROCPROFILER_SPM_RECORD_TYPE_AGENT_DATA_END,  ///< No more data is to be received from agent.
-    ROCPROFILER_SPM_RECORD_TYPE_DISPATCH_END,    ///< No more data is to be received from dispatch.
-    ROCPROFILER_SPM_RECORD_TYPE_LAST
-} rocprofiler_spm_record_type_t;
+    rocprofiler_timestamp_t timestamp;
+    uint64_t                value;
+} rocprofiler_spm_counter_record_t;
 
 /**
  * @brief Callback to receive SPM data
  *
  * @param [in] agent Which agent generated the spm data
- * @param [in] type one of rocprofiler_spm_record_type_t
- * @param [in] payload as described in rocprofiler_spm_record_type_t
+ * @param [in] records pointer to the array of SPM records
+ * @param [in] size_t  size of the record array
  * @param [in] userdata Passed back to user via dispatch_userdata or _configure_spm_agent_service
  */
-typedef void (*rocprofiler_spm_data_callback_t)(rocprofiler_agent_id_t        agent,
-                                                rocprofiler_spm_record_type_t type,
-                                                void*                         payload,
-                                                rocprofiler_user_data_t       userdata);
+
+typedef void (*rocprofiler_spm_data_callback_t)(rocprofiler_spm_counter_record_t* records,
+                                                size_t                            record_count,
+                                                rocprofiler_user_data_t*          userdata);
+typedef struct
+{
+    rocprofiler_spm_parameter_type_t type;
+    uint64_t                         value;
+} rocprofiler_spm_parameter_t;
 
 /**
  * @brief Callback query if dispatch should be profiled

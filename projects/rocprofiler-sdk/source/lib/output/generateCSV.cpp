@@ -654,49 +654,6 @@ generate_csv(const output_config&                    cfg,
 }
 
 void
-generate_csv(const output_config&                        cfg,
-             const metadata&                             tool_metadata,
-             const generator<tool_spm_counter_record_t>& data,
-             const stats_entry_t&                        stats)
-{
-    if(data.empty()) return;
-    if(cfg.stats && stats)
-        write_stats(get_stats_output_file(cfg, domain_type::SPM_ACCUMULATED_VALUES), stats.entries);
-
-    auto ofs = tool::csv_output_file{cfg,
-                                     domain_type::SPM_ACCUMULATED_VALUES,
-                                     tool::csv::spm_csv_encoder{},
-                                     {"Dispatch_Id", "Counter_Name", "Counter_Value"}};
-
-    auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
-    for(const auto& itr : tool_metadata.get_counter_info())
-        counter_id_to_name.emplace(itr.id, itr.name);
-
-    for(auto ditr : data)
-    {
-        for(auto record : data.get(ditr))
-        {
-            auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};
-            auto record_vector    = record.read();
-
-            // Accumulate counters based on ID
-            for(auto& count : record_vector)
-            {
-                counter_id_value[count.id] += count.value;
-            }
-
-            auto row_ss = std::stringstream{};
-            for(auto& [counter_id, counter_value] : counter_id_value)
-            {
-                tool::csv::spm_csv_encoder::write_row(
-                    row_ss, record.dispatch_id, counter_id_to_name.at(counter_id), counter_value);
-            }
-            ofs << row_ss.str();
-        }
-    }
-}
-
-void
 generate_csv(const output_config&                                                 cfg,
              const metadata&                                                      tool_metadata,
              const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>& data,
@@ -1048,6 +1005,15 @@ generate_csv(const output_config& cfg,
                                                   value.total.get_stddev());
         ofs << _row.str() << std::flush;
     }
+}
+
+void
+generate_csv(const output_config& /*cfg*/,
+             const metadata& /*tool_metadata*/,
+             const generator<rocprofiler_spm_counter_record_t>& /*data*/,
+             const stats_entry_t& /*stats*/)
+{
+    return;
 }
 }  // namespace tool
 }  // namespace rocprofiler

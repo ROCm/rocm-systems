@@ -259,15 +259,13 @@ public:
     : agent_id(other.agent_id)
     , sym(other.sym)
     {
-        packets  = other.packets;
-        data_fn  = other.data_fn;
-        is_valid = other.is_valid;
-        handle   = other.handle;
-        empty    = other.empty;
-        pool     = other.pool;
-        aql_desc = other.aql_desc;
-        desc     = other.desc;
-
+        packets             = other.packets;
+        is_valid            = other.is_valid;
+        handle              = other.handle;
+        empty               = other.empty;
+        pool                = other.pool;
+        aql_desc            = other.aql_desc;
+        spm_desc            = other.spm_desc;
         container_desc_data = other.container_desc_data;
     }
 
@@ -275,12 +273,11 @@ public:
     void kfd_stop();
     bool Valid() const { return is_valid; }
 
-    const rocprofiler_agent_id_t    agent_id;
-    rocprofiler_spm_data_callback_t data_fn{};
-    rocprofiler_user_data_t         user_data{};
-    aqlprofile_spm_buffer_desc_t    aql_desc{};
-    // built by packet_construct
-    rocprofiler_spm_descriptor_t desc{};
+    const rocprofiler_agent_id_t       agent_id;
+    rocprofiler_spm_data_callback_t    decode_data_fn{};
+    rocprofiler_user_data_t            user_data{};
+    aqlprofile_spm_buffer_desc_t       aql_desc{};
+    rocprofiler::SPM::spm_descriptor_t spm_desc{};
 
     std::shared_ptr<std::vector<char>> container_desc_data{};
 
@@ -290,12 +287,9 @@ public:
     const SPM::Dlsym sym{};
 
 private:
-    static void aql_data_callback(aqlprofile_spm_buffer_handle_t, void*, size_t, int, void*);
-
     aqlprofile_spm_aql_packets_t packets{};
-
-    std::atomic<bool> running{false};
-    bool              is_valid{false};
+    std::atomic<bool>            running{false};
+    bool                         is_valid{false};
 };
 
 using ClientID = int64_t;

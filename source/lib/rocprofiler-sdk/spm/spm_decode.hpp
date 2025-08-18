@@ -21,13 +21,40 @@
 // SOFTWARE.
 
 #pragma once
+#include <cstddef>
+#include <cstdint>
+#include <vector>
 
-#include <rocprofiler-sdk/experimental/spm/decode.h>
-
+#include <rocprofiler-sdk/fwd.h>
 namespace rocprofiler
 {
 namespace SPM
 {
+struct values_vec_t
+{
+    std::vector<uint64_t> timestamps;
+    std::vector<uint64_t> values;
+};
+
+struct instances_t
+{
+    std::vector<values_vec_t> shaders;
+    bool                      is_global = false;
+};
+
+typedef struct
+{
+    void*  data;
+    size_t size;
+    size_t seg_size;
+    size_t buffer_num;
+} spm_descriptor_t;
+
+typedef std::vector<instances_t> counter_vec;
+void
+decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine, void* userdata);
+void
+aql_data_callback(size_t, void*, size_t, int /* flags */, void*);
 struct spm_counter_instance_t
 {
     rocprofiler_counter_id_t id;
@@ -58,5 +85,6 @@ struct spm_desc_v0_t
 
 static_assert((sizeof(spm_desc_v0_t) % sizeof(spm_counter_instance_t)) == 0 &&
               "invalid descriptor and counter combination");
+
 }  // namespace SPM
 }  // namespace rocprofiler

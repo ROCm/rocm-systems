@@ -24,4 +24,3 @@
 
 #include <rocprofiler-sdk/experimental/spm/capture.h>
 #include <rocprofiler-sdk/experimental/spm/core.h>
-#include <rocprofiler-sdk/experimental/spm/decode.h>

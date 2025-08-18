@@ -270,6 +270,14 @@ generate_stats(const output_config& /*cfg*/,
     return get_stats(rocjpeg_stats);
 }
 
+stats_entry_t
+generate_stats(const output_config& /*cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<rocprofiler_spm_counter_record_t>& /*data*/)
+{
+    return stats_entry_t{};
+}
+
 namespace
 {
 void

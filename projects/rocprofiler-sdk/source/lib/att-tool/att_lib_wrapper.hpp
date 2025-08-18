@@ -26,7 +26,6 @@
 #include "lib/common/filesystem.hpp"
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder.h>
-#include <rocprofiler-sdk/fwd.h>
 
 #include <algorithm>
 #include <fstream>
@@ -39,12 +38,6 @@ namespace rocprofiler
 namespace att_wrapper
 {
 using Fspath = rocprofiler::common::filesystem::path;
-
-struct counter_info_t
-{
-    std::string              name;
-    rocprofiler_counter_id_t id;
-};
 
 struct CodeobjLoadInfo
 {
@@ -74,19 +67,6 @@ public:
                const std::vector<CodeobjLoadInfo>& codeobj_files,
                const std::vector<std::string>&     counters_names,
                const std::string&                  output_formats);
-
-    /**
-     * Add a set of SPM counters to ATT output. This needs to be called before "parse".
-     * @param[in] output_dir location where ui_ files are generated
-     * @param[in] counters list of SPM counters used
-     * @param[in] descriptor SPM descriptor
-     * @param[in] spm_data SPM buffer data per XCC
-     */
-    void addSpm(const Fspath&                                          output_dir,
-                const std::map<rocprofiler_counter_id_t, std::string>& counters,
-                std::vector<char>&                                     descriptor,
-                std::vector<std::vector<char>>&                        spm_data);
-
     bool valid() const;
 
 protected:

@@ -23,10 +23,7 @@
 #include "att_lib_wrapper.hpp"
 #include "filenames.hpp"
 #include "occupancy.hpp"
-#include "outputfile.hpp"
-#include "perfcounter.hpp"
 #include "profile_interface.hpp"
-#include "spm.hpp"
 #include "wave.hpp"
 #include "wstates.hpp"
 
@@ -203,17 +200,5 @@ ATTDecoder::valid() const
 {
     return decoder.handle != 0;
 }
-
-void
-ATTDecoder::addSpm(const Fspath&                                          output_dir,
-                   const std::map<rocprofiler_counter_id_t, std::string>& counters,
-                   std::vector<char>&                                     descriptor,
-                   std::vector<std::vector<char>>&                        spm_data)
-{
-    SPMFile file(output_dir);
-    file.setCounters(counters);
-    file.addSpm(descriptor, spm_data);
-}
-
 }  // namespace att_wrapper
 }  // namespace rocprofiler

@@ -243,13 +243,13 @@ SPMPacketFactory::construct()
     pool->delete_packets_fn = pkt->sym.delete_packets_fn;
     pkt->pool               = std::move(pool);
 
-    pkt->desc.size =
+    pkt->spm_desc.size =
         sizeof(SPM::spm_desc_v0_t) + id_map.size() * sizeof(id_map[0]) + pkt->aql_desc.size;
 
-    pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->desc.size);
-    pkt->desc.data           = pkt->container_desc_data->data();
+    pkt->container_desc_data = std::make_shared<std::vector<char>>(pkt->spm_desc.size);
+    pkt->spm_desc.data       = pkt->container_desc_data->data();
 
-    auto* desc = static_cast<SPM::spm_desc_v0_t*>(pkt->desc.data);
+    auto* desc = static_cast<SPM::spm_desc_v0_t*>(pkt->spm_desc.data);
 
     *desc               = SPM::spm_desc_v0_t{};
     desc->aql_desc_size = pkt->aql_desc.size;
