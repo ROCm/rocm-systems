@@ -32,10 +32,16 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(compute_comm_overlap.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(compute_comm_overlap.cpp hip-streams-per-thread.cpp
+                            PROPERTIES LANGUAGE HIP)
 add_executable(hip-streams)
 target_sources(hip-streams PRIVATE compute_comm_overlap.cpp)
 target_link_libraries(hip-streams PRIVATE rocprofiler-sdk::tests-build-flags)
 
+add_executable(hip-streams-per-thread)
+target_sources(hip-streams-per-thread PRIVATE hip-streams-per-thread.cpp)
+target_link_libraries(hip-streams-per-thread PRIVATE rocprofiler-sdk::tests-build-flags)
+
 find_package(Threads REQUIRED)
 target_link_libraries(hip-streams PRIVATE Threads::Threads)
+target_link_libraries(hip-streams-per-thread PRIVATE Threads::Threads)

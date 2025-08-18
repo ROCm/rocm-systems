@@ -68,29 +68,21 @@ using stream_map_t = std::unordered_map<hipStream_t, rocprofiler_stream_id_t>;
 
 namespace
 {
-struct stream_info
-{
-    stream_map_t stream_map{};
-    uint64_t     idx_offset{0};
-    uint64_t     thread_counter{0};
-};
-
 auto*
-get_stream_info()
+get_stream_map()
 {
-    static auto*& _v = common::static_object<common::Synchronized<stream_info>>::construct();
+    static auto*& _v = common::static_object<common::Synchronized<stream_map_t>>::construct();
     return _v;
 }
 
 auto
 add_stream(hipStream_t stream)
 {
-    return get_stream_info()->wlock(
-        [](stream_info& _info, hipStream_t _stream) {
-            auto& _data      = _info.stream_map;
-            auto& idx_offset = _info.idx_offset;
+    return get_stream_map()->wlock(
+        [](stream_map_t& _data, hipStream_t _stream) {
+            static uint64_t idx_offset = 0;
 
-            auto idx = _data.size() + idx_offset + _info.thread_counter;
+            auto idx = _data.size() + idx_offset;
             ROCP_INFO << fmt::format(
                 "hipStream_t={} :: id={}.handle={}{}", static_cast<void*>(_stream), '{', idx, '}');
 
@@ -107,21 +99,15 @@ add_stream(hipStream_t stream)
                           << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
                 _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
             }
-
+            // Handle special hipStreamPerThread case where each thread has it's own implicit stream
+            // ID
+            if(_stream == hipStreamPerThread)
+            {
+                return rocprofiler_stream_id_t{.handle = idx};
+            }
             return _data.at(_stream);
         },
         stream);
-}
-
-auto
-create_stream_id()
-{
-    // Get wlock so that stream map size, idx_offset, and thread counter are safe.
-    // wlock needed since thread counter is modified. No associated hip stream key, so the
-    // stream map itself is not modified.
-    return rocprofiler_stream_id_t{.handle = get_stream_info()->wlock([](stream_info& _info) {
-        return _info.stream_map.size() + _info.idx_offset + _info.thread_counter++;
-    })};
 }
 
 auto
@@ -138,16 +124,16 @@ get_stream_id(hipStream_t stream)
     else if(stream == hipStreamPerThread)
     {
         static thread_local auto thr_stream_id = rocprofiler_stream_id_t{.handle = 0};
-        if(thr_stream_id.handle == 0) thr_stream_id = create_stream_id();
+        if(thr_stream_id.handle == 0) thr_stream_id = add_stream(stream);
         return thr_stream_id;
     }
-    return get_stream_info()->rlock(
-        [](const stream_info& _info, hipStream_t _stream) {
-            ROCP_ERROR_IF(_info.stream_map.count(_stream) == 0)
+    return get_stream_map()->rlock(
+        [](const stream_map_t& _data, hipStream_t _stream) {
+            ROCP_ERROR_IF(_data.count(_stream) == 0)
                 << fmt::format("failed to retrieve stream ID for hipStream_t ({}) in {}",
                                sdk::utility::as_hex(static_cast<void*>(_stream)),
                                __FILE__);
-            return _info.stream_map.at(_stream);
+            return _data.at(_stream);
         },
         stream);
 }

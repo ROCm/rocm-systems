@@ -23,9 +23,6 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-#include <thread>
-
 #include "hip/hip_runtime.h"
 
 #define BLOCKDIM 64
@@ -54,32 +51,6 @@ cube(double* input, double* output, size_t offset, size_t elements_per_stream)
     for(size_t id = tid + offset; id < offset + elements_per_stream; id += gstride)
         for(size_t i = 0; i < 1000; ++i)
             output[id] = input[id] * input[id] * input[id];
-}
-
-static void
-copy_to_dev()
-{
-    unsigned int n   = (32 * 1024);  // 32KB
-    double*      A_h = nullptr;
-    double*      A_d = nullptr;
-
-    HIP_ASSERT(hipHostMalloc(&A_h, n * sizeof(double)));
-    HIP_ASSERT(hipMalloc(&A_d, n * sizeof(double)));
-
-    for(unsigned int i = 0; i < n; ++i)
-    {
-        A_h[i] = 123.5;
-    }
-    HIP_ASSERT(
-        hipMemcpyAsync(A_d, A_h, n * sizeof(double), hipMemcpyHostToDevice, hipStreamPerThread));
-    // Repeat to make sure streams remain the same
-    HIP_ASSERT(
-        hipMemcpyAsync(A_d, A_h, n * sizeof(double), hipMemcpyHostToDevice, hipStreamPerThread));
-
-    // Release device memory
-    HIP_ASSERT(hipFree(A_d));
-    // Release host memory
-    HIP_ASSERT(hipHostFree(A_h));
 }
 
 int
@@ -139,9 +110,9 @@ main()
     const int gridSizePerStream = 104;  //(int)ceil((float)elements_per_stream/blockSize);
 
     HIP_ASSERT(hipEventRecord(start));
-    // Extra copy with hipStreamPerThread to ensure special case is handled
+    // Extra copy with null stream
     HIP_ASSERT(hipMemcpyAsync(
-        &d_input1[0], &h_input1[0], bytes_per_stream, hipMemcpyHostToDevice, hipStreamLegacy));
+        &d_input1[0], &h_input1[0], bytes_per_stream, hipMemcpyHostToDevice, nullptr));
     // split H2D copies and kernel calls into separate loops
     for(int i = 0; i < num_streams; i++)
     {
@@ -173,18 +144,6 @@ main()
 
     float milliseconds = 0;
     HIP_ASSERT(hipEventElapsedTime(&milliseconds, start, stop));
-
-    // Test hipStreamPerThread with multiple threads
-    const size_t             thread_cnt = 8;
-    std::vector<std::thread> threads(thread_cnt);
-    for(auto& thread : threads)
-    {
-        thread = std::thread(copy_to_dev);
-    }
-    for(auto& thread : threads)
-    {
-        thread.detach();
-    }
 
     // Release device memory
     HIP_ASSERT(hipFree(d_input1));
