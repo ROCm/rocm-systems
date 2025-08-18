@@ -324,7 +324,6 @@
         "SWDEV-444041: These tests fail randomly in gfx1030 MGU",
         "Unit_hipMemMap_SameMemoryReuse",
         "Unit_hipMemMap_negative",
-        "Unit_hipMemSetAccess_Vmm2PeerDevMemCpy",
         "SWDEV-444041: These tests fail in gfx1100 MGPU",
         "Unit_hipMemMap_PhysicalMemoryReuse_SingleGPU",
         "Unit_hipMemMap_PhysicalMemory_Map2MultVMMs",

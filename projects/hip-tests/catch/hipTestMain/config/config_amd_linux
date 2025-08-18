@@ -114,7 +114,6 @@
         "Unit_hipMemMap_PhysicalMemoryReuse_MultiDev",
         "Unit_hipMemMap_VMMMemoryReuse_MultiGPU",
         "Unit_hipMemSetAccess_FuncTstOnMultDev",
-        "Unit_hipMemSetAccess_Vmm2PeerDevMemCpy",
         "Unit_hipMemSetAccess_Vmm2VMMInterDevMemCpy",
         "Unit_hipMemSetAccess_GrowVMM",
         "Unit_hipMemMap_PhysicalMemory_Map2MultVMMs",
