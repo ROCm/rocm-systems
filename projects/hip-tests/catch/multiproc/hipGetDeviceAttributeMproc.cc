@@ -161,4 +161,4 @@ TEST_CASE("Unit_hipDeviceGetAttribute_MaskedDevices") {
     SUCCEED("Not enough GPUs to run the masked GPU tests");
   }
 }
-#endif
+#endif //__linux__

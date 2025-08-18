@@ -345,4 +345,4 @@ TEST_CASE("Unit_deviceAllocation_NewDelete_MultProcess") {
   REQUIRE(res == true);
 }
 
-#endif
+#endif //__linux__

@@ -390,4 +390,4 @@ TEST_CASE("Unit_hipMemGetInfo_VerifyHiddenFreeMemForAllGpu") {
   }
 }
 #endif
-#endif
+#endif // __linux__
