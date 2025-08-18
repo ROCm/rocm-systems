@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <cuda_profiler_api.h>
 #include <cuda_runtime_api.h>
 
+#include <driver_types.h>
 #include <stdio.h>
 
 #define CUDA_9000 9000
@@ -889,6 +890,30 @@ static inline void hipMemcpy2DTocudaMemcpy2D(CUDA_MEMCPY2D *a,
   a->Height = (size_t)p->Height;
 }
 
+#if CUDA_VERSION >= CUDA_12020
+typedef enum cudaMemcpyFlags hipMemcpyFlags;
+#define hipMemcpyFlagDefault cudaMemcpyFlagDefault
+#define hipMemcpyFlagPreferOverlapWithCompute cudaMemcpyFlagPreferOverlapWithCompute
+
+typedef enum cudaMemcpySrcAccessOrder hipMemcpySrcAccessOrder;
+#define hipMemcpySrcAccessOrderInvalid cudaMemcpySrcAccessOrderInvalid
+#define hipMemcpySrcAccessOrderStream cudaMemcpySrcAccessOrderStream
+#define hipMemcpySrcAccessOrderDuringApiCall cudaMemcpySrcAccessOrderDuringApiCall
+#define hipMemcpySrcAccessOrderAny cudaMemcpySrcAccessOrderAny
+#define hipMemcpySrcAccessOrderMax cudaMemcpySrcAccessOrderMax
+
+typedef struct cudaMemcpyAttributes hipMemcpyAttributes;
+typedef enum cudaMemcpy3DOperandType hipMemcpy3DOperandType;
+#define hipMemcpyOperandTypePointer cudaMemcpyOperandTypePointer
+#define hipMemcpyOperandTypeArray cudaMemcpyOperandTypeArray
+#define hipMemcpyOperandTypeMax cudaMemcpyOperandTypeMax
+
+typedef struct cudaOffset3D hipOffset3D;
+typedef struct cudaMemcpy3DOperand hipMemcpy3DOperand;
+typedef struct cudaMemcpy3DBatchOp hipMemcpy3DBatchOp;
+typedef struct cudaMemcpy3DPeerParms hipMemcpy3DPeerParms;
+#endif
+
 #define hipMemcpy3DParms cudaMemcpy3DParms
 #define hipArrayDefault cudaArrayDefault
 #define hipArrayLayered cudaArrayLayered
@@ -1003,6 +1028,15 @@ typedef enum cudaGraphInstantiateFlags hipGraphInstantiateFlags;
 #define hipGraphInstantiateFlagDeviceLaunch cudaGraphInstantiateFlagDeviceLaunch
 #define hipGraphInstantiateFlagUseNodePriority                                 \
   cudaGraphInstantiateFlagUseNodePriority
+
+typedef enum cudaDriverEntryPointQueryResult hipDriverEntryPointQueryResult;
+#define hipDriverEntryPointSuccess cudaDriverEntryPointSuccess
+#define hipDriverEntryPointSymbolNotFound cudaDriverEntryPointSymbolNotFound
+#define hipDriverEntryPointVersionNotSufficent cudaDriverEntryPointVersionNotSufficent
+
+#define hipEnableDefault cudaEnableDefault
+#define hipEnableLegacyStream cudaEnableLegacyStream
+#define hipEnablePerThreadDefaultStream cudaEnablePerThreadDefaultStream
 
 inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
   switch (cuError) {
@@ -1877,6 +1911,26 @@ typedef enum cudaKernelNodeAttrID hipKernelNodeAttrID;
 #define hipKernelNodeAttributePriority cudaKernelNodeAttributePriority
 
 #if CUDA_VERSION >= CUDA_12000
+typedef union cudaStreamAttrValue hipStreamAttrValue;
+typedef enum cudaStreamAttrID hipStreamAttrID;
+#define hipStreamAttributeAccessPolicyWindow cudaStreamAttributeAccessPolicyWindow
+#define hipStreamAttributeSynchronizationPolicy cudaStreamAttributeSynchronizationPolicy
+#define hipStreamAttributeMemSyncDomainMap cudaStreamAttributeMemSyncDomainMap
+#define hipStreamAttributeMemSyncDomain cudaStreamAttributeMemSyncDomain
+#define hipStreamAttributePriority cudaStreamAttributePriority
+
+typedef enum cudaSynchronizationPolicy hipSynchronizationPolicy;
+#define hipSyncPolicyAuto cudaSyncPolicyAuto
+#define hipSyncPolicySpin cudaSyncPolicySpin
+#define hipSyncPolicyYield cudaSyncPolicyYield
+#define hipSyncPolicyBlockingSync cudaSyncPolicyBlockingSync
+
+typedef enum cudaLaunchMemSyncDomain hipLaunchMemSyncDomain;
+#define hipLaunchMemSyncDomainDefault cudaLaunchMemSyncDomainDefault
+#define hipLaunchMemSyncDomainRemote cudaLaunchMemSyncDomainRemote
+#endif
+
+#if CUDA_VERSION >= CUDA_12000
 typedef enum cudaGraphInstantiateResult hipGraphInstantiateResult;
 #define hipGraphInstantiateSuccess cudaGraphInstantiateSuccess
 #define hipGraphInstantiateError cudaGraphInstantiateError
@@ -2086,7 +2140,28 @@ inline static hipError_t hipMemPrefetchAsync(const void *dev_ptr, size_t count,
       cudaMemPrefetchAsync(dev_ptr, count, device, stream));
 }
 
-inline static hipError_t hipMemRangeGetAttribute(void *data, size_t data_size,
+inline static hipError_t hipMemPrefetchAsync_v2(const void *dev_ptr, size_t count,
+                                                hipMemLocation location, unsigned int flags,
+                                                hipStream_t stream __dparm(0)) {
+#if CUDA_VERSION >= 13000
+    return hipCUDAErrorTohipError(cudaMemPrefetchAsync(dev_ptr, count, location, flags, stream));
+#else
+    return hipCUDAErrorTohipError(cudaMemPrefetchAsync_v2(dev_ptr, count, location, flags,
+                                                          stream));
+#endif
+}
+
+inline static hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count,
+                                         hipMemoryAdvise advice, hipMemLocation location) {
+#if CUDA_VERSION >= 13000
+    return hipCUDAErrorTohipError(cudaMemAdvise(dev_ptr, count, advice , location));
+#else
+    return hipCUDAErrorTohipError(cudaMemAdvise_v2(dev_ptr, count, advice , location));
+#endif
+}
+
+
+inline static hipError_t hipMemRangeGetAttribute(void* data, size_t data_size,
                                                  hipMemRangeAttribute attribute,
                                                  const void *dev_ptr,
                                                  size_t count) {
@@ -2208,8 +2283,11 @@ inline static hipError_t hipSetDevice(int device) {
   return hipCUDAErrorTohipError(cudaSetDevice(device));
 }
 
-inline static hipError_t hipChooseDevice(int *device,
-                                         const hipDeviceProp_t *prop) {
+inline static hipError_t hipSetValidDevices(int* device_arr, int len) {
+    return hipCUDAErrorTohipError(cudaSetValidDevices(device_arr, len));
+}
+
+inline static hipError_t hipChooseDevice(int* device, const hipDeviceProp_t* prop) {
 
   if (prop == NULL) {
     return hipErrorInvalidValue;
@@ -2463,11 +2541,31 @@ hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffset,
       dst, wOffset, hOffset, src, spitch, width, height, kind, stream));
 }
 
-__HIP_DEPRECATED inline static hipError_t
-hipMemcpyToArray(hipArray_t dst, size_t wOffset, size_t hOffset,
-                 const void *src, size_t count, hipMemcpyKind kind) {
-  return hipCUDAErrorTohipError(
-      cudaMemcpyToArray(dst, wOffset, hOffset, src, count, kind));
+inline static hipError_t hipMemcpyBatchAsync(void **dsts, void **srcs, size_t *sizes, size_t count,
+                                             hipMemcpyAttributes *attrs, size_t *attrsIdxs,
+                                             size_t numAttrs, size_t *failIdx, hipStream_t stream) {
+    return hipCUDAErrorTohipError(cudaMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs,
+                                                       numAttrs, failIdx, stream));
+}
+
+inline static hipError_t hipMemcpy3DBatchAsync(size_t numOps, hipMemcpy3DBatchOp *opList,
+                                               size_t *failIdx, unsigned long long flags,
+                                               hipStream_t stream) {
+    return hipCUDAErrorTohipError(cudaMemcpy3DBatchAsync(numOps, opList, failIdx, flags, stream));
+}
+inline static hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms *p) {
+    return hipCUDAErrorTohipError(cudaMemcpy3DPeer(p));
+}
+inline static hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms *p, hipStream_t stream) {
+    return hipCUDAErrorTohipError(cudaMemcpy3DPeerAsync(p, stream));
+}
+
+
+__HIP_DEPRECATED inline static hipError_t hipMemcpyToArray(hipArray_t dst, size_t wOffset,
+                                                           size_t hOffset, const void* src,
+                                                           size_t count, hipMemcpyKind kind) {
+    return hipCUDAErrorTohipError(
+        cudaMemcpyToArray(dst, wOffset, hOffset, src, count, kind));
 }
 
 __HIP_DEPRECATED inline static hipError_t
@@ -2641,11 +2739,43 @@ inline static hipError_t hipMemset3DAsync(hipPitchedPtr pitchedDevPtr,
       cudaMemset3DAsync(pitchedDevPtr, value, extent, stream));
 }
 
-inline static hipError_t hipGetDeviceProperties(hipDeviceProp_t *p_prop,
-                                                int device) {
-  if (p_prop == NULL) {
-    return hipErrorInvalidValue;
-  }
+inline static hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
+                                       size_t width, size_t height) {
+    return hipCUResultTohipError(cuMemsetD2D8(dst, dstPitch, value, width, height));
+}
+inline static hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch,
+                                            unsigned char value, size_t width, size_t height,
+                                            hipStream_t stream) {
+    return hipCUResultTohipError(cuMemsetD2D8Async(dst, dstPitch, value, width, height, stream));
+}
+
+inline static hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
+                                        size_t width, size_t height) {
+    return hipCUResultTohipError(cuMemsetD2D16(dst, dstPitch, value, width, height));
+}
+
+inline static hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch,
+                                             unsigned short value, size_t width, size_t height,
+                                             hipStream_t stream) {
+    return hipCUResultTohipError(cuMemsetD2D16Async(dst, dstPitch, value, width, height,
+                                                       stream));
+}
+
+inline static hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
+                                        size_t width, size_t height) {
+    return hipCUResultTohipError(cuMemsetD2D32(dst, dstPitch, value, width, height));
+}
+
+inline static hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
+                               size_t width, size_t height, hipStream_t stream) {
+    return hipCUResultTohipError(cuMemsetD2D32Async(dst, dstPitch, value, width, height,
+                                                       stream));
+}
+
+inline static hipError_t hipGetDeviceProperties(hipDeviceProp_t* p_prop, int device) {
+    if (p_prop == NULL) {
+       return hipErrorInvalidValue;
+    }
 
   struct cudaDeviceProp cdprop;
   hipError_t error =
@@ -3416,8 +3546,18 @@ inline static hipError_t hipStreamGetDevice(hipStream_t stream,
   return hipCUResultTohipError(cuCtxPopCurrent(&context));
 }
 
-inline static hipError_t hipDriverGetVersion(int *driverVersion) {
-  return hipCUDAErrorTohipError(cudaDriverGetVersion(driverVersion));
+inline static hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                               const hipStreamAttrValue* value) {
+    return hipCUDAErrorTohipError(cudaStreamSetAttribute(stream, attr, value));
+}
+
+inline static hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
+                                               hipStreamAttrValue* value_out) {
+    return hipCUDAErrorTohipError(cudaStreamGetAttribute(stream, attr, value_out));
+}
+
+inline static hipError_t hipDriverGetVersion(int* driverVersion) {
+    return hipCUDAErrorTohipError(cudaDriverGetVersion(driverVersion));
 }
 
 inline static hipError_t hipRuntimeGetVersion(int *runtimeVersion) {
@@ -3680,6 +3820,10 @@ inline static hipError_t hipModuleLoad(hipModule_t *module, const char *fname) {
   return hipCUResultTohipError(cuModuleLoad(module, fname));
 }
 
+inline static hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
+    return hipCUResultTohipError(cuModuleLoadFatBinary(module, fatbin));
+}
+
 inline static hipError_t hipModuleUnload(hipModule_t hmod) {
   return hipCUResultTohipError(cuModuleUnload(hmod));
 }
@@ -3690,9 +3834,12 @@ inline static hipError_t hipModuleGetFunction(hipFunction_t *function,
   return hipCUResultTohipError(cuModuleGetFunction(function, module, kname));
 }
 
-inline static hipError_t
-hipModuleGetTexRef(hipTexRef *pTexRef, hipModule_t hmod, const char *name) {
-  return hipCUResultTohipError(cuModuleGetTexRef(pTexRef, hmod, name));
+inline static hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
+    return hipCUResultTohipError(cuModuleGetFunctionCount(count, mod));
+}
+
+inline static hipError_t hipModuleGetTexRef(hipTexRef* pTexRef, hipModule_t hmod, const char* name){
+    return hipCUResultTohipError(cuModuleGetTexRef(pTexRef, hmod, name));
 }
 
 inline static hipError_t hipFuncGetAttributes(hipFuncAttributes *attr,
@@ -3863,13 +4010,18 @@ inline static hipError_t hipGetChannelDesc(hipChannelFormatDesc *desc,
   return hipCUDAErrorTohipError(cudaGetChannelDesc(desc, array));
 }
 
-inline static hipError_t hipLaunchCooperativeKernel(const void *f, dim3 gridDim,
-                                                    dim3 blockDim,
-                                                    void **kernelParams,
-                                                    unsigned int sharedMemBytes,
-                                                    hipStream_t stream) {
-  return hipCUDAErrorTohipError(cudaLaunchCooperativeKernel(
-      f, gridDim, blockDim, kernelParams, sharedMemBytes, stream));
+inline static hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr,
+                                                unsigned long long flags,
+                                                hipDriverEntryPointQueryResult* driverStatus)
+{
+    return hipCUDAErrorTohipError(cudaGetDriverEntryPoint(symbol, funcPtr, flags, driverStatus));
+}
+
+inline static hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDim,
+                                      void** kernelParams, unsigned int sharedMemBytes,
+                                      hipStream_t stream) {
+    return hipCUDAErrorTohipError(
+            cudaLaunchCooperativeKernel(f, gridDim, blockDim, kernelParams, sharedMemBytes, stream));
 }
 
 inline static hipError_t hipModuleLaunchCooperativeKernel(
@@ -5360,4 +5512,4 @@ inline static hipError_t hipSetValidDevices(int *device_arr, int len) {
 
 #endif //__CUDACC__
 
-#endif // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
+#endif  // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
