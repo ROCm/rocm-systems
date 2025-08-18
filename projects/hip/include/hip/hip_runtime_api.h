@@ -9759,6 +9759,28 @@ inline hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSiz
                                                     F kernel, size_t dynSharedMemPerBlk, uint32_t blockSizeLimit) {
 return hipOccupancyMaxPotentialBlockSize(gridSize, blockSize,(hipFunction_t)kernel, dynSharedMemPerBlk, blockSizeLimit);
 }
+
+/**
+ * @brief Returns dynamic shared memory available per block when launching numBlocks blocks on SM.
+ *
+ * @ingroup Occupancy
+ * Returns in \p *dynamicSmemSize the maximum size of dynamic shared memory /
+ * to allow numBlocks blocks per SM.
+ *
+ * @param [out] dynamicSmemSize Returned maximum dynamic shared memory.
+ * @param [in]  f               Kernel function for which occupancy is calculated.
+ * @param [in]  numBlocks       Number of blocks to fit on SM
+ * @param [in]  blockSize       Size of the block
+ *
+ * @return #hipSuccess, #hipErrorInvalidDevice, #hipErrorInvalidDeviceFunction, #hipErrorInvalidValue,
+ * #hipErrorUnknown
+ */
+template <typename F>
+inline hipError_t hipOccupancyAvailableDynamicSMemPerBlock(size_t* dynamicSmemSize, F f,
+                                                           int numBlocks, int blockSize) {
+    return hipOccupancyAvailableDynamicSMemPerBlock(dynamicSmemSize, (hipFunction_t)f,
+                                                    numBlocks, blockSize);
+}
 /**
  * @brief Launches a device function
  *
