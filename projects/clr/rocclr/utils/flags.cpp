@@ -119,11 +119,11 @@ bool Flag::init() {
 #else  // !_WIN32
 #ifdef __APPLE__
   char** environ = *_NSGetEnviron();
+#endif  // __APPLE__
+
   if (environ == NULL) {
     return false;
   }
-#endif  // __APPLE__
-
   for (const char** p = const_cast<const char**>(environ); *p != NULL; ++p) {
     std::string var = *p;
     size_t pos = var.find('=');
