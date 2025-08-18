@@ -24,6 +24,7 @@
 #include "platform/command_utils.hpp"
 
 #include <atomic>
+#include <sys/sdt.h>
 
 namespace amd::activity_prof {
 
@@ -57,6 +58,8 @@ void ReportActivity(const amd::Command& command) {
     // is nothing to report to the profiler.
     return;
   }
+
+  DTRACE_PROBE2(amd_activity_prof, report, operation_id, command);
 
   auto function = report_activity.load(std::memory_order_relaxed);
   if (!function) return;
