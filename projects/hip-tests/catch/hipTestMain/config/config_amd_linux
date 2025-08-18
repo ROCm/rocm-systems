@@ -23,7 +23,6 @@
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",
-        "Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout",
         "NOTE: The following test is disabled due to defect - EXSWHTEC-241",
         "NOTE: The following test is disabled due to defect - EXSWHTEC-242",
         "Unit_hipFuncGetAttributes_Positive_Basic",

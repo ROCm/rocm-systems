@@ -102,7 +102,6 @@
         "Unit_hipFuncSetCacheConfig_Positive_Basic",
         "Unit_hipFuncSetCacheConfig_Negative_Parameters",
         "Unit_hipFuncSetSharedMemConfig_Positive_Basic",
-        "Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_HstVisMem",
         "Unit_hipEventCreateWithFlags_DefaultFlg_HstVisMem",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_NonCohHstMem",
