@@ -76,9 +76,14 @@ jobs:
       run: |
         apt-get update
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
+        mkdir --parents --mode=0755 /etc/apt/keyrings
+        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
+        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         add-apt-repository ppa:git-core/ppa
         apt-get update
-        apt-get install -y git
+        apt-get install -y git rocm-llvm-dev
         python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
@@ -91,8 +96,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        mkdir -p /opt/rocm-custom
-        tar -xf *.tar.gz -C /opt/rocm-custom
+        tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - uses: actions/checkout@v4
       with:
@@ -105,7 +110,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev rocm-llvm-dev
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libgtest-dev libgmock-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
 
@@ -179,9 +184,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
-        sudo ln -s /opt/rocm-custom /opt/rocm
+        sudo tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        sudo ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - uses: actions/checkout@v4
       with:

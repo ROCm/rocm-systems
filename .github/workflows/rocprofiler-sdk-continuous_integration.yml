@@ -90,7 +90,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev
+        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -179,7 +179,7 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
-        
+
     - name: Build and Install Aqlprofile
       shell: bash
       working-directory: projects/aqlprofile
@@ -187,9 +187,9 @@ jobs:
         echo "Install Aqlprofile."
         /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         /usr/bin/cmake --build build --target all --parallel 16
-        sudo /usr/bin/cmake --build build --target install
+        /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
-  
+
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.runner, 'mi200') || contains(matrix.system.runner, 'mi300a') }}
       shell: bash
@@ -337,7 +337,7 @@ jobs:
         EOF
         sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk
+        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
@@ -353,7 +353,7 @@ jobs:
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk
+        sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel
 
     - name: Install Latest ROCm
       shell: bash
@@ -384,7 +384,7 @@ jobs:
           projects/aqlprofile
         submodules: true
         set-safe-directory: true
-        
+
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
@@ -428,7 +428,7 @@ jobs:
         /usr/bin/cmake --build build --target all --parallel 16
         sudo /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
-  
+
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
@@ -496,7 +496,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk
+        apt-get install -y rocm-openmp-sdk rocm-llvm-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -546,7 +546,7 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
-  
+
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
@@ -572,7 +572,7 @@ jobs:
         export PATH=/opt/rocm-custom/bin:$PATH
         /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         /usr/bin/cmake --build build --target all --parallel 16
-        sudo /usr/bin/cmake --build build --target install
+        /usr/bin/cmake --build build --target install
         echo "✅ Installation complete!"
 
     - name: Configure, Build, and Test
