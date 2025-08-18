@@ -122,6 +122,12 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters") {
 }
 
 TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice") {
+
+  if (HipTest::getDeviceCount() < 2) {
+    HipTest::HIP_SKIP_TEST("This test requires 2 GPUs. Skipping test");
+    return;
+  }
+
   HIP_CHECK(hipSetDevice(0));
 
   std::vector<hipLaunchParams> params_list(2);
