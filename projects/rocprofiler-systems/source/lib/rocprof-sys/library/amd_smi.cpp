@@ -131,27 +131,27 @@ metadata_initialize_smi_pmc(size_t gpu_id)
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_mm_busy>::value, "Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
-          COMPONENT, trace_cache::PERCENTAGE, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0,
-          0, "{}" });
+          COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
+          EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_temp>::value, "Temp",
           trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
-          CELSIUS_DEGREES, trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          CELSIUS_DEGREES, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_power>::value, "Pow",
           trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
-          "W", trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
+          "W", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
         { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
-          COMPONENT, tim::units::mem_repr(tim::units::megabyte), trace_cache::ABSOLUTE,
-          BLOCK, EXPRESSION, 0, 0 });
+          COMPONENT, tim::units::mem_repr(tim::units::megabyte),
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 }
 
 void
