@@ -293,7 +293,7 @@ FuncT create_destroy_functor(RetT (*func)(Args...))
         if(!callback_contexts.empty())
         {
             tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
+            tracer_data.stream_value.ptr = stream;
             tracing::execute_phase_none_callbacks(callback_contexts,
                                                   thr_id,
                                                   internal_corr_id,
@@ -352,7 +352,7 @@ FuncT create_read_functor(RetT (*func)(Args...))
         if(!callback_contexts.empty())
         {
             tracer_data.stream_id        = get_stream_id(stream);
-            tracer_data.stream_value.ptr = stream;  // Keep this stream value the same?
+            tracer_data.stream_value.ptr = stream;
             tracing::execute_phase_enter_callbacks(callback_contexts,
                                                    thr_id,
                                                    internal_corr_id,
