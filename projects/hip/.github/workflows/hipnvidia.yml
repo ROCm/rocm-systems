@@ -1,0 +1,11 @@
+name: NVidia nightly tests  
+on:  
+  schedule:
+    - cron: "0 0 * * *"
+  workflow_dispatch:  
+
+jobs:  
+  call-workflow:  
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/nvidia_nightly.yml@mainline
+    secrets: inherit  
+
