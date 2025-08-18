@@ -298,7 +298,7 @@ TEMPLATE_TEST_CASE("Unit_VectorAndValueTypeOperations_SanityCheck_Basic_Device",
 /**
  * Test Description
  * ------------------------
- *    - Checks that vectors can be used with structured bindigns
+ *    - Checks that vectors can be used with structured bindings
  *    - Tests from the host side
  * Test source
  * ------------------------
@@ -332,7 +332,7 @@ __global__ void generate_my_kernel()
 /**
  * Test Description
  * ------------------------
- *    - Checks that vectors can be used with structured bindigns
+ *    - Checks that vectors can work with constexpr
  *    - Tests from the host and device side
  * Test source
  * ------------------------
@@ -344,6 +344,90 @@ __global__ void generate_my_kernel()
 TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
   generate_my_kernel<<<1, 1>>>();
   static_assert(func());
+}
+
+__host__ __device__ void check_alignment() {
+  // char/uchar
+  static_assert(std::alignment_of_v<char1> == 1);
+  static_assert(std::alignment_of_v<char2> == 2);
+  static_assert(std::alignment_of_v<char3> == 1);
+  static_assert(std::alignment_of_v<char4> == 4);
+  static_assert(std::alignment_of_v<uchar1> == 1);
+  static_assert(std::alignment_of_v<uchar2> == 2);
+  static_assert(std::alignment_of_v<uchar3> == 1);
+  static_assert(std::alignment_of_v<uchar4> == 4);
+
+  // short/ushort
+  static_assert(std::alignment_of_v<short1> == 2);
+  static_assert(std::alignment_of_v<short2> == 4);
+  static_assert(std::alignment_of_v<short3> == 2);
+  static_assert(std::alignment_of_v<short4> == 8);
+  static_assert(std::alignment_of_v<ushort1> == 2);
+  static_assert(std::alignment_of_v<ushort2> == 4);
+  static_assert(std::alignment_of_v<ushort3> == 2);
+  static_assert(std::alignment_of_v<ushort4> == 8);
+
+  // int/uint
+  static_assert(std::alignment_of_v<int1> == 4);
+  static_assert(std::alignment_of_v<int2> == 8);
+  static_assert(std::alignment_of_v<int3> == 4);
+  static_assert(std::alignment_of_v<int4> == 16);
+  static_assert(std::alignment_of_v<uint1> == 4);
+  static_assert(std::alignment_of_v<uint2> == 8);
+  static_assert(std::alignment_of_v<uint3> == 4);
+  static_assert(std::alignment_of_v<uint4> == 16);
+
+  // long/ulong
+  constexpr size_t long_size = sizeof(long);  // needed to handle MSVC long defintion
+  static_assert(std::alignment_of_v<long1> == long_size);
+  static_assert(std::alignment_of_v<long2> == 2 * long_size);
+  static_assert(std::alignment_of_v<long3> == long_size);
+  static_assert(std::alignment_of_v<long4> == 4 * long_size);
+  static_assert(std::alignment_of_v<ulong1> == long_size);
+  static_assert(std::alignment_of_v<ulong2> == 2 * long_size);
+  static_assert(std::alignment_of_v<ulong3> == long_size);
+  static_assert(std::alignment_of_v<ulong4> == 4 * long_size);
+
+  // longlong/ulonglong
+  static_assert(std::alignment_of_v<longlong1> == 8);
+  static_assert(std::alignment_of_v<longlong2> == 16);
+  static_assert(std::alignment_of_v<longlong3> == 8);
+  static_assert(std::alignment_of_v<longlong4> == 32);
+  static_assert(std::alignment_of_v<ulonglong1> == 8);
+  static_assert(std::alignment_of_v<ulonglong2> == 16);
+  static_assert(std::alignment_of_v<ulonglong3> == 8);
+  static_assert(std::alignment_of_v<ulonglong4> == 32);
+
+  // float
+  static_assert(std::alignment_of_v<float1> == 4);
+  static_assert(std::alignment_of_v<float2> == 8);
+  static_assert(std::alignment_of_v<float3> == 4);
+  static_assert(std::alignment_of_v<float4> == 16);
+
+  // double
+  static_assert(std::alignment_of_v<double1> == 8);
+  static_assert(std::alignment_of_v<double2> == 16);
+  static_assert(std::alignment_of_v<double3> == 8);
+  static_assert(std::alignment_of_v<double4> == 32);
+}
+
+__global__ void check_alignment_device() { static_assert(func()); }
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Compile-time test checking vector type alignement
+ *    - Tests from the host and device side
+ * Test source
+ * ------------------------
+ *    - unit/vector_types/vector_types.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_Vector_alignment_check", "") {
+  check_alignment_device<<<1, 1>>>();
+  check_alignment();
 }
 #endif  // HT_AMD
 
