@@ -175,7 +175,7 @@ void *khrIcdOsLibraryLoad(const char *libraryName)
     void *retVal = dlopen (libraryName, RTLD_NOW);
 
     if (NULL == retVal) {
-        printf("dlerror: %s\n", dlerror());
+        fprintf(stderr, "dlerror: %s\n", dlerror());
     }
 
     return retVal;
