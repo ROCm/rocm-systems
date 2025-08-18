@@ -68,7 +68,7 @@ endmacro()
 
 ctest_start(Continuous)
 
-ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _update_ret)
+ctest_update(SOURCE "${CTEST_SOURCE_DIRECTORY}" RETURN_VALUE _update_ret)
 handle_error("Update" _update_ret)
 
 ctest_configure(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _configure_ret)
@@ -76,12 +76,12 @@ dashboard_submit(PARTS Start Update Configure RETURN_VALUE _submit_ret)
 
 handle_error("Configure" _configure_ret)
 
-ctest_build(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _build_ret)
+ctest_build(BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _build_ret)
 dashboard_submit(PARTS Build RETURN_VALUE _submit_ret)
 
 handle_error("Build" _build_ret)
 
-ctest_test(SOURCE "${CTEST_SOURCE_DIRECTORY}" BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _test_ret)
+ctest_test(BUILD "${CTEST_BINARY_DIRECTORY}" RETURN_VALUE _test_ret)
 dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
 
 handle_error("Testing" _test_ret)
