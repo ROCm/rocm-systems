@@ -90,7 +90,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
+        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -337,7 +337,7 @@ jobs:
         EOF
         sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
+        sudo dnf install -y rocm-openmp-sdk
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
@@ -353,7 +353,7 @@ jobs:
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
+        sudo zypper install -y rocm-openmp-sdk
 
     - name: Install Latest ROCm
       shell: bash
@@ -496,7 +496,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
+        apt-get install -y rocm-openmp-sdk
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
