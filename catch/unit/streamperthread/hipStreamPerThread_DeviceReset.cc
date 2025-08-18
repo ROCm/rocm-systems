@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -88,6 +88,9 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
   if (status != hipSuccess) return;
   HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
 
+  // Host Memory is not destroyed with hipDeviceReset, need to free it
+  // explicitly to avoid memory leaks
+  HIP_CHECK(hipHostFree(A_h));
   HIP_CHECK(hipDeviceReset());
 
   // After reset all memory objects will be destroyed hence allocating them again
