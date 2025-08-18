@@ -418,6 +418,9 @@ hipError_t StatCO::getStatFuncAttr(hipFuncAttributes* func_attr, const void* hos
   if (*(module) == nullptr) {
     hipError_t err = digestFatBinary(module_to_hostModule_[module], *module);
     assert(err == hipSuccess);
+    if (err == hipErrorNoBinaryForGpu) {
+      return err;
+    }
   }
 
   return it->second->getStatFuncAttr(func_attr, deviceId);
