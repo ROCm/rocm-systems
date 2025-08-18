@@ -180,7 +180,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat /opt/rocm/.info/version
         ls -la
 
     - name: Build and Install Aqlprofile
@@ -213,6 +213,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.system.ci-flags }}
           --
@@ -336,9 +337,9 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
-        sudo ln -s /opt/rocm-custom /opt/rocm
+        sudo mkdir -p /opt/rocm
+        sudo tar -xf *.tar.gz -C /opt/rocm
+        sudo ln -s /opt/rocm /opt/rocm
 
     - name: Checkout
       uses: actions/checkout@v5
@@ -466,12 +467,9 @@ jobs:
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-          echo 'HIP_COMPILER=amdclang' >> $GITHUB_ENV
-          echo 'HIP_CLANG_PATH=/opt/rocm-custom/llvm/bin' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=/opt/rocm-custom/llvm/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'HSA_PATH=/opt/rocm-custom' >> $GITHUB_ENV
-          echo 'LLVM_PATH=/opt/rocm-custom/llvm' >> $GITHUB_ENV
+          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+          echo 'CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}' >> $GITHUB_ENV
 
     - name: List Files
       shell: bash
@@ -481,7 +479,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat /opt/rocm/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -510,7 +508,7 @@ jobs:
           -DROCPROFILER_BUILD_DOCS=OFF
           -DOPENMP_GPU_TARGETS=''
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
@@ -557,8 +555,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm-custom
-        sudo tar -xf *.tar.gz -C /opt/rocm-custom
+        sudo mkdir -p /opt/rocm
+        sudo tar -xf *.tar.gz -C /opt/rocm
 
     - name: Checkout
       uses: actions/checkout@v5
@@ -622,7 +620,7 @@ jobs:
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-custom/.info/version
+        cat /opt/rocm/.info/version
         ls -la
 
     - name: Enable PC Sampling
@@ -671,8 +669,7 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
-          -DCMAKE_PREFIX_PATH='/opt/rocm-custom;/opt/rocm-custom/lib;/opt/rocm-custom/lib/cmake;/opt/rocm-custom/llvm;/opt/rocm-custom/llvm/lib'
-          -DOPENMP_GPU_TARGETS=''
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
           ${{ env.GLOBAL_CMAKE_OPTIONS }}
           --
