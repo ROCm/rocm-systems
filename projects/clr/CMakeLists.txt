@@ -32,6 +32,8 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         add_compile_options(/MTd)
         add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
     endif()
+else()
+    add_link_options("-Wl,--undefined-version")
 endif()
 
 if (AMD_COMPUTE_WIN)
