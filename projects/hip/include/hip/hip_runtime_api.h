@@ -271,6 +271,11 @@ typedef enum hipMemoryType {
 
 } hipMemoryType;
 
+typedef enum hipModuleLoadingMode_t {
+  HIP_MODULE_EAGER_LOADING = 1,
+  HIP_MODULE_LAZY_LOADING = 2
+} hipModuleLoadingMode_t;
+
 /**
  * Pointer attributes
  */
@@ -6289,6 +6294,15 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  */
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
 
+/**
+ * @brief Function gets the current module load mode
+ *
+ * @param [out] module  mode of current module load
+ *
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidContext, #hipErrorNotInitialized,
+ * #hipErrorNotFound,
+ */
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);
 /**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
