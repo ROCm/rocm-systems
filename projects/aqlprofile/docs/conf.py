@@ -27,7 +27,7 @@ with open('../CMakeLists.txt', encoding='utf-8') as f:
                       f.read())
     if not match:
         raise ValueError("VERSION not found!")
-version_number = "1.0"
+    version_number = "1.0.0"
 
 # for PDF output on Read the Docs
 project = "AQLprofile"
