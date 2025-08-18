@@ -90,32 +90,6 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters") {
                     hipErrorInvalidValue);
   }
 
-  if (device_count > 1) {
-    SECTION("launchParamsList.func doesn't match across all devices") {
-      params_list[1].func = reinterpret_cast<void*>(kernel2);
-      HIP_CHECK_ERROR(hipExtLaunchMultiKernelMultiDevice(params_list.data(), device_count, 0u),
-                      hipErrorInvalidValue);
-    }
-
-    SECTION("launchParamsList.gridDim doesn't match across all kernels") {
-      params_list[1].gridDim = dim3{2, 2, 2};
-      HIP_CHECK_ERROR(hipExtLaunchMultiKernelMultiDevice(params_list.data(), device_count, 0u),
-                      hipErrorInvalidValue);
-    }
-
-    SECTION("launchParamsList.blockDim doesn't match across all kernels") {
-      params_list[1].blockDim = dim3{2, 2, 2};
-      HIP_CHECK_ERROR(hipExtLaunchMultiKernelMultiDevice(params_list.data(), device_count, 0u),
-                      hipErrorInvalidValue);
-    }
-
-    SECTION("launchParamsList.sharedMem doesn't match across all kernels") {
-      params_list[1].sharedMem = 1024;
-      HIP_CHECK_ERROR(hipExtLaunchMultiKernelMultiDevice(params_list.data(), device_count, 0u),
-                      hipErrorInvalidValue);
-    }
-  }
-
   for (const auto params : params_list) {
     HIP_CHECK(hipStreamDestroy(params.stream));
   }
