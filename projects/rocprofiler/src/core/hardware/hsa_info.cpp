@@ -123,8 +123,7 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
     minor_version_str = std::to_string(minor_version);
   if (major_version > 11 || (major_version == 9 && minor_version > 4))
     rocprofiler::fatal(
-        "rocprofv2 doesn't support newer hardware navi4x, mi35x and later. use rocprofv3 tool for "
-        "new features and support.");
+        "Unsupported hardware. Use rocprofv3 tool for navi4x, mi35x and later.");
   stepping = (gfx_target_version % 100);
   if (stepping > 9)
     stepping_str = std::string(1, convert(stepping));
