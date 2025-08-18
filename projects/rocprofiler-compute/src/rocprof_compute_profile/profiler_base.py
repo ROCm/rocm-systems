@@ -298,6 +298,9 @@ class RocProfCompute_Base:
         """Perform any pre-processing steps prior to profiling."""
         console_debug("profiling", "pre-processing using %s profiler" % self.__profiler)
 
+        if self.__args.pid:
+            self.__args.remaining = ""
+
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
             console_error(
@@ -324,21 +327,20 @@ class RocProfCompute_Base:
                     % self.__args.remaining[0]
                 )
             self.__args.remaining = " ".join(self.__args.remaining)
-        else:
-            if not self.__args.pid:
-                console_error(
-                    (
-                        "Profiling command required. Pass application executable after -- "
-                        "at the end of options.\n"
-                        "\t\ti.e. rocprof-compute profile -n vcopy -- "
-                        "./vcopy -n 1048576 -b 256"
-                    )
+        elif not self.__args.pid:
+            console_error(
+                (
+                    "Profiling command required. Pass application executable after -- "
+                    "at the end of options.\n"
+                    "\t\ti.e. rocprof-compute profile -n vcopy -- "
+                    "./vcopy -n 1048576 -b 256"
                 )
+            )
 
         gen_sysinfo(
             workload_name=self.__args.name,
             workload_dir=self.get_args().path,
-            app_cmd=self.__args.remaining if self.__args.remaining else "",
+            app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
             mspec=self._soc._mspec,
             soc=self._soc,
@@ -442,11 +444,7 @@ class RocProfCompute_Base:
             # Only 1-run case is permitted for attach/detach
             if ((isinstance(options, list) and "--pid" in options) or (isinstance(options, dict) and (options.get("ROCPROF_ATTACH_PID") is not None))):
                 if total_runs > 1:
-                    console_error(
-                        "Attach/Detach can only work with 1 run of application. Current configuration needs {} times of replay of application".format(
-                            total_runs
-                        )
-                    )
+                    console_error(f"Cannot attach process for profiling as number of required application replays {total_runs} is greater than 1")
 
             if (
                 self.__profiler == "rocprofv1"
@@ -476,7 +474,6 @@ class RocProfCompute_Base:
             else:
                 console_error("Profiler not supported")
             total_profiling_time_so_far += actual_profiling_duration
-
         # PC sampling data is only collected when block "21" is specified
         if "21" in self.get_args().filter_blocks and self.__profiler in (
             "rocprofv3",

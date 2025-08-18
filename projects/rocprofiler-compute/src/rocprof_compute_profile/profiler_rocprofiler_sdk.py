@@ -40,9 +40,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        app_cmd = (
-            shlex.split(self.get_args().remaining) if not self.get_args().pid else ""
-        )
+        app_cmd = shlex.split(self.get_args().remaining)
 
         rocm_libdir = str(Path(self.get_args().rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(

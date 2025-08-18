@@ -40,9 +40,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         )
 
     def get_profiler_options(self, fname, soc):
-        app_cmd = (
-            shlex.split(self.get_args().remaining) if not self.get_args().pid else ""
-        )
+        app_cmd = shlex.split(self.get_args().remaining)
 
         trace_option = "--kernel-trace"
         if self.get_args().kokkos_trace:

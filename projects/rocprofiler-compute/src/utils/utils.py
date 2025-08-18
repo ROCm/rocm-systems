@@ -39,6 +39,7 @@ import threading
 import time
 import sys
 import ctypes
+import select
 from pathlib import Path as path
 from typing import Optional
 
@@ -344,20 +345,33 @@ def capture_subprocess_output(
     selector.register(process.stdout, selectors.EVENT_READ, handle_output)
 
     def forward_input():
-        try:
+        # Check if sys.stdin is a tty or has data ready to read
+        if sys.stdin.isatty():
+            # Interactive input is available; forward line by line
             for line in sys.stdin:
                 if process.poll() is not None:
                     break
                 process.stdin.write(line)
                 process.stdin.flush()
+        else:
+            # sys.stdin is not a tty (probably piped or empty), use select to check for data
+            while process.poll() is None:
+                # Use select to check if there's data to read
+                rlist, _, _ = select.select([sys.stdin], [], [], 0.1)
+                if rlist:
+                    line = sys.stdin.readline()
+                    if not line:
+                        break
+                    process.stdin.write(line)
+                    process.stdin.flush()
+                else:
+                    # No data ready to read, avoid busy wait
+                    continue
+        try:
+            process.stdin.close()
         except Exception:
-            pass
-        finally:
-            try:
-                process.stdin.close()
-            except Exception:
-                pass
-
+            console_warning("forward_input: the stdin did not close properly!")
+            
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
@@ -377,7 +391,6 @@ def capture_subprocess_output(
     buf.close()
 
     return (success, output)
-
 
 # Create a dictionary that maps agent ID to agent objects
 def get_agent_dict(data):
@@ -858,8 +871,10 @@ def run_prof(
                 c_lib.attach(int(pid))
                 duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
                 if duration is None:
-                    input(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
+                    console_log(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
+                    input()
                 else:
+                    console_log(f"\033[93mAttach to process with ID {pid} is successful, detach will happen in {duration} miliseconds...\033[0m")
                     time.sleep(int(duration) / 1000)
                 c_lib.detach()
             

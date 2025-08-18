@@ -128,7 +128,7 @@ Examples:
         metavar="",
         default=None,
         required=False,
-        help="\t\t\tenable attach/detach mode and set its process id.",
+        help="\t\t\tProcess id to be attached for profiling.",
     )
     profile_group.add_argument(
         "--attach-duration-msec",
