@@ -120,4 +120,4 @@ provides source portability to either platform.   HIP provides the _hipcc_ compi
 ## Reporting an issue
 
 Use the [GitHub issue tracker](https://github.com/ROCm/HIP/issues).
-If reporting a bug, include the output of "hipconfig --full" and samples/1_hipInfo/hipInfo (if possible).
+If reporting a bug, include the output of "hipconfig --full" and samples/1_hipInfo/hipInfo (if possible).  
