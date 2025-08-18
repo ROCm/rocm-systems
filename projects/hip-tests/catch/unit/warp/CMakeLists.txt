@@ -10,6 +10,7 @@ set(TEST_SRC
   hipShflSyncXorTests.cc
   hipShflSyncTests.cc
   hipVoteSyncTests.cc
+  syncwarp.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")
