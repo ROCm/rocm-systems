@@ -224,17 +224,37 @@ unsigned long long __match_any(T value) {
           (sizeof(T) == 4 || sizeof(T) == 8),
       "T can be int, unsigned int, long, unsigned long, long long, unsigned "
       "long long, float or double.");
-  bool done = false;
-  unsigned long long retval = 0;
 
-  while (__any(!done)) {
-    if (!done) {
-      T chosen = __hip_readfirstlane(value);
-      if (chosen == value) {
-        retval = __activemask();
-        done = true;
+  unsigned long long actvmask = __activemask();
+  unsigned long long retval = 0;
+  if (actvmask != ~0ull) {
+    bool done = false;
+    while (__any(!done)) {
+      if (!done) {
+        T chosen = __hip_readfirstlane(value);
+        if (chosen == value) {
+          retval = __activemask();
+          done = true;
+        }
       }
     }
+  } else {
+    union dill { unsigned int i[2]; unsigned long long ill; decltype(value) val; } dill_ = { .val = value };
+    retval = 1;
+    //Do a full rotate of the wave lanes, using dpp with "wave_rol1" control (ID: 0x134).
+    //wave_rol1 dpp rotates the value from each lane to one lane left of it, across the whole wave.
+    //In doing so each lane gets a mask of matches with all other lanes in the wave in retval.
+    for (int i = 1; i < static_cast<int>(warpSize); i++) {
+      if constexpr (sizeof(value) == 8)
+        dill_.ill = __builtin_amdgcn_mov_dpp(dill_.ill, 0x134 /*dpp_ctrl=wave_rol1*/, 0xf/*row_mask*/, 0xf/*clmn_mask*/, 1/*bound_ctrl*/);
+      else
+        dill_.i[0] = __builtin_amdgcn_mov_dpp(dill_.i[0], 0x134 /*dpp_ctrl=wave_rol1*/, 0xf/*full*/, 0xf/*full*/, 1/*bound_ctrl*/);
+      retval |= ((unsigned long long)(dill_.val == value)) << i;
+    }
+    //At this point each lane has a rotated match_any mask, where it is in the LSB.
+    //So we just need to rotate the mask by the lane's actual position to get the correct mask.
+    int rotv = __lane_id();
+    retval = (retval << rotv) | (retval >> (static_cast<int>(warpSize) - rotv));
   }
 
   return retval;
