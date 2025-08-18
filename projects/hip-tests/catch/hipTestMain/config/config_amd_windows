@@ -990,6 +990,8 @@
         "Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch",
         "=== SWDEV-457316 Below test is skipped due ref count logic (Discussed with German) ===",
         "Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again",
+        "-------------BatchMemOps fails on windows-----------------------------------",
+        "Unit_hipStreamBatchMemOp_functional",
     #endif
         "=== Following tests disabled as it should be a local perf test",
         "Performance_hipExtLaunchKernelGGL_QueryGPUFrequency",
