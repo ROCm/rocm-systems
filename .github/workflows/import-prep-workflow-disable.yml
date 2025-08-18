@@ -1,0 +1,44 @@
+# Import Prep: Disable Workflows
+# ------------------------------
+# This GitHub Actions workflow disables all non-Import-related workflows in the repository.
+# This is useful as a preparatory step before performing a bulk import of issues from another repository.
+name: "Import Prep: Disable workflows"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  disable-workflows:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Validate maintainer permissions
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Actor is: ${{ github.actor }}"
+          PERMISSION=$(gh api \
+            repos/${{ github.repository }}/collaborators/${{ github.actor }}/permission \
+            --jq .permission)
+          if [[ "$PERMISSION" != "admin" && "$PERMISSION" != "maintain" ]]; then
+            echo "❌ User ${{ github.actor }} is not authorized to run this workflow"
+            exit 1
+          fi
+
+      - name: Generate a token
+        id: generate-token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Disable Workflows except Import
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+        run: |
+          workflows=$(gh api --paginate repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | {id, name}')
+          echo "$workflows" | jq -c '. | select(.name | startswith("Import") | not)' | while read wf; do
+            id=$(echo "$wf" | jq '.id')
+            name=$(echo "$wf" | jq -r '.name')
+            gh api --method PUT repos/${{ github.repository }}/actions/workflows/$id/disable --silent
+          done

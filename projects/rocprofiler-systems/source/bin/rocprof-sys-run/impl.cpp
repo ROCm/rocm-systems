@@ -250,6 +250,32 @@ print_updated_environment(parser_data_t& _data, std::string_view _prefix)
 parser_data_t&
 parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
 {
+    using parser_t     = argparse::argument_parser;
+    using parser_err_t = typename parser_t::result_type;
+
+    auto help_check = [](parser_t& p, int _argc, char** _argv) {
+        std::set<std::string> help_args = { "-h", "--help", "-?" };
+        return (p.exists("help") || _argc == 1 ||
+                (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
+    };
+
+    auto _pec        = EXIT_SUCCESS;
+    auto help_action = [&_pec, argc, argv](parser_t& p) {
+        if(_pec != EXIT_SUCCESS)
+        {
+            std::stringstream msg;
+            msg << "Error in command:";
+            for(int i = 0; i < argc; ++i)
+                msg << " " << argv[i];
+            msg << "\n\n";
+            stream(std::cerr, color::fatal()) << msg.str();
+            std::cerr << std::flush;
+        }
+
+        p.print_help();
+        exit(_pec);
+    };
+
     get_initial_environment(_parser_data);
 
     bool _do_parse_args = false;
@@ -266,20 +292,11 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
 
     if(!_do_parse_args) return parse_command(argc, argv, _parser_data);
 
-    using parser_t     = argparse::argument_parser;
-    using parser_err_t = typename parser_t::result_type;
-
     toggle_suppression(initial_suppression);
     rocprofsys::argparse::init_parser(_parser_data);
 
     // no need for backtraces
     signals::disable_signal_detection(signals::signal_settings::get_enabled());
-
-    auto help_check = [](parser_t& p, int _argc, char** _argv) {
-        std::set<std::string> help_args = { "-h", "--help", "-?" };
-        return (p.exists("help") || _argc == 1 ||
-                (_argc > 1 && help_args.find(_argv[1]) != help_args.end()));
-    };
 
     const auto* _desc = R"desc(
     Command line interface to rocprof-sys configuration.
@@ -292,7 +309,7 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
         exit(EXIT_FAILURE);
     });
 
-    parser.enable_help("", "Usage: rocprof-sys-run <OPTIONS> -- <COMMAND> <ARGS>");
+    parser.enable_help();
     parser.enable_version("rocprof-sys-run", ROCPROFSYS_ARGPARSE_VERSION_INFO);
 
     auto _cols = std::get<0>(console::get_columns());
@@ -337,11 +354,10 @@ parse_args(int argc, char** argv, parser_data_t& _parser_data, bool& _fork_exec)
     }
 
     auto _cerr = parser.parse_args(_inpv.size(), _inpv.data());
-    if(_cerr)
-    {
-        std::cerr << _cerr.what() << std::endl;
-        exit(EXIT_FAILURE);
-    }
+    if(help_check(parser, argc, argv))
+        help_action(parser);
+    else if(_cerr)
+        throw std::runtime_error(_cerr.what());
 
     tim::log::monochrome() = _parser_data.monochrome;
 

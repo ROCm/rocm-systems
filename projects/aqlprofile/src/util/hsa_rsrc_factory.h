@@ -72,16 +72,16 @@ typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
 // handle, name, max queue size, max wavefront size, etc.
 struct AgentInfo {
   // Handle of Agent
-  hsa_agent_t dev_id;
+  hsa_agent_t dev_id{};
 
   // Agent type - Cpu = 0, Gpu = 1 or Dsp = 2
-  uint32_t dev_type;
+  uint32_t dev_type{};
 
   // APU flag
-  bool is_apu;
+  bool is_apu{};
 
   // Agent system index
-  uint32_t dev_index;
+  uint32_t dev_index{};
 
   // GFXIP name
   char gfxip[64];
@@ -90,13 +90,13 @@ struct AgentInfo {
   char name[64];
 
   // Max size of Wavefront size
-  uint32_t max_wave_size;
+  uint32_t max_wave_size{};
 
   // Max size of Queue buffer
-  uint32_t max_queue_size;
+  uint32_t max_queue_size{};
 
   // Hsail profile supported by agent
-  hsa_profile_t profile;
+  hsa_profile_t profile{};
 
   // CPU/GPU/kern-arg memory pools
   hsa_amd_memory_pool_t cpu_pool;
@@ -104,16 +104,16 @@ struct AgentInfo {
   hsa_amd_memory_pool_t kern_arg_pool;
 
   // The number of compute unit available in the agent.
-  uint32_t cu_num;
+  uint32_t cu_num{};
 
   // Maximum number of waves possible in a Compute Unit.
-  uint32_t waves_per_cu;
+  uint32_t waves_per_cu{};
 
   // Number of SIMD's per compute unit CU
-  uint32_t simds_per_cu;
+  uint32_t simds_per_cu{};
 
   // Number of Shader Engines (SE) in Gpu
-  uint32_t se_num;
+  uint32_t se_num{};
 
   // Number of MI3000 XCC
   uint32_t xcc_num{1};
@@ -125,7 +125,10 @@ struct AgentInfo {
   uint32_t bdf_id{0};
 
   // Number of Shader Arrays Per Shader Engines in Gpu
-  uint32_t shader_arrays_per_se;
+  uint32_t shader_arrays_per_se{};
+
+  // Timestamp frequency for realtime clock
+  uint32_t timestamp_freq{0};
 };
 
 // HSA timer class

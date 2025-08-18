@@ -23,7 +23,7 @@
 /projects/rocprofiler-register/                                       @ammarwa @bgopesh
 /projects/rocprofiler-sdk/                                            @jrmadsen @t-tye
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
-/projects/rocr-runtime/                                               @kentrussell @fxkamd @dayatsin-amd
+/projects/rocr-runtime/                                               @kentrussell @dayatsin-amd @cfreeamd
 /projects/roctracer/                                                  @ammarwa @bgopesh
 
 # rocprofiler-sdk section-specific code owners
@@ -42,6 +42,14 @@
 /projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-tool             @SrirakshaNag
 /projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
 
+# rocr-runtime section-specific code owners
+/projects/rocr-runtime/libhsakmt                                      @kentrussell @dayatsin-amd
+/projects/rocr-runtime/rocrtst                                        @shwetagkhatri @cfreeamd
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/xdna           @atgutier @ypapadop-amd
+/projects/rocr-runtime/runtime/hsa-runtime/core/driver/virtio         @dayatsin-amd
+/projects/rocr-runtime/runtime/hsa-runtime/loader                     @dayatsin-amd @kzhuravl
+/projects/rocr-runtime/runtime/hsa-runtime/image                      @shwetagkhatri @dayatsin-amd
+/projects/rocr-runtime/runtime/hsa-runtime/pcs                        @shwetagkhatri @dayatsin-amd
 
 # Documentation-specific ownership by project
 /projects/aqlprofile/**/*.md                                          @ammarwa @bgopesh @ROCm/rocm-documentation
@@ -82,9 +90,9 @@
 /projects/rocprofiler-systems/**/.readthedocs.yaml                    @ROCm/rocprof-sys @jrmadsen @ROCm/rocm-documentation
 /projects/rocprofiler-systems/docs/                                   @ROCm/rocprof-sys @jrmadsen @ROCm/rocm-documentation
 
-/projects/rocr-runtime/**/*.md                                        @kentrussell @fxkamd @dayatsin-amd @ROCm/rocm-documentation
-/projects/rocr-runtime/**/*.rst                                       @kentrussell @fxkamd @dayatsin-amd @ROCm/rocm-documentation
-/projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @fxkamd @dayatsin-amd @ROCm/rocm-documentation
+/projects/rocr-runtime/**/*.md                                        @kentrussell @dayatsin-amd @ROCm/rocm-documentation
+/projects/rocr-runtime/**/*.rst                                       @kentrussell @dayatsin-amd @ROCm/rocm-documentation
+/projects/rocr-runtime/**/.readthedocs.yaml                           @kentrussell @dayatsin-amd @ROCm/rocm-documentation
 
 /projects/roctracer/**/*.md                                           @ammarwa @bgopesh @ROCm/rocm-documentation
 /projects/roctracer/**/*.rst                                          @ammarwa @bgopesh @ROCm/rocm-documentation
