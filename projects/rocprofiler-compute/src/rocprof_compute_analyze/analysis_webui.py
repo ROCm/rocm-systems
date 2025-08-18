@@ -220,7 +220,6 @@ class webui_analysis(OmniAnalyze_Base):
                 )
                 html_section = []
                 if panel["title"] not in self.__hidden_sections:
-                    print("panel ", panel["title"])
                     # Iterate over each table per section
                     for data_source in panel["data source"]:
                         for t_type, table_config in data_source.items():
