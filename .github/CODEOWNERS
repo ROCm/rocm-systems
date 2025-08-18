@@ -19,7 +19,7 @@
 /projects/rocm-smi-lib/                                               @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
 /projects/rocprofiler/                                                @ammarwa @bgopesh
-/projects/rocprofiler-compute/                                        @coleramos425 @feizheng10 @vedithal-amd @xuchen-amd @cfallows-amd @ywang103-amd @jamessiddeley-amd
+/projects/rocprofiler-compute/                                        @ROCm/rocprof-compute-reviewer # Owners: @ROCm/rocprof-compute-owners, Reviewers: @ROCm/rocprof-compute-reviewer
 /projects/rocprofiler-register/                                       @ammarwa @bgopesh
 /projects/rocprofiler-sdk/                                            @jrmadsen @t-tye
 /projects/rocprofiler-systems/                                        @ROCm/rocprof-sys @jrmadsen
@@ -70,7 +70,7 @@
 /projects/rocprofiler/doc/                                            @ammarwa @bgopesh @ROCm/rocm-documentation
 
 /projects/rocprofiler-compute/**/*.md                                 @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
-/projects/rocprofiler-compute/**/*.rst                                @ROCm/rocprof-compute-reviewer@ROCm/rocm-documentation @prbasyal-amd
+/projects/rocprofiler-compute/**/*.rst                                @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/**/.readthedocs.yaml                    @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 /projects/rocprofiler-compute/docs/                                   @ROCm/rocprof-compute-reviewer @ROCm/rocm-documentation @prbasyal-amd
 
