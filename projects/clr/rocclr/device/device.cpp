@@ -826,7 +826,7 @@ bool Device::ValidateComgr() {
 #if defined(USE_COMGR_LIBRARY)
   // Check if Lightning compiler was requested
   if (settings_->useLightning_) {
-    constexpr bool kComgrVersioned = false;
+    constexpr bool kComgrVersioned = true;
     std::call_once(amd::Comgr::initialized, amd::Comgr::LoadLib, kComgrVersioned);
     // Use Lightning only if it's available
     settings_->useLightning_ = amd::Comgr::IsReady();
