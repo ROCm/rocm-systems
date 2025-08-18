@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #ifndef HIP_INCLUDE_HIP_HIP_BF16_H
 #define HIP_INCLUDE_HIP_HIP_BF16_H
+#define HIP_GFX125_H
 
 #include <hip/hip_common.h>
 
