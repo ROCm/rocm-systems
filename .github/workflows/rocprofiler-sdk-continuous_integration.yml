@@ -424,6 +424,11 @@ jobs:
         python3 -m pipx ensurepath; source ~/.bashrc;
         LD_LIBRARY_PATH=/opt/rocm-custom/lib:/opt/rocm-custom/llvm/lib:$LD_LIBRARY_PATH
         PATH=/opt/rocm-custom/bin:/opt/rocm-custom/llvm/bin:/usr/bin:$PATH
+        which cmake
+        if [ "${OS_TYPE}" == "rhel-9.1" ]; then
+          sudo dnf install cmake
+        fi
+        which cmake
         /usr/bin/cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         /usr/bin/cmake --build build --target all --parallel 16
         sudo /usr/bin/cmake --build build --target install
