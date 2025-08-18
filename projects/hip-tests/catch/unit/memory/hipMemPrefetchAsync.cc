@@ -25,6 +25,8 @@ THE SOFTWARE.
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 #include <resource_guards.hh>
+#include <numaif.h>      // for move_pages
+#include <numa.h>        // for numa_available()
 
 std::vector<int> GetDevicesWithPrefetchSupport() {
   const auto device_count = HipTest::getDeviceCount();
@@ -154,5 +156,95 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {
   SECTION("Invalid device") {
     HIP_CHECK_ERROR(hipMemPrefetchAsync(alloc.ptr(), kPageSize, hipInvalidDeviceId),
                     hipErrorInvalidDevice);
+  }
+}
+
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic") {
+  auto supported_devices = GetDevicesWithPrefetchSupport();
+  if (supported_devices.empty()) {
+    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+  }
+
+  constexpr size_t kPageSize = 4096;
+  const size_t count = kPageSize / sizeof(int);
+  constexpr int fill_value = 42;
+
+  // allocate and initialize source buffer
+  LinearAllocGuard<int> src(LinearAllocs::hipMallocManaged, kPageSize);
+  std::fill_n(src.ptr(), count, fill_value);
+
+  SECTION("Device prefetch + kernel execution") {
+    for (int dev : supported_devices) {
+      HIP_CHECK(hipSetDevice(dev));
+      LinearAllocGuard<int> dst(LinearAllocs::hipMallocManaged, kPageSize);
+      StreamGuard sg(Streams::created);
+
+      hipMemLocation location{};
+      location.type = hipMemLocationTypeDevice;
+      location.id = dev;
+
+      HIP_CHECK(hipMemPrefetchAsync_v2(src.ptr(), kPageSize, location, sg.stream()));
+
+      // launch the kernel to exercise prefetched pages
+      const int blocks = (count + 255) / 256;
+      MemPrefetchAsyncKernel<<<blocks, 256, 0, sg.stream()>>>(dst.ptr(), src.ptr(), count);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipStreamSynchronize(sg.stream()));
+
+      // verify results
+      ArrayFindIfNot(dst.ptr(), fill_value * fill_value, count);
+    }
+  }
+
+  SECTION("Host prefetch") {
+    hipMemLocation location{hipMemLocationTypeHost, 12345 /*ignored*/};
+    HIP_CHECK(hipMemPrefetchAsync_v2(src.ptr(), kPageSize, location, 0));
+    HIP_CHECK(hipDeviceSynchronize());
+    ArrayFindIfNot(src.ptr(), fill_value, count);
+  }
+
+  SECTION("HostNuma for every node") {
+    if (numa_available() < 0) {
+      HipTest::HIP_SKIP_TEST("NUMA not available on this system");
+    }
+    int maxnode = numa_max_node();
+    REQUIRE(maxnode >= 0);
+
+    for (int node = 0; node <= maxnode; ++node) {
+      hipMemLocation location{hipMemLocationTypeHostNuma, node};
+      HIP_CHECK(hipMemPrefetchAsync_v2(src.ptr(), kPageSize, location, 0));
+      HIP_CHECK(hipDeviceSynchronize());
+      ArrayFindIfNot(src.ptr(), fill_value, count);
+
+      // verify placement
+      void* page = src.ptr();
+      int status = -1;
+      int ret = move_pages(0, 1, &page, nullptr, &status, 0);
+      REQUIRE(ret == 0);
+      REQUIRE(status == node);
+    }
+  }
+
+  SECTION("HostNumaCurrent prefetch") {
+    if (numa_available() < 0) {
+      HipTest::HIP_SKIP_TEST("NUMA not available on this system");
+    }
+
+    hipMemLocation location{hipMemLocationTypeHostNumaCurrent, -1};
+    HIP_CHECK(hipMemPrefetchAsync_v2(src.ptr(), kPageSize, location, 0));
+    HIP_CHECK(hipDeviceSynchronize());
+    ArrayFindIfNot(src.ptr(), fill_value, count);
+
+    // determine current CPU’s NUMA node
+    int cpu = sched_getcpu();
+    int cur_node = numa_node_of_cpu(cpu);
+    REQUIRE(cur_node >= 0);
+
+    // verify that the page is on the current node
+    void* page = src.ptr();
+    int status = -1;
+    int ret = move_pages(0, 1, &page, nullptr, &status, 0);
+    REQUIRE(ret == 0);
+    REQUIRE(status == cur_node);
   }
 }
