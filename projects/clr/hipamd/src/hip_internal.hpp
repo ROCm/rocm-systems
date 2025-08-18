@@ -680,6 +680,8 @@ public:
                                         size_t sizeBytes);
   hipError_t ihipMemcpy(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
                         hip::Stream& stream, bool isHostAsync = false, bool isGPUAsync = true);
+  hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream = nullptr,
+                          bool isAsync = false);
   constexpr bool kOptionChangeable = true;
   constexpr bool kNewDevProg = false;
 

@@ -18,12 +18,12 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
 #include <hip_test_common.hh>
 
@@ -33,12 +33,12 @@ typedef struct d_uint16 {
   uint data[ARRAY_SIZE];
 } d_uint16;
 
-__global__ void write_kernel(d_uint16 *dst, ulong N, d_uint16 pval) {
-    size_t idx = (blockIdx.x * blockDim.x + threadIdx.x);
-    size_t stride = blockDim.x * gridDim.x;
-    for (size_t i = idx; i < N; i += stride) {
-      dst[i] = pval;
-    }
+__global__ void write_kernel(d_uint16* dst, ulong N, d_uint16 pval) {
+  size_t idx = (blockIdx.x * blockDim.x + threadIdx.x);
+  size_t stride = blockDim.x * gridDim.x;
+  for (size_t i = idx; i < N; i += stride) {
+    dst[i] = pval;
+  }
 }
 
 static bool hipPerfDevMemWriteSpeed_test() {
@@ -55,8 +55,8 @@ static bool hipPerfDevMemWriteSpeed_test() {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
 
-  INFO("info: running on bus " << "0x" << props.pciBusID << " " <<
-       props.name << " with " << props.multiProcessorCount << " CUs \n");
+  CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs\n", props.pciBusID, props.name,
+                props.multiProcessorCount);
 
   const unsigned threadsPerBlock = 64;
   const unsigned blocks = props.multiProcessorCount * 4;
@@ -65,7 +65,7 @@ static bool hipPerfDevMemWriteSpeed_test() {
     pval.data[i] = inputData;
   }
 
-  hDst =  new d_uint16[nBytes];
+  hDst = new d_uint16[nBytes];
   REQUIRE(hDst != nullptr);
 
   for (size_t i = 0; i < N; i++) {
@@ -78,18 +78,18 @@ static bool hipPerfDevMemWriteSpeed_test() {
   HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipMalloc(&dDst, nBytes));
-  hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock),
-                                   0, stream, dDst, N, pval);
+  hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst, N, pval);
   HIP_CHECK(hipGetLastError());
-  HIP_CHECK(hipMemcpy(hDst, dDst, nBytes , hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hDst, dDst, nBytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
 
   for (uint i = 0; i < N; i++) {
     for (uint j = 0; j < ARRAY_SIZE; j++) {
       if (hDst[i].data[j] != inputData) {
-        INFO("hipPerfDevMemWriteSpeed - Data validation failed for warm up run!"
-              << "at index i: " << i << " element j: " << j <<
-              "expected " << inputData << " but got " << hDst[i].data[j]);
+        DEBUG_PRINT(
+            "hipPerfDevMemWriteSpeed - Data validation failed for warm up run! at index i: %u "
+            "element j: %u expected 0x%x but got 0x%x\n",
+            i, j, inputData, hDst[i].data[j]);
         return false;
       }
     }
@@ -99,8 +99,7 @@ static bool hipPerfDevMemWriteSpeed_test() {
   auto all_start = std::chrono::steady_clock::now();
 
   for (int i = 0; i < nIter; i++) {
-    hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock),
-                                     0, stream, dDst, N, pval);
+    hipLaunchKernelGGL(write_kernel, dim3(blocks), dim3(threadsPerBlock), 0, stream, dDst, N, pval);
     HIP_CHECK(hipGetLastError());
   }
   HIP_CHECK(hipDeviceSynchronize());
@@ -109,44 +108,45 @@ static bool hipPerfDevMemWriteSpeed_test() {
   std::chrono::duration<double> all_kernel_time = all_end - all_start;
 
   // read speed in GB/s
-  double perf = (static_cast<double>(nBytes * nIter * (1e-09))) /
-                                     all_kernel_time.count();
+  double perf = (static_cast<double>(nBytes * nIter * (1e-09))) / all_kernel_time.count();
 
-  INFO("hipPerfDevMemReadSpeed - info: average write speed of " <<
-        perf << " GB/s " << "achieved for memory size of " <<
-        nBytes / (1024 * 1024) << " MB");
+  CONSOLE_PRINT(
+      "hipPerfDevMemWriteSpeed - average write speed of %.2f GB/s achieved for memory size of %u "
+      "MB\n",
+      perf, nBytes / (1024 * 1024));
 
-  delete [] hDst;
+  delete[] hDst;
   HIP_CHECK(hipFree(dDst));
   HIP_CHECK(hipStreamDestroy(stream));
   return true;
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfDevMemWriteSpeed status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfDevMemWriteSpeed.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfDevMemWriteSpeed status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfDevMemWriteSpeed.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfDevMemWriteSpeed_test") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED("Skipped testcase hipPerfDevMemWriteSpeed as"
-            "there is no device to test.");
+    SUCCEED(
+        "Skipped testcase hipPerfDevMemWriteSpeed as"
+        "there is no device to test.");
   } else {
     REQUIRE(true == hipPerfDevMemWriteSpeed_test());
   }
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

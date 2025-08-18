@@ -1033,8 +1033,8 @@ getStringString(const char* src)
 
     std::string str(src);
 
-    if (str.length() > 60) {
-        str = str.substr(0, 60).append("...");
+    if (str.length() > 6000) {
+        str = str.substr(0, 6000).append("...");
     }
 
     size_t found = 0;

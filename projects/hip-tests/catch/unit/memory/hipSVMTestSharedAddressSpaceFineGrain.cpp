@@ -208,6 +208,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
       }
       else
       {
+        HIP_CHECK(hipSetDevice(ci));
         create_linked_lists_on_device(streams[ci], pNodes, pAllocator, numLists,
                                              ListLength);
       }
@@ -218,6 +219,7 @@ TEST_CASE("test_svm_shared_address_space_fine_grain_buffers") {
       }
       else
       {
+        HIP_CHECK(hipSetDevice(vi));
         verify_linked_lists_on_device(streams[vi], pNodes, pNumCorrect, numLists,
                                              ListLength);
       }

@@ -94,6 +94,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       if (payload[0]) {
         amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
         if (mem) {
+          const_cast<amd::Device*>(&dev)->RemoveHostcallMemory(mem);
           amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
           mem->release();
         } else {
@@ -110,6 +111,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
             amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
+            const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
           } else {
             buf->release();
           }

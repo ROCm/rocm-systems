@@ -24,6 +24,10 @@
 #include "hip_internal.hpp"
 #include "thread/monitor.hpp"
 
+#if !defined(_MSC_VER)
+#include <sys/mman.h>
+#endif
+
 // Internal structure for stream callback handler
 namespace hip {
 class StreamCallback {
@@ -98,7 +102,9 @@ class Event {
   std::vector<hip::GraphNode*> nodesPrevToRecorded_;
  protected:
   bool CheckHwEvent() {
-    return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, false, flags_);
+    amd::SyncPolicy policy = (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking :
+                                                                amd::SyncPolicy::Auto;
+    return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, false, policy);
   }
 
  public:
@@ -204,6 +210,12 @@ class IPCEvent : public Event {
         amd::Os::shm_unlink(ipc_evt_.ipc_name_);
       }
     }
+#if !defined(_MSC_VER)
+    // Clean up the POSIX shared memory object
+    if (!ipc_evt_.ipc_name_.empty() && ipc_evt_.ipc_name_ != "dummy") {
+      shm_unlink(ipc_evt_.ipc_name_.c_str());
+    }
+#endif
   }
   IPCEvent() : Event(hipEventInterprocess) {}
   bool createIpcEventShmemIfNeeded();

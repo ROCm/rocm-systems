@@ -56,7 +56,6 @@
 #include <iostream>
 #include <iomanip>
 #include <memory>
-#include <sys/resource.h>
 #ifdef ROCCLR_SUPPORT_NUMA_POLICY
 #include <numa.h>
 #include <numaif.h>
@@ -1017,7 +1016,7 @@ bool Sampler::create(const amd::Sampler& owner) {
     return false;
   }
 
-  hwSrd_ = reinterpret_cast<uint64_t>(hsa_sampler.handle);
+  hwSrd_ = hsa_sampler.handle;
   hwState_ = reinterpret_cast<address>(hsa_sampler.handle);
 
   return true;
@@ -1272,8 +1271,7 @@ bool Device::populateOCLDeviceConstants() {
     assert(alloc_granularity_ > 0);
   } else {
     // We suppose half of physical memory can be used by GPU in APU system
-    info_.globalMemSize_ =
-        uint64_t(sysconf(_SC_PAGESIZE)) * uint64_t(sysconf(_SC_PHYS_PAGES)) / 2;
+    info_.globalMemSize_ = amd::Os::hostTotalPhysicalMemory() / 2;
     info_.globalMemSize_ = std::max(info_.globalMemSize_, uint64_t(1 * Gi));
     info_.globalMemSize_ = (static_cast<uint64_t>(std::min(GPU_MAX_HEAP_SIZE, 100u)) *
                             static_cast<uint64_t>(info_.globalMemSize_)) / 100u;
@@ -2288,22 +2286,22 @@ void Device::updateFreeMemory(size_t size, bool free) {
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   amd::Memory* mem = nullptr;
-  void* svmPtrUsed = reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr); 
-                  
+  void* svmPtrUsed = reinterpret_cast<void*>(amd::Memory::MemoryType::kSvmMemoryPtr);
+
   if (nullptr != svmPtr) {
     // Find the existing amd::mem object
     mem = amd::MemObjMap::FindMemObj(svmPtr);
     if (mem != nullptr) {
       return mem->getSvmPtr();
-    } 
+    }
     if (flags & CL_MEM_USE_HOST_PTR ) {
       svmPtrUsed = svmPtr;
     } else {
       DevLogPrintfError("Cannot find svm_ptr: 0x%x \n", svmPtr);
       return nullptr;
     }
-  }     
-  
+  }
+
   // create a hidden buffer, which will allocated on the device later
   mem = new (context) amd::Buffer(context, flags, size, svmPtrUsed);
   if (mem == nullptr) {
@@ -2468,8 +2466,8 @@ amd::Memory* Device::ImportShareableVMMHandle(void* osHandle) {
 }
 
 // ================================================================================================
-bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count,
-                              amd::MemoryAdvice advice, bool first_alloc, bool use_cpu) const {
+bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
+                                 bool first_alloc, bool use_cpu, int numa_id) const {
   if ((settings().hmmFlags_ & Settings::Hmm::EnableSvmTracking) && !first_alloc) {
     amd::Memory* svm_mem = amd::MemObjMap::FindMemObj(dev_ptr);
     if ((nullptr == svm_mem) || ((svm_mem->getMemFlags() & CL_MEM_ALLOC_HOST_PTR) == 0) ||
@@ -2492,7 +2490,7 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count,
         break;
       case amd::MemoryAdvice::SetPreferredLocation:
         if (use_cpu) {
-          attr.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, getCpuAgent().handle});
+          attr.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, getCpuAgent(numa_id).handle});
         } else {
           attr.push_back({HSA_AMD_SVM_ATTRIB_PREFERRED_LOCATION, getBackendDevice().handle});
         }
@@ -2552,7 +2550,7 @@ bool Device::SetSvmAttributesInt(const void* dev_ptr, size_t count,
 
 // ================================================================================================
 bool Device::SetSvmAttributes(const void* dev_ptr, size_t count,
-                              amd::MemoryAdvice advice, bool use_cpu) const {
+                              amd::MemoryAdvice advice, bool use_cpu, int numa_id) const {
   constexpr bool kFirstAlloc = false;
   return SetSvmAttributesInt(dev_ptr, count, advice, kFirstAlloc, use_cpu);
 }
@@ -2840,7 +2838,7 @@ bool Device::SetClockMode(const cl_set_device_clock_mode_input_amd setClockModeI
 }
 
 // ================================================================================================
-bool Device::IsHwEventReady(const amd::Event& event, bool wait, uint32_t hip_event_flags) const {
+bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy policy) const {
   void* hw_event =
       (event.NotifyEvent() != nullptr) ? event.NotifyEvent()->HwEvent() : event.HwEvent();
   if (hw_event == nullptr) {
@@ -2851,8 +2849,10 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, uint32_t hip_eve
     // when set the CPU gives up host thread for other work
     // when not set the CPU enters a busy-wait on the event to occur
     constexpr int kHipEventBlockingSync = 0x1;
-    bool active_wait = !(hip_event_flags & kHipEventBlockingSync) && ActiveWait();
-    return WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait);
+    bool active_wait = !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) &&
+                        ActiveWait();
+    bool yield = (policy == amd::SyncPolicy::Yield);
+    return WaitForSignal(reinterpret_cast<ProfilingSignal*>(hw_event)->signal_, active_wait, yield);
   }
 
   auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
@@ -3159,19 +3159,16 @@ void Device::releaseQueue(hsa_queue_t* queue, const std::vector<uint32_t>& cuMas
 void* Device::getOrCreateHostcallBuffer(hsa_queue_t* queue, bool coop_queue,
                                         const std::vector<uint32_t>& cuMask) {
   decltype(queuePool_)::value_type::iterator qIter;
-
+  bool found = false;
   if (!coop_queue) {
     for (auto &it : cuMask.size() == 0 ? queuePool_ : queueWithCUMaskPool_) {
       qIter = it.find(queue);
       if (qIter != it.end()) {
+        found = true;
         break;
       }
     }
-    if (cuMask.size() == 0) {
-      assert(qIter != queuePool_[QueuePriority::High].end());
-    } else {
-      assert(qIter != queueWithCUMaskPool_[QueuePriority::High].end());
-    }
+    assert(found && "Couldn't find queue");
 
     if (qIter->second.hostcallBuffer_) {
       return qIter->second.hostcallBuffer_;
@@ -3406,9 +3403,7 @@ hsa_status_t Device::BackendErrorCallBackHandler(const hsa_amd_event_t* event, v
   }
 
   // Execute the default handler if a GPU core file should be generated ...
-  struct rlimit rlimit;
-  if ((getrlimit(RLIMIT_CORE, &rlimit) == 0 && rlimit.rlim_cur != 0) ||
-      !HIP_SKIP_ABORT_ON_GPU_ERROR) {
+  if (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR) {
     return HSA_STATUS_ERROR;
   }
 
@@ -3654,9 +3649,7 @@ void callbackQueue(hsa_status_t status, hsa_queue_t* queue, void* data) {
         errorMsg, status);
     }
 
-    struct rlimit rlimit;
-    if ((getrlimit(RLIMIT_CORE, &rlimit) == 0 && rlimit.rlim_cur != 0) ||
-        !HIP_SKIP_ABORT_ON_GPU_ERROR) {
+    if (amd::Os::DumpCoreFile() || !HIP_SKIP_ABORT_ON_GPU_ERROR) {
       abort();
     }
     amd::Device::gpu_error_ = ConvertHSAErrorIntoCLError(status);

@@ -30,9 +30,12 @@ jobs:
         id: set-matrix
         run: |
           PRS="${{ github.event.inputs.subrepo-pr-numbers }}"
-          PR_ARRAY=$(echo "$PRS" | tr ',' '\n' | jq -R . | jq -s .)
-          echo "matrix=$PR_ARRAY"
-          echo "matrix=$PR_ARRAY" >> $GITHUB_OUTPUT
+          JSON_ARRAY=$(echo "$PRS" \
+            | tr ',' '\n'     \
+            | jq -R .         \
+            | jq -s .)
+          COMPACT=$(jq -c . <<<"$JSON_ARRAY")
+          echo "matrix=$COMPACT" >> $GITHUB_OUTPUT
 
   import:
     needs: generate-matrix
@@ -40,6 +43,8 @@ jobs:
     strategy:
       matrix:
         pr_number: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
+      fail-fast: false
+    continue-on-error: true
     steps:
       - name: Validate maintainer permissions
         env:
@@ -82,25 +87,20 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          PR_JSON=$(gh pr view ${{ matrix.pr_number }} \
-            --repo ${{ github.event.inputs.subrepo-upstream }} \
-            --json title,body,headRefName,headRepository,isDraft \
-            --jq '{title: .title, body: .body, head_ref: .headRefName, head_repo: .headRepository.cloneUrl, is_draft: .isDraft}')
-
-          echo "$PR_JSON" > pr.json
-
-          TITLE=$(jq -r .title pr.json | sed 's/`/\\`/g')
-          echo "title=$TITLE" >> $GITHUB_OUTPUT
-
-          {
-            echo 'body<<EOF'
-            jq -r .body pr.json
-            echo 'EOF'
-          } >> $GITHUB_OUTPUT
-
-          echo "head_ref=$(jq -r .head_ref pr.json)" >> $GITHUB_OUTPUT
-          echo "head_repo=$(jq -r .head_repo pr.json)" >> $GITHUB_OUTPUT
-          echo "is_draft=$(jq -r .is_draft pr.json)" >> $GITHUB_OUTPUT
+            PR_JSON=$(gh pr view ${{ matrix.pr_number }} \
+              --repo ${{ github.event.inputs.subrepo-upstream }} \
+              --json title,body,headRefName,headRepository,isDraft \
+              --jq '{title: .title, body: .body, head_ref: .headRefName, head_repo: .headRepository.cloneUrl, is_draft: .isDraft}')
+            echo "$PR_JSON" > pr.json
+            TITLE=$(jq -r .title pr.json | sed 's/`/\\`/g' | sed 's/\r$//g')
+            echo "title=$TITLE" >> $GITHUB_OUTPUT
+            BODY_CLEAN=$(jq -r .body pr.json | sed 's/\r//g')
+            echo "body<<EOF" >> $GITHUB_OUTPUT
+            echo "$BODY_CLEAN"  >> $GITHUB_OUTPUT
+            echo "EOF"          >> $GITHUB_OUTPUT
+            echo "head_ref=$(jq -r .head_ref pr.json)" >> $GITHUB_OUTPUT
+            echo "head_repo=$(jq -r .head_repo pr.json)" >> $GITHUB_OUTPUT
+            echo "is_draft=$(jq -r .is_draft pr.json)" >> $GITHUB_OUTPUT
 
       - name: Create new branch for import
         id: import-branch

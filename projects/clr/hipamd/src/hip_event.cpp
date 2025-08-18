@@ -19,8 +19,9 @@
  THE SOFTWARE. */
 
 #include <hip/hip_runtime.h>
-
 #include "hip_event.hpp"
+#include "hip_graph_internal.hpp"
+
 #if !defined(_MSC_VER)
 #include <unistd.h>
 #endif
@@ -76,7 +77,9 @@ hipError_t Event::synchronize() {
   auto hip_device = g_devices[deviceId()];
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
-  if (!hip_device->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, flags_)) {
+  amd::SyncPolicy policy = (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking :
+                                                              amd::SyncPolicy::Auto;
+  if (!hip_device->devices()[0]->IsHwEventReady(*event_, kWaitCompletion, policy)) {
     event_->awaitCompletion();
   }
   return hipSuccess;
@@ -88,7 +91,9 @@ bool Event::awaitEventCompletion() {
 }
 
 bool EventDD::awaitEventCompletion() {
-  return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, true, flags_);
+  amd::SyncPolicy policy = (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking :
+                                                              amd::SyncPolicy::Auto;
+  return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, true, policy);
 }
 
 hipError_t Event::elapsedTime(Event& eStop, float& ms) {
@@ -402,16 +407,16 @@ hipError_t hipEventRecord_common(hipEvent_t event, hipStream_t stream, unsigned 
     std::vector<hip::GraphNode*> lastCapturedNodes = s->GetLastCapturedNodes();
     e->SetNodesPrevToRecorded(lastCapturedNodes);
     if (flags == hipEventRecordExternal) {
-      hip::GraphNode* pGraphNode;
-      status =
-          hipGraphAddEventRecordNode((hipGraphNode_t*)&pGraphNode, (hipGraph_t)s->GetCaptureGraph(),
-                                     (hipGraphNode_t*)s->GetLastCapturedNodes().data(),
-                                     s->GetLastCapturedNodes().size(), (hipEvent_t)e);
+      hip::GraphNode* node = new hip::GraphEventRecordNode(reinterpret_cast<hipEvent_t>(e));
+      hipError_t status = hip::ihipGraphAddNode(
+          node, reinterpret_cast<hip::Graph*>(s->GetCaptureGraph()),
+          reinterpret_cast<hip::GraphNode* const*>(s->GetLastCapturedNodes().data()),
+          s->GetLastCapturedNodes().size(), false);
       if (status != hipSuccess) {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "hipEventRecord add external event node failed");
         return status;
       }
-      s->SetLastCapturedNode(pGraphNode);
+      s->SetLastCapturedNode(node);
     }
   } else {
     if (e->deviceId() != hip_stream->DeviceId()) {
