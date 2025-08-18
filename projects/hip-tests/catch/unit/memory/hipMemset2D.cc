@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (c) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
@@ -32,24 +32,20 @@
 // (width2D, height2D, memsetWidth, memsetHeight)
 typedef std::tuple<int, int, int, int> tupletype;
 
-static constexpr std::initializer_list<tupletype> tableItems {
-               std::make_tuple(20,   20, 20, 20),
-               std::make_tuple(10,   10,  4,  4),
-               std::make_tuple(100, 100, 20, 40),
-               std::make_tuple(256, 256, 39, 19),
-               std::make_tuple(100, 100, 20,  0),
-               std::make_tuple(100, 100,  0, 20),
-               std::make_tuple(100, 100,  0,  0),
-               };
+static constexpr std::initializer_list<tupletype> tableItems{
+    std::make_tuple(20, 20, 20, 20),   std::make_tuple(10, 10, 4, 4),
+    std::make_tuple(100, 100, 20, 40), std::make_tuple(256, 256, 39, 19),
+    std::make_tuple(100, 100, 20, 0),  std::make_tuple(100, 100, 0, 20),
+    std::make_tuple(100, 100, 0, 0),
+};
 
-
-
+enum MemsetType { hipMemsetTypeDefault, hipMemsetTypeDefaultSpt };
 /**
  * Basic Functionality of hipMemset2D
  */
 TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x24;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -59,23 +55,28 @@ TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
   size_t elements = numW * numH;
   char *A_d, *A_h;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width,
-                          numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
 
   for (size_t i = 0; i < elements; i++) {
     A_h[i] = 1;
   }
-
-  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH,
-                       hipMemcpyDeviceToHost));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+  } else {
+#if HT_AMD
+    HIP_CHECK(hipMemset2D_spt(A_d, pitch_A, memsetval, numW, numH));
+#else
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
+#endif
+  }
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
-      INFO("Memset2D mismatch at index:" << i << " computed:"
-                                     << A_h[i] << " memsetval:" << memsetval);
+      INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
+                                         << " memsetval:" << memsetval);
       REQUIRE(false);
     }
   }
@@ -90,7 +91,7 @@ TEST_CASE("Unit_hipMemset2D_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   constexpr int memsetval = 0x26;
   constexpr size_t numH = 256;
   constexpr size_t numW = 256;
@@ -100,26 +101,31 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
   size_t elements = numW * numH;
   char *A_d, *A_h;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A,
-                          width, numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
 
   for (size_t i = 0; i < elements; i++) {
-      A_h[i] = 1;
+    A_h[i] = 1;
   }
-
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+  } else {
+#if HT_AMD
+    HIP_CHECK(hipMemset2DAsync_spt(A_d, pitch_A, memsetval, numW, numH, stream));
+#else
+    HIP_CHECK(hipMemset2DAsync(A_d, pitch_A, memsetval, numW, numH, stream));
+#endif
+  }
   HIP_CHECK(hipStreamSynchronize(stream));
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH,
-                       hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
 
-  for (size_t i=0; i < elements; i++) {
+  for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
-      INFO("Memset2DAsync mismatch at index:" << i << " computed:"
-                                     << A_h[i] << " memsetval:" << memsetval);
+      INFO("Memset2DAsync mismatch at index:" << i << " computed:" << A_h[i]
+                                              << " memsetval:" << memsetval);
       REQUIRE(false);
     }
   }
@@ -135,7 +141,7 @@ TEST_CASE("Unit_hipMemset2DAsync_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
   CHECK_IMAGE_SUPPORT
-
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   int width2D, height2D;
   int memsetWidth, memsetHeight;
   char *A_d, *A_h;
@@ -143,13 +149,12 @@ TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
   constexpr int memsetval = 0x26;
 
   std::tie(width2D, height2D, memsetWidth, memsetHeight) =
-                 GENERATE(table<int, int, int, int>(tableItems));
+      GENERATE(table<int, int, int, int>(tableItems));
 
   size_t width = width2D * sizeof(char);
   size_t sizeElements = width * height2D;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A,
-                          width, height2D));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, height2D));
 
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
@@ -158,18 +163,23 @@ TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
     A_h[index] = 'c';
   }
 
-  INFO("2D Dimension: Width:" << width2D << " Height:" << height2D <<
-           " MemsetWidth:" << memsetWidth << " MemsetHeight:" << memsetHeight);
-
-  HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width2D, height2D,
-                       hipMemcpyDeviceToHost));
+  INFO("2D Dimension: Width:" << width2D << " Height:" << height2D << " MemsetWidth:" << memsetWidth
+                              << " MemsetHeight:" << memsetHeight);
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+  } else {
+#if HT_AMD
+    HIP_CHECK(hipMemset2D_spt(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+#else
+    HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, memsetWidth, memsetHeight));
+#endif
+  }
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, width2D, height2D, hipMemcpyDeviceToHost));
 
   for (int row = 0; row < memsetHeight; row++) {
     for (int column = 0; column < memsetWidth; column++) {
       if (A_h[(row * width) + column] != memsetval) {
-        INFO("A_h[" << row << "][" << column << "]" <<
-                                         " didnot match " << memsetval);
+        INFO("A_h[" << row << "][" << column << "]" << " didnot match " << memsetval);
         REQUIRE(false);
       }
     }
@@ -180,22 +190,23 @@ TEST_CASE("Unit_hipMemset2D_UniqueWidthHeight") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic functional testcase for triggering capturehipMemset2DAsync internal
-*  API to improve code coverage
-* Test source
-* ------------------------
-*  - unit/memory/hipMemset2D.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase for triggering capturehipMemset2DAsync internal
+ *  API to improve code coverage
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemset2D.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   char *A_h, *B_h, *A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   int rows, cols;
+  enum MemsetType type = GENERATE(hipMemsetTypeDefault, hipMemsetTypeDefaultSpt);
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   hipStream_t stream;
@@ -209,15 +220,21 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
       A_h[i * cols + j] = 'a';
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &devPitch,
-                           sizeof(char) * cols, rows));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(char) * cols,
-                        sizeof(char) * cols, rows, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(char) * cols, rows));
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, A_h, sizeof(char) * cols, sizeof(char) * cols, rows,
+                        hipMemcpyHostToDevice));
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows,
-                             stream));
+  if (type == hipMemsetTypeDefault) {
+    HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows, stream));
+  } else {
+#if HT_AMD
+    HIP_CHECK(hipMemset2DAsync_spt(A_d, devPitch, 'b', sizeof(char) * cols, rows, stream));
+#else
+    HIP_CHECK(hipMemset2DAsync(A_d, devPitch, 'b', sizeof(char) * cols, rows, stream));
+#endif
+  }
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -225,8 +242,8 @@ TEST_CASE("Unit_hipMemset2DAsync_capturehipMemset2DAsync") {
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  HIP_CHECK(hipMemcpy2D(B_h, sizeof(char) * cols, A_d, devPitch,
-                        sizeof(char) * cols, rows, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(B_h, sizeof(char) * cols, A_d, devPitch, sizeof(char) * cols, rows,
+                        hipMemcpyDeviceToHost));
 
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
