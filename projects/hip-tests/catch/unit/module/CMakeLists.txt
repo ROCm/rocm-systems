@@ -86,7 +86,8 @@ set(TEST_SRC
     ${TEST_SRC}
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
-    hipGetProcAddressModuleApis.cc)
+    hipGetProcAddressModuleApis.cc
+    hipLinkAPIs.cc)
 
 add_custom_target(empty_module.code
                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR}
