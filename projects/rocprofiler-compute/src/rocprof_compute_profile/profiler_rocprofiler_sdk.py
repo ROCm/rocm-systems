@@ -41,7 +41,6 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
 
     def get_profiler_options(self, fname, soc):
         app_cmd = shlex.split(self.get_args().remaining)
-
         rocm_libdir = str(Path(self.get_args().rocprofiler_sdk_library_path).parent)
         rocprofiler_sdk_tool_path = str(
             Path(rocm_libdir).joinpath("rocprofiler-sdk/librocprofiler-sdk-tool.so")
@@ -50,13 +49,11 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         rocprofiler_attach_tool_path = str(
             Path(rocm_dir).joinpath("libexec/rocprofiler-sdk/librocprofv3-attach.so")
         )
-        
         ld_preload = [
             rocprofiler_sdk_tool_path,
             self.get_args().rocprofiler_sdk_library_path,
             rocprofiler_attach_tool_path,
         ]
-        
         options = {
             "ROCPROFILER_LIBRARY_CTOR": "1",
             "LD_PRELOAD": ":".join(ld_preload),
