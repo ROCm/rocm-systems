@@ -745,8 +745,6 @@ rocprofsys_reset_preload_hidden(void)
 extern "C" void
 rocprofsys_finalize_hidden(void)
 {
-    rocprofiler_finalize_ompt();
-
     // disable thread id recycling during finalization
     threading::recycle_ids() = false;
     // disable initialization callback
