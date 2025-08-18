@@ -181,6 +181,9 @@ __CG_STATIC_QUALIFIER__ bool is_valid() { return static_cast<bool>(__ockl_grid_i
 
 __CG_STATIC_QUALIFIER__ void sync() { __ockl_grid_sync(); }
 
+__CG_STATIC_QUALIFIER__ unsigned int barrier_arrive() { return __ockl_grid_bar_arrive(); }
+
+__CG_STATIC_QUALIFIER__ void barrier_wait(unsigned int s) { __ockl_grid_bar_wait(s); }
 }  // namespace grid
 
 /**
@@ -220,6 +223,23 @@ __CG_STATIC_QUALIFIER__ dim3 block_dim() {
           static_cast<__hip_uint32_t>(blockDim.z)));
 }
 
+__CG_STATIC_QUALIFIER__ void barrier_arrive() {
+  __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_signal(-1);  // -1 is workgroup barriers
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+}
+
+__CG_STATIC_QUALIFIER__ void barrier_wait() {
+#if __has_builtin(__builtin_amdgcn_s_barrier_signal) &&                                            \
+    __has_builtin(__builtin_amdgcn_s_barrier_wait)
+  __builtin_amdgcn_s_barrier_wait(-1);
+#else
+  __builtin_amdgcn_s_barrier();
+#endif  // __builtin_amdgcn_s_barrier_signal && __builtin_amdgcn_s_barrier_wait
+  __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+}
 }  // namespace workgroup
 
 namespace tiled_group {
