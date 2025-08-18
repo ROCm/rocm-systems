@@ -762,13 +762,21 @@ static void __threadfence_system()
     __builtin_amdgcn_fence(__ATOMIC_SEQ_CST, "");
 }
 __device__ inline static void __work_group_barrier(__cl_mem_fence_flags flags) {
-    if (flags) {
-        __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
-        __builtin_amdgcn_s_barrier();
-        __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
-    } else {
-        __builtin_amdgcn_s_barrier();
-    }
+  if (flags == (__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE)) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
+  } else if (flags & (__CLK_GLOBAL_MEM_FENCE)) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "global");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "global");
+  } else if (flags & (__CLK_LOCAL_MEM_FENCE)) {
+    __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup", "local");
+    __builtin_amdgcn_s_barrier();
+    __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup", "local");
+  } else {
+    __builtin_amdgcn_s_barrier();
+  }
 }
 
 __device__
@@ -783,7 +791,7 @@ inline
 __attribute__((convergent))
 void __syncthreads()
 {
-  __barrier(__CLK_LOCAL_MEM_FENCE);
+  __barrier(__CLK_GLOBAL_MEM_FENCE | __CLK_LOCAL_MEM_FENCE);
 }
 
 __device__
