@@ -821,6 +821,7 @@ class AMDSMIHelpers():
                     power_cap_min = power_cap_info['min_power_cap']
             except amdsmi_interface.AmdSmiLibraryException as e:
                 logging.debug(f"AMDSMIHelpers.get_power_caps - Unable to get power cap info for device {dev}: {str(e)}")
+                power_cap_min, power_cap_max = "N/A", "N/A"
                 continue
         return (power_cap_min, power_cap_max)
 

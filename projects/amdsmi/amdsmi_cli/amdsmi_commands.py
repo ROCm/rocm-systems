@@ -4463,8 +4463,9 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.process_isolation is not None,
-                        args.clk_limit is not None]):
+            if not any([args.power_cap is not None,
+                        args.clk_limit is not None,
+                        args.process_isolation is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -4590,7 +4591,6 @@ class AMDSMICommands():
                     self.logger.print_output()
                     self.logger.clear_multiple_devices_output()
                     return
-
             if args.memory_partition:
                 ####################################################################
                 # Get current and available memory partition modes                 #
@@ -4631,52 +4631,6 @@ class AMDSMICommands():
                         self.logger.clear_multiple_devices_output()
                         return
                 self.logger.store_output(args.gpu, 'memory_partition', out)
-                self.logger.print_output()
-                self.logger.clear_multiple_devices_output()
-                return
-
-            if isinstance(args.power_cap, int):
-                try:
-                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                    logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                    min_power_cap = power_cap_info["min_power_cap"]
-                    min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                    max_power_cap = power_cap_info["max_power_cap"]
-                    max_power_cap = self.helpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                    current_power_cap = power_cap_info["power_cap"]
-                    current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    min_power_cap = "N/A"
-                    max_power_cap = "N/A"
-                    current_power_cap = "N/A"
-                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
-                    self.logger.print_output()
-                    self.logger.clear_multiple_devices_output()
-                    return
-
-                if args.power_cap == current_power_cap:
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}W")
-                elif current_power_cap == 0:
-                    self.logger.store_output(args.gpu, 'powercap', f"Unable to set power cap to {args.power_cap}W, current value is {current_power_cap}W")
-                elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
-                    try:
-                        new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
-                                                                     AMDSMIHelpers.SI_Unit.MICRO)
-                        amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
-                    except amdsmi_exception.AmdSmiLibraryException as e:
-                        if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                            raise PermissionError('Command requires elevation') from e
-                        self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
-                        self.logger.print_output()
-                        self.logger.clear_multiple_devices_output()
-                        return
-
-                    self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
-                else:
-                    # setting power cap to 0 will return the current power cap so the technical minimum value is 1
-                    if min_power_cap == 0:
-                        min_power_cap = 1
-                    self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap}W and {max_power_cap}W")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -4819,7 +4773,52 @@ class AMDSMICommands():
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
+        # Universal args
+        if isinstance(args.power_cap, int):
+            try:
+                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
+                min_power_cap = power_cap_info["min_power_cap"]
+                min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                max_power_cap = power_cap_info["max_power_cap"]
+                max_power_cap = self.helpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                current_power_cap = power_cap_info["power_cap"]
+                current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                min_power_cap = "N/A"
+                max_power_cap = "N/A"
+                current_power_cap = "N/A"
+                self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                self.logger.print_output()
+                self.logger.clear_multiple_devices_output()
+                return
 
+            if args.power_cap == current_power_cap:
+                self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}W")
+            elif current_power_cap == 0:
+                self.logger.store_output(args.gpu, 'powercap', f"Unable to set power cap to {args.power_cap}W, current value is {current_power_cap}W")
+            elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
+                try:
+                    new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
+                                                                    AMDSMIHelpers.SI_Unit.MICRO)
+                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    self.logger.store_output(args.gpu, 'powercap', f"[{e.get_error_info(detailed=False)}] Unable to set power cap to {args.power_cap}W")
+                    self.logger.print_output()
+                    self.logger.clear_multiple_devices_output()
+                    return
+
+                self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {args.power_cap}W")
+            else:
+                # setting power cap to 0 will return the current power cap so the technical minimum value is 1
+                if min_power_cap == 0:
+                    min_power_cap = 1
+                self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap}W and {max_power_cap}W")
+            self.logger.print_output()
+            self.logger.clear_multiple_devices_output()
+            return
         if isinstance(args.clk_limit, tuple):
             clk_type = args.clk_limit.clk_type
             lim_type = args.clk_limit.lim_type
@@ -4886,7 +4885,6 @@ class AMDSMICommands():
             self.logger.print_output()
             self.logger.clear_multiple_devices_output()
             return
-
         if isinstance(args.process_isolation, int):
             status_string = "Enabled" if args.process_isolation else "Disabled"
             result = f"Requested process isolation to {status_string}" # This should not print out
