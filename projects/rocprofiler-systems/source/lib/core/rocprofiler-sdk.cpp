@@ -414,6 +414,7 @@ get_callback_domains()
     {
         // Argument tracing is supported in rocprofiler-sdk 0.6.0 and later
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
+        supported.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
         supported.emplace(ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API);
     }
 #    endif
@@ -436,6 +437,15 @@ get_callback_domains()
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
     }
 
+#    if ROCPROFILER_VERSION >= 600
+    // Translate some configuration settings to rocprofiler domains
+    if(config::get_use_ompt() && _version.formatted >= 600)
+    {
+        _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
+    }
+#    endif
+
+    // Check that the domains are valid
     const auto valid_choices =
         settings::instance()->at("ROCPROFSYS_ROCM_DOMAINS")->get_choices();
 
@@ -476,6 +486,7 @@ get_callback_domains()
             {
                 auto ditr = callback_tracing_info[idx];
                 auto dval = static_cast<rocprofiler_callback_tracing_kind_t>(idx);
+
                 if(itr == to_lower(ditr.name) && supported.count(dval) > 0)
                 {
                     _data.emplace(dval);

@@ -235,13 +235,13 @@ bool
 get_use_vaapi_tracing();
 
 bool
-get_use_ompt();
-
-bool
 get_use_code_coverage();
 
 bool
 get_sampling_keep_internal();
+
+bool
+get_use_ompt();
 
 bool
 get_use_rcclp();

@@ -631,7 +631,7 @@ set(TIMEMORY_QUIET_CONFIG ON CACHE BOOL "Make timemory configuration quieter")
 set(TIMEMORY_USE_GOTCHA ON CACHE BOOL "Enable GOTCHA support in timemory")
 set(TIMEMORY_USE_PERFETTO OFF CACHE BOOL "Disable perfetto support in timemory")
 set(TIMEMORY_USE_OMPT
-    ${ROCPROFSYS_USE_OMPT}
+    OFF
     CACHE BOOL
     "Enable OMPT support in timemory"
     FORCE
