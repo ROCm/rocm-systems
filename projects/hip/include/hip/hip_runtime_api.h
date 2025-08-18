@@ -354,6 +354,7 @@ typedef enum __HIP_NODISCARD hipError_t {
     // Deprecated
     hipErrorInvalidResourceHandle = 400,  ///< Resource handle (hipEvent_t or hipStream_t) invalid.
     hipErrorIllegalState = 401, ///< Resource required is not in a valid state to perform operation.
+    hipErrorLossyQuery = 402, ///< Requested resource was not provided a valid buffer in the query.
     hipErrorNotFound = 500,   ///< Not found
     hipErrorNotReady = 600,  ///< Indicates that asynchronous operations enqueued earlier are not
                              ///< ready.  This is not actually an error, but is used to distinguish
@@ -8036,6 +8037,29 @@ hipError_t hipGraphGetRootNodes(hipGraph_t graph, hipGraphNode_t* pRootNodes,
  */
 hipError_t hipGraphNodeGetDependencies(hipGraphNode_t node, hipGraphNode_t* pDependencies,
                                        size_t* pNumDependencies);
+
+/**
+ * @brief Returns a node's dependent nodes.
+ *
+ * @param [in] node - Graph node to get the dependent nodes from.
+ * @param [out] pDependentNodes - Pointer to return the graph dependent nodes.
+ * @param [out] edgeData - Optional array of data associated with each dependency.
+ * @param [out] pNumDependentNodes - Returns the number of graph node dependent nodes.
+ * @returns #hipSuccess, #hipErrorInvalidValue
+ *
+ * pDependencies may be NULL, in which case this function will return the number of dependencies in
+ * pNumDependencies. Otherwise, pNumDependencies entries will be filled in. If pNumDependencies is
+ * higher than the actual number of dependencies, the remaining entries in pDependencies will be set
+ * to NULL, and the number of nodes actually obtained will be returned in pNumDependencies.
+ * @warning This API is marked as Beta. While this feature is complete, it can
+ *          change and might have outstanding issues.
+ * @warning Param "hipGraphEdgeData* edgeData" is currently not supported and has to be
+ *          passed as nullptr. This API is marked as beta, meaning, while this is feature
+ *          complete, it is still open to changes and may have outstanding issues.
+ *
+ */
+hipError_t hipGraphNodeGetDependentNodes_v2(hipGraphNode_t node, hipGraphNode_t* pDependentNodes,
+                                            hipGraphEdgeData* edgeData, size_t* pNumDependentNodes);
 
 /**
  * @brief Returns a node's dependent nodes.
