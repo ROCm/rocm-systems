@@ -226,14 +226,18 @@ jobs:
       if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
-      run:
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         cmake --build build --target install --parallel 16
 
     - name: Build Packaging
       if: ${{ contains(matrix.system.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       working-directory: projects/rocprofiler-sdk
-      run:
+      run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         cmake --build build --target package --parallel 16
 
     - name: Test Install Build
@@ -242,6 +246,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
@@ -256,6 +262,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         export PATH=${PATH}:/usr/local/sbin:/usr/sbin:/sbin
         ls -la
         ls -la ./build
@@ -269,6 +277,8 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-samples-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/samples
         CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} cmake -B build-tests-deb ${{ env.ROCM_PATH }}/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
