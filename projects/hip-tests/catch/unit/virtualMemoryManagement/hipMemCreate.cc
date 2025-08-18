@@ -268,6 +268,69 @@ TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch") {
 /**
  * Test Description
  * ------------------------
+ *    - Allocate uncached memory and map it to virtual address
+ * range. After setting device permission, copy data from host
+ * to device, launch kernel to square the data, copy data back
+ * to host. Verify the result.
+ * ------------------------
+ *    - unit/virtualMemoryManagement/hipMemCreate.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemCreate_ChkWithKerLaunch_Uncached") {
+  size_t granularity = 0;
+  constexpr int N = DATA_SIZE;
+  size_t buffer_size = N * sizeof(int);
+  CTX_CREATE();
+  int deviceId = 0;
+  hipDevice_t device;
+  HIP_CHECK(hipDeviceGet(&device, deviceId));
+  checkVMMSupported(device);
+  hipMemAllocationProp prop{};
+  prop.type = hipMemAllocationTypePinned;
+  prop.location.type = hipMemLocationTypeDevice;
+  prop.location.id = device;  // Current Devices
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  REQUIRE(granularity > 0);
+  size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
+  hipMemGenericAllocationHandle_t handle;
+  // Allocate physical memory
+  HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, hipDeviceMallocUncached));
+  // Allocate virtual address range
+  hipDeviceptr_t ptrA;
+  HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
+  HIP_CHECK(hipMemMap(ptrA, size_mem, 0, handle, 0));
+  HIP_CHECK(hipMemRelease(handle));
+  // Set access
+  hipMemAccessDesc accessDesc = {};
+  accessDesc.location.type = hipMemLocationTypeDevice;
+  accessDesc.location.id = device;
+  accessDesc.flags = hipMemAccessFlagsProtReadWrite;
+  // Make the address accessible to GPU 0
+  HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+  std::vector<int> A_h(N), B_h(N), C_h(N);
+  // Initialize with data
+  for (size_t idx = 0; idx < N; idx++) {
+    A_h[idx] = idx;
+    C_h[idx] = idx * idx;
+  }
+  HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
+  // Invoke kernel
+  hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
+                     reinterpret_cast<int*>(ptrA));
+  HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
+  HIP_CHECK(hipDeviceSynchronize());
+  REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
+  HIP_CHECK(hipMemUnmap(ptrA, size_mem));
+  HIP_CHECK(hipMemAddressFree(ptrA, size_mem));
+  CTX_DESTROY();
+}
+
+/**
+ * Test Description
+ * ------------------------
  *    - Allocate multiple non-contiguous physical memory chunks
  * and map it to contiguous virtual address range. After setting
  * device permission, copy data from host to device, launch kernel
