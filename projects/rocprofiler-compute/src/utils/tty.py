@@ -110,6 +110,7 @@ def convert_time_columns(df, time_unit):
 
     return df_copy
 
+
 def has_time_data(df):
     """
     Check if the dataframe contains time data by looking at the Unit column.
@@ -153,37 +154,69 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                 for type in data_source
             )
 
-            if has_roofline_style and (not args.filter_metrics or "4" in args.filter_metrics):
+            if has_roofline_style and (
+                not args.filter_metrics or "4" in args.filter_metrics
+            ):
                 print("\n" + "=" * 80, file=output)
                 print("4. Roofline", file=output)
                 print("=" * 80, file=output)
 
                 for run_path, workload in runs.items():
-                    if hasattr(workload, 'roofline_metrics') and workload.roofline_metrics:
-                        print("\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points", file=output)
+                    if (
+                        hasattr(workload, "roofline_metrics")
+                        and workload.roofline_metrics
+                    ):
+                        print(
+                            "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
+                            file=output,
+                        )
                         print("-" * 80, file=output)
 
                         kernel_top_df = workload.dfs.get(1, pd.DataFrame())
                         if not kernel_top_df.empty:
                             kernel_name_shortener(kernel_top_df, args.kernel_verbose)
 
-                        for i, (kernel_id, metrics) in enumerate(workload.roofline_metrics.items()):
-                            if not kernel_top_df.empty and kernel_id in kernel_top_df.index:
-                                kernel_name = kernel_top_df.loc[kernel_id, "Kernel_Name"]
-                                kernel_pct = kernel_top_df.loc[kernel_id, "Pct"] if "Pct" in kernel_top_df.columns else 0
+                        for i, (kernel_id, metrics) in enumerate(
+                            workload.roofline_metrics.items()
+                        ):
+                            if (
+                                not kernel_top_df.empty
+                                and kernel_id in kernel_top_df.index
+                            ):
+                                kernel_name = kernel_top_df.loc[
+                                    kernel_id, "Kernel_Name"
+                                ]
+                                kernel_pct = (
+                                    kernel_top_df.loc[kernel_id, "Pct"]
+                                    if "Pct" in kernel_top_df.columns
+                                    else 0
+                                )
                             else:
-                                kernel_name = metrics.get('name', f'Kernel {kernel_id}')
+                                kernel_name = metrics.get("name", f"Kernel {kernel_id}")
                                 kernel_pct = 0
 
-                            display_name = kernel_name[:80] + '...' if len(kernel_name) > 80 else kernel_name
-                            print(f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)", file=output)
+                            display_name = (
+                                kernel_name[:80] + "..."
+                                if len(kernel_name) > 80
+                                else kernel_name
+                            )
+                            print(
+                                f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                                file=output,
+                            )
 
                             base_indent = "  "
                             table_indent_prefix = f"{base_indent}|   "
 
                             tables = {
-                                401: ("4.1 Roofline Rate Metrics:", metrics.get('ai_table', pd.DataFrame())),
-                                402: ("4.2 Roofline AI Plot Points:", metrics.get('calc_table', pd.DataFrame()))
+                                401: (
+                                    "4.1 Roofline Rate Metrics:",
+                                    metrics.get("ai_table", pd.DataFrame()),
+                                ),
+                                402: (
+                                    "4.2 Roofline AI Plot Points:",
+                                    metrics.get("calc_table", pd.DataFrame()),
+                                ),
                             }
 
                             print(f"{base_indent}|")
@@ -200,8 +233,12 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                     if col in display_df.columns:
                                         display_df = display_df.drop(columns=[col])
 
-                                table_string = get_table_string(display_df, transpose=False, decimal=args.decimal)
-                                indented_table_string = textwrap.indent(table_string, table_indent_prefix)
+                                table_string = get_table_string(
+                                    display_df, transpose=False, decimal=args.decimal
+                                )
+                                indented_table_string = textwrap.indent(
+                                    table_string, table_indent_prefix
+                                )
                                 print(indented_table_string, file=output)
 
                     else:
@@ -522,8 +559,8 @@ def show_roof_plot(roof_plot):
 
 
 def show_kernel_stats(args, runs, archConfigs, output):
-    """	
-    Show the kernels and dispatches from "Top Stats" section.	
+    """
+    Show the kernels and dispatches from "Top Stats" section.
     """
 
     df = pd.DataFrame()

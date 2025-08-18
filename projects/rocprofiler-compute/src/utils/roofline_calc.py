@@ -259,23 +259,18 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 # Calculate relevant metrics for ai calculation
 def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
     """
-    Calculate per-kernel metrics and AI points with Roofine yamls using eval_metric.
+    Calculate per-kernel metrics and AI points with Roofline yamls using eval_metric.
     """
-
+    console_debug("calc_ai_analyze: Starting calc_ai analysis using Roofline yamls")
     plot_points = {
         "ai_l1": [[], []],
         "ai_l2": [[], []],
         "ai_hbm": [[], []],
-        "kernelNames": []
+        "kernelNames": [],
     }
 
     workload.roofline_metrics = {}
-    filtered_pmc = apply_filters(
-        workload,
-        workload.path,
-        is_gui=False,
-        debug=False
-    )
+    filtered_pmc = apply_filters(workload, workload.path, is_gui=False, debug=False)
 
     kernel_ids_to_process = []
     kernel_top_table_id = 1
@@ -286,7 +281,9 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
         if kernel_top_table_id in workload.dfs:
             kernel_top_df = workload.dfs[kernel_top_table_id]
             kernel_ids_to_process = kernel_top_df.index.tolist()
-            console_debug("roofline", f"Found {len(kernel_ids_to_process)} kernels to process")
+            console_debug(
+                "roofline", f"Found {len(kernel_ids_to_process)} kernels to process"
+            )
 
     if not kernel_ids_to_process:
         console_warning("No kernels found to process for roofline")
@@ -304,7 +301,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
 
         console_debug("roofline", f"Processing kernel {kernel_id}: {kernel_name[:50]}")
 
-        #filter PMC data for specific kernel
+        # filter PMC data for specific kernel
         kernel_pmc_df = filtered_pmc[
             filtered_pmc["pmc_perf"]["Kernel_Name"] == kernel_name
         ]
@@ -323,7 +320,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
                 kernel_dfs[table_id] = arch_config.dfs[table_id].copy()
                 kernel_dfs_type[table_id] = arch_config.dfs_type[table_id]
 
-        #eval metrics for single kernel only
+        # eval metrics for single kernel only
         eval_metric(
             kernel_dfs,
             kernel_dfs_type,
@@ -331,33 +328,38 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
             workload.roofline_peaks,
             kernel_only_data,
             debug=False,
-            config=config
+            config=config,
         )
 
-        #DEBUG
+        # DEBUG
         if 402 in kernel_dfs:
             console_debug("roofline", f"Table 402 for kernel {kernel_id}:")
             for idx, row in kernel_dfs[402].iterrows():
-                console_debug("roofline", f"  {row.get('Metric', '')}: {row.get('Value', '')}")
+                console_debug(
+                    "roofline", f"  {row.get('Metric', '')}: {row.get('Value', '')}"
+                )
 
         ai_hbm = ai_l2 = ai_l1 = performance = 0
 
         if 402 in kernel_dfs:
             for idx, row in kernel_dfs[402].iterrows():
-                metric = row.get('Metric', '')
-                value = row.get('Value', 0)
-                if metric == 'AI HBM':
-                    ai_hbm = value if value and value != '' else 0
-                elif metric == 'AI L2':
-                    ai_l2 = value if value and value != '' else 0
-                elif metric == 'AI L1':
-                    ai_l1 = value if value and value != '' else 0
-                elif metric == 'Performance (GFLOPs)':
-                    performance = value if value and value != '' else 0
+                metric = row.get("Metric", "")
+                value = row.get("Value", 0)
+                if metric == "AI HBM":
+                    ai_hbm = value if value and value != "" else 0
+                elif metric == "AI L2":
+                    ai_l2 = value if value and value != "" else 0
+                elif metric == "AI L1":
+                    ai_l1 = value if value and value != "" else 0
+                elif metric == "Performance (GFLOPs)":
+                    performance = value if value and value != "" else 0
 
-        console_debug("roofline", f"Kernel {kernel_id}: AI_HBM={ai_hbm:.2f}, AI_L2={ai_l2:.2f}, AI_L1={ai_l1:.2f}, Performance={performance:.2e} GFLOP/s")
+        console_debug(
+            "roofline",
+            f"Kernel {kernel_id}: AI_HBM={ai_hbm:.2f}, AI_L2={ai_l2:.2f}, AI_L1={ai_l1:.2f}, Performance={performance:.2e} GFLOP/s",
+        )
 
-        #add to plot points if we have valid data
+        # add to plot points if we have valid data
         if performance > 0:
             if ai_hbm > 0:
                 plot_points["ai_hbm"][0].append(ai_hbm)
@@ -372,27 +374,34 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
             plot_points["kernelNames"].append(f"K{kernel_id}")
             console_debug("roofline", f"Added kernel {kernel_id} to plot points")
         else:
-            console_debug("roofline", f"Skipping kernel {kernel_id} - no performance data")
+            console_debug(
+                "roofline", f"Skipping kernel {kernel_id} - no performance data"
+            )
 
-        #store metrics for display
+        # store metrics for display
         workload.roofline_metrics[kernel_id] = {
-            'name': kernel_name,
-            'ai_table': kernel_dfs.get(401, pd.DataFrame()),
-            'calc_table': kernel_dfs.get(402, pd.DataFrame())
+            "name": kernel_name,
+            "ai_table": kernel_dfs.get(401, pd.DataFrame()),
+            "calc_table": kernel_dfs.get(402, pd.DataFrame()),
         }
 
-    console_debug("roofline", f"Generated {len(plot_points['kernelNames'])} plot points")
+    console_debug(
+        "roofline", f"Generated {len(plot_points['kernelNames'])} plot points"
+    )
     console_debug("roofline", f"Plot points: {plot_points}")
     return plot_points
 
+
 def calc_ai_profile(mspec, sort_type, ret_df):
     """Given counter data, calculate arithmetic intensity for each kernel in the application.
-    Leverage hard-coded equations to calculate AI values. 
-    
+    Leverage hard-coded equations to calculate AI values.
+
     Used during profiling stage to generate roofline PDF, since Roofline yamls are not available
     in the profiling stage."""
 
-    print("Starting legacy roofline calculation (froom roofline calc)")
+    console_debug(
+        "calc_ai_profile: Starting legacy roofline calculation (from roofline_calc)"
+    )
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?
     df = df.sort_values(by=["Kernel_Name"])
@@ -579,7 +588,10 @@ def calc_ai_profile(mspec, sort_type, ret_df):
                         * 64
                     )
                     + (
-                        (df["TCC_EA0_WRREQ_sum"][idx] - df["TCC_EA0_WRREQ_64B_sum"][idx])
+                        (
+                            df["TCC_EA0_WRREQ_sum"][idx]
+                            - df["TCC_EA0_WRREQ_64B_sum"][idx]
+                        )
                         * 32
                     )
                     + (df["TCC_EA0_WRREQ_64B_sum"][idx] * 64)
@@ -596,7 +608,9 @@ def calc_ai_profile(mspec, sort_type, ret_df):
 
         calls += 1
 
-        if sort_type == "kernels" and (at_end == True or (kernelName != next_kernelName)):
+        if sort_type == "kernels" and (
+            at_end == True or (kernelName != next_kernelName)
+        ):
             myList.append(
                 AI_Data(
                     kernelName,
@@ -744,9 +758,7 @@ def constuct_roof(roofline_parameters, dtype):
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------
-    benchmark_data = (
-        {}
-    )  # TODO: consider changing this to an ordered dict for consistency over py versions
+    benchmark_data = {}  # TODO: consider changing this to an ordered dict for consistency over py versions
     headers = []
     try:
         with open(benchmark_results, "r") as csvfile:

@@ -68,9 +68,7 @@ class cli_analysis(OmniAnalyze_Base):
             )
 
             # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(
-                workload.raw_pmc, self.get_args().kernel_verbose
-            )
+            kernel_name_shortener(workload.raw_pmc, self.get_args().kernel_verbose)
 
             # create the loaded table
             parser.load_table_data(
@@ -106,7 +104,7 @@ class cli_analysis(OmniAnalyze_Base):
                     roof_obj = self.get_socs()[gpu_arch].roofline_obj
 
                     if roof_obj:
-                        #store path in workload for calc_ai_analyze
+                        # store path in workload for calc_ai_analyze
                         workload.path = workload_path
 
                         # NOTE: using default data type
@@ -114,7 +112,7 @@ class cli_analysis(OmniAnalyze_Base):
                             dtype=roof_obj.get_dtype()[0],
                             workload=workload,
                             config=self._profiling_config,
-                            arch_config=arch_config
+                            arch_config=arch_config,
                         )
 
             tty.show_all(

@@ -180,11 +180,11 @@ class Roofline:
         ):
             self.roof_setup()
 
-        console_debug("roofline", "Path: %s" % self.__run_parameters.get("workload_dir"))
+        console_debug(
+            "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
+        )
         self.__ai_data = calc_ai_profile(
-            self.__mspec,
-            self.__run_parameters.get("sort_type"),
-            ret_df
+            self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
         msg = "AI at each mem level:"
         for i in self.__ai_data:
@@ -676,14 +676,14 @@ class Roofline:
             console_log("roofline", "{} does not exist".format(roofline_csv))
             return
 
-        #if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
+        # if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
         if workload is not None:
             self.__ai_data = calc_ai_analyze(
                 workload=workload,
                 mspec=self.__mspec,
                 sort_type=self.__run_parameters.get("sort_type"),
                 config=config,
-                arch_config=arch_config
+                arch_config=arch_config,
             )
 
         else:
@@ -694,15 +694,12 @@ class Roofline:
             t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
 
             self.__ai_data = calc_ai_profile(
-                self.__mspec,
-                self.__run_parameters["sort_type"],
-                t_df
+                self.__mspec, self.__run_parameters["sort_type"], t_df
             )
 
         self.__ceiling_data = constuct_roof(
-                roofline_parameters=self.__run_parameters,
-                dtype=dtype
-            )
+            roofline_parameters=self.__run_parameters, dtype=dtype
+        )
         console_debug(f"AI data: {self.__ai_data}")
         console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
 
@@ -738,7 +735,6 @@ class Roofline:
             4: "at",
             5: "atom",
         }
-
 
         plt.clf()
         plt.plotsize(plt.tw(), plt.th())
