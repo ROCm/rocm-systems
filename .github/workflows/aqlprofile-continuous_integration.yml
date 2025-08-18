@@ -74,7 +74,12 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
+        apt-get update
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
+        add-apt-repository ppa:git-core/ppa
+        apt-get update
+        apt-get install -y git
+        python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \
