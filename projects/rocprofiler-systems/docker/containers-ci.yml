@@ -21,4 +21,3 @@ matrix:
     version: "9.4"
   - distro: "rhel"
     version: "9.5"
-    
