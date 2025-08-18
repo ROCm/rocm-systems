@@ -1445,10 +1445,9 @@ THE SOFTWARE.
             __device__
             __half __hfma(__half x, __half y, __half z)
             {
-                return __half_raw{__ocml_fma_f16(
-                    static_cast<__half_raw>(x).data,
-                    static_cast<__half_raw>(y).data,
-                    static_cast<__half_raw>(z).data)};
+              return __half_raw{__builtin_elementwise_fma(static_cast<__half_raw>(x).data,
+                                                          static_cast<__half_raw>(y).data,
+                                                          static_cast<__half_raw>(z).data)};
             }
             inline
             __device__
@@ -1554,7 +1553,9 @@ THE SOFTWARE.
             __device__
             __half2 __hfma2(__half2 x, __half2 y, __half2 z)
             {
-                return __half2{__ocml_fma_2f16(x, y, z)};
+              return __half2{__builtin_elementwise_fma(static_cast<__half2_raw>(x).data,
+                                                       static_cast<__half2_raw>(y).data,
+                                                       static_cast<__half2_raw>(z).data)};
             }
             inline
             __device__
