@@ -333,6 +333,7 @@ jobs:
         gpgcheck=1
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
+        sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
         sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
 
