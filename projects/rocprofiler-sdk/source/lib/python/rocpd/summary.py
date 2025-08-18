@@ -24,6 +24,7 @@
 ###############################################################################
 
 import argparse
+from dataclasses import dataclass
 import os
 import math
 
@@ -31,6 +32,15 @@ from typing import Any, List, Tuple
 from .importer import RocpdImportData, execute_statement
 from .query import export_sqlite_query
 from . import output_config
+
+
+@dataclass
+class ExportConfig:
+    """Configuration for exporting summary queries."""
+
+    output_format: str = "console"
+    output_path: str = "./rocpd-output-data"
+    filename: str = ""
 
 
 def check_function_availability(connection, function_name):
@@ -73,12 +83,7 @@ def get_temp_view_columns(connection: RocpdImportData, view_name: str) -> List[s
 
 
 def export_query(
-    connection: RocpdImportData,
-    query_name,
-    query,
-    output_format,
-    output_path,
-    filename="",
+    connection: RocpdImportData, config: ExportConfig, query_name, query
 ) -> None:
     """Write the contents of a SQL query to an output format."""
 
@@ -93,18 +98,18 @@ def export_query(
         return
 
     # prepare the output filename
-    if not filename:
+    if not config.filename:
         output_filename = query_name
     else:
-        output_filename = f"{filename}_{query_name}"
+        output_filename = f"{config.filename}_{query_name}"
 
-    if output_format == "console":
+    if config.output_format == "console":
         print(f"\n{query_name.upper()}:")
 
     # call query module to export.  query will append the extension
-    export_path = os.path.join(output_path, output_filename)
+    export_path = os.path.join(config.output_path, output_filename)
     export_sqlite_query(
-        connection, query, export_format=output_format, export_path=export_path
+        connection, query, export_format=config.output_format, export_path=export_path
     )
 
 
@@ -281,10 +286,10 @@ def generate_domain_query(connection: RocpdImportData, by_rank=False) -> Tuple[s
     return (view_name, domain_select)
 
 
-def create_summary_queries(connection: RocpdImportData, by_rank=False) -> dict[str, str]:
-    """Create summary queries for eligible temporary views in the database."""
-
-    queries = {}
+def export_summary_queries(
+    connection: RocpdImportData, config: ExportConfig, by_rank=False
+):
+    """Create and export summary queries for eligible temporary views in the database."""
 
     NAME_COLUMN_MAP = {
         "memory_allocations": "type",
@@ -308,7 +313,7 @@ def create_summary_queries(connection: RocpdImportData, by_rank=False) -> dict[s
         summary_query_name, summary_query = generate_summary_query(
             view_name, "", name_column=NAME_COLUMN_MAP.get(view_name, "name")
         )
-        queries[summary_query_name] = summary_query
+        export_query(connection, config, summary_query_name, summary_query)
 
         # Create per-rank summary query
         if by_rank:
@@ -318,17 +323,16 @@ def create_summary_queries(connection: RocpdImportData, by_rank=False) -> dict[s
                 name_column=NAME_COLUMN_MAP.get(view_name, "name"),
                 by_rank=True,
             )
-            queries[per_rank_query_name] = summary_by_rank_query
-
-    return queries
+            export_query(connection, config, per_rank_query_name, summary_by_rank_query)
 
 
-def create_summary_region_queries(
-    connection: RocpdImportData, by_rank=False, region_categories=None
-) -> dict[str, str]:
-    """Create summary and region queries"""
-
-    queries = {}
+def export_summary_region_queries(
+    connection: RocpdImportData,
+    config: ExportConfig,
+    by_rank=False,
+    region_categories=None,
+):
+    """Create and export summary and region queries"""
 
     query = "SELECT DISTINCT(category) FROM regions_and_samples"
     categories = execute_statement(connection, query).fetchall()
@@ -352,22 +356,25 @@ def create_summary_region_queries(
                 WHERE {" OR ".join(conditions)}
             """
 
-            queries[k] = region_query
+            # Export the region summary query
+            export_query(connection, config, k, region_query)
 
             # Create regular summary query
             summary_query_name, summary_query = generate_summary_query(k, region_query)
-            queries[summary_query_name] = summary_query
+            export_query(connection, config, summary_query_name, summary_query)
 
-            # Create per-rank summary view
+            # Create per-rank summary query
             if by_rank:
                 per_rank_query_name, summary_by_rank_query = generate_summary_query(
                     k, region_query, by_rank=True
                 )
-                queries[per_rank_query_name] = summary_by_rank_query
+                export_query(
+                    connection, config, per_rank_query_name, summary_by_rank_query
+                )
 
     # Markers
     if "MARKER" not in region_categories:
-        return queries
+        return
 
     markers_query_name = "markers"
     markers_query = f"""
@@ -380,32 +387,27 @@ def create_summary_region_queries(
     summary_query_name, summary_query = generate_summary_query(
         markers_query_name, markers_query, name_column="marker_name"
     )
-    queries[summary_query_name] = summary_query
+    export_query(connection, config, summary_query_name, summary_query)
 
     # Create per-rank summary query
     if by_rank:
         per_rank_query_name, summary_by_rank_query = generate_summary_query(
             markers_query_name, markers_query, name_column="marker_name", by_rank=True
         )
-        queries[per_rank_query_name] = summary_by_rank_query
-
-    return queries
+        export_query(connection, config, per_rank_query_name, summary_by_rank_query)
 
 
-def create_domain_query(connection: RocpdImportData, by_rank=False) -> dict[str, str]:
-    """Create a domain summary query by aggregating all summary views."""
+def export_domain_query(connection: RocpdImportData, config: ExportConfig, by_rank=False):
+    """Create and export a domain summary query by aggregating all summary views."""
 
     result = generate_domain_query(connection, by_rank=by_rank)
     if not result:
-        return {}
+        return
 
     query_name, query = result
-    queries = {}
 
-    # Create the domain summary view
-    queries[query_name] = query
-
-    return queries
+    # Export the domain summary query
+    export_query(connection, config, query_name, query)
 
 
 def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
@@ -429,24 +431,23 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
             ),
         )
 
-    queries = {}
+    config = ExportConfig(
+        output_format=output_format,
+        output_path=output_path,
+        filename=filename,
+    )
 
-    # create the temporary summary queries
-    queries |= create_summary_queries(connection, by_rank)
-    queries |= create_summary_region_queries(
-        connection, by_rank, region_categories=region_categories
+    # Create and export the summary queries
+    export_summary_queries(connection, config, by_rank)
+    export_summary_region_queries(
+        connection, config, by_rank, region_categories=region_categories
     )
 
     if domain_summary:
-        queries |= create_domain_query(connection)
-        # Create domain summary per rank only if both domain_summary and summary_by_rank are enabled
+        export_domain_query(connection, config)
+        # Create and export domain summary per rank only if both domain_summary and summary_by_rank are enabled
         if by_rank:
-            queries |= create_domain_query(connection, by_rank=True)
-
-    # Write summary
-    print("\nSummary files:")
-    for query_name, query in queries.items():
-        export_query(connection, query_name, query, output_format, output_path, filename)
+            export_domain_query(connection, config, by_rank=True)
 
 
 #
