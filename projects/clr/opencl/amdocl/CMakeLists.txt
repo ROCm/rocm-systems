@@ -54,12 +54,16 @@ else()
 endif()
 
 set_target_properties(amdocl PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON)
 
-# set amdocl library version
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(amdocl PRIVATE -stdlib=libc++ INTERFACE -stdlib=libc++)
+endif()
+
+  # set amdocl library version
 set(AMDOCL_LIB_VERSION_MAJOR "2")
 set(AMDOCL_LIB_VERSION_MINOR "1")
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})

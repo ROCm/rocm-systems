@@ -19,6 +19,17 @@
 # THE SOFTWARE.
 
 cmake_minimum_required(VERSION 3.16.8)
+
+# Set default compiler for UNIX
+if(UNIX)
+    if(NOT DEFINED CMAKE_C_COMPILER)
+        set(CMAKE_C_COMPILER "/opt/rocm/lib/llvm/bin/clang")
+    endif()
+    if(NOT DEFINED CMAKE_CXX_COMPILER)
+        set(CMAKE_CXX_COMPILER "/opt/rocm/lib/llvm/bin/clang++")
+    endif()
+endif()
+
 project(clr)
 
 ##########

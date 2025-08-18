@@ -51,10 +51,14 @@ set(ROCCLR_INCLUDE_DIR "${ROCCLR_SRC_DIR}/include" PARENT_SCOPE)
 mark_as_advanced(ROCCLR_INCLUDE_DIR)
 
 set_target_properties(rocclr PROPERTIES
-    CXX_STANDARD 17
+    CXX_STANDARD 20
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  target_compile_options(rocclr PRIVATE -stdlib=libc++ INTERFACE -stdlib=libc++)
+endif()
 
 target_sources(rocclr PRIVATE
   ${ROCCLR_SRC_DIR}/compiler/lib/utils/options.cpp

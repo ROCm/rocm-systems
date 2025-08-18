@@ -69,7 +69,7 @@ else()
 endif()
 
 set_target_properties(amdhip64 PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
@@ -77,6 +77,17 @@ set_target_properties(amdhip64 PROPERTIES
   # having hardcoded references to build/lib/libamdhip64.so
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND UNIX)
+  if(NOT DEFINED LLVM_LIBRARY_PATH)
+    set(LLVM_LIBRARY_PATH "/opt/rocm/lib/llvm/lib")
+  endif()
+  message(STATUS "Using libc++ from: ${LLVM_LIBRARY_PATH}")
+  set_target_properties(amdhip64 PROPERTIES
+    COMPILE_OPTIONS "-stdlib=libc++"
+    LINK_OPTIONS "-stdlib=libc++"
+    LINK_DIRECTORIES ${LLVM_LIBRARY_PATH})
+endif()
 
 if(CMAKE_SIZEOF_VOID_P EQUAL 8)
   set_target_properties(amdhip64 PROPERTIES OUTPUT_NAME "amdhip64")

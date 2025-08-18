@@ -40,12 +40,19 @@ else()
 endif()
 
 set_target_properties(hiprtc PROPERTIES
-  CXX_STANDARD 17
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
   LIBRARY_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib
   ARCHIVE_OUTPUT_DIRECTORY ${PROJECT_BINARY_DIR}/lib)
+
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" AND UNIX)
+  set_target_properties(hiprtc PROPERTIES
+    COMPILE_OPTIONS "-stdlib=libc++"
+    LINK_OPTIONS "-stdlib=libc++"
+    LINK_DIRECTORIES ${LLVM_LIBRARY_PATH})
+endif()
 
 if(WIN32)
   if(${HIP_LIB_VERSION_MAJOR} VERSION_GREATER 9)
@@ -69,12 +76,6 @@ if(BUILD_SHARED_LIBS)
 endif()
 
 target_sources(hiprtc PRIVATE hiprtc.cpp ../hip_comgr_helper.cpp hiprtcInternal.cpp)
-
-set_target_properties(hiprtc PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-  CXX_EXTENSIONS OFF
-  POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(hiprtc
   PRIVATE
@@ -190,7 +191,7 @@ generate_hiprtc_mcin("${HIPRTC_GEN_MCIN}" "${HIPRTC_GEN_PREPROCESSED}")
 # Note: second command appends define macros at build time.
 add_custom_command(
   OUTPUT ${HIPRTC_GEN_PREPROCESSED}
-  COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++17 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
+  COMMAND ${clang} -O3 --rocm-path=${PROJECT_SOURCE_DIR}/include/.. -std=c++20 -nogpulib --hip-version=${HIP_LIB_VERSION_MAJOR}.${HIP_LIB_VERSION_MINOR} -isystem ${HIP_COMMON_INCLUDE_DIR} -isystem ${PROJECT_SOURCE_DIR}/include -isystem ${PROJECT_BINARY_DIR}/include -isystem ${CMAKE_CURRENT_SOURCE_DIR}/include --cuda-device-only -D__HIPCC_RTC__ -DHIP_VERSION_MAJOR=${HIP_LIB_VERSION_MAJOR} -DHIP_VERSION_MINOR=${HIP_LIB_VERSION_MINOR} -x hip ${HIPRTC_GEN_HEADER} -E -P -o ${HIPRTC_GEN_PREPROCESSED}
   COMMAND ${CMAKE_COMMAND} -DHIPRTC_ADD_MACROS=1 -DHIPRTC_HEADERS="${HIPRTC_HEADERS}" -DHIPRTC_PREPROCESSED_FILE=${HIPRTC_GEN_PREPROCESSED} -P ${HIPRTC_CMAKE}
   DEPENDS ${clang} ${HIPRTC_GEN_HEADER})
 add_custom_command(
@@ -201,7 +202,7 @@ add_custom_command(
 # Create hiprtc-builtins library.
 add_library(hiprtc-builtins ${HIPRTC_GEN_OBJ})
 set_target_properties(hiprtc-builtins PROPERTIES
-  CXX_STANDARD 14
+  CXX_STANDARD 20
   CXX_STANDARD_REQUIRED ON
   CXX_EXTENSIONS OFF
   POSITION_INDEPENDENT_CODE ON
