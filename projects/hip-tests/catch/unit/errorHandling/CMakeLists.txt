@@ -7,6 +7,7 @@ set(TEST_SRC
     hipDrvGetErrorString.cc
     hipGetLastError.cc
     hipPeekAtLastError.cc
+    hipGetErrorOnCrash.cc
 )
 
 if(UNIX)
