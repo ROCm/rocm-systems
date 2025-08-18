@@ -31,13 +31,13 @@ Run this periodically to update the coverage baseline:
 ```bash
 # From monorepo root
 cd projects/rocprofiler-compute
-./utils/generate_coverage.sh
+./utils/update_coverage.sh
 
 # This will:
 # - Build with coverage enabled
 # - Run all tests
 # - Generate coverage.xml
-# - Copy to coverage/coverage-latest.xml
+# - Copy/overwrite to coverage/coverage-latest.xml
 # - Show instructions for committing
 ```
 
