@@ -57,9 +57,8 @@ void init(bool* status) {
     return;
   }
 
-  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d.%s, Direct Dispatch: %d",
-          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, HIP_VERSION_GITHASH,
-          AMD_DIRECT_DISPATCH);
+  ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Version: %d.%d.%d, Direct Dispatch: %d",
+          HIP_VERSION_MAJOR, HIP_VERSION_MINOR, HIP_VERSION_PATCH, AMD_DIRECT_DISPATCH);
   // Print the current path of the library
   amd::Os::PrintLibraryLocation();
   const std::vector<amd::Device*>& devices = amd::Device::getDevices(CL_DEVICE_TYPE_GPU, false);
