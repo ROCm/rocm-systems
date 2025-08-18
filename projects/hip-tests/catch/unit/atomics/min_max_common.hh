@@ -160,7 +160,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
     __syncthreads();
   }
 
-  const auto n = cooperative_groups::this_grid().size();
+  const auto n = cooperative_groups::this_grid().num_threads();
 
   TestType* atomic_addr = PitchedOffset(mem, pitch, tid % width);
 

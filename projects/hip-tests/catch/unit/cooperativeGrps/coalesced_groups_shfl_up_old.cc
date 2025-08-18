@@ -36,7 +36,7 @@ using namespace cooperative_groups;
 #define ASSERT_EQUAL(lhs, rhs) assert(lhs == rhs)
 #define WAVE_SIZE 32
 __device__ int prefix_sum_kernel(coalesced_group const& g, int val) {
-  int sz = g.size();
+  int sz = g.num_threads();
   for (int i = 1; i < sz; i <<= 1) {
     int temp = g.shfl_up(val, i);
 
@@ -73,7 +73,7 @@ __global__ void kernel_cg_group_partition_shfl_up(int* dPtr, unsigned int tileSz
     // Choose a leader thread to print the results
     if (threadBlockCGTy.thread_rank() == 0) {
       printf(" Creating %d groups, of tile size %d threads:\n\n",
-             (int)threadBlockCGTy.size() / tileSz, tileSz);
+             (int)threadBlockCGTy.num_threads() / tileSz, tileSz);
     }
 
     threadBlockCGTy.sync();

@@ -42,7 +42,7 @@ __device__ int atomicAggInc(int *ptr) {
    int prev = 0;
    // elect the first active thread to perform atomic add
    if (g.thread_rank() == 0) {
-     prev = atomicAdd(ptr, g.size());
+     prev = atomicAdd(ptr, g.num_threads());
    }
    // broadcast previous value within the warp
    // and add each active thread’s rank to it
@@ -93,7 +93,7 @@ __global__ void filter_arr(int *dst, int *nres, const int *src, int n) {
 __device__ int reduction_kernel(coalesced_group g, int* x, int val) {
   int lane = g.thread_rank();
 
-  for (int i = g.size() / 2; i > 0; i /= 2) {
+  for (int i = g.num_threads() / 2; i > 0; i /= 2) {
     // use lds to store the temporary result
     x[lane] = val;
     // Ensure all the stores are completed.
@@ -145,9 +145,9 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
 
     if (threadBlockCGTy.thread_rank() == 0) {
       printf(" Sum of all ranks 0..%d in coalesced_group is %d\n\n",
-             (int)threadBlockCGTy.size() - 1, outputSum);
+             (int)threadBlockCGTy.num_threads() - 1, outputSum);
       printf(" Creating %d groups, of tile size %d threads:\n\n",
-             (int)threadBlockCGTy.size() / tileSz, tileSz);
+             (int)threadBlockCGTy.num_threads() / tileSz, tileSz);
     }
 
     threadBlockCGTy.sync();
@@ -163,7 +163,7 @@ __global__ void kernel_cg_coalesced_group_partition(unsigned int tileSz, int* re
       printf(
           "   Sum of all ranks 0..%d in this tiledPartition group is %d. Corresponding parent thread rank"
           " obtained from meta_group_rank : %d and number of tiles created : %d\n",
-          tiledPartition.size() - 1, outputSum, tiledPartition.meta_group_rank(),
+          tiledPartition.num_threads() - 1, outputSum, tiledPartition.meta_group_rank(),
           tiledPartition.meta_group_size());
         result[input / (tileSz)] = outputSum;
     }
@@ -189,7 +189,7 @@ __global__ void kernel_coalesced_active_groups() {
     if (activeOdd.thread_rank() == 0) {
       printf(" ODD: Size of odd set of active threads is %d."
              " Corresponding parent thread_rank is %d.\n\n",
-               activeOdd.size(), threadBlockCGTy.thread_rank());
+               activeOdd.num_threads(), threadBlockCGTy.thread_rank());
     }
   }
   else { // Group all active even threads
@@ -198,7 +198,7 @@ __global__ void kernel_coalesced_active_groups() {
     if (activeEven.thread_rank() == 0) {
       printf(" EVEN: Size of even set of active threads is %d."
              " Corresponding parent thread_rank is %d.",
-               activeEven.size(), threadBlockCGTy.thread_rank());
+               activeEven.num_threads(), threadBlockCGTy.thread_rank());
     }
   }
   return;

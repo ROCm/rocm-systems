@@ -40,7 +40,7 @@ static __global__ void kernel_cg_multi_grid_group_type(int* grid_rank_dev, int* 
   grid_rank_dev[gIdx] = mg.grid_rank();
 
   // Test size
-  size_dev[gIdx] = mg.size();
+  size_dev[gIdx] = mg.num_threads();
 
   // Test thread_rank
   thd_rank_dev[gIdx] = mg.thread_rank();
@@ -81,7 +81,7 @@ static __global__ void kernel_cg_multi_grid_group_type_via_base_type(
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
   // Test size
-  size_dev[gIdx] = tg.size();
+  size_dev[gIdx] = tg.num_threads();
 
   // Test thread_rank
   grid_rank_dev[gIdx] = cg::this_multi_grid().grid_rank();
@@ -174,7 +174,7 @@ __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array, uint3
     // If the grid sync below fails, then the other threads may hit the
     // atomicInc instruction many times before the last thread ever gets to it.
     // If the sync works, then it will likely contain "total number of blocks"*iter
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       // The last wavefront should spin on this loop's atomic value
       // until all of the other wavefronts have incremented the
       // per-loop atomic and hit the grid.sync()
@@ -201,7 +201,7 @@ __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array, uint3
     blocks_seen += grid_blocks;
 
     // Each grid updates its own counter
-    if (rank == (grid.size() - 1)) {
+    if (rank == (grid.num_threads() - 1)) {
       grid_values[grid_id] = atomicAdd(&grid_counters[grid_id], grid_id + 1);
     }
     mgrid.sync();

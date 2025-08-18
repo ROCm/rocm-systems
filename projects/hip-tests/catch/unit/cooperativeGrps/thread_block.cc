@@ -39,7 +39,7 @@ namespace cg = cooperative_groups;
 template <typename BaseType = cg::thread_block>
 static __global__ void thread_block_size_getter(unsigned int* sizes) {
   const BaseType group = cg::this_thread_block();
-  sizes[thread_rank_in_grid()] = group.size();
+  sizes[thread_rank_in_grid()] = group.num_threads();
 }
 
 template <typename BaseType = cg::thread_block>
@@ -260,9 +260,9 @@ __global__ void thread_block_sync_check(T* global_data, unsigned int* wait_modif
   data[tid] = tid % divisor;
   block.sync();
   bool valid = true;
-  for (auto i = 0; i < block.size(); ++i) {
-    const auto offset = block.size() + read_offset;
-    const auto expected = (tid + offset + i) % block.size();
+  for (auto i = 0; i < block.num_threads(); ++i) {
+    const auto offset = block.num_threads() + read_offset;
+    const auto expected = (tid + offset + i) % block.num_threads();
     if (!(valid &= (data[expected] == expected % divisor))) {
       break;
     }

@@ -49,7 +49,7 @@ namespace cg = cooperative_groups;
 __device__ int reduction_kernel(cg::thread_group g, int* x, int val) {
   int lane = g.thread_rank();
 
-  for (int i = g.size() / 2; i > 0; i /= 2) {
+  for (int i = g.num_threads() / 2; i > 0; i /= 2) {
     // use lds to store the temporary result
     x[lane] = val;
     // Ensure all the stores are completed.
@@ -94,15 +94,15 @@ __global__ void kernel_cg_group_partition_static(int* result, bool is_global_mem
   // input to reduction, for each thread, is its' rank in the group
   input = thread_block_CG_ty.thread_rank();
 
-  expected_output = (thread_block_CG_ty.size() - 1) * thread_block_CG_ty.size() / 2;
+  expected_output = (thread_block_CG_ty.num_threads() - 1) * thread_block_CG_ty.num_threads() / 2;
 
   output_sum = reduction_kernel(thread_block_CG_ty, workspace, input);
 
   if (thread_block_CG_ty.thread_rank() == 0) {
     printf(" Sum of all ranks 0..%d in threadBlockCooperativeGroup is %d (expected %d)\n\n",
-           (int)thread_block_CG_ty.size() - 1, output_sum, expected_output);
+           (int)thread_block_CG_ty.num_threads() - 1, output_sum, expected_output);
     printf(" Creating %d groups, of tile size %d threads:\n\n",
-           (int)thread_block_CG_ty.size() / tile_size, tile_size);
+           (int)thread_block_CG_ty.num_threads() / tile_size, tile_size);
   }
 
   thread_block_CG_ty.sync();
@@ -119,7 +119,7 @@ __global__ void kernel_cg_group_partition_static(int* result, bool is_global_mem
         "   Sum of all ranks 0..%d in this tiledPartition group is %d. Corresponding parent thread "
         "rank: via meta_group_rank : %d and the total number of groups created when partitioned : "
         "%d\n",
-        tiled_part.size() - 1, output_sum, tiled_part.meta_group_rank(),
+        tiled_part.num_threads() - 1, output_sum, tiled_part.meta_group_rank(),
         tiled_part.meta_group_size());
     result[input / (tile_size)] = output_sum;
   }
@@ -149,9 +149,9 @@ __global__ void kernel_cg_group_partition_dynamic(unsigned int tile_size, int* r
 
   if (thread_block_CG_ty.thread_rank() == 0) {
     printf("\n\n\n Sum of all ranks 0..%d in threadBlockCooperativeGroup is %d\n\n",
-           (int)thread_block_CG_ty.size() - 1, output_sum);
+           (int)thread_block_CG_ty.num_threads() - 1, output_sum);
     printf(" Creating %d groups, of tile size %d threads:\n\n",
-           (int)thread_block_CG_ty.size() / tile_size, tile_size);
+           (int)thread_block_CG_ty.num_threads() / tile_size, tile_size);
   }
 
   thread_block_CG_ty.sync();
@@ -167,7 +167,7 @@ __global__ void kernel_cg_group_partition_dynamic(unsigned int tile_size, int* r
     printf(
         "   Sum of all ranks 0..%d in this tiledPartition group is %d. Corresponding parent thread "
         "rank: %d\n",
-        static_cast<int>(tiled_part.size()) - 1, output_sum, input);
+        static_cast<int>(tiled_part.num_threads()) - 1, output_sum, input);
     result[input / (tile_size)] = output_sum;
   }
   return;

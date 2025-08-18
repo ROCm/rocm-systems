@@ -34,7 +34,7 @@ static __global__ void kernel_cg_thread_block_type(int* size_dev, int* thd_rank_
   cg::thread_block tb = cg::this_thread_block();
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
   // Test size
-  size_dev[gIdx] = tb.size();
+  size_dev[gIdx] = tb.num_threads();
 
   // Test thread_rank
   thd_rank_dev[gIdx] = tb.thread_rank();
@@ -64,7 +64,7 @@ static __global__ void kernel_cg_thread_block_type_via_base_type(int* size_dev, 
   int gIdx = (blockIdx.x * blockDim.x) + threadIdx.x;
 
   // Test size
-  size_dev[gIdx] = tg.size();
+  size_dev[gIdx] = tg.num_threads();
 
   // Test thread_rank
   thd_rank_dev[gIdx] = tg.thread_rank();
