@@ -18,6 +18,7 @@
 set(TEST_SRC
     hipKernelLookUpPerf.cc
     hipEventOverFlowPerf.cc
+    hipIpcEventSyncTest.cc
 )
 hip_add_exe_to_target(NAME perfEventTest
                       TEST_SRC ${TEST_SRC}
