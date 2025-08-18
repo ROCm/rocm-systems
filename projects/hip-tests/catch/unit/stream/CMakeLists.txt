@@ -28,7 +28,10 @@ if(HIP_PLATFORM MATCHES "amd")
                hipStreamGetPriority_spt.cc
                hipStreamQuery_spt.cc
                hipStreamSynchronize_spt.cc
-               hipStreamBatchMemOp.cc)
+               hipStreamBatchMemOp.cc
+	       hipStreamWaitEvent_spt.cc
+               hipStreamAddCallback_spt.cc
+               hipLaunchHostFunc_spt.cc)
 else()
   set(TEST_SRC
       ${TEST_SRC}

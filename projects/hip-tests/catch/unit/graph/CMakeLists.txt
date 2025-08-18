@@ -93,6 +93,12 @@ if(HIP_PLATFORM MATCHES "amd")
     hipStreamCaptureExtModuleLaunchKernel.cc
     hipStreamBeginCaptureToGraph.cc
     hipGetProcAddressGraphApis.cc
+    hipStreamGetCaptureInfo_spt.cc
+    hipStreamGetCaptureInfo_v2_spt.cc
+    hipStreamIsCapturing_spt.cc
+    hipStreamBeginCapture_spt.cc
+    hipStreamEndCapture_spt.cc
+    hipGraphLaunch_spt.cc
     # Below files are disbled in NVIDIA as PSDB builds are failing due to lower CUDA version.
     hipGraphExecNodeSetParams.cc
     hipGraphNodeSetParams.cc
