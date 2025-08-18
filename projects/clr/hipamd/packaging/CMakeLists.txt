@@ -69,12 +69,6 @@ if(HIP_PLATFORM STREQUAL "amd" )
               DESTINATION ${CMAKE_INSTALL_LIBDIR}
               COMPONENT ${COMPONENT_NAME})
 
-   if(BUILD_SHARED_LIBS)
-      if(NOT ENABLE_ASAN_PACKAGING)
-          install(PROGRAMS ${PROJECT_BINARY_DIR}/libamdhip64.so.6 DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT ${COMPONENT_NAME} OPTIONAL)
-      endif()
-   endif()
-
 #TODO:This do not belong in BINARY package.
 #Keeping it as is for now
 install(FILES ${CMAKE_BINARY_DIR}/hipamd/share/hip/.hipInfo DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary)

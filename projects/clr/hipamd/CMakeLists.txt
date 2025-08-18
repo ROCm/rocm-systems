@@ -327,16 +327,6 @@ if(HIP_RUNTIME STREQUAL "rocclr")
    add_subdirectory(src)
 endif()
 
-# Download libamdhip64.so.6
-if(HIP_PLATFORM STREQUAL "amd")
-    if(NOT WIN32)
-        execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/download_libamhip64_v6.sh" WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR} COMMAND_ECHO STDERR RESULT_VARIABLE DWLD_HIP_SO_RC)
-        if (DWLD_HIP_SO_RC AND NOT DWLD_HIP_SO_RC EQUAL 0)
-            message(FATAL_ERROR "Failed to download libamdhip64.so.6")
-        endif()
-    endif()
-endif()
-
 # Build doxygen documentation
 find_program(DOXYGEN_EXE doxygen)
 if(DOXYGEN_EXE)
