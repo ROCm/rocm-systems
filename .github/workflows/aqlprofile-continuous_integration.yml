@@ -48,13 +48,17 @@ jobs:
       fail-fast: false
       matrix:
         system: [
-          {gpu: 'navi4', runner: 'linux-rx9070-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X"},
-          {gpu: 'navi3', runner: 'linux-gfx110X-gpu-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X"},
-          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X"},
-          {gpu: 'mi355', runner: 'linux-mi355-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx950"}
+          {gpu: 'navi4', runner: 'rocprofiler-navi4-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx120X"},
+          {gpu: 'navi3', runner: 'rocprofiler-navi3-dind', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx110X"},
+          {gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X"}
         ]
 
     runs-on: ${{ matrix.system.runner }}
+    container:
+      image: ubuntu:22.04
+      env:
+        DEBIAN_FRONTEND: noninteractive
+      options: --privileged
 
     permissions:
       contents: read
@@ -70,7 +74,12 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
+        apt-get update
+        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
+        add-apt-repository ppa:git-core/ppa
+        apt-get update
+        apt-get install -y git
+        python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
           --bucket therock-nightly-tarball \

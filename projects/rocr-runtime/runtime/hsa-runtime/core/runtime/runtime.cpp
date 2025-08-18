@@ -2977,10 +2977,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
 
   Agent* dest = Agent::Convert(agent);
-  if (dest->device_type() == Agent::kAmdCpuDevice)
-    op->node_id = 0;
-  else
-    op->node_id = dest->node_id();
+  op->node_id = dest->node_id();
 
   op->base = reinterpret_cast<void*>(base);
   op->size = len;
