@@ -25,6 +25,7 @@ texture<float, 2, hipReadModeElementType> tex;
 
 TEST_CASE("Unit_hipTexRefGetFormat_Basic") {
   CHECK_IMAGE_SUPPORT
+
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
   int num_channels = 0;
@@ -46,6 +47,7 @@ TEST_CASE("Unit_hipTexRefGetFormat_Basic") {
 
 TEST_CASE("Unit_hipTexRefGetFormat_Positive") {
   CHECK_IMAGE_SUPPORT
+
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
   int num_channels = 1;
@@ -77,6 +79,7 @@ TEST_CASE("Unit_hipTexRefGetFormat_Positive") {
 
 TEST_CASE("Unit_hipTexRefGetFormat_Negative") {
   CHECK_IMAGE_SUPPORT
+
   hipModule_t module = nullptr;
   hipTexRef tex_ref = nullptr;
   int num_channels = 1;
