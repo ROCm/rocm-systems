@@ -83,7 +83,8 @@ using tool_agent_vec_t = std::vector<tool_agent>;
 client_data* tool_data = new client_data{};
 
 std::mutex buffered_records_mutex;
-using record_with_ts_t = std::pair<rocprofiler_callback_tracing_record_t, rocprofiler_timestamp_t>;
+using record_with_ts_t =
+    std::pair<rocprofiler_callback_tracing_record_t, rocprofiler_timestamp_t>;
 std::map<uint64_t, std::vector<record_with_ts_t>> buffered_records_map;
 
 void
@@ -305,6 +306,210 @@ get_marker_started_ranges()
     return _v;
 }
 
+#if(ROCPROFILER_VERSION >= 600)
+// Extracts the exact OMPT callback name (ensure record.kind ==
+// ROCPROFILER_CALLBACK_TRACING_OMPT before calling)
+bool
+ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& record,
+                                const char**                                 name)
+{
+    auto* payload_data =
+        static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload);
+
+    auto get_sync_kind = [&]() {
+        if(record.operation == ROCPROFILER_OMPT_ID_sync_region_wait)
+            return payload_data->args.sync_region_wait.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_sync_region)
+            return payload_data->args.sync_region.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_reduction)
+            return payload_data->args.reduction.kind;
+        return static_cast<ompt_sync_region_t>(-1);  // Error value
+    };
+
+    auto get_mutex_kind = [&]() {
+        if(record.operation == ROCPROFILER_OMPT_ID_mutex_released)
+            return payload_data->args.mutex_released.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_lock_init)
+            return payload_data->args.lock_init.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_lock_destroy)
+            return payload_data->args.lock_destroy.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_mutex_acquire)
+            return payload_data->args.mutex_acquire.kind;
+        else if(record.operation == ROCPROFILER_OMPT_ID_mutex_acquired)
+            return payload_data->args.mutex_acquired.kind;
+        return static_cast<ompt_mutex_t>(-1);  // Error value
+    };
+
+    switch(record.operation)  // rocprofiler_ompt_operation_t
+    {
+        // case ROCPROFILER_OMPT_ID_sync_region_wait: //ompt_sync_region_t
+        case ROCPROFILER_OMPT_ID_sync_region:  // ompt_sync_region_t
+        case ROCPROFILER_OMPT_ID_reduction:    // ompt_sync_region_t
+        {
+            auto kind = get_sync_kind();
+            switch(kind)
+            {
+                case ompt_sync_region_barrier:
+                    *name = "omp_sync_region_barrier";
+                    return true;
+                case ompt_sync_region_barrier_implicit:
+                    *name = "omp_sync_region_barrier_implicit";
+                    return true;
+                case ompt_sync_region_barrier_explicit:
+                    *name = "omp_sync_region_barrier_explicit";
+                    return true;
+                case ompt_sync_region_barrier_implementation:
+                    *name = "omp_sync_region_barrier_implementation";
+                    return true;
+                case ompt_sync_region_taskwait:
+                    *name = "omp_sync_region_taskwait";
+                    return true;
+                case ompt_sync_region_taskgroup:
+                    *name = "omp_sync_region_taskgroup";
+                    return true;
+                case ompt_sync_region_reduction:
+                    *name = "omp_sync_region_reduction";
+                    return true;
+                case ompt_sync_region_barrier_implicit_workshare:
+                    *name = "omp_sync_region_barrier_implicit_workshare";
+                    return true;
+                case ompt_sync_region_barrier_implicit_parallel:
+                    *name = "omp_sync_region_barrier_implicit_parallel";
+                    return true;
+                case ompt_sync_region_barrier_teams:
+                    *name = "omp_sync_region_barrier_teams";
+                    return true;
+            }
+            return false;
+        }
+        case ROCPROFILER_OMPT_ID_mutex_released:  // ompt_mutex_t
+        case ROCPROFILER_OMPT_ID_lock_init:       // ompt_mutex_t
+        case ROCPROFILER_OMPT_ID_lock_destroy:    // ompt_mutex_t
+        case ROCPROFILER_OMPT_ID_mutex_acquire:   // ompt_mutex_t
+        case ROCPROFILER_OMPT_ID_mutex_acquired:  // ompt_mutex_t
+        {
+            auto kind = get_mutex_kind();
+            switch(kind)
+            {
+                case ompt_mutex_lock: *name = "omp_mutex_lock"; return true;
+                case ompt_mutex_test_lock: *name = "omp_mutex_test_lock"; return true;
+                case ompt_mutex_nest_lock: *name = "omp_mutex_nest_lock"; return true;
+                case ompt_mutex_test_nest_lock:
+                    *name = "omp_mutex_test_nest_lock";
+                    return true;
+                case ompt_mutex_critical: *name = "omp_mutex_critical"; return true;
+                case ompt_mutex_atomic: *name = "omp_mutex_atomic"; return true;
+                case ompt_mutex_ordered: *name = "omp_mutex_ordered"; return true;
+            }
+            return false;
+        }
+        case ROCPROFILER_OMPT_ID_work:  // ompt_work_t
+        {
+            auto kind = payload_data->args.work.work_type;
+            switch(kind)
+            {
+                case ompt_work_loop: *name = "omp_work_loop"; return true;
+                case ompt_work_sections: *name = "omp_work_sections"; return true;
+                case ompt_work_single_executor:
+                    *name = "omp_work_single_executor";
+                    return true;
+                case ompt_work_single_other: *name = "omp_work_single_other"; return true;
+                case ompt_work_workshare: *name = "omp_work_workshare"; return true;
+                case ompt_work_distribute: *name = "omp_work_distribute"; return true;
+                case ompt_work_taskloop: *name = "omp_work_taskloop"; return true;
+                case ompt_work_scope: *name = "omp_work_scope"; return true;
+                case ompt_work_loop_static: *name = "omp_work_loop_static"; return true;
+                case ompt_work_loop_dynamic: *name = "omp_work_loop_dynamic"; return true;
+                case ompt_work_loop_guided: *name = "omp_work_loop_guided"; return true;
+                case ompt_work_loop_other: *name = "omp_work_loop_other"; return true;
+            }
+            return false;
+        }
+        case ROCPROFILER_OMPT_ID_dispatch:  // ompt_dispatch_t
+        {
+            auto kind = payload_data->args.dispatch.kind;
+            switch(kind)
+            {
+                case ompt_dispatch_iteration:
+                    *name = "omp_dispatch_iteration";
+                    return true;
+                case ompt_dispatch_section: *name = "omp_dispatch_section"; return true;
+                case ompt_dispatch_ws_loop_chunk:
+                    *name = "omp_dispatch_ws_loop_chunk";
+                    return true;
+                case ompt_dispatch_taskloop_chunk:
+                    *name = "omp_dispatch_taskloop_chunk";
+                    return true;
+                case ompt_dispatch_distribute_chunk:
+                    *name = "omp_dispatch_distribute_chunk";
+                    return true;
+            }
+            return false;
+        }
+        case ROCPROFILER_OMPT_ID_target_emi:  // ompt_target_t
+        {
+            auto kind = payload_data->args.target_emi.kind;
+            switch(kind)
+            {
+                case ompt_target: *name = "omp_target"; return true;
+                case ompt_target_enter_data: *name = "omp_target_enter_data"; return true;
+                case ompt_target_exit_data: *name = "omp_target_exit_data"; return true;
+                case ompt_target_update: *name = "omp_target_update"; return true;
+                case ompt_target_nowait: *name = "omp_target_nowait"; return true;
+                case ompt_target_enter_data_nowait:
+                    *name = "omp_target_enter_data_nowait";
+                    return true;
+                case ompt_target_exit_data_nowait:
+                    *name = "omp_target_exit_data_nowait";
+                    return true;
+                case ompt_target_update_nowait:
+                    *name = "omp_target_update_nowait";
+                    return true;
+            }
+            return false;
+        }
+        case ROCPROFILER_OMPT_ID_target_data_op_emi:  // ompt_target_data_op_t
+        {
+            auto kind = payload_data->args.target_data_op_emi.optype;
+            switch(kind)
+            {
+                case ompt_target_data_alloc: *name = "omp_target_data_alloc"; return true;
+                case ompt_target_data_transfer_to_device:
+                    *name = "omp_target_data_transfer_to_device";
+                    return true;
+                case ompt_target_data_transfer_from_device:
+                    *name = "omp_target_data_transfer_from_device";
+                    return true;
+                case ompt_target_data_delete:
+                    *name = "omp_target_data_delete";
+                    return true;
+                case ompt_target_data_associate:
+                    *name = "omp_target_data_associate";
+                    return true;
+                case ompt_target_data_disassociate:
+                    *name = "omp_target_data_disassociate";
+                    return true;
+                case ompt_target_data_alloc_async:
+                    *name = "omp_target_data_alloc_async";
+                    return true;
+                case ompt_target_data_transfer_to_device_async:
+                    *name = "omp_target_data_transfer_to_device_async";
+                    return true;
+                case ompt_target_data_transfer_from_device_async:
+                    *name = "omp_target_data_transfer_from_device_async";
+                    return true;
+                case ompt_target_data_delete_async:
+                    *name = "omp_target_data_delete_async";
+                    return true;
+            }
+            return false;
+        }
+        default: return false;
+    }
+}
+
+#endif
+
 template <typename CategoryT>
 void
 tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t record,
@@ -315,7 +520,18 @@ tool_tracing_callback_start(CategoryT, rocprofiler_callback_tracing_record_t rec
     // "unused variable" warning.
     (void) ts;
 
-    auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    // auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    const char*      name = nullptr;
+    std::string_view _name;
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT &&
+       !ompt_get_detailed_callback_name(record, &name))
+    {
+        _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    }
+    else
+    {
+        _name = name;
+    }
 
     if constexpr(std::is_same<CategoryT, category::rocm_marker_api>::value)
     {
@@ -368,7 +584,18 @@ tool_tracing_callback_stop(
     rocprofiler_user_data_t* user_data, rocprofiler_timestamp_t ts,
     std::optional<std::vector<tim::unwind::processed_entry>>& _bt_data)
 {
-    auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    // auto _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    const char*      name = nullptr;
+    std::string_view _name;
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT &&
+       !ompt_get_detailed_callback_name(record, &name))
+    {
+        _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+    }
+    else
+    {
+        _name = name;
+    }
 
     uint64_t begin_ts = user_data->value;
     if constexpr(std::is_same<CategoryT, category::rocm_marker_api>::value)
@@ -572,8 +799,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
 
     const char* name = nullptr;
-    rocprofiler_query_callback_tracing_kind_operation_name(record.kind, record.operation,
-                                                           &name, nullptr);
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT &&
+       !ompt_get_detailed_callback_name(record, &name))
+    {
+        rocprofiler_query_callback_tracing_kind_operation_name(
+            record.kind, record.operation, &name, nullptr);
+    }
 
     auto info = std::stringstream{};
     info << std::left << "tid=" << record.thread_id << ", cid=" << std::setw(3)
@@ -581,6 +812,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", operation=" << std::setw(3) << record.operation
          << ", phase=" << record.phase << ", dt_nsec=" << std::setw(8) << ts
          << ", name=" << name;
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
+    {
+        std::cout << "[CALLBACK] Name: " << name << " ";
+        std::cout << info.str() << std::endl;
+    }
 
     if(rocprofsys::get_state() != rocprofsys::State::Active)
     {
@@ -787,8 +1024,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
         else if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
         {
-            std::lock_guard guard { buffered_records_mutex };
-            record_with_ts_t entry = {record, ts};
+            std::cout << "[OMPT] Name: " << name << std::endl;
+            std::lock_guard  guard{ buffered_records_mutex };
+            record_with_ts_t entry = { record, ts };
             buffered_records_map[record.thread_id].emplace_back(entry);
         }
         else
@@ -1302,19 +1540,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* user_data)
 
     for(auto itr : {
             ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-                ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-                ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-                ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-                ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-                ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-                ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-                ROCPROFILER_CALLBACK_TRACING_RCCL_API,
+            ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+            ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+            ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+            ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+            ROCPROFILER_CALLBACK_TRACING_RCCL_API,
 #if(ROCPROFILER_VERSION >= 600)
-                ROCPROFILER_CALLBACK_TRACING_OMPT,
-                ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
+            ROCPROFILER_CALLBACK_TRACING_OMPT,
+            ROCPROFILER_CALLBACK_TRACING_ROCDECODE_API,
 #endif
 #if(ROCPROFILER_VERSION >= 700)
-                ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
+            ROCPROFILER_CALLBACK_TRACING_ROCJPEG_API,
 #endif
         })
     {
@@ -1508,33 +1746,35 @@ void
 config()
 {}
 
-const char* ompt_thread_name = "ompt_thread";
+const char* ompt_thread_name   = "ompt_thread";
 const char* ompt_parallel_name = "ompt_parallel";
 void
 post_process()
 {
-    std::lock_guard guard {buffered_records_mutex};
+    std::lock_guard guard{ buffered_records_mutex };
 
     struct perfetto_record
     {
-        const char* name;
-        rocprofiler_timestamp_t start;
-        rocprofiler_timestamp_t end;
-        rocprofiler_thread_id_t thread_id;
+        const char*                  name;
+        rocprofiler_timestamp_t      start;
+        rocprofiler_timestamp_t      end;
+        rocprofiler_thread_id_t      thread_id;
         rocprofiler_correlation_id_t corr_id;
     };
     std::vector<perfetto_record> records;
 
-    for(auto &thread_records : buffered_records_map)
+    for(auto& thread_records : buffered_records_map)
     {
         std::vector<record_with_ts_t> thread_list = thread_records.second;
 
-
-        auto find_record = [thread_list](const rocprofiler_ompt_operation_t &operation) -> std::optional<record_with_ts_t> {
+        auto find_record = [thread_list](const rocprofiler_ompt_operation_t& operation)
+            -> std::optional<record_with_ts_t> {
             auto it = std::find_if(thread_list.begin(), thread_list.end(),
-                                [operation](const record_with_ts_t &record_with_ts) {
-                                    return static_cast<int>(record_with_ts.first.operation) == static_cast<int>(operation);
-                                });
+                                   [operation](const record_with_ts_t& record_with_ts) {
+                                       return static_cast<int>(
+                                                  record_with_ts.first.operation) ==
+                                              static_cast<int>(operation);
+                                   });
             if(it == thread_list.end())
             {
                 return std::nullopt;
@@ -1562,11 +1802,11 @@ post_process()
 
             if(parallel_begin.has_value() && parallel_end.has_value())
             {
-                perfetto_record entry{ .name      =  ompt_parallel_name,
+                perfetto_record entry{ .name      = ompt_parallel_name,
                                        .start     = parallel_begin->second,
                                        .end       = parallel_end->second,
                                        .thread_id = thread_records.first,
-                                       .corr_id = parallel_end->first.correlation_id };
+                                       .corr_id   = parallel_end->first.correlation_id };
 
                 records.emplace_back(entry);
             }
@@ -1585,12 +1825,14 @@ post_process()
 
         tracing::push_perfetto(
             category::rocm_ompt_api{}, record.name, _track, record.start,
-            ::perfetto::Flow::ProcessScoped(record.corr_id.internal), [&](::perfetto::EventContext ctx) {
+            ::perfetto::Flow::ProcessScoped(record.corr_id.internal),
+            [&](::perfetto::EventContext ctx) {
                 if(config::get_perfetto_annotations())
                 {
                     tracing::add_perfetto_annotation(ctx, "begin_ns", record.start);
                     tracing::add_perfetto_annotation(ctx, "end_ns", record.end);
-                    tracing::add_perfetto_annotation(ctx, "corr_id", record.corr_id.internal);
+                    tracing::add_perfetto_annotation(ctx, "corr_id",
+                                                     record.corr_id.internal);
                 }
             });
         tracing::pop_perfetto(category::rocm_ompt_api{}, record.name, _track, record.end);
