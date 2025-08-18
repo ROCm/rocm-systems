@@ -42,7 +42,7 @@ jobs:
           
           if [ ! -f "$COVERAGE_FILE" ]; then
             echo "ERROR: Coverage file not found at $COVERAGE_FILE!"
-            echo "Please run manual coverage generation before promotion"
+            echo "Please run manual coverage generation"
             echo "Use: cd projects/rocprofiler-compute && ./utils/update_coverage.sh"
             exit 1
           fi
