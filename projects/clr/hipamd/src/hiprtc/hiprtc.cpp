@@ -300,9 +300,47 @@ hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* option
   }
 
   if (num_options != 0) {
-    for (int i = 0; i < num_options; i++) {
-      if (options_ptr == nullptr || options_vals_pptr == nullptr) {
-        HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
+    if (options_ptr == nullptr || options_vals_pptr == nullptr) {
+      HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
+    }
+
+    for (int i = 0; i < num_options; ++i) {
+      switch (options_ptr[i]) {
+        // CUDA only options
+        case hipJitOptionMaxRegisters:
+        case hipJitOptionThreadsPerBlock:
+        case hipJitOptionWallTime:
+        case hipJitOptionInfoLogBuffer:
+        case hipJitOptionInfoLogBufferSizeBytes:
+        case hipJitOptionErrorLogBuffer:
+        case hipJitOptionErrorLogBufferSizeBytes:
+        case hipJitOptionOptimizationLevel:
+        case hipJitOptionTargetFromContext:
+        case hipJitOptionTarget:
+        case hipJitOptionFallbackStrategy:
+        case hipJitOptionGenerateDebugInfo:
+        case hipJitOptionLogVerbose:
+        case hipJitOptionGenerateLineInfo:
+        case hipJitOptionCacheMode:
+        case hipJitOptionSm3xOpt:
+        case hipJitOptionFastCompile:
+        case hipJitOptionGlobalSymbolNames:
+        case hipJitOptionGlobalSymbolAddresses:
+        case hipJitOptionGlobalSymbolCount:
+        case hipJitOptionLto:
+        case hipJitOptionFtz:
+        case hipJitOptionPrecDiv:
+        case hipJitOptionPrecSqrt:
+        case hipJitOptionFma:
+        case hipJitOptionPositionIndependentCode:
+        case hipJitOptionMinCTAPerSM:
+        case hipJitOptionMaxThreadsPerBlock:
+        case hipJitOptionOverrideDirectiveValues:
+        case hipJitOptionNumOptions:
+          HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
+        default:
+          // everything else is fine
+          break;
       }
     }
   }
@@ -361,7 +399,7 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
 
   if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX ||
       input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT ||
-      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM || 
+      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM ||
       input_type == HIPRTC_JIT_INPUT_SPIRV) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
