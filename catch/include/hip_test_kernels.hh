@@ -93,7 +93,12 @@ template <typename T> __global__ void vector_square(const T* A_d, T* C_d, size_t
   size_t gputhread = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = gputhread; i < N_ELMTS; i += stride) {
+#if HT_AMD
+    T result = A_d[i] * A_d[i];
+    __hip_atomic_store(&C_d[i], result, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_SYSTEM);
+#else
     C_d[i] = A_d[i] * A_d[i];
+#endif
   }
 }
 
