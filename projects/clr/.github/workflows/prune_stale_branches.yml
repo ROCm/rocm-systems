@@ -1,0 +1,98 @@
+name: Prune stale amd/dev branches
+
+on:
+  # Run every Sunday at 12:00 PM PST (20:00 UTC). Note: During Daylight Saving Time (PDT, UTC-7)
+  # this will execute at 1:00 PM local time. See comments below for alternatives.
+  schedule:
+    - cron: "0 20 * * 0"
+  # Allow manual trigger
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Run in dry-run mode (no deletions)"
+        required: false
+        default: "false"
+        type: choice
+        options: ["true", "false"]
+      quiet:
+        description: "Suppress normal stdout"
+        required: false
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+
+permissions:
+  contents: write         # Required to delete branches
+  pull-requests: read     # Needed for gh pr list
+  actions: read
+
+concurrency:
+  group: prune-amd-dev-branches
+  cancel-in-progress: false
+
+jobs:
+  prune:
+    name: Prune branches
+    runs-on: AMD-ROCm-Internal-dev1
+    env:
+      # gh will pick up this token (it also respects GITHUB_TOKEN automatically, but we set GH_TOKEN explicitly)
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      DRY_RUN_INPUT: ${{ github.event.inputs.dry_run }}
+      QUIET_INPUT: ${{ github.event.inputs.quiet }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+            # Fetch all branches so script can inspect remote refs accurately
+            fetch-depth: 0
+      - name: Setup Github CLI
+        uses: actions4gh/setup-gh@v4
+        
+      - name: Ensure script is executable
+        run: |
+          if [ ! -f .github/scripts/prune_amd_dev_branches.sh ]; then
+            echo "Script prune_amd_dev_branches.sh not found at repository root." >&2
+            exit 1
+          fi
+            chmod +x prune_amd_dev_branches.sh
+      - name: Run prune script
+        id: run_prune
+        run: |
+          set -euo pipefail
+          DRY_FLAG=""
+            # Determine dry run: default to false unless workflow_dispatch sets true
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ "${DRY_RUN_INPUT}" = "true" ]; then
+              DRY_FLAG="--dry-run"
+            fi
+            QUIET_FLAG=""
+            if [ "${QUIET_INPUT}" = "true" ]; then
+              QUIET_FLAG="--quiet"
+            fi
+          fi
+
+          # For scheduled runs we want real deletions & quiet output by default
+          if [ "${{ github.event_name }}" = "schedule" ]; then
+            QUIET_FLAG="--quiet"
+          fi
+
+          echo "Invoking: ./.github/scripts/prune_amd_dev_branches.sh ${DRY_FLAG} ${QUIET_FLAG}"
+          ./.github/scripts/prune_amd_dev_branches.sh ${DRY_FLAG} ${QUIET_FLAG}
+
+      - name: Upload log (only if not quiet or on failure)
+        if: failure() || steps.run_prune.outcome == 'failure' || (github.event_name == 'workflow_dispatch' && env.QUIET_INPUT != 'true')
+        uses: actions/upload-artifact@v4
+        with:
+          name: prune-branches-log
+          path: |
+            ./*.log
+          if-no-files-found: ignore
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "Prune run finished at $(date -u '+%Y-%m-%d %H:%M:%S UTC')."
+          echo "Event: ${{ github.event_name }}"
+          echo "Dry run input: ${DRY_RUN_INPUT:-N/A}"
+          echo "Quiet input: ${QUIET_INPUT:-N/A}"
