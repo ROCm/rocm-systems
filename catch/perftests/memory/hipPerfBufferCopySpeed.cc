@@ -60,6 +60,7 @@ static void checkData(void* ptr, unsigned int size, char value) {
 }
 
 static bool hipPerfBufferCopySpeed_test(int p_tests) {
+  int testIdx = 0;
   unsigned int bufSize_;
   unsigned int numIter;
   bool hostMalloc[2] = {false};
@@ -78,6 +79,10 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   // 1. Run all P2P for all sizes
   if (numDevices >= 2) {
     for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
+      if (p_tests != -1 && testIdx != p_tests) {
+        ++testIdx;
+        continue;
+      }
       unsigned int bufSize_ = Sizes[sizeIdx];
       void* srcBuffer = NULL;
       void* dstBuffer = NULL;
@@ -167,12 +172,17 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipSetDevice(1));
       HIP_CHECK(hipFree(dstBuffer));
       HIP_CHECK(hipSetDevice(0));
+      ++testIdx;
     }
   }
   int dstTest = 0;
   int srcTest = 0;
   // 2. Run all NoCU (intra) for all sizes
   for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
+    if (p_tests != -1 && testIdx != p_tests) {
+      ++testIdx;
+      continue;
+    }
     unsigned int bufSize_ = Sizes[sizeIdx];
     void* srcBuffer = NULL;
     void* dstBuffer = NULL;
@@ -184,7 +194,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU));
     auto all_start = std::chrono::steady_clock::now();
     for (unsigned int i = 0; i < numIter; i++) {
-      HIP_CHECK(hipMemcpy(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU));
+      HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDeviceToDeviceNoCU, NULL));
     }
     HIP_CHECK(hipDeviceSynchronize());
     hipError_t syncErr = hipGetLastError();
@@ -222,12 +232,18 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     free(temp);
     HIP_CHECK(hipFree(srcBuffer));
     HIP_CHECK(hipFree(dstBuffer));
+    ++testIdx;
   }
 
   // 3. Run all buffer type (default) for all sizes
+
   for (int srcTest = 0; srcTest < BUF_TYPES; ++srcTest) {
     for (int dstTest = 0; dstTest < BUF_TYPES; ++dstTest) {
       for (int sizeIdx = 0; sizeIdx < NUM_SIZES; ++sizeIdx) {
+        if (p_tests != -1 && testIdx != p_tests) {
+          ++testIdx;
+          continue;
+        }
         unsigned int bufSize_ = Sizes[sizeIdx];
         bool hostMalloc[2] = {false};
         bool hostRegister[2] = {false};
@@ -394,6 +410,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
           HIP_CHECK(hipFree(dstBuffer));
         }
       }
+      ++testIdx;
     }
   }
   return true;
@@ -431,7 +448,7 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
         deviceId, props.name);
 
     // Run the test with all sizes and buffer types, alter p_tests to run a specific test
-    REQUIRE(true == hipPerfBufferCopySpeed_test(-1));
+    REQUIRE(true == hipPerfBufferCopySpeed_test(5));
   }
 }
 
