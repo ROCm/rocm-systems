@@ -109,6 +109,7 @@ TEST_CASE("test_svm_byte_granularity") {
   // get all the devices going simultaneously
   for(unsigned int d = 0; d < num_devices; d++)  // device ids starting at 1.
   {
+    HIP_CHECK(hipSetDevice(d));
     write_owned_locations<<<num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host, d);
     HIP_CHECK(hipGetLastError());
   }
@@ -125,6 +126,7 @@ TEST_CASE("test_svm_byte_granularity") {
   size_t adjusted_num_elements = num_elements - num_devices;
   for(unsigned int d = 0; d < num_devices; d++)
   {
+    HIP_CHECK(hipSetDevice(d));
     sum_neighbor_locations<<<adjusted_num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host,
                                                                      error_counts[d]);
     HIP_CHECK(hipGetLastError());

@@ -32,6 +32,7 @@
 #include "hsa/hsa_ven_amd_aqlprofile.h"
 #include "rocsched.hpp"
 #include "device/device.hpp"
+#include "os/os.hpp"
 #include <stack>
 
 namespace amd::roc {
@@ -49,7 +50,7 @@ constexpr static uint64_t kUnlimitedWait = std::numeric_limits<uint64_t>::max();
 
 constexpr static uint64_t kTimeout4Secs = 4 * M;
 
-inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false) {
+inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yield = false) {
 
   hsa_wait_state_t wait_state = HSA_WAIT_STATE_BLOCKED;
   if (active_wait) {
@@ -80,6 +81,9 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false) {
           ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Device not Stable, while waiting for Signal ="
                   "(0x%lx) for %d ns", signal.handle, kTimeout4Secs);
         return true;
+      }
+      if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
+        amd::Os::yield();
       }
     }
   }

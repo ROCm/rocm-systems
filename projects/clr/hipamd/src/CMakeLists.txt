@@ -178,20 +178,17 @@ if(DISABLE_DIRECT_DISPATCH)
   target_compile_definitions(amdhip64 PRIVATE DISABLE_DIRECT_DISPATCH)
 endif()
 
-# hipamd will reference llvm symbols, so we need install rocm-llvm-dev package
-find_package(LLVM REQUIRED CONFIG
-  HINTS
-    ${ROCM_PATH}/llvm)
-message(STATUS "Found LLVM_INCLUDE_DIRS=" ${LLVM_INCLUDE_DIRS} )
-target_include_directories(amdhip64 PRIVATE ${LLVM_INCLUDE_DIRS})
-
 # Short-Term solution for pre-compiled headers for online compilation
 # Enable pre compiled header
 if(__HIP_ENABLE_PCH)
+  find_package(LLVM REQUIRED CONFIG
+    HINTS
+      ${ROCM_PATH}/llvm)
   # find_package(LLVM) returns the lib/cmake/llvm location. We require the root.
   if(NOT DEFINED HIP_LLVM_ROOT)
     set(HIP_LLVM_ROOT "${LLVM_DIR}/../../..")
   endif()
+
   execute_process(COMMAND sh -c "${CMAKE_CURRENT_SOURCE_DIR}/hip_embed_pch.sh ${HIP_COMMON_INCLUDE_DIR} ${PROJECT_BINARY_DIR}/include ${PROJECT_SOURCE_DIR}/include ${HIP_LLVM_ROOT}" COMMAND_ECHO STDERR RESULT_VARIABLE EMBED_PCH_RC WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   if (EMBED_PCH_RC AND NOT EMBED_PCH_RC EQUAL 0)
     message(FATAL_ERROR "Failed to embed PCH")

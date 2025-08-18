@@ -111,6 +111,7 @@ public:
 
   //Gets GlobalVar/Functions from a dynamically loaded code object
   hipError_t getDynFunc(hipFunction_t* hfunc, std::string func_name);
+  hipError_t getFuncCount(unsigned int* count);
   bool isValidDynFunc(const void* hfunc);
   hipError_t getDeviceVar(DeviceVar** dvar, std::string var_name);
 

@@ -123,7 +123,10 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject,
       LogInfo("Mipmap not supported on the device");
       return hipErrorNotSupported;
     }
-    if (pResDesc->res.mipmap.mipmap == nullptr || pTexDesc->normalizedCoords == 0) {
+    if (pResDesc->res.mipmap.mipmap == nullptr) {
+      return hipErrorInvalidValue;
+    }
+    if (pTexDesc->normalizedCoords == 0) {
       return hipErrorInvalidChannelDescriptor;
     }
   }

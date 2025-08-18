@@ -44,6 +44,8 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include <atomic>
+#include <cinttypes>
 
 #if defined(__AVX__)
 #if defined(__MINGW64__)
@@ -925,7 +927,12 @@ uint64_t VirtualGPU::getQueueID() {
 
 // ================================================================================================
 static inline void packet_store_release(uint32_t* packet, uint16_t header, uint16_t rest) {
-  __atomic_store_n(packet, header | (rest << 16), __ATOMIC_RELEASE);
+#if IS_WINDOWS
+    std::atomic_ref<uint32_t> atomic_header(*packet);
+    atomic_header.store(header | (rest << 16), std::memory_order_release);
+#else
+    __atomic_store_n(packet, header | (rest << 16), __ATOMIC_RELEASE);
+#endif
 }
 
 // ================================================================================================
@@ -968,12 +975,12 @@ void VirtualGPU::AnalyzeAqlQueue() const {
       } else {
         printf("VGPU(%p) Queue(%p). Couldn't find kernel\n", this, gpu_queue_);
       }
-      printf("VGPU=%p SWq=%p, HWq=%p, id=%ld\n\tDispatch Header = "
+      printf("VGPU=%p SWq=%p, HWq=%p, id=%" PRIu64 "\n\tDispatch Header ="
              "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
              "setup=%d\n\tgrid=[%u, %u, %u], workgroup=[%u, %u, %u]\n\tprivate_seg_size=%u, "
-             "group_seg_size=%u\n\tkernel_obj=0x%lx, "
-             "kernarg_address=0x%p\n\tcompletion_signal=0x%lx, "
-             "correlation_id=%lu\n\trptr=%lu, wptr=%lu\n",
+             "group_seg_size=%u\n\tkernel_obj=0x%" PRIx64 ", "
+             "kernarg_address=0x%p\n\tcompletion_signal=0x%" PRIx64 ", "
+             "correlation_id=%" PRIu64 "\n\trptr=%" PRIu64 ", wptr=%" PRIu64 "\n ",
              this, gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, header,
              extractAqlBits(header, HSA_PACKET_HEADER_TYPE, HSA_PACKET_HEADER_WIDTH_TYPE),
              extractAqlBits(header, HSA_PACKET_HEADER_BARRIER, HSA_PACKET_HEADER_WIDTH_BARRIER),
@@ -987,8 +994,8 @@ void VirtualGPU::AnalyzeAqlQueue() const {
              packet.kernarg_address, packet.completion_signal.handle, packet.reserved2,
              read, index);
     } else {
-      printf("VGPU(%p) Queue(%p) rptr=%lu, wptr=%lu. A barrier packet in the queue!\n",
-             this, gpu_queue_, read, index);
+      printf("VGPU(%p) Queue(%p) rptr=%" PRIu64 ", wptr=%" PRIu64
+        ". A barrier packet in the queue!\n", this, gpu_queue_, read, index);
     }
   } else {
     printf("VGPU(%p) Queue(%p) is idle\n", this, gpu_queue_);
@@ -1261,7 +1268,7 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   hsa_barrier_and_packet_t* aql_loc =
     &(reinterpret_cast<hsa_barrier_and_packet_t*>(gpu_queue_->base_address))[index & queueMask];
   *aql_loc = barrier_packet_;
-  __atomic_store_n(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, __ATOMIC_RELEASE);
+  packet_store_release(reinterpret_cast<uint32_t*>(aql_loc), packetHeader, 0);
 
   hsa_signal_store_screlease(gpu_queue_->doorbell_signal, index);
   ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
@@ -2109,9 +2116,10 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
     hsa_signal_t active = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
 
     // Find the requested agent for the transfer
-    hsa_agent_t agent = (cmd.cpu_access() ||
-        (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory)) ?
-        dev().getCpuAgent() : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
+    hsa_agent_t agent =
+        (cmd.cpu_access() || (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory))
+        ? dev().getCpuAgent(cmd.numa_id())
+        : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
 
     // Initiate a prefetch command
     hsa_status_t status = hsa_amd_svm_prefetch_async(
@@ -3223,6 +3231,7 @@ bool VirtualGPU::createVirtualQueue(uint deviceQueueSize)
 }
 
 // ================================================================================================
+#if IS_LINUX
 __attribute__((optimize("unroll-all-loops"), always_inline))
 static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
@@ -3270,6 +3279,12 @@ static inline void nontemporalMemcpy(
   std::memcpy(dst, src, size);
 #endif
 }
+#else
+static inline void nontemporalMemcpy(void* __restrict dst, const void* __restrict src,
+                                     size_t size) {
+  std::memcpy(dst, src, size);
+}
+#endif
 
 void VirtualGPU::HiddenHeapInit() { const_cast<Device&>(dev()).HiddenHeapInit(*this); }
 

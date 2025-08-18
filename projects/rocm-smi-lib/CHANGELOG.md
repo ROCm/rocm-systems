@@ -4,7 +4,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
-## rocm_smi_lib for ROCm 6.5.0
+## rocm_smi_lib for ROCm 7.0.0
 
 ### Added
 

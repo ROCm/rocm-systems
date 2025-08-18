@@ -39,8 +39,10 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <signal.h>
+#include <cxxabi.h>
 
 #include <sys/prctl.h>
+#include <sys/resource.h>
 
 #include <link.h>
 #include <time.h>
@@ -238,7 +240,8 @@ address Os::reserveMemory(address start, size_t size, size_t alignment, MemProt 
   if (size >= kLargePageSize) {
     int status = madvise(aligned, size, MADV_HUGEPAGE);
     if (status) {
-      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "madvise with advice MADV_HUGEPAGE"
+      ClPrint(amd::LOG_DEBUG, amd::LOG_CODE,
+              "madvise with advice MADV_HUGEPAGE"
               " starting at address %p and page size 0x%zx, returned %d, errno: %s",
               aligned, size, status, strerror(errno));
     }
@@ -335,7 +338,7 @@ void Os::setPreferredNumaNode(uint32_t node) {
 
     numa_free_cpumask(bm);
   }
-#endif //ROCCLR_SUPPORT_NUMA_POLICY
+#endif  // ROCCLR_SUPPORT_NUMA_POLICY
 }
 
 void* Thread::entry(Thread* thread) {
@@ -736,8 +739,7 @@ void Os::getAppPathAndFileName(std::string& appName, std::string& appPathAndName
     // Get filename without path and extension.
     appName = std::string(basename(buff.get()));
     appPathAndName = std::string(buff.get());
-  }
-  else {
+  } else {
     appName = "";
     appPathAndName = "";
   }
@@ -747,9 +749,8 @@ void Os::getAppPathAndFileName(std::string& appName, std::string& appPathAndName
 bool Os::GetURIFromMemory(const void* image, size_t image_size, std::string& uri) {
   pid_t pid = getpid();
   std::ostringstream uri_stream;
-  //Create a unique resource indicator to the memory address
-  uri_stream << "memory://" << pid
-             << "#offset=0x" << std::hex << (uintptr_t)image << std::dec
+  // Create a unique resource indicator to the memory address
+  uri_stream << "memory://" << pid << "#offset=0x" << std::hex << (uintptr_t)image << std::dec
              << "&size=" << image_size;
   uri = uri_stream.str();
   return true;
@@ -757,7 +758,7 @@ bool Os::GetURIFromMemory(const void* image, size_t image_size, std::string& uri
 
 bool Os::CloseFileHandle(FileDesc fdesc) {
   // Return false if close system call fails
-  if(close(fdesc) < 0) {
+  if (close(fdesc) < 0) {
     return false;
   }
 
@@ -776,7 +777,7 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
     return false;
   }
 
-  //Retrieve stat info and size
+  // Retrieve stat info and size
   if (fstat(*fd_ptr, &stat_buf) != 0) {
     close(*fd_ptr);
     return false;
@@ -789,7 +790,6 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
 
 bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
                                       size_t* foffset_ptr) {
-
   // Get the list of mapped file list
   bool ret_value = false;
   std::ifstream proc_maps;
@@ -804,9 +804,7 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
     char dash;
     std::stringstream tokens(line);
     uintptr_t low_address, high_address;
-    tokens >> std::hex >> low_address >> std::dec
-           >> dash
-           >> std::hex >> high_address >> std::dec;
+    tokens >> std::hex >> low_address >> std::dec >> dash >> std::hex >> high_address >> std::dec;
     if (dash != '-') {
       continue;
     }
@@ -818,10 +816,7 @@ bool amd::Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr,
       std::string permissions, device, uri_file_path;
       size_t offset;
       uint64_t inode;
-      tokens >> permissions
-             >> std::hex >> offset >> std::dec
-             >> device
-             >> inode;
+      tokens >> permissions >> std::hex >> offset >> std::dec >> device >> inode;
       std::getline(tokens >> std::ws, uri_file_path);
 
       if (inode == 0 || uri_file_path.empty()) {
@@ -870,7 +865,7 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
 
   struct stat stat_buf;
   int fd = open(fname, O_RDONLY);
-  if (fd < 0 ) {
+  if (fd < 0) {
     return false;
   }
 
@@ -897,15 +892,15 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
   }
 
   struct stat stat_buf;
-  int fd = shm_open(fname, O_RDWR|O_CREAT, S_IRWXU|S_IRWXG|S_IRWXO);
-  if (fd < 0 ) {
+  int fd = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
+  if (fd < 0) {
     return false;
   }
 
   if (ftruncate(fd, mmap_size) != 0) {
     return false;
   }
-  *mmap_ptr = mmap(NULL, mmap_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+  *mmap_ptr = mmap(NULL, mmap_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 
   close(fd);
 
@@ -916,13 +911,11 @@ bool Os::MemoryMapFileTruncated(const char* fname, const void** mmap_ptr, size_t
   return true;
 }
 
-int Os::getProcessId() {
-  return ::getpid();
-}
+int Os::getProcessId() { return ::getpid(); }
 
 // ================================================================================================
 void* Os::CreateIpcMemory(const char* fname, size_t size, FileDesc* desc) {
-  *desc = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU|S_IRWXG|S_IRWXO);
+  *desc = shm_open(fname, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG | S_IRWXO);
   if (*desc < 0) {
     return nullptr;
   }
@@ -940,7 +933,7 @@ void* Os::CreateIpcMemory(const char* fname, size_t size, FileDesc* desc) {
 void* Os::OpenIpcMemory(const char* fname, const FileDesc desc, size_t size) {
   FileDesc handle = desc;
   if (fname != nullptr) {
-    handle = shm_open(fname, O_RDWR, S_IRWXU|S_IRWXG|S_IRWXO);
+    handle = shm_open(fname, O_RDWR, S_IRWXU | S_IRWXG | S_IRWXO);
   }
 
   if (handle < 0) {
@@ -961,6 +954,7 @@ void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
   }
 }
 
+// ================================================================================================
 void Os::PrintLibraryLocation() {
   Dl_info dl_info;
   if (dladdr(reinterpret_cast<void*>(Os::loadLibrary), &dl_info) && dl_info.dli_fname) {
@@ -968,6 +962,21 @@ void Os::PrintLibraryLocation() {
   } else {
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
   }
+}
+
+// ================================================================================================
+bool Os::DumpCoreFile() {
+  // Execute the default handler if a GPU core file should be generated ...
+  struct rlimit rlimit;
+  return (getrlimit(RLIMIT_CORE, &rlimit) == 0 && rlimit.rlim_cur != 0);
+}
+
+// ================================================================================================
+void Os::CxaDemangle(const std::string& name, std::string* result) {
+  int status = 0;
+  char* demangled = abi::__cxa_demangle(name.c_str(), nullptr, nullptr, &status);
+  *result = (status == 0 && demangled != nullptr) ? demangled : name;
+  free(demangled);
 }
 
 }  // namespace amd

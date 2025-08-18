@@ -31,9 +31,10 @@ THE SOFTWARE.
 #include <type_traits>
 #endif // !defined(__HIPCC_RTC__)
 
-#define TEXTURE_PARAMETERS_INIT                                                                     \
-    unsigned int ADDRESS_SPACE_CONSTANT* i = (unsigned int ADDRESS_SPACE_CONSTANT*)t.textureObject; \
-    unsigned int ADDRESS_SPACE_CONSTANT* s = i + HIP_SAMPLER_OBJECT_OFFSET_DWORD;
+#define TEXTURE_PARAMETERS_INIT                                                                    \
+  unsigned int ADDRESS_SPACE_CONSTANT* i = (unsigned int ADDRESS_SPACE_CONSTANT*)t.textureObject;  \
+  unsigned int ADDRESS_SPACE_CONSTANT* s = i + HIP_SAMPLER_OBJECT_OFFSET_DWORD;                    \
+  (void)s;
 
 template<typename T>
 struct __hip_is_tex_surf_scalar_channel_type
@@ -376,6 +377,11 @@ template <typename T, hipTextureReadMode readMode>
 static __forceinline__ __device__ __hip_img_chk__ __hip_tex_ret_t<T, readMode> texCubemapGrad(texture<T, hipTextureTypeCubemap, readMode> t, float x, float y, float z, float4 dPdx, float4 dPdy)
 {
     TEXTURE_PARAMETERS_INIT;
+    (void)x;
+    (void)y;
+    (void)z;
+    (void)dPdx;
+    (void)dPdy;
     // TODO missing in device libs.
     // auto tmp = __ockl_image_sample_grad_CM(i, s, get_native_vector(float4(x, y, z, 0.0f)),
     // get_native_vector(float4(dPdx.x, dPdx.y, dPdx.z, 0.0f)), get_native_vector(float4(dPdy.x,
@@ -387,6 +393,12 @@ template <typename T, hipTextureReadMode readMode>
 static __forceinline__ __device__ __hip_img_chk__ __hip_tex_ret_t<T, readMode> texCubemapLayeredGrad(texture<T, hipTextureTypeCubemapLayered, readMode> t, float x, float y, float z, int layer, float4 dPdx, float4 dPdy)
 {
     TEXTURE_PARAMETERS_INIT;
+    (void)x;
+    (void)y;
+    (void)z;
+    (void)layer;
+    (void)dPdx;
+    (void)dPdy;
     // TODO missing in device libs.
     // auto tmp = __ockl_image_sample_grad_CMa(i, s, get_native_vector(float4(x, y, z, layer)),
     // get_native_vector(float4(dPdx.x, dPdx.y, dPdx.z, 0.0f)), get_native_vector(float4(dPdy.x,

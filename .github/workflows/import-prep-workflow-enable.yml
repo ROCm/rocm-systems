@@ -36,7 +36,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
         run: |
-          workflows=$(gh api repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | {id, name}')
+          workflows=$(gh api --paginate repos/${{ github.repository }}/actions/workflows --jq '.workflows[] | {id, name}')
           echo "$workflows" | jq -c '. | select(.name | startswith("Import") | not)' | while read wf; do
             id=$(echo "$wf" | jq '.id')
             name=$(echo "$wf" | jq -r '.name')
