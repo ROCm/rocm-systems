@@ -2221,10 +2221,14 @@ void Device::releaseMemory(void* ptr, size_t size) const {
 void* Device::deviceLocalAlloc(size_t size, bool atomics, bool pseudo_fine_grain,
                                bool contiguous) const {
 
-  const hsa_amd_memory_pool_t& pool = (pseudo_fine_grain && gpu_ext_fine_grained_segment_.handle)
-                                       ? gpu_ext_fine_grained_segment_
-                                         : (atomics && gpu_fine_grained_segment_.handle)
-                                            ? gpu_fine_grained_segment_ : gpuvm_segment_;
+  if ((pseudo_fine_grain && !gpu_ext_fine_grained_segment_.handle)
+      || (atomics && !gpu_fine_grained_segment_.handle)) {
+    LogError("Cannot allocate pseudo fine grain or atomics on right segment");
+    return nullptr;
+  }
+
+  const hsa_amd_memory_pool_t& pool = pseudo_fine_grain ? gpu_ext_fine_grained_segment_
+                                         : atomics ? gpu_fine_grained_segment_ : gpuvm_segment_;
 
   if (pool.handle == 0 || gpuvm_segment_max_alloc_ == 0) {
     DevLogPrintfError("Invalid argument, pool_handle: 0x%x , max_alloc: %u \n",
