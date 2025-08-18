@@ -12,7 +12,7 @@ on:
 jobs:  
   call-workflow:  
     if: github.event_name != 'issue_comment' ||(github.event_name == 'issue_comment' && github.event.issue.pull_request && (startsWith(github.event.comment.body, '!verify') || startsWith(github.event.comment.body, '!linux-hip-psdb') || startsWith(github.event.comment.body, '!verify release') || startsWith(github.event.comment.body, '!verify retest')))  
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@mainline
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@jharryma/add-windows-support-for-jenkins-trigger
     secrets: inherit  
     with:  
       input_sha: ${{github.event_name == 'pull_request' && github.event.pull_request.head.sha || (github.event_name == 'push' && github.sha) || (github.event_name == 'issue_comment' && github.event.issue.pull_request.head.sha) || github.sha}}  
@@ -23,3 +23,17 @@ jobs:
       base_ref: ${{github.event_name == 'pull_request' && github.event.pull_request.base.ref || (github.event_name == 'issue_comment' && github.event.issue.pull_request.base.ref) || github.ref}}  
       trigger_event_type: ${{ github.event_name }}  
       comment_text: ${{ github.event_name == 'issue_comment' && github.event.comment.body || '' }}
+  call-windows-workflow:
+    if: github.event_name != 'issue_comment' && (startsWith(github.event.comment.body, '!verify') || startsWith(github.event.comment.body, '!win-stg-psdb'))  
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/rocm_ci.yml@jharryma/add-windows-support-for-jenkins-trigger
+    secrets: inherit  
+    with:  
+      input_sha: ${{ github.event.issue.pull_request.head.sha }} 
+      input_pr_num: ${{ github.event.pull_request.number }}
+      input_pr_url: ${{ github.event.issue.pull_request.html_url }}
+      input_pr_title: ${{ github.event.issue.pull_request.title }}
+      repository_name: ${{ github.repository }} 
+      base_ref: ${{ github.event.issue.pull_request.base.ref }}
+      trigger_event_type: ${{ github.event_name }}  
+      comment_text: ${{ github.event.comment.body }}
+      os: "windows"
