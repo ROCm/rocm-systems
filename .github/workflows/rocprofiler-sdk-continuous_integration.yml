@@ -177,7 +177,7 @@ jobs:
       timeout-minutes: 20
       shell: bash
       working-directory: projects/rocprofiler-sdk
-      run:
+      run: |
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb -DGPU_TARGETS="gfx942" /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
