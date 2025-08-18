@@ -133,6 +133,7 @@ jobs:
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+          echo 'CMAKE_PREFIX_PATH=/opt/rocm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -140,7 +141,6 @@ jobs:
       run:
         LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
         PATH=/opt/rocm/bin:$PATH
-        CMAKE_PREFIX_PATH=/opt/rocm
         /usr/bin/ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="$(hostname)"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
@@ -174,8 +174,30 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
+    - name: Install Latest ROCm
+      shell: bash
+      working-directory: /tmp
+      run: |
+        python3 -m pip install --upgrade pip pipx
+        python3 -m pipx install awscli
+        python3 -m pipx ensurepath
+        source ~/.bashrc
+        KEY=$(aws s3api list-objects-v2 \
+          --bucket therock-nightly-tarball \
+          --no-sign-request \
+          --output json \
+          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
+        KEY=${KEY//\"/}
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
+        ls -lh rocm.tar.gz
+        echo "Downloaded: ${KEY}"
+        sudo mkdir -p /opt/rocm
+        sudo tar -xf *.tar.gz -C /opt/rocm
+
     - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/aqlprofile
@@ -254,7 +276,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
-        cat /opt/rocm-7.0.0/.info/version
+        cat /opt/rocm/.info/version
         ls -la
         pwd
 
@@ -266,15 +288,15 @@ jobs:
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+          echo 'CMAKE_PREFIX_PATH=/opt/rocm' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
         python3 -m pipx ensurepath; source ~/.bashrc;
-        PATH=/opt/rocm/bin:$PATH
+        PATH=~/.local/bin:/opt/rocm/bin:$PATH
         LD_LIBRARY_PATH=$(pwd)/build:/opt/rocm/lib:$LD_LIBRARY_PATH
-        CMAKE_PREFIX_PATH=/opt/rocm
         ctest --output-on-failure -VV -DCTEST_SOURCE_DIRECTORY="$(pwd)"
           -DCTEST_BINARY_DIRECTORY="$(pwd)/build" -DAQLPROFILE_BUILD_NUM_JOBS="16" -DCTEST_SITE="linux-mi325-1gpu-ossci-rocm"
           -DCTEST_BUILD_NAME=PR_${{ github.ref_name }}_${{ github.repository }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
