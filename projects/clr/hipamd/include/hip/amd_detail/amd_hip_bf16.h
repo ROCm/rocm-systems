@@ -1868,7 +1868,7 @@ __BF16_DEVICE_STATIC__ __hip_bfloat162 h2trunc(const __hip_bfloat162 h) {
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 unsafeAtomicAdd(__hip_bfloat162* address,
                                                        __hip_bfloat162 value) {
-#if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
+#if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16) && !defined(__SPIRV__)
   typedef short __attribute__((ext_vector_type(2))) vec_short2;
   static_assert(sizeof(vec_short2) == sizeof(__hip_bfloat162_raw));
   union {

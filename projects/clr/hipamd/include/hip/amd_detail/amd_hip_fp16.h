@@ -1577,7 +1577,7 @@ THE SOFTWARE.
             // Atomic
             #if defined(__clang__) && defined(__HIP__)
             inline __device__ __half2 unsafeAtomicAdd(__half2* address, __half2 value) {
-            #if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16)
+            #if __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2f16) && !defined(__SPIRV__)
                 // The api expects an ext_vector_type of half
                 typedef _Float16 __attribute__((ext_vector_type(2))) vec_fp162;
                 static_assert(sizeof(vec_fp162) == sizeof(__half2_raw));
