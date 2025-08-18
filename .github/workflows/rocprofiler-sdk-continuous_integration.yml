@@ -90,7 +90,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
+        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -180,20 +180,24 @@ jobs:
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake --build build --target all --parallel 16
+        cmake --build build --target install
+        echo "✅ Installation complete!"
+
     - name: Enable PC Sampling
       if: ${{ contains(matrix.system.runner, 'mi200') || contains(matrix.system.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Install AQLProfile
-      shell: bash
-      working-directory: projects/aqlprofile
-      run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -206,6 +210,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.system.os }}-${{ matrix.system.gpu }}-core
           --build-jobs 16
           --site ${{ matrix.system.runner }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -319,6 +324,14 @@ jobs:
       OS_TYPE: ${{ matrix.os }}
 
     steps:
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile
+        set-safe-directory: true
+
     - name: Install Latest ROCm RHEL 9.1
       if: ${{ matrix.os == 'rhel-9.1' }}
       shell: bash
@@ -335,7 +348,7 @@ jobs:
         EOF
         sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
+        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
@@ -351,7 +364,7 @@ jobs:
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk hsa-rocr-devel hip-devel hip-runtime-amd rccl-unittests hsa-amd-aqlprofile
+        sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel
 
     - name: Install Latest ROCm
       shell: bash
@@ -374,20 +387,12 @@ jobs:
         sudo tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         sudo ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
-    - name: Checkout
-      uses: actions/checkout@v4
-      with:
-        sparse-checkout: |
-          projects/rocprofiler-sdk
-          projects/aqlprofile
-        submodules: true
-        set-safe-directory: true
-
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run: |
+        git config --global --add safe.directory '*'
         python3 -m pip install -U --user -r requirements.txt
         python3 -m pip install -U pip pipx
         python3 -m pipx install cmake
@@ -395,8 +400,8 @@ jobs:
 
     - name: Special Requirements
       shell: bash
-      working-directory: projects/rocprofiler-sdk
       run: |
+          git config --global --add safe.directory '*'
           echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
@@ -414,20 +419,25 @@ jobs:
         cat ${{ env.ROCM_PATH }}/.info/version
         ls -la
 
+    - name: Build and Install Aqlprofile
+      shell: bash
+      working-directory: projects/aqlprofile
+      run: |
+        echo "Install Aqlprofile."
+        python3 -m pipx ensurepath; source ~/.bashrc;
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/bin:$PATH
+        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake --build build --target all --parallel 16
+        sudo cmake --build build --target install
+        echo "✅ Installation complete!"
+
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') || contains(matrix.runner, 'mi300a') }}
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
-
-    - name: Install AQLProfile
-      shell: bash
-      working-directory: projects/aqlprofile
-      run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -441,6 +451,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --run-attempt ${{ github.run_attempt }}
           ${{ matrix.ci-flags }}
           --
@@ -489,7 +500,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk hsa-rocr-dev hsa-rocr-dbgsym hip-dev hip-runtime-amd hip-runtime-amd-dbgsym rccl-unittests hsa-amd-aqlprofile rocdecode rocdecode-dev rocdecode-dbgsym rocdecode-dev-dbgsym rocjpeg rocjpeg-dev
+        apt-get install -y rocm-openmp-sdk rocm-llvm-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -509,7 +520,7 @@ jobs:
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
     - name: Checkout
-      uses: actions/checkout@v4
+      uses: actions/checkout@v5
       with:
         sparse-checkout: |
           projects/rocprofiler-sdk
@@ -556,13 +567,17 @@ jobs:
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
           echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
 
-    - name: Install AQLProfile
+    - name: Build and Install Aqlprofile
       shell: bash
       working-directory: projects/aqlprofile
       run: |
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} .
+        echo "Install Aqlprofile."
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
+        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
+        echo "✅ Installation complete!"
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
@@ -575,6 +590,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site linux-mi325-1gpu-ossci-rocm
+          --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
           --

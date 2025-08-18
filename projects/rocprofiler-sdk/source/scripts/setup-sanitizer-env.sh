@@ -32,9 +32,9 @@ if [ -n "${EXTERNAL_SYMBOLIZER_PATH}" ]; then
     EXTERNAL_SYMBOLIZER=" external_symbolizer_path=${EXTERNAL_SYMBOLIZER_PATH}"
 fi
 
-: ${ASAN_OPTIONS="detect_leaks=0 use_sigaltstack=0 suppressions=${SUPPR_DIR}/address-sanitizer-suppr.txt"}
+: ${ASAN_OPTIONS="quarantine_size_mb=128 detect_leaks=0 use_sigaltstack=0 suppressions=${SUPPR_DIR}/address-sanitizer-suppr.txt"}
 : ${LSAN_OPTIONS="suppressions=${SUPPR_DIR}/leak-sanitizer-suppr.txt"}
-: ${TSAN_OPTIONS="history_size=5 detect_deadlocks=0 suppressions=${SUPPR_DIR}/thread-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
+: ${TSAN_OPTIONS="mmap_limit_mb=16384 history_size=5 detect_deadlocks=0 suppressions=${SUPPR_DIR}/thread-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
 : ${UBSAN_OPTIONS="print_stacktrace=1 suppressions=${SUPPR_DIR}/undef-behavior-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
 
 export ASAN_OPTIONS
