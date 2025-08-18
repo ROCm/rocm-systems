@@ -98,8 +98,8 @@ if(NOT GPU_TARGETS)
     message(AUTHOR_WARNING
         " GPU_TARGETS was not set, and system GPU detection was unsuccsessful.\n \n"
         " The amdgpu-arch tool failed:\n"
-        " Error: '${AMDGPU_ARCH_ERROR}'\n"
-        " Output: '${AMDGPU_ARCH_OUTPUT}'\n \n"
+        " ERR_OUT : '${AMDGPU_ARCH_ERROR}'\n"
+        " STD_OUT: '${AMDGPU_ARCH_OUTPUT}'\n \n"
 
         " As a result, --offload-arch will not be set for subsequent\n"
         " compilations, and the default architecture\n"
