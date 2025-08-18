@@ -106,7 +106,9 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemVmm.cc
       hipArray.cc
       hipMemcpyDeviceToDeviceNoCU.cc
-      hipGetProcAddressMemoryApis.cc)
+      hipGetProcAddressMemoryApis.cc
+      hipGetProcAddressAmdDbgApi.cc
+      )
   if(UNIX)
     # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
     # For windows build error occurs undefined symbol: hipPointerSetAttribute

@@ -23,6 +23,12 @@ THE SOFTWARE.
 #include <utils.hh>
 #include "../device/hipGetProcAddressHelpers.hh"
 
+const int N = 40;
+const int Nbytes = N * sizeof(int);
+__device__ int srcDeviceData[N];
+__device__ int dstDeviceData[N];
+__device__ int symbol[N];
+
 /**
  * Test Description
  * ------------------------
@@ -32,7 +38,7 @@ THE SOFTWARE.
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -564,7 +570,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_MemCpy") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -660,7 +666,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memset") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -846,7 +852,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memset2D3D") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -2025,7 +2031,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy2D") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -2601,7 +2607,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Memcpy3D") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -2694,7 +2700,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_LaunchKernel") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -2769,7 +2775,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_LaunchCooperativeKernel") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -2878,7 +2884,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Stream") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -3075,7 +3081,7 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Graph") {
  *  - using the funtion pointer.
  * Test source
  * ------------------------
- *  - unit/streamperthread/hipGetProcAddress_SPT_APIs.cc
+ *  - unit/streamperthread/hipGetProcAddressSptApis.cc
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.2
@@ -3211,4 +3217,519 @@ TEST_CASE("Unit_hipGetProcAddress_spt_Event") {
   }
   free(hostMem);
   HIP_CHECK(hipFree(devMem));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test will get the function pointer of
+ *  - hipMemcpyFromArray_spt API from the hipGetProcAddress API
+ *  - and then validates the basic functionality of that API
+ *  - using the funtion pointer.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipGetProcAddressSptApis.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_spt_hipMemcpyFromArray_spt") {
+  CHECK_IMAGE_SUPPORT
+
+  void* hipMemcpyFromArray_spt_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipMemcpyFromArray_spt",
+                              &hipMemcpyFromArray_spt_ptr,
+                              currentHipVersion, 0, nullptr));
+
+  hipError_t(*dyn_hipMemcpyFromArray_spt_ptr)(void *, hipArray_const_t, size_t,
+             size_t, size_t, hipMemcpyKind) =
+    reinterpret_cast<hipError_t (*)(void *, hipArray_const_t, size_t, size_t,
+              size_t, hipMemcpyKind)>(hipMemcpyFromArray_spt_ptr);
+
+  // Validating hipMemcpyFromArray_spt API
+  size_t width = 64;
+  size_t height = 1;
+  const int N = width * height;
+  int value = 10;
+
+  int* hostMem = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+  REQUIRE(hostMem != nullptr);
+  fillHostArray(hostMem, N, value);
+
+  hipArray_t array = nullptr;
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  unsigned int flags = hipArrayDefault;
+  HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+  REQUIRE(array != nullptr);
+
+  HIP_CHECK(hipMemcpyToArray(array, 0, 0,
+                             hostMem, N * sizeof(int),
+                             hipMemcpyHostToDevice));
+
+  // With flag hipMemcpyDeviceToHost
+  {
+    int* hostMemory = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(hostMemory != nullptr);
+
+    HIP_CHECK(dyn_hipMemcpyFromArray_spt_ptr(hostMemory,
+                                             array, 0, 0, N * sizeof(int),
+                                             hipMemcpyDeviceToHost));
+    REQUIRE(validateHostArray(hostMemory, N, value) == true);
+
+    free(hostMemory);
+  }
+
+  // With flag hipMemcpyDeviceToDevice
+  {
+    int* deviceMemory = nullptr;
+    HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+    REQUIRE(deviceMemory != nullptr);
+
+    HIP_CHECK(dyn_hipMemcpyFromArray_spt_ptr(deviceMemory,
+                                             array, 0, 0, N * sizeof(int),
+                                             hipMemcpyDeviceToDevice));
+    REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
+
+    HIP_CHECK(hipFree(deviceMemory));
+  }
+
+  // With flag hipMemcpyDeviceToDeviceNoCU
+  {
+    int* deviceMemory = nullptr;
+    HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+    REQUIRE(deviceMemory != nullptr);
+
+    HIP_CHECK(dyn_hipMemcpyFromArray_spt_ptr(deviceMemory,
+                                             array, 0, 0, N * sizeof(int),
+                                             hipMemcpyDeviceToDeviceNoCU));
+    REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
+
+    HIP_CHECK(hipFree(deviceMemory));
+  }
+
+  // With flag hipMemcpyDefault - Device To Host
+  {
+    int* hostMemory = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(hostMemory != nullptr);
+
+    HIP_CHECK(dyn_hipMemcpyFromArray_spt_ptr(hostMemory,
+                                             array, 0, 0, N * sizeof(int),
+                                             hipMemcpyDefault));
+    REQUIRE(validateHostArray(hostMemory, N, value) == true);
+
+    free(hostMemory);
+  }
+
+  // With flag hipMemcpyDefault - Device To Device
+  {
+    int* deviceMemory = nullptr;
+    HIP_CHECK(hipMalloc(&deviceMemory, N * sizeof(int)));
+    REQUIRE(deviceMemory != nullptr);
+
+    HIP_CHECK(dyn_hipMemcpyFromArray_spt_ptr(deviceMemory,
+                                             array, 0, 0, N * sizeof(int),
+                                             hipMemcpyDefault));
+    REQUIRE(validateDeviceArray(deviceMemory, N, value) == true);
+
+    HIP_CHECK(hipFree(deviceMemory));
+  }
+  free(hostMem);
+  HIP_CHECK(hipFreeArray(array));
+}
+
+ /**
+ * Test Description
+ * ------------------------
+ *  - This test will get the function pointer of hipMemcpyFromSymbol_spt API,
+ *  - hipMemcpyFromSymbolAsync_spt API from the hipGetProcAddress API
+ *  - and then validates the basic functionality of those APIs
+ *  - using the funtion pointer.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGetProcAddressSptApis.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_spt_FromSymbol") {
+  void* hipMemcpyFromSymbol_spt_ptr = nullptr;
+  void* hipMemcpyFromSymbolAsync_spt_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress(
+            "hipMemcpyFromSymbol_spt",
+            &hipMemcpyFromSymbol_spt_ptr,
+            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress(
+            "hipMemcpyFromSymbolAsync_spt",
+            &hipMemcpyFromSymbolAsync_spt_ptr,
+            currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipMemcpyFromSymbol_spt_ptr)(void *,
+    const void *, size_t, size_t, hipMemcpyKind) =
+    reinterpret_cast<hipError_t (*)(void *,
+    const void *, size_t, size_t, hipMemcpyKind)>
+    (hipMemcpyFromSymbol_spt_ptr);
+
+  hipError_t (*dyn_hipMemcpyFromSymbolAsync_spt_ptr)(void *,
+    const void *, size_t, size_t, hipMemcpyKind, hipStream_t) =
+    reinterpret_cast<hipError_t (*)(void *,
+    const void *, size_t, size_t, hipMemcpyKind, hipStream_t)>
+    (hipMemcpyFromSymbolAsync_spt_ptr);
+
+  int* source = reinterpret_cast<int *>(malloc(Nbytes));
+  REQUIRE(source != nullptr);
+  fillHostArray(source, N, 100);
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(srcDeviceData), source, Nbytes, 0,
+                              hipMemcpyHostToDevice));
+
+  // Validating hipMemcpyFromSymbol_spt
+  // With flag hipMemcpyDeviceToHost
+  {
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbol_spt_ptr(dstHostData,
+                                              HIP_SYMBOL(srcDeviceData),
+                                              Nbytes, 0,
+                                              hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 100) == true);
+
+    free(dstHostData);
+  }
+
+  // With flag hipMemcpyDeviceToDevice
+  {
+    int* dstDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&dstDeviceData, Nbytes));
+    REQUIRE(dstDeviceData != nullptr);
+    fillDeviceArray(dstDeviceData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbol_spt_ptr(dstDeviceData,
+                                              HIP_SYMBOL(srcDeviceData),
+                                              Nbytes, 0,
+                                              hipMemcpyDeviceToDevice));
+
+    REQUIRE(validateDeviceArray(dstDeviceData, N, 100) == true);
+
+    HIP_CHECK(hipFree(dstDeviceData));
+  }
+
+  // With flag hipMemcpyDeviceToDeviceNoCU
+  {
+    int* dstDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&dstDeviceData, Nbytes));
+    REQUIRE(dstDeviceData != nullptr);
+    fillDeviceArray(dstDeviceData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbol_spt_ptr(dstDeviceData,
+                                              HIP_SYMBOL(srcDeviceData),
+                                              Nbytes, 0,
+                                              hipMemcpyDeviceToDeviceNoCU));
+
+    REQUIRE(validateDeviceArray(dstDeviceData, N, 100) == true);
+
+    HIP_CHECK(hipFree(dstDeviceData));
+  }
+
+  // Validating hipMemcpyFromSymbolAsync_spt
+  // With flag hipMemcpyDeviceToHost
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbolAsync_spt_ptr(dstHostData,
+                                                   HIP_SYMBOL(srcDeviceData),
+                                                   Nbytes, 0,
+                                                   hipMemcpyDeviceToHost,
+                                                   stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    REQUIRE(validateHostArray(dstHostData, N, 100) == true);
+
+    free(dstHostData);
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  // With flag hipMemcpyDeviceToDevice
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* dstDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&dstDeviceData, Nbytes));
+    REQUIRE(dstDeviceData != nullptr);
+    fillDeviceArray(dstDeviceData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbolAsync_spt_ptr(dstDeviceData,
+                                                   HIP_SYMBOL(srcDeviceData),
+                                                   Nbytes, 0,
+                                                   hipMemcpyDeviceToDevice,
+                                                   stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    REQUIRE(validateDeviceArray(dstDeviceData, N, 100) == true);
+
+    HIP_CHECK(hipFree(dstDeviceData));
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  // With flag hipMemcpyDeviceToDeviceNoCU
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* dstDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&dstDeviceData, Nbytes));
+    REQUIRE(dstDeviceData != nullptr);
+    fillDeviceArray(dstDeviceData, N, 0);
+
+    HIP_CHECK(dyn_hipMemcpyFromSymbolAsync_spt_ptr(dstDeviceData,
+                                                   HIP_SYMBOL(srcDeviceData),
+                                                   Nbytes, 0,
+                                                   hipMemcpyDeviceToDeviceNoCU,
+                                                   stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    REQUIRE(validateDeviceArray(dstDeviceData, N, 100) == true);
+
+    HIP_CHECK(hipFree(dstDeviceData));
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  free(source);
+}
+
+ /**
+ * Test Description
+ * ------------------------
+ *  - This test will get the function pointer of hipMemcpyToSymbol_spt API,
+ *  - hipMemcpyToSymbolAsync_spt API from the hipGetProcAddress API
+ *  - and then validates the basic functionality of those APIs
+ *  - using the funtion pointer.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGetProcAddressSptApis.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_spt_ToSymbol") {
+  void* hipMemcpyToSymbol_spt_ptr = nullptr;
+  void* hipMemcpyToSymbolAsync_spt_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress(
+            "hipMemcpyToSymbol_spt",
+            &hipMemcpyToSymbol_spt_ptr,
+            currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress(
+            "hipMemcpyToSymbolAsync_spt",
+            &hipMemcpyToSymbolAsync_spt_ptr,
+            currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipMemcpyToSymbol_spt_ptr)(const void *,
+    const void *, size_t, size_t, hipMemcpyKind) =
+    reinterpret_cast<hipError_t (*)(const void *,
+    const void *, size_t, size_t, hipMemcpyKind)>
+    (hipMemcpyToSymbol_spt_ptr);
+  hipError_t (*dyn_hipMemcpyToSymbolAsync_spt_ptr)(const void *,
+    const void *, size_t, size_t, hipMemcpyKind, hipStream_t) =
+    reinterpret_cast<hipError_t (*)(const void *,
+    const void *, size_t, size_t, hipMemcpyKind, hipStream_t)>
+    (hipMemcpyToSymbolAsync_spt_ptr);
+
+  // Validating hipMemcpyToSymbol
+  // With flag hipMemcpyHostToDevice
+  {
+    int* srcHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(srcHostData != nullptr);
+    fillHostArray(srcHostData, N, 10);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbol_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                            srcHostData,
+                                            Nbytes, 0,
+                                            hipMemcpyHostToDevice));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 10) == true);
+
+    free(srcHostData);
+    free(dstHostData);
+  }
+
+  // With flag hipMemcpyDeviceToDevice
+  {
+    int* srcDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&srcDeviceData, Nbytes));
+    REQUIRE(srcDeviceData != nullptr);
+    fillDeviceArray(srcDeviceData, N, 20);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbol_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                            srcDeviceData,
+                                            Nbytes, 0,
+                                            hipMemcpyDeviceToDevice));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 20) == true);
+
+    HIP_CHECK(hipFree(srcDeviceData));
+    free(dstHostData);
+  }
+
+  // With flag hipMemcpyDeviceToDeviceNoCU
+  {
+    int* srcDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&srcDeviceData, Nbytes));
+    REQUIRE(srcDeviceData != nullptr);
+    fillDeviceArray(srcDeviceData, N, 20);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbol_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                            srcDeviceData,
+                                            Nbytes, 0,
+                                            hipMemcpyDeviceToDeviceNoCU));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 20) == true);
+
+    HIP_CHECK(hipFree(srcDeviceData));
+    free(dstHostData);
+  }
+
+  // Validating hipMemcpyToSymbolAsync
+  // With flag hipMemcpyHostToDevice
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* srcHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(srcHostData != nullptr);
+    fillHostArray(srcHostData, N, 10);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbolAsync_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                                 srcHostData,
+                                                 Nbytes, 0,
+                                                 hipMemcpyHostToDevice,
+                                                 stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 10) == true);
+
+    free(srcHostData);
+    free(dstHostData);
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  // With flag hipMemcpyDeviceToDevice
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* srcDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&srcDeviceData, Nbytes));
+    REQUIRE(srcDeviceData != nullptr);
+    fillDeviceArray(srcDeviceData, N, 20);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbolAsync_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                                 srcDeviceData,
+                                                 Nbytes, 0,
+                                                 hipMemcpyDeviceToDevice,
+                                                 stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 20) == true);
+
+    HIP_CHECK(hipFree(srcDeviceData));
+    free(dstHostData);
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
+
+  // With flag hipMemcpyDeviceToDeviceNoCU
+  {
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+
+    int* srcDeviceData = nullptr;
+    HIP_CHECK(hipMalloc(&srcDeviceData, Nbytes));
+    REQUIRE(srcDeviceData != nullptr);
+    fillDeviceArray(srcDeviceData, N, 20);
+
+    HIP_CHECK(dyn_hipMemcpyToSymbolAsync_spt_ptr(HIP_SYMBOL(dstDeviceData),
+                                                 srcDeviceData,
+                                                 Nbytes, 0,
+                                                 hipMemcpyDeviceToDeviceNoCU,
+                                                 stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    int* dstHostData = reinterpret_cast<int *>(malloc( N * sizeof(int)));
+    REQUIRE(dstHostData != nullptr);
+    fillHostArray(dstHostData, N, 0);
+
+    HIP_CHECK(hipMemcpyFromSymbol(dstHostData,
+                                  HIP_SYMBOL(dstDeviceData),
+                                  Nbytes, 0,
+                                  hipMemcpyDeviceToHost));
+
+    REQUIRE(validateHostArray(dstHostData, N, 20) == true);
+
+    HIP_CHECK(hipFree(srcDeviceData));
+    free(dstHostData);
+    HIP_CHECK(hipStreamDestroy(stream));
+  }
 }

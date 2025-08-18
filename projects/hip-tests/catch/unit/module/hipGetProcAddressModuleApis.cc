@@ -836,3 +836,70 @@ TEST_CASE("Unit_hipGetProcAddress_ModuleApisOccupancy") {
 
   HIP_CHECK(hipModuleUnload(module));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test will get the function pointer of different module management
+ *  - hipModuleGetTexRef  API from the hipGetProcAddress API
+ *  - and then validates the basic functionality of that particular API
+ *  - using the funtion pointer.
+ * Test source
+ * ------------------------
+ *  - unit/module/hipGetProcAddress_Module_APIs_Ext.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipGetProcAddress_ModuleApisTex") {
+  CHECK_IMAGE_SUPPORT
+
+  void* hipModuleGetTexRef_ptr = nullptr;
+
+  int currentHipVersion = 0;
+  HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
+
+  HIP_CHECK(hipGetProcAddress("hipModuleGetTexRef",
+                              &hipModuleGetTexRef_ptr,
+                              currentHipVersion, 0, nullptr));
+
+  hipError_t (*dyn_hipModuleGetTexRef_ptr)(
+              textureReference **, hipModule_t, const char *) =
+    reinterpret_cast<hipError_t (*)(textureReference **, hipModule_t,
+              const char *)>(hipModuleGetTexRef_ptr);
+
+  // Validating hipModuleGetTexRef API
+  hipModule_t module;
+  HIP_CHECK(hipModuleLoad(&module, "addKernel.code"));
+  REQUIRE(module != nullptr);
+
+  hipTexRef texRef = nullptr;
+  HIP_CHECK(hipModuleGetTexRef(&texRef, module, "tex"));
+  REQUIRE(texRef != nullptr);
+
+  hipTexRef texRefWithPtr = nullptr;
+  HIP_CHECK(dyn_hipModuleGetTexRef_ptr(&texRefWithPtr, module, "tex"));
+  REQUIRE(texRefWithPtr != nullptr);
+
+  REQUIRE(texRefWithPtr->normalized          == texRef->normalized);
+  REQUIRE(texRefWithPtr->readMode            == texRef->readMode);
+  REQUIRE(texRefWithPtr->filterMode          == texRef->filterMode);
+  REQUIRE(texRefWithPtr->addressMode[0]      == texRef->addressMode[0]);
+  REQUIRE(texRefWithPtr->addressMode[1]      == texRef->addressMode[1]);
+  REQUIRE(texRefWithPtr->addressMode[2]      == texRef->addressMode[2]);
+  REQUIRE(texRefWithPtr->channelDesc.x       == texRef->channelDesc.x);
+  REQUIRE(texRefWithPtr->channelDesc.y       == texRef->channelDesc.y);
+  REQUIRE(texRefWithPtr->channelDesc.z       == texRef->channelDesc.z);
+  REQUIRE(texRefWithPtr->channelDesc.w       == texRef->channelDesc.w);
+  REQUIRE(texRefWithPtr->channelDesc.f       == texRef->channelDesc.f);
+  REQUIRE(texRefWithPtr->sRGB                == texRef->sRGB);
+  REQUIRE(texRefWithPtr->maxAnisotropy       == texRef->maxAnisotropy);
+  REQUIRE(texRefWithPtr->mipmapLevelBias     == texRef->mipmapLevelBias);
+  REQUIRE(texRefWithPtr->minMipmapLevelClamp == texRef->minMipmapLevelClamp);
+  REQUIRE(texRefWithPtr->maxMipmapLevelClamp == texRef->maxMipmapLevelClamp);
+  REQUIRE(texRefWithPtr->textureObject       == texRef->textureObject);
+  REQUIRE(texRefWithPtr->numChannels         == texRef->numChannels);
+  REQUIRE(texRefWithPtr->format              == texRef->format);
+
+  HIP_CHECK(hipModuleUnload(module));
+}
