@@ -443,6 +443,9 @@ class Resource : public amd::HeapObject {
   bool CreateP2PAccess(CreateParams* params //!< special parameters for resource allocation
                       );
 
+  void LogCreateEventTypeHeap(Resource* resObj, const Pal::GpuMemoryCreateInfo& createInfo) const;
+  void LogDestroyEvent(Resource* resObj) const;
+
  protected:
     /*! \brief Creates a PAL memory object, from IPC handle
    *

@@ -403,6 +403,8 @@ Resource::~Resource() {
     delete[] reinterpret_cast<char*>(image_);
   }
 
+  LogDestroyEvent(this);
+
   // Remove the current resource from the global resource list
   gpuDevice_.removeResource(this);
 }
@@ -1217,6 +1219,38 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
 }
 
 // ================================================================================================
+void Resource::LogCreateEventTypeHeap(Resource *resObj, const Pal::GpuMemoryCreateInfo& createInfo) const {
+  Pal::ResourceDescriptionHeap desc = {};
+  desc.size        = createInfo.size;
+  desc.alignment   = createInfo.alignment;
+  desc.preferredGpuHeap = createInfo.heaps[0];
+
+  Pal::ResourceCreateEventData data = {};
+  data.type              = Pal::ResourceType::Heap;
+  data.pResourceDescData = &desc;
+  data.resourceDescSize  = sizeof(Pal::ResourceDescriptionHeap);
+  data.pObj              = this;
+
+  dev().iPlat()->LogEvent(Pal::PalEvent::GpuMemoryResourceCreate, &data, sizeof(Pal::ResourceCreateEventData));
+
+  Pal::Result result;
+  Pal::GpuMemoryResourceBindEventData bindData = {};
+  bindData.pObj               = resObj;
+  bindData.pGpuMemory         = memRef_->gpuMem_;  // IGpuMemory*
+  bindData.requiredGpuMemSize = dev().iDev()->GetGpuMemorySize(createInfo, &result);
+  bindData.offset             = 0;
+
+  dev().iPlat()->LogEvent(Pal::PalEvent::GpuMemoryResourceBind, &bindData, sizeof(Pal::GpuMemoryResourceBindEventData));
+}
+
+// ================================================================================================
+void Resource::LogDestroyEvent(Resource *resObj) const {
+  Pal::ResourceDestroyEventData data = {};
+  data.pObj = resObj;
+  dev().iPlat()->LogEvent(Pal::PalEvent::GpuMemoryResourceDestroy, &data, sizeof(Pal::ResourceDestroyEventData));
+}
+
+// ================================================================================================
 bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear) {
   bool imageCreateView = false;
   bool foundCalRef = false;
@@ -1361,6 +1395,9 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
       return false;
     }
   }
+
+  LogCreateEventTypeHeap(this, createInfo);
+
   offset_ += static_cast<size_t>(subOffset_);
   // Check if memory is locked already and restore CPU pointer
   if (memRef_->cpuAddress_ != nullptr) {
