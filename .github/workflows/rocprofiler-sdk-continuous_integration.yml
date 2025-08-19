@@ -524,15 +524,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.runner }}
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v5
-      with:
-        sparse-checkout: |
-          projects/rocprofiler-sdk
-          projects/aqlprofile
-        submodules: true
-        set-safe-directory: true
-
     - name: Install Latest ROCm
       shell: bash
       working-directory: /tmp
@@ -563,6 +554,15 @@ jobs:
         echo "Downloaded: ${KEY}"
         tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+
+    - name: Checkout
+      uses: actions/checkout@v5
+      with:
+        sparse-checkout: |
+          projects/rocprofiler-sdk
+          projects/aqlprofile
+        submodules: true
+        set-safe-directory: true
 
     - name: Install requirements
       timeout-minutes: 10
