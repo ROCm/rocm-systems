@@ -72,10 +72,25 @@ struct pmc
     uint32_t    is_constant;
     uint32_t    is_derived;
     std::string extdata;
+};
 
-    friend bool operator<(const pmc& lhs, const pmc& rhs)
+struct pmc_info_hash
+{
+    std::size_t operator()(const pmc& _pmc) const noexcept
     {
-        return lhs.name.compare(rhs.name) < 0;
+        std::size_t h1 = std::hash<size_t>{}(static_cast<size_t>(_pmc.type));
+        std::size_t h2 = std::hash<size_t>{}(_pmc.agent_type_index);
+        std::size_t h3 = std::hash<std::string>{}(_pmc.name);
+        return h1 ^ (h2 << 1) ^ (h3 << 1);
+    }
+};
+
+struct pmc_info_equal
+{
+    bool operator()(const pmc& lhs, const pmc& rhs) const noexcept
+    {
+        return lhs.type == rhs.type && lhs.agent_type_index == rhs.agent_type_index &&
+               lhs.name == rhs.name;
     }
 };
 
@@ -172,8 +187,10 @@ struct metadata_registry
 private:
     friend class cache_manager;
     metadata_registry() = default;
-    common::synchronized<info::process>          m_process;
-    common::synchronized<std::set<info::pmc>>    m_pmc_infos;
+    common::synchronized<info::process> m_process;
+    common::synchronized<
+        std::unordered_set<info::pmc, info::pmc_info_hash, info::pmc_info_equal>>
+                                                 m_pmc_infos;
     common::synchronized<std::set<info::thread>> m_threads;
     common::synchronized<std::set<info::track>>  m_tracks;
 
