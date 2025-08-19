@@ -448,7 +448,7 @@ TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
         deviceId, props.name);
 
     // Run the test with all sizes and buffer types, alter p_tests to run a specific test
-    REQUIRE(true == hipPerfBufferCopySpeed_test(5));
+    REQUIRE(true == hipPerfBufferCopySpeed_test(-1));
   }
 }
 
