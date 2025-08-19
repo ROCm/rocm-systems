@@ -114,7 +114,6 @@ else()
   target_include_directories(hiprtc PRIVATE $<TARGET_PROPERTY:rocclr,INCLUDE_DIRECTORIES>)
 endif()
 
-target_include_directories(hiprtc PRIVATE ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(hiprtc PUBLIC __HIP_PLATFORM_AMD__)
 
 add_to_config(_versionInfo HIP_PACKAGING_VERSION_PATCH)

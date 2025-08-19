@@ -47,11 +47,6 @@ bool Kernel::postLoad() {
   workGroupInfo_.availableLDSSize_ = device().info().localMemSizePerCU_;
   assert(workGroupInfo_.availableLDSSize_ > 0);
 
-  if (!SetAvailableSgprVgpr()) {
-    DevLogError("Cannot set available SGPR/VGPR\n");
-    return false;
-  }
-
   // Get the kernel code handle
   hsa_status_t hsaStatus;
   hsa_executable_symbol_t symbol;
@@ -145,35 +140,15 @@ bool Kernel::postLoad() {
   }
   assert(wavefront_size > 0);
 
-  size_t const_size_bytes = 0;
-  hsa_executable_iterate_symbols(
-      program()->hsaExecutable(),
-      [](hsa_executable_t executable, hsa_executable_symbol_t symbol,
-         void *const_size_bytes) -> hsa_status_t {
-        bool variable_is_const = false;
-        hsa_status_t hsaStat = hsa_executable_symbol_get_info(
-            symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_IS_CONST, &variable_is_const);
-
-        if (hsaStat == HSA_STATUS_SUCCESS && variable_is_const) {
-          uint32_t variable_size = 0;
-          if (hsa_executable_symbol_get_info(
-                  symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_SIZE,
-                  &variable_size) == HSA_STATUS_SUCCESS) {
-            *(static_cast<size_t *>(const_size_bytes)) += variable_size;
-          }
-        }
-
-        return HSA_STATUS_SUCCESS;
-      },
-      &const_size_bytes);
-
+  workGroupInfo_.availableVGPRs_ = device().isa().vgprPerWavefront();
+  workGroupInfo_.availableSGPRs_ = device().isa().sgprPerWavefront();
   workGroupInfo_.privateMemSize_ = workitemPrivateSegmentByteSize_;
   workGroupInfo_.localMemSize_ = workgroupGroupSegmentByteSize_;
   workGroupInfo_.usedLDSSize_ = workgroupGroupSegmentByteSize_;
   workGroupInfo_.preferredSizeMultiple_ = wavefront_size;
   workGroupInfo_.usedStackSize_ = kernelHasDynamicCallStack_;
   workGroupInfo_.wavefrontPerSIMD_ = program()->rocDevice().info().maxWorkItemSizes_[0] / wavefront_size;
-  workGroupInfo_.constMemSize_ = const_size_bytes;
+  workGroupInfo_.constMemSize_ = 0;
   workGroupInfo_.maxDynamicSharedSizeBytes_ = static_cast<int>(workGroupInfo_.availableLDSSize_ -
                                                                workGroupInfo_.localMemSize_);
   if (workGroupInfo_.size_ == 0) {

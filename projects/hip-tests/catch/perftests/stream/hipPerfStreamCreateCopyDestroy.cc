@@ -18,18 +18,16 @@
  */
 
 /**
-* @addtogroup hipPerfStreamCreateCopyDestroy hipPerfStreamCreateCopyDestroy
-* @{
-* @ingroup perfStreamTest
-* `hipError_t hipStreamCreate(hipStream_t* stream)` -
-* Create an asynchronous stream.
-*/
+ * @addtogroup hipPerfStreamCreateCopyDestroy hipPerfStreamCreateCopyDestroy
+ * @{
+ * @ingroup perfStreamTest
+ * `hipError_t hipStreamCreate(hipStream_t* stream)` -
+ * Create an asynchronous stream.
+ */
 
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
-
-using namespace std;
 
 #define BufSize 0x1000
 #define Iterations 0x100
@@ -39,17 +37,20 @@ using namespace std;
 
 class hipPerfStreamCreateCopyDestroy {
  private:
-    unsigned int numBuffers_;
-    unsigned int numStreams_;
-    const size_t totalStreams_[TotalStreams];
-    const size_t totalBuffers_[TotalBufs];
+  unsigned int numBuffers_;
+  unsigned int numStreams_;
+  const size_t totalStreams_[TotalStreams];
+  const size_t totalBuffers_[TotalBufs];
+
  public:
-    hipPerfStreamCreateCopyDestroy() : numBuffers_(0), numStreams_(0),
-                                       totalStreams_{1, 2, 4, 8},
-                                       totalBuffers_{1, 100, 1000, 5000} {};
-    ~hipPerfStreamCreateCopyDestroy() {};
-    bool open(int deviceID);
-    bool run(unsigned int testNumber);
+  hipPerfStreamCreateCopyDestroy()
+      : numBuffers_(0),
+        numStreams_(0),
+        totalStreams_{1, 2, 4, 8},
+        totalBuffers_{1, 100, 1000, 5000} {};
+  ~hipPerfStreamCreateCopyDestroy(){};
+  bool open(int deviceID);
+  bool run(unsigned int testNumber);
 };
 
 bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
@@ -61,20 +62,20 @@ bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
   HIP_CHECK(hipSetDevice(deviceId));
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
-  std::cout << "info: running on bus " << "0x" << props.pciBusID
-  << " " << props.name << " with " << props.multiProcessorCount << " CUs"
-  << " and device id: " << deviceId  << std::endl;
+
+  CONSOLE_PRINT("info: running on bus 0x%x %s with %d CUs and device id: %d\n", props.pciBusID,
+                props.name, props.multiProcessorCount, deviceId);
   return true;
 }
 
 bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
   numStreams_ = totalStreams_[testNumber % TotalStreams];
-  size_t iter = Iterations / (numStreams_ * (static_cast<size_t>(1)
-                 << (testNumber / TotalBufs + 1)));
-  hipStream_t *streams = new hipStream_t[numStreams_];
+  size_t iter =
+      Iterations / (numStreams_ * (static_cast<size_t>(1) << (testNumber / TotalBufs + 1)));
+  hipStream_t* streams = new hipStream_t[numStreams_];
 
   numBuffers_ = totalBuffers_[testNumber / TotalBufs];
-  float ** dSrc = new float*[numBuffers_];
+  float** dSrc = new float*[numBuffers_];
   size_t nBytes = BufSize * sizeof(float);
 
   for (size_t b = 0; b < numBuffers_; ++b) {
@@ -97,8 +98,7 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
 
     for (size_t s = 0; s < numStreams_; ++s) {
       for (size_t b = 0; b < numBuffers_; ++b) {
-        HIP_CHECK(hipMemcpyWithStream(dSrc[b], hSrc, nBytes,
-                  hipMemcpyHostToDevice, streams[s]));
+        HIP_CHECK(hipMemcpyWithStream(dSrc[b], hSrc, nBytes, hipMemcpyHostToDevice, streams[s]));
       }
     }
 
@@ -112,31 +112,31 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
 
   auto time = static_cast<float>(diff.count() * 1000 / (iter * numStreams_));
 
-  cout << "Create+Copy+Destroy time for " << numStreams_ << " streams and "
-       << setw(4) << numBuffers_ << " buffers " << " and " << setw(4)
-       << iter << " iterations " << time << " (ms) " << endl;
+  CONSOLE_PRINT(
+      "Create+Copy+Destroy time for %u streams and %u buffers and %zu iterations %.6f (ms)\n",
+      numStreams_, numBuffers_, iter, time);
 
-  delete [] hSrc;
+  delete[] hSrc;
   for (size_t b = 0; b < numBuffers_; ++b) {
     HIP_CHECK(hipFree(dSrc[b]));
   }
 
-  delete [] streams;
-  delete [] dSrc;
+  delete[] streams;
+  delete[] dSrc;
   return true;
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify the Create+Copy+Destroy time for different stream.
-* Test source
-* ------------------------
-*  - perftests/stream/hipPerfDeviceConcurrency.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify the Create+Copy+Destroy time for different stream.
+ * Test source
+ * ------------------------
+ *  - perftests/stream/hipPerfDeviceConcurrency.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfStreamCreateCopyDestroy") {
   hipPerfStreamCreateCopyDestroy streamCCD;
@@ -149,6 +149,6 @@ TEST_CASE("Perf_hipPerfStreamCreateCopyDestroy") {
 }
 
 /**
-* End doxygen group perfStreamTest.
-* @}
-*/
+ * End doxygen group perfStreamTest.
+ * @}
+ */

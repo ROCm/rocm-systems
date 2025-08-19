@@ -2750,7 +2750,7 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM,
   sp->child_queue = reinterpret_cast<uint64_t>(schedulerQueue);
   sp->complete_signal = gpu().Barriers().ActiveSignal(kInitSignalValueOne, nullptr);
   sp->vqueue_header = vqVM;
-  sp->parentAQL = reinterpret_cast<uint64_t>(aql_wrap);
+  sp->parentAQL = aql_wrap;
 
   if (dev().info().maxEngineClockFrequency_ > 0) {
     sp->eng_clk = (1000 * 1024) / dev().info().maxEngineClockFrequency_;

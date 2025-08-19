@@ -26,6 +26,8 @@
 #include "top.hpp"
 #include "elfio/elfio.hpp"
 #include <sstream>
+using amd::ELFIO::Elf64_Ehdr;
+using amd::ELFIO::Elf64_Shdr;
 
 // Not sure where to put these in the libelf
 #define AMD_BIF2 2 // AMD BIF Version 2.0

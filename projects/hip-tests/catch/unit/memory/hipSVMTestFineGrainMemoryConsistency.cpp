@@ -129,6 +129,7 @@ void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int n
   // all the pixels.
   for(unsigned int d=0; d < num_devices; d++)
   {
+    HIP_CHECK(hipSetDevice(d));
     build_hash_table_on_device<<<(num_pixels + 255) / 256, 256, 0, streams[d]>>>(
         pInputImage, num_pixels, pNodes, pNumNodes, numBins, d);
     HIP_CHECK(hipGetLastError());

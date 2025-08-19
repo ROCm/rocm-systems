@@ -26,8 +26,14 @@
 #include <GL/glx.h>
 #include <EGL/egl.h>
 #else
+#include <windows.h>
 #include <GL/gl.h>
+#include <GL/glext.h>
 #include <EGL/egl.h>
+#ifndef GLX_H
+struct _XDisplay;
+struct __GLXcontextRec;
+#endif
 typedef _XDisplay Display;
 typedef __GLXcontextRec* GLXContext;
 #endif

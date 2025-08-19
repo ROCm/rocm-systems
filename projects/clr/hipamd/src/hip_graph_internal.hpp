@@ -47,6 +47,9 @@ class GraphExec;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
+hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
+                            hip::GraphNode* const* pDependencies, size_t numDependencies,
+                            bool capture);
 
 class UserObject : public amd::ReferenceCountedObject {
   typedef void (*UserCallbackDestructor)(void* data);

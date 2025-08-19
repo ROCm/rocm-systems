@@ -319,8 +319,8 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice") {
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-static void threadQAsyncCommands(streamMemAllocTest* testObj,
-                                hipStream_t strm) {
+static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, int idx) {
+  HIP_CHECK(hipSetDevice(idx));
   // Create host buffer with test data.
   testObj->createHostBufferWithData();
   // Allocate device memory and transfer data to it asyncronously on stream.
@@ -350,7 +350,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent") {
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    std::thread test(threadQAsyncCommands, tesObjBuf[idx], stream_buf[idx]);
+    std::thread test(threadQAsyncCommands, tesObjBuf[idx], stream_buf[idx], idx);
     test.join();
   }
   // Wait for the streams
@@ -405,10 +405,10 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream") {
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    std::thread test1(threadQAsyncCommands, tesObjBuf[streamPerAsic*idx],
-                    stream_buf[streamPerAsic*idx]);
-    std::thread test2(threadQAsyncCommands, tesObjBuf[streamPerAsic*idx + 1],
-                    stream_buf[streamPerAsic*idx + 1]);
+    std::thread test1(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx],
+                      stream_buf[streamPerAsic * idx], idx);
+    std::thread test2(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx + 1],
+                      stream_buf[streamPerAsic * idx + 1], idx);
     test1.join();
     test2.join();
   }
