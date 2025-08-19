@@ -10,6 +10,7 @@ on:
       - 'projects/rocprofiler-systems/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
 
 concurrency:
