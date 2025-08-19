@@ -1,7 +1,7 @@
 ##############################################################################bl
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,29 @@ from config import rocprof_compute_home
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from utils import rocpd_data
 from utils.analysis_orm import Database, get_views
-import utils.analysis_orm as orm
-from utils.logger import demarcate, console_debug, console_warning, console_error
-from utils.parser import PC_SAMPLING_NOT_ISSUE_PREFIX, build_in_vars, CodeTransformer, to_avg, to_concat, to_int, to_max, to_median, to_min, to_mod, to_quantile, to_round, to_std
-from utils.roofline_calc import SUPPORTED_DATATYPES, PEAK_OPS_DATATYPES, MFMA_DATATYPES, CACHE_HIERARCHY
-from utils.utils import get_version
+from utils.logger import console_debug, console_error, console_warning, demarcate
+from utils.parser import (
+    PC_SAMPLING_NOT_ISSUE_PREFIX,
+    CodeTransformer,
+    build_in_vars,
+    to_avg,
+    to_concat,
+    to_int,
+    to_max,
+    to_median,
+    to_min,
+    to_mod,
+    to_quantile,
+    to_round,
+    to_std,
+)
+from utils.roofline_calc import (
+    CACHE_HIERARCHY,
+    MFMA_DATATYPES,
+    PEAK_OPS_DATATYPES,
+    SUPPORTED_DATATYPES,
+)
+from utils.utils import get_version, get_uuid
 import pandas as pd
 import json
 from pathlib import Path
@@ -78,7 +96,12 @@ class db_analysis(OmniAnalyze_Base):
         super().run_analysis()
 
         # Initialize analysis database
-        db_name = Database.init(self.get_args().db)
+        # Create db uuid
+        if self.get_args().output_name:
+            db_name = f"{self.get_args().output_name}.db"
+        else:
+            db_name = f"rocprof_compute_{get_uuid()}.db"
+        Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 
         for workload_path in self._runs.keys():
@@ -163,6 +186,7 @@ class db_analysis(OmniAnalyze_Base):
         # Write database
         Database.write()
         console_debug("Completed writing database")
+        print(f"Created file: {db_name}")
 
     def calc_roofline_ceilings(self):
         roofline_ceilings_per_workload = dict()

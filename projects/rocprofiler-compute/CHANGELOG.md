@@ -102,6 +102,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
 
+* Analysis output:
+  * Remove ``-o`` or ``--output`` analyze mode option.
+  * Remove ``--save-dfs`` analyze mode option.
+  * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
+  * Add ``--output-name`` analysis mode option to override the default file/folder name.
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi

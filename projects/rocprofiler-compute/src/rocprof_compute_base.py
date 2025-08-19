@@ -137,7 +137,7 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
-        elif self.__args.db:
+        elif self.__args.output_format == "db":
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"

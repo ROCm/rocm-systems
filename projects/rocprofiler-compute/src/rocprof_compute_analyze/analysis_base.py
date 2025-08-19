@@ -34,14 +34,8 @@ import pandas as pd
 
 import config
 from utils import file_io, parser, schema
-from utils.logger import (
-    console_debug,
-    console_error,
-    console_log,
-    console_warning,
-    demarcate,
-)
-from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
+from utils.logger import console_debug, console_error, console_log, console_warning, demarcate
+from utils.utils import is_workload_empty, merge_counters_spatial_multiplex, get_uuid
 
 
 class OmniAnalyze_Base:
@@ -284,15 +278,31 @@ class OmniAnalyze_Base:
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
 
+<<<<<<< HEAD
         # Ensure analysis db file only contains alphanumeric characters and the file does not exist
         if self.__args.db:
             if not self.__args.db.isalnum():
                 console_error(
                     "Analysis database file name must contain only alphanumeric characters."
-                )
-            if Path(f"{self.__args.db}.db").exists():
+=======
+        # Ensure analysis output does not overwrite existing files
+        if self.__args.output_name:
+            if not self.__args.output_name.isalnum():
                 console_error(
+                    "Analysis output file/folder name must contain only alphanumeric characters."
+>>>>>>> c994150cf (Address review comments)
+                )
+            path_to_check = self.__args.output_name
+            if self.__args.output_format in ("txt", "db"):
+                path_to_check += f".{self.__args.output_format}"
+            if Path(path_to_check).exists():
+                console_error(
+<<<<<<< HEAD
                     f"Analysis database file {self.__args.db}.db already exists. Please choose a different name."
+=======
+                    f"Analysis output file/folder {path_to_check} already exists. "
+                    "Please choose a different name."
+>>>>>>> c994150cf (Address review comments)
                 )
 
     # ----------------------------------------------------
@@ -304,11 +314,14 @@ class OmniAnalyze_Base:
         console_debug("analysis", "prepping to do some analysis")
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
-        self._output = (
-            open(self.__args.output_file, "w+")
-            if self.__args.output_file
-            else sys.stdout
-        )
+        if self.__args.output_format == "txt":
+            if self.__args.output_name:
+                self._output = open(f"{self.__args.output_name}.txt", "w+")
+                print(f"Created file: {self.__args.output_name}.txt")
+            else:
+                self._output = open(f"rocprof_compute_{get_uuid()}.txt", "w+")
+        elif self.__args.output_format == "stdout":
+            self._output = sys.stdout
 
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
