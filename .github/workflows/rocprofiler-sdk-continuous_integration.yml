@@ -353,7 +353,7 @@ jobs:
         EOF
         sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel llvm14-devel
+        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel
 
     - name: Install Latest ROCm SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
