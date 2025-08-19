@@ -546,25 +546,6 @@ jobs:
       GPU_RUNNER: ${{ matrix.runner }}
 
     steps:
-    - name: Install Latest ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        [ $(cat /etc/os-release | grep "24.04" | wc -l) > 1 ] && python3 -m pip install awscli --break-system-packages || python3 -m pip install awscli
-        export PATH=/usr/local/bin:~/.local/bin:$PATH
-        KEY=$(aws s3api list-objects-v2 \
-          --bucket therock-nightly-tarball \
-          --no-sign-request \
-          --output json \
-          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
-        KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
-        ls -lh rocm.tar.gz
-        echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm
-        sudo tar -xf *.tar.gz -C /opt/rocm
-
     - name: Checkout
       uses: actions/checkout@v5
       with:
@@ -596,9 +577,9 @@ jobs:
           --bucket therock-nightly-tarball \
           --no-sign-request \
           --output json \
-          --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.system.therock-s3 }}')], &LastModified)[-1].Key")
+          --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
         KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No ${{ matrix.system.therock-s3 }} tarball found"; exit 1; }
+        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
