@@ -1,7 +1,7 @@
 ##############################################################################bl
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -165,8 +165,7 @@ class Database:
     _session = None
 
     @classmethod
-    def init(cls, name):
-        db_name = f"{name}.db"
+    def init(cls, db_name):
         engine = create_engine(f"sqlite:///{db_name}")
         Base.metadata.create_all(engine)
         cls._session = sessionmaker(bind=engine)()

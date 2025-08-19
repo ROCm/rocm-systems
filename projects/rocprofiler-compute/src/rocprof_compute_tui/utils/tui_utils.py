@@ -123,7 +123,7 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
     #       args.filter_metrics
     #       args.cols
     #       args.max_stat_num
-    #       args.df_file_dir
+    #       dfs file dir
 
     result_structure = defaultdict(dict)
 

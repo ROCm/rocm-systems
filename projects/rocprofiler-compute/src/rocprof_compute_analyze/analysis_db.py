@@ -1,7 +1,7 @@
 ##############################################################################bl
 # MIT License
 #
-# Copyright (c) 2021 - 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -57,7 +57,7 @@ from utils.roofline_calc import (
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
 )
-from utils.utils import get_version
+from utils.utils import get_version, get_uuid
 
 
 class db_analysis(OmniAnalyze_Base):
@@ -105,7 +105,12 @@ class db_analysis(OmniAnalyze_Base):
         super().run_analysis()
 
         # Initialize analysis database
-        db_name = Database.init(self.get_args().db)
+        # Create db uuid
+        if self.get_args().output_name:
+            db_name = f"{self.get_args().output_name}.db"
+        else:
+            db_name = f"rocprof_compute_{get_uuid()}.db"
+        Database.init(db_name)
         console_debug(f"Initialized database: {db_name}")
 
         for workload_path in self._runs.keys():
@@ -202,6 +207,7 @@ class db_analysis(OmniAnalyze_Base):
         # Write database
         Database.write()
         console_debug("Completed writing database")
+        print(f"Created file: {db_name}")
 
     def calc_roofline_ceilings(self):
         roofline_ceilings_per_workload = dict()

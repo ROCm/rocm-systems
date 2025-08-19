@@ -23,7 +23,6 @@ options.
 * :doc:`grafana-gui`
 * :doc:`standalone-gui`
 * :doc:`tui`
-* :doc:`data-dump`
 
 .. note::
 

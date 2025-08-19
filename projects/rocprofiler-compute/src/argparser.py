@@ -635,11 +635,27 @@ Examples:
         help="\t\tMode of spatial multiplexing.",
     )
     analyze_group.add_argument(
-        "-o",
-        "--output",
+        "--output-format",
         metavar="",
-        dest="output_file",
-        help="\t\tSpecify an output file to save analysis results.",
+        dest="output_format",
+        choices=["stdout", "txt", "csv", "db"],
+        default="stdout",
+        help=(
+            "\t\tSet the format of output file or folder containing analysis data.\n"
+            "\t\tBy default, file or folder created will have the name rocprof_compute_<uuid>.\n"
+            "\t\tFile or folder name can be overriden using --output-name.\n"
+            "\t\tDefault output format is stdout which will not generate any file/folder.\n"
+        ),
+    )
+    analyze_group.add_argument(
+        "--output-name",
+        metavar="",
+        dest="output_name",
+        help="\t\tOverride the default output file name rocprof_compue_<uuid> with the specified name.",
+        help=(
+            "\t\tOverride the default output file name rocprof_compue_<uuid> with the specified name.\n"
+            "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
+        ),
     )
     analyze_group.add_argument(
         "--gui",
@@ -656,17 +672,6 @@ Examples:
         action="store_true",
         help="\t\tActivate a Textual User Interface (TUI) to "
         "interact with rocprofiler-compute metrics.",
-    )
-    analyze_group.add_argument(
-        "--db",
-        type=str,
-        required=False,
-        metavar="<db_file_name>",
-        help=(
-            "\t\tStore the analysis data in a sqlite3 database file\n"
-            "\t\twith the given name and .db suffix added to it.\n"
-            "\t\tThis option will disable generation of analysis report in CLI/GUI/TUI."
-        ),
     )
     analyze_group.add_argument(
         "-R",
@@ -768,12 +773,6 @@ Examples:
         metavar="",
         help="\t\tSpecify the directory of customized configs.",
         default=rocprof_compute_home.joinpath("rocprof_compute_soc/analysis_configs/"),
-    )
-    analyze_advanced_group.add_argument(
-        "--save-dfs",
-        dest="df_file_dir",
-        metavar="",
-        help="\t\tSpecify the dirctory to save analysis dataframe csv files.",
     )
     analyze_advanced_group.add_argument(
         "--cols",

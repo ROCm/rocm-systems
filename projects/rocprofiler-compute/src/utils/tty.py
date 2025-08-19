@@ -33,7 +33,7 @@ from tabulate import tabulate
 import config
 from utils import mem_chart, parser
 from utils.logger import console_error, console_log, console_warning
-from utils.utils import convert_metric_id_to_panel_info
+from utils.utils import convert_metric_id_to_panel_info, get_uuid
 
 
 def string_multiple_lines(source, width, max_rows):
@@ -388,17 +388,20 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     ):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
-                    if args.df_file_dir:
-                        p = Path(args.df_file_dir)
+                    if args.output_format == "csv":
+                        if args.output_name:
+                            p = Path(f"{args.output_name}")
+                        else:
+                            p = Path(f"rocprof_compute_{get_uuid()}")
                         if not p.exists():
                             p.mkdir()
                         if p.is_dir():
                             if "title" in table_config and table_config["title"]:
                                 table_id_str += "_" + table_config["title"]
-                            df.to_csv(
-                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
-                                index=False,
-                            )
+                            csv_filename = p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                            df.to_csv(csv_filename, index=False)
+                            print(f"Created file: {csv_filename}")
+
                     # Only show top N kernels (as specified in --max-kernel-num)
                     # in "Top Stats" section
                     if type == "raw_csv_table" and (
