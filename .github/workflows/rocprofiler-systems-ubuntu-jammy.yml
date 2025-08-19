@@ -3,32 +3,26 @@ run-name: ubuntu-jammy
 
 on:
   push:
+    branches:
+      - develop
     paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-jammy.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-ubuntu-jammy.yml'
       - 'projects/rocprofiler-systems/**'
       - '!projects/rocprofiler-systems/*.md'
       - '!projects/rocprofiler-systems/docs/**'
       - '!projects/rocprofiler-systems/source/docs/**'
       - '!projects/rocprofiler-systems/source/python/gui/**'
-      - '!projects/rocprofiler-systems/.github/workflows/docs.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/cpack.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/containers.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/formatting.yml'
-      - '!projects/rocprofiler-systems/.github/workflows/weekly-mainline-sync.yml'
       - '!projects/rocprofiler-systems/docker/**'
       - '!projects/rocprofiler-systems/.wordlist.txt'
       - '!projects/rocprofiler-systems/CMakePresets.json'
@@ -111,9 +105,13 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
+        gcc --version &&
         TAG="" &&
         append-tagname() { if [ "${1}" == "ON" ]; then TAG="${TAG}-${2}"; fi; } &&
         append-tagname ${{ matrix.mpi }} mpi &&
@@ -303,6 +301,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-systems/
       run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
         git config --global --add safe.directory ${PWD} &&
         cmake --version &&
         TAG="" &&
@@ -400,3 +399,82 @@ jobs:
           projects/rocprofiler-systems/build/rocprofsys-tests-config/*.cfg
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*.txt
           projects/rocprofiler-systems/build/rocprofsys-tests-output/**/*-instr*.json
+
+  ubuntu-jammy-codecov:
+    runs-on: ubuntu-latest
+
+    container:
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
+      options: --cap-add CAP_SYS_ADMIN
+
+    env:
+      ROCPROFSYS_VERBOSE: 2
+      ROCPROFSYS_CAUSAL_BACKEND: perf
+      ROCPROFSYS_CI: 'ON'
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rocprofiler-systems/
+
+    - name: Install Packages
+      timeout-minutes: 25
+      uses: nick-fields/retry@v3
+      with:
+        retry_wait_seconds: 30
+        timeout_minutes: 25
+        max_attempts: 5
+        command: |
+          cd projects/rocprofiler-systems/
+          apt-get update &&
+          apt-get install -y autoconf bison build-essential clang environment-modules gcc g++ libmpich-dev libomp-dev libtool m4 mpich python3-pip texinfo &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
+          python3 -m pip install --upgrade pip &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.21' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
+          apt-get -y --purge autoremove &&
+          apt-get -y clean &&
+          /opt/conda/bin/conda clean -y -a
+    - name: Configure Env
+      run:
+        echo "${HOME}/.local/bin" >> $GITHUB_PATH
+
+    - name: Configure, Build, and Test
+      timeout-minutes: 115
+      shell: bash
+      working-directory: projects/rocprofiler-systems/
+      env:
+        GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      run:
+        git config --global --add safe.directory ${GITHUB_WORKSPACE} &&
+        git config --global --add safe.directory ${PWD} &&
+        cmake --version &&
+        python3 ./scripts/run-ci.py -B build
+          --name ${{ github.repository_owner }}-${{ github.ref_name }}-ubuntu-jammy-codecov-mpi-python-ompt-papi
+          --build-jobs 2
+          --site GitHub
+          --coverage
+          --
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_CI=OFF
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_BUILD_BOOST=ON
+          -DROCPROFSYS_BUILD_TBB=ON
+          -DROCPROFSYS_BUILD_ELFUTILS=ON
+          -DROCPROFSYS_BUILD_LIBIBERTY=ON
+          -DROCPROFSYS_BUILD_DEBUG=OFF
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF
+          -DROCPROFSYS_USE_MPI=ON
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_USE_OMPT=ON
+          -DROCPROFSYS_USE_PAPI=ON
+          -DROCPROFSYS_USE_ROCM=OFF
+          -DROCPROFSYS_USE_RCCL=OFF
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp-target"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
+          --
+          -LE "transpose|rccl|videodecode|jpegdecode|network"

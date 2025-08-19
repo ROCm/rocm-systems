@@ -1155,56 +1155,6 @@ bool Kernel::GetAttrCodePropMetadata() {
   return true;
 }
 
-bool Kernel::SetAvailableSgprVgpr() {
-  std::string buf;
-
-  amd_comgr_metadata_node_t isaMeta;
-  amd_comgr_metadata_node_t sgprMeta;
-  amd_comgr_metadata_node_t vgprMeta;
-  bool hasIsaMeta = false;
-  bool hasSgprMeta = false;
-  bool hasVgprMeta = false;
-
-  amd_comgr_status_t status = amd::Comgr::get_isa_metadata(
-                                prog().device().isa().isaName().c_str(), &isaMeta);
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasIsaMeta = true;
-    status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumSGPRs", &sgprMeta);
-  }
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasSgprMeta = true;
-    status = getMetaBuf(sgprMeta, &buf);
-  }
-
-  workGroupInfo_.availableSGPRs_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumVGPRs", &vgprMeta);
-  }
-
-  if (status == AMD_COMGR_STATUS_SUCCESS) {
-    hasVgprMeta = true;
-    status = getMetaBuf(vgprMeta, &buf);
-  }
-  workGroupInfo_.availableVGPRs_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
-
-  if (hasVgprMeta) {
-    amd::Comgr::destroy_metadata(vgprMeta);
-  }
-
-  if (hasSgprMeta) {
-    amd::Comgr::destroy_metadata(sgprMeta);
-  }
-
-  if (hasIsaMeta) {
-    amd::Comgr::destroy_metadata(isaMeta);
-  }
-
-  return (status == AMD_COMGR_STATUS_SUCCESS);
-}
-
 bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
   const amd_comgr_metadata_node_t programMD = prog().metadata();
   amd_comgr_metadata_node_t printfMeta;

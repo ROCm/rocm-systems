@@ -47,6 +47,9 @@ class GraphExec;
 class UserObject;
 class GraphKernelNode;
 typedef GraphNode* Node;
+hipError_t ihipGraphAddNode(hip::GraphNode* graphNode, hip::Graph* graph,
+                            hip::GraphNode* const* pDependencies, size_t numDependencies,
+                            bool capture);
 
 class UserObject : public amd::ReferenceCountedObject {
   typedef void (*UserCallbackDestructor)(void* data);
@@ -1358,7 +1361,7 @@ class GraphKernelNode : public GraphNode {
 
 class GraphMemcpyNode : public GraphNode {
  protected:
-  hipMemcpy3DParms copyParams_;
+  hipMemcpy3DParms copyParams_{0};
 
  public:
   GraphMemcpyNode(const hipMemcpy3DParms* pCopyParams)
@@ -1530,12 +1533,15 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
 
  public:
   GraphMemcpyNode1D(void* dst, const void* src, size_t count, hipMemcpyKind kind,
-                       hipGraphNodeType type = hipGraphNodeTypeMemcpy)
-      : GraphMemcpyNode(nullptr),
-        dst_(dst),
-        src_(src),
-        count_(count),
-        kind_(kind) {}
+                    hipGraphNodeType type = hipGraphNodeTypeMemcpy)
+      : GraphMemcpyNode(nullptr), dst_(dst), src_(src), count_(count), kind_(kind) {
+    copyParams_.srcPtr.ptr = const_cast<void*>(src);
+    copyParams_.dstPtr.ptr = dst;
+    copyParams_.extent.width = count;
+    copyParams_.extent.height = 1;
+    copyParams_.extent.depth = 1;
+    copyParams_.kind = kind;
+  }
 
   ~GraphMemcpyNode1D() {}
 

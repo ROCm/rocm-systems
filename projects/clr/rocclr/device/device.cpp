@@ -81,6 +81,9 @@ bool VirtualDevice::ActiveWait() const {
   return device_().ActiveWait();
 }
 
+#if defined(USE_COMGR_LIBRARY)
+extern amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str);
+#endif
 }
 
 static_assert(static_cast<uint32_t>(device::Memory::MemAccess::kMemAccessNone)
@@ -327,6 +330,61 @@ const Isa* Isa::begin() {
 const Isa* Isa::end() {
   return supportedIsas().second;
 }
+
+#if defined(USE_COMGR_LIBRARY)
+void Isa::setAvailableSgprVgprCached() const {
+  std::call_once(setSgprVgprFlag, [this]() {
+    std::string buf;
+    amd_comgr_metadata_node_t isaMeta;
+    amd_comgr_metadata_node_t sgprMeta;
+    amd_comgr_metadata_node_t vgprMeta;
+    bool hasIsaMeta = false;
+    bool hasSgprMeta = false;
+    bool hasVgprMeta = false;
+
+    amd_comgr_status_t status = amd::Comgr::get_isa_metadata(isaName().c_str(), &isaMeta);
+
+    if (status == AMD_COMGR_STATUS_SUCCESS) {
+      hasIsaMeta = true;
+      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumSGPRs", &sgprMeta);
+    }
+
+    if (status == AMD_COMGR_STATUS_SUCCESS) {
+      hasSgprMeta = true;
+      status = amd::device::getMetaBuf(sgprMeta, &buf);
+    }
+
+    sgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
+
+    if (status == AMD_COMGR_STATUS_SUCCESS) {
+      status = amd::Comgr::metadata_lookup(isaMeta, "AddressableNumVGPRs", &vgprMeta);
+    }
+
+    if (status == AMD_COMGR_STATUS_SUCCESS) {
+      hasVgprMeta = true;
+      status = amd::device::getMetaBuf(vgprMeta, &buf);
+    }
+
+    vgprPerWavefront_ = (status == AMD_COMGR_STATUS_SUCCESS) ? atoi(buf.c_str()) : 0;
+
+    if (hasVgprMeta) {
+      amd::Comgr::destroy_metadata(vgprMeta);
+    }
+
+    if (hasSgprMeta) {
+      amd::Comgr::destroy_metadata(sgprMeta);
+    }
+
+    if (hasIsaMeta) {
+      amd::Comgr::destroy_metadata(isaMeta);
+    }
+
+    if (status != AMD_COMGR_STATUS_SUCCESS) {
+      DevLogPrintfError("Failed to set SGPR/VGPR for ISA: %s", isaName().c_str());
+    }
+  });
+}
+#endif
 
 std::vector<Device*>* Device::devices_ = nullptr;
 AppProfile Device::appProfile_;
@@ -749,6 +807,16 @@ Device::~Device() {
     delete vaCacheMap_;
   }
 
+  for (auto memory : hostcall_allocated_memories_) {
+    if (memory != nullptr) {
+      amd::MemObjMap::RemoveMemObj(
+          reinterpret_cast<void*>(memory->getDeviceMemory(*this, false)->virtualAddress()));
+      memory->release();
+    }
+  }
+
+  hostcall_allocated_memories_.clear();
+
   delete vaCacheAccess_;
   delete settings_;
   delete[] info_.extensions_;
@@ -1145,6 +1213,20 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
 
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
   return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle);
+}
+
+// ================================================================================================
+void Device::TrackHostcallMemory(amd::Memory* memory) {
+  hostcall_allocated_memories_.push_back(memory);
+}
+
+// ================================================================================================
+void Device::RemoveHostcallMemory(amd::Memory* memory) {
+  auto it =
+      std::find(hostcall_allocated_memories_.begin(), hostcall_allocated_memories_.end(), memory);
+  if (it != hostcall_allocated_memories_.end()) {
+    hostcall_allocated_memories_.erase(it);
+  }
 }
 
 }  // namespace amd

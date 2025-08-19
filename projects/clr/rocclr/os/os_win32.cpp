@@ -505,6 +505,9 @@ std::string Os::getTempFileName() {
 
 int Os::unlink(const std::string& path) { return ::_unlink(path.c_str()); }
 
+// shm_unlink is a nop on windows
+int Os::shm_unlink(const std::string& path) { return 0; }
+
 void Os::cpuid(int regs[4], int info) { return __cpuid(regs, info); }
 
 uint64_t Os::xgetbv(uint32_t ecx) { return (uint64_t)_xgetbv(ecx); }
@@ -732,6 +735,7 @@ void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
   }
 }
 
+// ================================================================================================
 void Os::PrintLibraryLocation() {
   HMODULE hm = NULL;
   if (GetModuleHandleExA(
@@ -745,6 +749,12 @@ void Os::PrintLibraryLocation() {
   }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
 }
+
+// ================================================================================================
+bool Os::DumpCoreFile() { return false; }
+
+// ================================================================================================
+void Os::CxaDemangle(const std::string& name, std::string* result) { *result = name; }
 
 }  // namespace amd
 

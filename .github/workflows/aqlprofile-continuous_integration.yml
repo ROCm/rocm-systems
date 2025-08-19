@@ -10,12 +10,14 @@ on:
       - '!projects/aqlprofile/*.md'
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
   pull_request:
     paths:
       - 'projects/aqlprofile/**'
       - '!projects/aqlprofile/*.md'
       - '!projects/aqlprofile/CODEOWNERS'
       - '!projects/aqlprofile/source/docs/**'
+      - '.github/workflows/aqlprofile-continuous_integration.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -106,7 +108,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi300']
-        os: ['rhel-8', 'sles-15']
+        os: ['rhel-9', 'sles-15']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 

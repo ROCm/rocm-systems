@@ -834,6 +834,17 @@ hipError_t PlatformState::getDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
   return it->second->getDynFunc(hfunc, func_name);
 }
 
+hipError_t PlatformState::getFuncCount(unsigned int* count, hipModule_t hmod) {
+  amd::ScopedLock lock(lock_);
+
+  auto it = dynCO_map_.find(hmod);
+  if (it == dynCO_map_.end()) {
+    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    return hipErrorNotFound;
+  }
+  return it->second->getFuncCount(count);
+}
+
 bool PlatformState::isValidDynFunc(const void* hfunc) {
   amd::ScopedLock lock(lock_);
   return std::any_of(dynCO_map_.begin(), dynCO_map_.end(),

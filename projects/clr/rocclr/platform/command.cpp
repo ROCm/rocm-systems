@@ -269,7 +269,9 @@ bool Event::notifyCmdQueue(bool cpu_wait) {
     ScopedLock l(notify_lock_);
     if ((status() > CL_COMPLETE) && (nullptr != queue) &&
         // If HW event was assigned, then notification can be ignored, since a barrier was issued
-        (HwEvent() == nullptr) &&
+        // @note: Force the marker always in OCL for now, since OCL events require precise
+        // sequence of the status update
+        ((HwEvent() == nullptr) || !amd::IS_HIP) &&
         !notified_.test_and_set()) {
       // Make sure the queue is draining the enqueued commands.
       amd::Command* command = new amd::Marker(*queue, false, nullWaitList, this, cpu_wait);
@@ -364,8 +366,17 @@ void Command::enqueue() {
 
     // Notify all commands about the waiter. Barrier will be sent in order to obtain
     // HSA signal for a wait on the current queue
-    for (const auto& event : eventWaitList()) {
-      event->notifyCmdQueue(!kCpuWait);
+    for (const auto &event: eventWaitList()) {
+      if (!amd::IS_HIP && event->command().type() == CL_COMMAND_USER) {
+        if (event->status() >= CL_COMPLETE) {
+          reinterpret_cast<amd::UserEvent*>(event)->AddDependent(this);
+        } else {
+          setStatus(CL_EXEC_STATUS_ERROR_FOR_EVENTS_IN_WAIT_LIST);
+          return;
+        }
+      } else {
+        event->notifyCmdQueue(!kCpuWait);
+      }
     }
 
     // The batch update must be lock protected to avoid a race condition
@@ -410,20 +421,21 @@ const Context& Command::context() const { return queue_->context(); }
 NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                                            Kernel& kernel, const NDRangeContainer& sizes,
                                            uint32_t sharedMemBytes, uint32_t extraParam,
-                                           uint32_t gridId, uint32_t numGrids,
-                                           uint64_t prevGridSum, uint64_t allGridSum,
-                                           uint32_t firstDevice, bool forceProfiling) :
-    Command(queue, CL_COMMAND_NDRANGE_KERNEL, eventWaitList, AMD_SERIALIZE_KERNEL |
-                                                            (HIP_LAUNCH_BLOCKING << 1)),
-    kernel_(kernel),
-    sizes_(sizes),
-    sharedMemBytes_(sharedMemBytes),
-    extraParam_(extraParam),
-    gridId_(gridId),
-    numGrids_(numGrids),
-    prevGridSum_(prevGridSum),
-    allGridSum_(allGridSum),
-    firstDevice_(firstDevice) {
+                                           uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
+                                           uint64_t allGridSum, uint32_t firstDevice,
+                                           bool forceProfiling)
+    : Command(queue, CL_COMMAND_NDRANGE_KERNEL, eventWaitList,
+              AMD_SERIALIZE_KERNEL | (HIP_LAUNCH_BLOCKING << 1)),
+      kernel_(kernel),
+      sizes_(sizes),
+      sharedMemBytes_(sharedMemBytes),
+      extraParam_(extraParam),
+      gridId_(gridId),
+      numGrids_(numGrids),
+      prevGridSum_(prevGridSum),
+      allGridSum_(allGridSum),
+      firstDevice_(firstDevice),
+      parameters_(nullptr) {
   auto& device = queue.device();
   auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
   if (cooperativeGroups()) {

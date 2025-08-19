@@ -54,6 +54,10 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/rocprofiler-systems/**/*'
 
+"project: rocr-runtime":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocr-runtime/**/*'
+
 "project: roctracer":
 - changed-files:
   - any-glob-to-any-file: 'projects/roctracer/**/*'
@@ -70,7 +74,7 @@ External CI:
   - any-glob-to-any-file:
     - .azuredevops/**/*
 
-github action:
+github actions:
 - changed-files:
   - any-glob-to-any-file:
     - .github/workflows/**/*
