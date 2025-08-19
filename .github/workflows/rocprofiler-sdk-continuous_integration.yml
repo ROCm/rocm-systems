@@ -335,6 +335,7 @@ jobs:
         sparse-checkout: |
           projects/rocprofiler-sdk
           projects/aqlprofile
+        submodules: true
         set-safe-directory: true
 
     - name: Install Latest ROCm RHEL 9.1
@@ -419,11 +420,10 @@ jobs:
       working-directory: projects/aqlprofile
       run: |
         echo "Install Aqlprofile."
-        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
-        export PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/bin:$PATH
         python3 -m pipx install cmake
-        python3 -m pipx ensurepath
-        source ~/.bashrc
+        python3 -m pipx ensurepath; source ~/.bashrc
+        export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
+        export PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:/usr/bin:$PATH
         cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         cmake --build build --target all --parallel 16
         sudo cmake --build build --target install
@@ -481,6 +481,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        python3 -m pipx ensurepath; source ~/.bashrc;
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:/usr/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
@@ -508,16 +509,16 @@ jobs:
       matrix:
         runner: ['mi325']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
-        os: ['ubuntu-22.04']
+        os: ['ubuntu-24.04']
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: ubuntu:22.04
+      image: ubuntu:24.04
       env:
         DEBIAN_FRONTEND: noninteractive
-      options: --privileged
+      options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
 
     # define this for containers
     env:
