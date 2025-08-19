@@ -34,6 +34,7 @@
 #include "../test_common.h"
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "rocm_smi/rocm_smi_utils.h"
 #include "memorypartition_read_write.h"
 
 const uint32_t MAX_UNSUPPORTED_PARTITIONS = 0;
@@ -258,7 +259,14 @@ void TestMemoryPartitionReadWrite::Run(void) {
           if (ret == AMDSMI_STATUS_SUCCESS) {
             max_xcps = static_cast<uint32_t>(num_xcd);
           }
-          EXPECT_LT(partition_id[i], max_xcps);
+          if (!amd::smi::is_vm_guest()) {
+            // In BM, we can get the number of XCDs (calculated by getting # of gfx_clocks)
+            EXPECT_LT(partition_id[i], max_xcps);
+          } else {
+            // In guest, we may not be able to get the number of XCDs
+            // (calculated by getting # of gfx_clocks)
+            EXPECT_LE(partition_id[i], max_xcps);
+          }
           break;
         }
         case AMDSMI_ACCELERATOR_PARTITION_INVALID:
