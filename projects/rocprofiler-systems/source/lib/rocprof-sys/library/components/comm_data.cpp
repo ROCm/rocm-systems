@@ -115,23 +115,19 @@ metadata_initialize_comm_data_pmc()
     [[maybe_unused]] constexpr const char* MSG              = "bytes";
     [[maybe_unused]] constexpr const auto* TARGET_ARCH      = "CPU";
     auto                                   ni               = node_info::get_instance();
-    constexpr const auto                   DEVICE_ID = 0;  // Assuming CPU device ID is 0
-
-    auto&                 agent_mngr = agent_manager::get_instance();
-    [[maybe_unused]] auto agent_handle =
-        agent_mngr.get_agent_by_type_index(DEVICE_ID, agent_type::CPU).handle;
+    [[maybe_unused]] constexpr const auto  DEVICE_ID = 0;  // Assuming CPU device ID is 0
 
 #if defined(ROCPROFSYS_USE_MPI)
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, comm_data::mpi_send::label,
-          "Tracks MPI communication data sizes", trait::name<category::mpi>::description,
-          LONG_DESCRIPTION, COMPONENT, MSG, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0 });
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::mpi_send::label, "Tracks MPI communication data sizes",
+          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID, comm_data::mpi_recv::label,
-          "Tracks MPI communication data sizes", trait::name<category::mpi>::description,
-          LONG_DESCRIPTION, COMPONENT, MSG, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
-          EXPRESSION, 0, 0 });
+        { agent_type::CPU, DEVICE_ID, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+          comm_data::mpi_recv::label, "Tracks MPI communication data sizes",
+          trait::name<category::mpi>::description, LONG_DESCRIPTION, COMPONENT, MSG,
+          rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 #endif
 }
 

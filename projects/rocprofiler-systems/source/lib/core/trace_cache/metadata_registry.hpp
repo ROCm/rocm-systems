@@ -23,6 +23,8 @@
 #pragma once
 
 #include "common/synchronized.hpp"
+#include "core/agent.hpp"
+
 #include <cassert>
 #include <cstdint>
 #include <cstdlib>
@@ -53,7 +55,8 @@ struct process
 };
 struct pmc
 {
-    size_t      agent_handle;
+    agent_type  type;
+    size_t      agent_type_index;
     std::string target_arch;
     size_t      event_code;
     size_t      instance_id;

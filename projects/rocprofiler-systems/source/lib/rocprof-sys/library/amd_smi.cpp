@@ -123,31 +123,27 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     auto        ni               = node_info::get_instance();
     const char* TARGET_ARCH      = "GPU";
 
-    auto& agent_mngr = agent_manager::get_instance();
-    auto  agent_handle =
-        agent_mngr.get_agent_by_type_index(gpu_id, agent_type::GPU).handle;
-
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_mm_busy>::value, "Busy",
           trait::name<category::amd_smi_mm_busy>::description, LONG_DESCRIPTION,
           COMPONENT, trace_cache::PERCENTAGE, rocprofsys::trace_cache::ABSOLUTE, BLOCK,
           EXPRESSION, 0, 0, "{}" });
 
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_temp>::value, "Temp",
           trait::name<category::amd_smi_temp>::description, LONG_DESCRIPTION, COMPONENT,
           CELSIUS_DEGREES, rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_power>::value, "Pow",
           trait::name<category::amd_smi_power>::description, LONG_DESCRIPTION, COMPONENT,
           "W", rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
 
     trace_cache::get_metadata_registry().add_pmc_info(
-        { agent_handle, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
+        { agent_type::GPU, gpu_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
           trait::name<category::amd_smi_memory_usage>::value, "MemUsg",
           trait::name<category::amd_smi_memory_usage>::description, LONG_DESCRIPTION,
           COMPONENT, tim::units::mem_repr(tim::units::megabyte),

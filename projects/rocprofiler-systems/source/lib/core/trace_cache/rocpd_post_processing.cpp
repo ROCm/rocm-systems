@@ -537,7 +537,8 @@ rocpd_post_processing::post_process_metadata()
     for(const auto& pmc_info : pmc_info_list)
     {
         const auto agent_primary_key =
-            agent_mngr.get_agent_by_handle(pmc_info.agent_handle).base_id;
+            agent_mngr.get_agent_by_type_index(pmc_info.agent_type_index, pmc_info.type)
+                .base_id;
 
         data_processor.insert_pmc_description(
             n_info.id, process_info.pid, agent_primary_key, pmc_info.target_arch.c_str(),
