@@ -1657,32 +1657,40 @@ def test_comprehensive_error_paths():
         assert False, "Should raise exception for None coll_level"
     except Exception as e:
         assert "coll_level can not be None" in str(e)
-        
-        
+
+
 @pytest.mark.live_attach_detach
 def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     if not using_v3():
         assert True
         return
-    
+
     options = ["--block", "3.1.1", "4.1.1", "5.1.1"]
     workload_dir = test_utils.get_output_dir()
     process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
 
     # set the time to detach here to 1 mins, which is 60000 msec
-    time_to_detach="60000"
+    time_to_detach = "60000"
 
-    attach_detach=dict()
+    attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
     attach_detach["attach-duration-msec"] = time_to_detach
 
     _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False, app_name="app_hip_dynamic_shared", attach_detach_para=attach_detach
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
     )
 
     # kill the process of the workload at thsi point if it's still running
     if process_workload.poll() is None:
-        print(f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})...")
+        print(
+            f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})..."
+        )
         process_workload.kill()
         process_workload.wait()
 
@@ -1703,31 +1711,42 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
         "- 5.1.1", f"{workload_dir}/profiling_config.yaml"
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
-    
+
+
 @pytest.mark.live_attach_detach
-def test_live_attach_detach_singlepath_launch_stats(binary_handler_profile_rocprof_compute):
+def test_live_attach_detach_singlepath_launch_stats(
+    binary_handler_profile_rocprof_compute,
+):
     if not using_v3():
         assert True
         return
-    
+
     options = ["--set", "launch_stats"]
     workload_dir = test_utils.get_output_dir()
     process_workload = subprocess.Popen(config["app_hip_dynamic_shared"])
 
     # set the time to detach here to 1 mins, which is 60000 msec
-    time_to_detach="60000"
+    time_to_detach = "60000"
 
-    attach_detach=dict()
+    attach_detach = dict()
     attach_detach["attach_pid"] = process_workload.pid
     attach_detach["attach-duration-msec"] = time_to_detach
 
     _ = binary_handler_profile_rocprof_compute(
-        config, workload_dir, options, check_success=True, roof=False, app_name="app_hip_dynamic_shared", attach_detach_para=attach_detach
+        config,
+        workload_dir,
+        options,
+        check_success=True,
+        roof=False,
+        app_name="app_hip_dynamic_shared",
+        attach_detach_para=attach_detach,
     )
 
     # kill the process of the workload at thsi point if it's still running
     if process_workload.poll() is None:
-        print(f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})...")
+        print(
+            f"rocprof-compute has detached and finished, killing workload process (pid={process_workload.pid})..."
+        )
         process_workload.kill()
         process_workload.wait()
 
@@ -1764,6 +1783,7 @@ def test_live_attach_detach_singlepath_launch_stats(binary_handler_profile_rocpr
     )
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+
 @pytest.mark.sets_func
 class TestSetsIntegration:
     def test_memory_throughput_set(self, binary_handler_profile_rocprof_compute):
@@ -1782,9 +1802,9 @@ class TestSetsIntegration:
 
         memory_metrics = ["16.1.2", "17.1.0"]
         for metric_id in memory_metrics:
-            assert (
-                metric_id in open(Path(workload_dir) / "log.txt", "r").read()
-            ), f"Expected memory metric {metric_id} not found"
+            assert metric_id in open(Path(workload_dir) / "log.txt", "r").read(), (
+                f"Expected memory metric {metric_id} not found"
+            )
 
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1851,7 +1871,9 @@ class TestSetsIntegration:
         assert returncode == 1
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    def test_set_and_block_mutual_exclusion(self, binary_handler_profile_rocprof_compute):
+    def test_set_and_block_mutual_exclusion(
+        self, binary_handler_profile_rocprof_compute
+    ):
         options = ["--set", "compute_thruput_util", "--block", "12"]
         workload_dir = test_utils.get_output_dir()
 

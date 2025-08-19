@@ -78,23 +78,23 @@ def binary_handler_profile_rocprof_compute(request):
             ]
             if not roof:
                 baseline_opts.append("--no-roof")
-                
-            command_rocprof_compute = \
-                baseline_opts        \
-                + options \
-                + ["--path", workload_dir] \
-                    
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
             if not attach_detach_para:
-                command_rocprof_compute = command_rocprof_compute \
-                    + ["--"] \
-                    + config[app_name]
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
             else:
-                command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-pid" , str(attach_detach_para["attach_pid"])]
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
                 if attach_detach_para["attach-duration-msec"]:
-                    command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]
-                
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
             process = subprocess.run(
                 command_rocprof_compute,
                 text=True,
@@ -107,24 +107,23 @@ def binary_handler_profile_rocprof_compute(request):
             baseline_opts = ["rocprof-compute", "profile", "-n", app_name, "-VVV"]
             if not roof:
                 baseline_opts.append("--no-roof")
-                
-            command_rocprof_compute = \
-                baseline_opts        \
-                + options \
-                + ["--path", workload_dir] \
-                    
+
+            command_rocprof_compute = baseline_opts + options + ["--path", workload_dir]
             if not attach_detach_para:
-                command_rocprof_compute = command_rocprof_compute \
-                    + ["--"] \
-                    + config[app_name]
+                command_rocprof_compute = (
+                    command_rocprof_compute + ["--"] + config[app_name]
+                )
             else:
-                command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-pid" , str(attach_detach_para["attach_pid"])]
+                command_rocprof_compute = command_rocprof_compute + [
+                    "--attach-pid",
+                    str(attach_detach_para["attach_pid"]),
+                ]
                 if attach_detach_para["attach-duration-msec"]:
-                    command_rocprof_compute = command_rocprof_compute \
-                    + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]
-                    
-                    
+                    command_rocprof_compute = command_rocprof_compute + [
+                        "--attach-duration-msec",
+                        str(attach_detach_para["attach-duration-msec"]),
+                    ]
+
             with pytest.raises(SystemExit) as e:
                 with patch(
                     "sys.argv",

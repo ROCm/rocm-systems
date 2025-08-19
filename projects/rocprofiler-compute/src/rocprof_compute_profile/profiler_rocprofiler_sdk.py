@@ -63,7 +63,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_FORMAT": self.get_args().format_rocprof_output,
             "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
         }
-        
+
         if self.get_args().attach_pid:
             options.update({
                 "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,

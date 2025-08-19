@@ -442,9 +442,14 @@ class RocProfCompute_Base:
             options = self.get_profiler_options(fname, self._soc)
 
             # Only 1-run case is permitted for attach/detach
-            if ((isinstance(options, list) and "--pid" in options) or (isinstance(options, dict) and (options.get("ROCPROF_ATTACH_PID") is not None))):
+            if (isinstance(options, list) and "--pid" in options) or (
+                isinstance(options, dict)
+                and (options.get("ROCPROF_ATTACH_PID") is not None)
+            ):
                 if total_runs > 1:
-                    console_error(f"Cannot attach process for profiling as the requsted performance counters excceed the collection capacity of single pass counter collection. The current setup of requested counter blocks needs {total_runs} number of passes. Please use \"--block\" or \"--set\" to adjust or reduce the requested performance metrics!")
+                    console_error(
+                        f'Cannot attach process for profiling as the requsted performance counters excceed the collection capacity of single pass counter collection. The current setup of requested counter blocks needs {total_runs} number of passes. Please use "--block" or "--set" to adjust or reduce the requested performance metrics!'
+                    )
 
             if (
                 self.__profiler == "rocprofv1"

@@ -303,7 +303,7 @@ def capture_subprocess_output(
                 sanitized_env[k] = ":".join(str(i) for i in v)
             else:
                 sanitized_env[k] = str(v)
-         
+
     process = (
         subprocess.Popen(
             subprocess_args,
@@ -371,7 +371,7 @@ def capture_subprocess_output(
             process.stdin.close()
         except Exception:
             console_warning("forward_input: the stdin did not close properly!")
-            
+
     input_thread = threading.Thread(target=forward_input, daemon=True)
     input_thread.start()
 
@@ -391,6 +391,7 @@ def capture_subprocess_output(
     buf.close()
 
     return (success, output)
+
 
 # Create a dictionary that maps agent ID to agent objects
 def get_agent_dict(data):
@@ -762,7 +763,12 @@ def run_prof(
 
     console_debug("pmc file: %s" % path(fname).name)
 
-    is_mode_live_attach = (isinstance(profiler_options, list) and "--pid" in profiler_options) or (isinstance(profiler_options, dict) and profiler_options.get("ROCPROF_ATTACH_PID") is not None)
+    is_mode_live_attach = (
+        isinstance(profiler_options, list) and "--pid" in profiler_options
+    ) or (
+        isinstance(profiler_options, dict)
+        and profiler_options.get("ROCPROF_ATTACH_PID") is not None
+    )
 
     # standard rocprof options
     if rocprof_cmd == "rocprofiler-sdk":
@@ -780,7 +786,9 @@ def run_prof(
             options = ["-A", "absolute"] + options
     else:
         if is_mode_live_attach:
-            console_error("The live attach/detach only supports rocprofv3 or rocprofiler-sdk")
+            console_error(
+                "The live attach/detach only supports rocprofv3 or rocprofiler-sdk"
+            )
 
     new_env = os.environ.copy()
 
@@ -836,7 +844,7 @@ def run_prof(
         for key, value in options.items():
             new_env[key] = value
         console_debug("rocprof sdk env vars: {}".format(new_env))
-        
+
         if not is_mode_live_attach:
             app_cmd = options.pop("APP_CMD")
             console_debug("rocprof sdk user provided command: {}".format(app_cmd))
@@ -845,6 +853,7 @@ def run_prof(
             )
         else:
             from contextlib import contextmanager
+
             @contextmanager
             def temporary_env(env_vars):
                 original_env = os.environ.copy()
@@ -854,13 +863,13 @@ def run_prof(
                 finally:
                     os.environ.clear()
                     os.environ.update(original_env)
-                
+
             with temporary_env(new_env):
                 libname = options["ROCPROF_ATTACH_TOOL_LIBRARY"]
                 c_lib = ctypes.CDLL(libname)
                 if c_lib is None:
                     console_error(f"Error opening {libname}")
-                c_lib.attach.argtypes = [ctypes.c_uint]            
+                c_lib.attach.argtypes = [ctypes.c_uint]
 
                 pid = options["ROCPROF_ATTACH_PID"]
                 if pid is None:
@@ -871,13 +880,17 @@ def run_prof(
                 c_lib.attach(int(pid))
                 duration = os.environ.get("ROCPROF_ATTACH_DURATION", None)
                 if duration is None:
-                    console_log(f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m")
+                    console_log(
+                        f"\033[93mAttach to process with ID {pid} is successful, Press Enter to detach...\033[0m"
+                    )
                     input()
                 else:
-                    console_log(f"\033[93mAttach to process with ID {pid} is successful, detach will happen in {duration} miliseconds...\033[0m")
+                    console_log(
+                        f"\033[93mAttach to process with ID {pid} is successful, detach will happen in {duration} miliseconds...\033[0m"
+                    )
                     time.sleep(int(duration) / 1000)
                 c_lib.detach()
-            
+
     else:
         console_debug("rocprof command: {}".format([rocprof_cmd] + options))
         # profile the app
