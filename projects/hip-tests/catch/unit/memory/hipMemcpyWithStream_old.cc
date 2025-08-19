@@ -475,6 +475,7 @@ void TestkindDefaultForDtoD(void) {
     }
 
     for (int i=0; i < NumDevices; ++i) {
+      HIP_CHECK(hipSetDevice(i));
       hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks),
                          dim3(threadsPerBlock),
                          0, stream[i], static_cast<const int*>(A_d[i]),

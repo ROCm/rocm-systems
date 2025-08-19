@@ -85,8 +85,12 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   HIP_INIT_API(hipMemCreate, handle, size, prop, flags);
 
   //  Currently we do not support Pinned memory
-  if (handle == nullptr || size == 0 || flags != 0 || prop == nullptr ||
+  if (handle == nullptr || size == 0 || prop == nullptr ||
       prop->type != hipMemAllocationTypePinned || prop->location.type != hipMemLocationTypeDevice) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  if (flags != hipDeviceMallocUncached && flags != 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -112,8 +116,12 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   amd::Context* amdContext = g_devices[prop->location.id]->asContext();
 
   // When ROCCLR_MEM_PHYMEM is set, ROCr impl gets and stores unique hsa handle. Flag no-op on PAL.
-  void* ptr = amd::SvmBuffer::malloc(*amdContext, ROCCLR_MEM_PHYMEM, size,
-                                     dev_info.memBaseAddrAlign_, nullptr);
+  uint64_t ihipFlags = ROCCLR_MEM_PHYMEM;
+  if (flags == hipDeviceMallocUncached) {
+    ihipFlags |= ROCCLR_MEM_HSA_UNCACHED | CL_MEM_SVM_ATOMICS;
+  }
+  void* ptr =
+      amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_, nullptr);
 
   // Handle out of memory cases,
   if (ptr == nullptr) {

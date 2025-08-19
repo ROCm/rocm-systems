@@ -75,6 +75,7 @@ MAX_REOCCURING_COUNT = 28
 
 ALL_CSVS_MI100 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
@@ -94,6 +95,7 @@ ALL_CSVS_MI100 = sorted([
 
 ALL_CSVS_MI200 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
@@ -111,6 +113,7 @@ ALL_CSVS_MI200 = sorted([
 ])
 ALL_CSVS_MI300 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",
@@ -128,6 +131,7 @@ ALL_CSVS_MI300 = sorted([
 ])
 ALL_CSVS_MI350 = sorted([
     "SQC_DCACHE_INFLIGHT_LEVEL.csv",
+    "SQC_ICACHE_INFLIGHT_LEVEL.csv",
     "SQ_IFETCH_LEVEL.csv",
     "SQ_INST_LEVEL_LDS.csv",
     "SQ_INST_LEVEL_SMEM.csv",

@@ -783,9 +783,29 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd(const __hip_bfloat16 a, const 
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Adds two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hadd_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
+  return (__bf16)a + (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
  * \brief Subtracts two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+  return (__bf16)a - (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Subtracts two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hsub_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
   return (__bf16)a - (__bf16)b;
 }
 
@@ -812,6 +832,16 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 __hfma(const __hip_bfloat16 a, const __hip
  * \brief Multiplies two bfloat16 values
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul(const __hip_bfloat16 a, const __hip_bfloat16 b) {
+  return (__bf16)a * (__bf16)b;
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT16_ARITH
+ * \brief Multiplies two bfloat16 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat16 __hmul_rn(const __hip_bfloat16 a,
+                                                     const __hip_bfloat16 b) {
+#pragma clang fp contract(off)
   return (__bf16)a * (__bf16)b;
 }
 
@@ -863,6 +893,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2(const __hip_bfloat162 a,
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Adds two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hadd2_rn(const __hip_bfloat162 a,
+                                                       const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
+  return __hip_bfloat162{__bf16_2(a) + __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
  * \brief Performs FMA of given bfloat162 values
  */
 __BF16_DEVICE_STATIC__ __hip_bfloat162 __hfma2(const __hip_bfloat162 a, const __hip_bfloat162 b,
@@ -881,6 +921,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2(const __hip_bfloat162 a,
 
 /**
  * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Multiplies two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hmul2_rn(const __hip_bfloat162 a,
+                                                    const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
+  return __hip_bfloat162{__bf16_2(a) * __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
  * \brief Converts a bfloat162 into negative
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hneg2(const __hip_bfloat162 a) {
@@ -893,6 +943,16 @@ __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hneg2(const __hip_bfloat162 a) {
  */
 __BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2(const __hip_bfloat162 a,
                                                     const __hip_bfloat162 b) {
+  return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
+}
+
+/**
+ * \ingroup HIP_INTRINSIC_BFLOAT162_ARITH
+ * \brief Subtracts two bfloat162 values, will not fuse into fma
+ */
+__BF16_HOST_DEVICE_STATIC__ __hip_bfloat162 __hsub2_rn(const __hip_bfloat162 a,
+                                                    const __hip_bfloat162 b) {
+#pragma clang fp contract(off)
   return __hip_bfloat162{__bf16_2(a) - __bf16_2(b)};
 }
 

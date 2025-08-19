@@ -114,10 +114,11 @@ template <
     typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf1Dread(T* data, hipSurfaceObject_t surfObj, int x,
         int boundaryMode = hipBoundaryModeZero) {
-    __HIP_SURFACE_OBJECT_PARAMETERS_INIT
-    x = __hipGetPixelAddr(x, __ockl_image_channel_data_type_1D(i), __ockl_image_channel_order_1D(i));
-    auto tmp = __ockl_image_load_1D(i, x);
-    *data = __hipMapFrom<T>(tmp);
+  __HIP_SURFACE_OBJECT_PARAMETERS_INIT;
+  (void)boundaryMode;
+  x = __hipGetPixelAddr(x, __ockl_image_channel_data_type_1D(i), __ockl_image_channel_order_1D(i));
+  auto tmp = __ockl_image_load_1D(i, x);
+  *data = __hipMapFrom<T>(tmp);
 }
 
 /** \brief Writes the value data to the one-dimensional surface at coordinate x.
@@ -157,7 +158,7 @@ static __device__ __hip_img_chk__ void surf2Dread(T* data, hipSurfaceObject_t su
     *data = __hipMapFrom<T>(tmp);
 }
 
-/** \brief Writes the value data to the two-dimensional surface at coordinate 
+/** \brief Writes the value data to the two-dimensional surface at coordinate
  *         x, y.
  *
  *  \tparam T The data type of the surface.
@@ -177,7 +178,7 @@ static __device__ __hip_img_chk__ void surf2Dwrite(T data, hipSurfaceObject_t su
     __ockl_image_store_2D(i, get_native_vector(coords), tmp);
 }
 
-/** \brief Reads the value from the three-dimensional surface at coordinate 
+/** \brief Reads the value from the three-dimensional surface at coordinate
  *         x, y, z.
  *
  *  \tparam T The data type of the surface.
@@ -238,7 +239,7 @@ static __device__ __hip_img_chk__ void surf1DLayeredread(T* data, hipSurfaceObje
     *data = __hipMapFrom<T>(tmp);
 }
 
-/** \brief Writes the value data to the one-dimensional layered surface at 
+/** \brief Writes the value data to the one-dimensional layered surface at
  *         coordinate x and layer index.
  *
  *  \tparam T The data type of the surface.
@@ -257,7 +258,7 @@ static __device__ __hip_img_chk__ void surf1DLayeredwrite(T data, hipSurfaceObje
     __ockl_image_store_lod_1D(i, x, layer, tmp);
 }
 
-/** \brief Reads the value from the two-dimensional layered surface at 
+/** \brief Reads the value from the two-dimensional layered surface at
  *         coordinate x, y and layer index.
  *
  *  \tparam T The data type of the surface.

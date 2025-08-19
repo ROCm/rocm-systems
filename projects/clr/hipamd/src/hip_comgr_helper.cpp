@@ -19,20 +19,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#define LLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING 1
-#include "llvm/BinaryFormat/ELF.h"
+#include "hip_comgr_helper.hpp"
 #if defined(_WIN32)
 #include <io.h>
-#if defined(__has_attribute)
-// MS compiler doesn't support __has_attribute
-#undef __has_attribute
 #endif
-#endif
-#include "hip_comgr_helper.hpp"
-using namespace llvm::ELF;
+#include "../src/amd_hsa_elf.hpp"
 
 namespace hip {
-
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;
 
 namespace helpers {
@@ -63,239 +56,6 @@ struct __ClangOffloadBundleHeader {
   uint64_t numOfCodeObjects;
   __ClangOffloadBundleInfo desc[1];
 };
-
-static bool getProcName(uint32_t EFlags, std::string& proc_name, bool& xnackSupported,
-                        bool& sramEccSupported) {
-  switch (EFlags & EF_AMDGPU_MACH) {
-    case EF_AMDGPU_MACH_AMDGCN_GFX700:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx700";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX701:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx701";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX702:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx702";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX703:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx703";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX704:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx704";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX705:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx705";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX801:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx801";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX802:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx802";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX803:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx803";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX805:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx805";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX810:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx810";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX900:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx900";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX902:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx902";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX904:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx904";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX906:
-      xnackSupported = true;
-      sramEccSupported = true;
-      proc_name = "gfx906";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX908:
-      xnackSupported = true;
-      sramEccSupported = true;
-      proc_name = "gfx908";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX909:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx909";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX90A:
-      xnackSupported = true;
-      sramEccSupported = true;
-      proc_name = "gfx90a";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX90C:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx90c";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX942:
-      xnackSupported = true;
-      sramEccSupported = true;
-      proc_name = "gfx942";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX950:
-      xnackSupported = true;
-      sramEccSupported = true;
-      proc_name = "gfx950";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1010:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx1010";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1011:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx1011";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1012:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx1012";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1013:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx1013";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1030:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1030";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1031:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1031";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1032:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1032";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1033:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1033";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1034:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1034";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1035:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1035";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1036:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1036";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1100:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1100";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1101:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1101";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1102:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1102";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1103:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1103";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1150:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1150";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1151:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1151";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1200:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1200";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX1201:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx1201";
-    case EF_AMDGPU_MACH_AMDGCN_GFX9_GENERIC:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx9-generic";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX10_1_GENERIC:
-      xnackSupported = true;
-      sramEccSupported = false;
-      proc_name = "gfx10-1-generic";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX10_3_GENERIC:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx10-3-generic";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX11_GENERIC:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx11-generic";
-      break;
-    case EF_AMDGPU_MACH_AMDGCN_GFX12_GENERIC:
-      xnackSupported = false;
-      sramEccSupported = false;
-      proc_name = "gfx12-generic";
-      break;
-    default:
-      return false;
-  }
-  return true;
-}
 
 // Consumes the string 'consume_' from the starting of the given input
 // eg: input = amdgcn-amd-amdhsa--gfx908 and consume_ is amdgcn-amd-amdhsa--
@@ -1119,12 +879,6 @@ bool IsCompatibleWithGenericTarget(const std::string& coTarget, const std::strin
 std::vector<std::string> getLinkOptions(const LinkArguments& args) {
   std::vector<std::string> res;
 
-  {  // process optimization level
-    std::string opt("-O");
-    opt += std::to_string(args.optimization_level_);
-    res.push_back(opt);
-  }
-
   const auto irArgCount = args.linker_ir2isa_args_count_;
   if (irArgCount > 0) {
     res.reserve(irArgCount);
@@ -1257,103 +1011,11 @@ bool LinkProgram::isLinkerValid(LinkProgram* link_program) {
 bool LinkProgram::AddLinkerOptions(unsigned int num_options, hipJitOption* options_ptr,
                                       void** options_vals_ptr) {
   for (size_t opt_idx = 0; opt_idx < num_options; ++opt_idx) {
-    if ( options_vals_ptr[opt_idx] == nullptr) {
+    if (options_vals_ptr[opt_idx] == nullptr) {
       LogError("Options value can not be nullptr");
       return false;
     }
     switch (options_ptr[opt_idx]) {
-      case hipJitOptionMaxRegisters:
-        link_args_.max_registers_ = *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionThreadsPerBlock:
-        link_args_.threads_per_block_ =
-            *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionWallTime:
-        link_args_.wall_time_ = *(reinterpret_cast<long*>(options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionInfoLogBuffer: {
-        link_args_.info_log_ = (reinterpret_cast<char*>(options_vals_ptr[opt_idx]));
-        break;
-      }
-      case hipJitOptionInfoLogBufferSizeBytes:
-        link_args_.info_log_size_ = (reinterpret_cast<size_t>(options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionErrorLogBuffer: {
-        link_args_.error_log_ = reinterpret_cast<char*>(options_vals_ptr[opt_idx]);
-        break;
-      }
-      case hipJitOptionErrorLogBufferSizeBytes:
-        link_args_.error_log_size_ = (reinterpret_cast<size_t>(options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionOptimizationLevel:
-        link_args_.optimization_level_ =
-            *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionTargetFromContext:
-        link_args_.target_from_hip_context_ =
-            *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionTarget:
-        link_args_.jit_target_ = *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionFallbackStrategy:
-        link_args_.fallback_strategy_ =
-            *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionGenerateDebugInfo:
-        link_args_.generate_debug_info_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionLogVerbose:
-        link_args_.log_verbose_ = reinterpret_cast<size_t>(options_vals_ptr[opt_idx]);
-        break;
-      case hipJitOptionGenerateLineInfo:
-        link_args_.generate_line_info_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionCacheMode:
-        link_args_.cache_mode_ = *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionSm3xOpt:
-        link_args_.sm3x_opt_ = *(reinterpret_cast<bool*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionFastCompile:
-        link_args_.fast_compile_ = *(reinterpret_cast<bool*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionGlobalSymbolNames: {
-        link_args_.global_symbol_names_ = reinterpret_cast<const char**>(options_vals_ptr[opt_idx]);
-        break;
-      }
-      case hipJitOptionGlobalSymbolAddresses: {
-        link_args_.global_symbol_addresses_ = reinterpret_cast<void**>(options_vals_ptr[opt_idx]);
-        break;
-      }
-      case hipJitOptionGlobalSymbolCount:
-        link_args_.global_symbol_count_ =
-            *(reinterpret_cast<unsigned int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionLto:
-        link_args_.lto_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionFtz:
-        link_args_.ftz_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionPrecDiv:
-        link_args_.prec_div_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionPrecSqrt:
-        link_args_.prec_sqrt_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionFma:
-        link_args_.fma_ = *(reinterpret_cast<int*>(&options_vals_ptr[opt_idx]));
-        break;
-      case hipJitOptionPositionIndependentCode:
-        link_args_.pic_ = *(reinterpret_cast<int *>(&options_vals_ptr[opt_idx]));
-      case hipJitOptionMinCTAPerSM:
-        link_args_.min_cta_per_sm_ = *(reinterpret_cast<int *>(&options_vals_ptr[opt_idx]));
-      case hipJitOptionMaxThreadsPerBlock:
-        link_args_.max_threads_per_block_ = *(reinterpret_cast<int *>(&options_vals_ptr[opt_idx]));
-      case hipJitOptionOverrideDirectiveValues:
-        link_args_.override_directive_values_ = *(reinterpret_cast<int *>(&options_vals_ptr[opt_idx]));
       case hipJitOptionIRtoISAOptExt: {
         link_args_.linker_ir2isa_args_ = reinterpret_cast<const char**>(options_vals_ptr[opt_idx]);
         break;

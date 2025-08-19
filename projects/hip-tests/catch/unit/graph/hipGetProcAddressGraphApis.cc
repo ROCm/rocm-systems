@@ -375,9 +375,7 @@ TEST_CASE("Unit_hipGetProcAddress_GraphAPIs_AddMemsetMemcpyNodes") {
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
-  #ifdef _WIN32
   HIP_CHECK(hipStreamSynchronize(0));
-  #endif
 
   REQUIRE(validateArrayT<char>(hostMemDst, N, value) == true);
 

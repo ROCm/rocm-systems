@@ -978,4 +978,77 @@ inline
 size_t getElementSize(const hipChannelFormatDesc &desc) {
   return (desc.x / 8) * getNumChannels(desc);
 }
+
+inline
+hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
+  hipMemcpy3DParms params;
+  params.extent = desc.extent;
+  params.kind = hipMemcpyDefault;
+
+  // infer elementSize
+  size_t elementSize = 1;
+  if (desc.src.type == hipMemcpyOperandTypeArray) {
+    elementSize = getElementSize(desc.src.op.array.array);
+  } else if (desc.dst.type == hipMemcpyOperandTypeArray) {
+    elementSize = getElementSize(desc.dst.op.array.array);
+  }
+
+  // source
+  if (desc.src.type == hipMemcpyOperandTypePointer) {
+    size_t row = desc.src.op.ptr.rowLength;
+    size_t height = desc.src.op.ptr.layerHeight;
+    size_t spitch = (row ? row : desc.extent.width) * elementSize;
+    size_t swidth = (row ? row : desc.extent.width);
+    size_t sheight = (height ? height : desc.extent.height);
+    params.srcPtr = make_hipPitchedPtr(
+        desc.src.op.ptr.ptr,
+        spitch,
+        swidth,
+        sheight
+    );
+  } else if (desc.src.type == hipMemcpyOperandTypeArray) {
+    params.srcArray = desc.src.op.array.array;
+    params.srcPos = make_hipPos(
+        desc.src.op.array.offset.x,
+        desc.src.op.array.offset.y,
+        desc.src.op.array.offset.z
+    );
+  }
+  // dest
+  if (desc.dst.type == hipMemcpyOperandTypePointer) {
+    size_t row = desc.dst.op.ptr.rowLength;
+    size_t height = desc.dst.op.ptr.layerHeight;
+    size_t spitch = (row ? row : desc.extent.width) * elementSize;
+    size_t swidth = (row ? row : desc.extent.width);
+    size_t sheight = (height ? height : desc.extent.height);
+    params.dstPtr = make_hipPitchedPtr(
+        desc.dst.op.ptr.ptr,
+        spitch,
+        swidth,
+        sheight
+    );
+  } else if (desc.dst.type == hipMemcpyOperandTypeArray) {
+    params.dstArray = desc.dst.op.array.array;
+    params.dstPos = make_hipPos(
+        desc.dst.op.array.offset.x,
+        desc.dst.op.array.offset.y,
+        desc.dst.op.array.offset.z
+    );
+  }
+  return params;
+}
+
+inline
+hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
+  hipMemcpy3DParms params;
+  params.srcArray = desc.srcArray;
+  params.srcPos = desc.srcPos;
+  params.srcPtr = desc.srcPtr;
+  params.dstArray = desc.dstArray;
+  params.dstPos = desc.dstPos;
+  params.dstPtr = desc.dstPtr;
+  params.extent = desc.extent;
+  params.kind = hipMemcpyDeviceToDevice;
+  return params;
+}
 };

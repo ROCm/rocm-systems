@@ -39,26 +39,7 @@ public:
   FatBinaryInfo(const char* fname, const void* image);
   ~FatBinaryInfo();
 
-  // Loads Fat binary from file or image, unbundles COs for devices.
-  hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
-      bool &containGenericTarget);
-
-  /**
-     *  @brief Extract code object from fatbin using comgr unbundling action via calling
-     *         CodeObject::extractCodeObjectFromFatBinaryUsingComgr
-     *
-     *  @param[in]  data the bundle data(fatbin or loaded module data). It can be in uncompressed,
-     *              compressed and even SPIR-V(to be supported later) mode.
-     *  @param[in]  devices devices whose code objects will be extracted.
-     *  Returned error code
-     *
-     *  @return #hipSuccess, #hipErrorNoBinaryForGpu, #hipErrorInvalidValue
-     *
-     *  @see CodeObject::extractCodeObjectFromFatBinaryUsingComgr()
-     */
-  hipError_t ExtractFatBinaryUsingCOMGR(const void* data,
-                                              const std::vector<hip::Device*>& devices);
-  hipError_t ExtractFatBinary(const std::vector<hip::Device*>& devices);
+  hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
                            size_t binary_offset);
   hipError_t BuildProgram(const int device_id);

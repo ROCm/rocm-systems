@@ -307,6 +307,13 @@ class HostQueue : public CommandQueue {
     return thread_.vdev()->getQueueID();
   }
 
+  //! Returns Synchronization Policy for the current stream
+  amd::SyncPolicy GetSyncPolicy() const { return sync_policy_; }
+  //! Set Synchronization Policy used by Queue
+  void SetSyncPolicy(amd::SyncPolicy value) {
+    sync_policy_ = value;
+  }
+
 private:
   Command* head_;     //!< Head of the batch list
   Command* tail_;     //!< Tail of the batch list
@@ -315,6 +322,8 @@ private:
   //! True if this command queue is active
   bool isActive_;
   bool forceDestroy_ = false;  //!< Destroy the queue in the current state
+
+  amd::SyncPolicy sync_policy_;    //!< Used for controlling stream synchronization
 };
 
 class DeviceQueue : public CommandQueue {
