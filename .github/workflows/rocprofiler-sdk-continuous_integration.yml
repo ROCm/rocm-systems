@@ -78,7 +78,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Install Latest ROCm
+    - name: Install Latest Nightly ROCm
       shell: bash
       working-directory: /tmp
       run: |
@@ -90,7 +90,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev
+        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev rccl-dev rocdecode-dev rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -107,7 +107,9 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        rm -rf /opt/rocm
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
     - name: Checkout
       uses: actions/checkout@v4
@@ -329,6 +331,17 @@ jobs:
       GPU_RUNNER: ${{ matrix.runner }}
 
     steps:
+    - name: Setup Git
+      if: ${{ matrix.os == 'rhel-9.1' }}
+      shell: bash
+      run: |
+        wget https://www.kernel.org/pub/software/scm/git/git-2.9.5.tar.xz
+        tar -xf git-2.9.5.tar.xz
+        cd git-2.9.5
+        dnf install perl-ExtUtils-MakeMaker
+        make prefix=/usr all -j 32
+        sudo make prefix=/usr install
+
     - name: Checkout
       uses: actions/checkout@v5
       with:
@@ -338,7 +351,7 @@ jobs:
         submodules: true
         set-safe-directory: true
 
-    - name: Install Latest ROCm RHEL 9.1
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.1
       if: ${{ matrix.os == 'rhel-9.1' }}
       shell: bash
       working-directory: /tmp
@@ -354,9 +367,9 @@ jobs:
         EOF
         sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
         sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel
+        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
-    - name: Install Latest ROCm SLES 15.4
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.4
       if: ${{ matrix.os == 'sles-15.4' }}
       shell: bash
       working-directory: /tmp
@@ -370,9 +383,9 @@ jobs:
         gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
         EOF
         sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel
+        sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
-    - name: Install Latest ROCm
+    - name: Install Latest Nightly ROCm using TheRock Tarballs
       shell: bash
       working-directory: /tmp
       run: |
@@ -391,6 +404,7 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         sudo tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        rm -rf /opt/rocm
         sudo ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
     - name: Install requirements
@@ -527,7 +541,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.runner }}
 
     steps:
-    - name: Install Latest ROCm
+    - name: Install Latest Nightly ROCm
       shell: bash
       working-directory: /tmp
       run: |
@@ -539,7 +553,7 @@ jobs:
         echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         apt-get update
-        apt-get install -y rocm-openmp-sdk rocm-llvm-dev
+        apt-get install -y rocm-openmp-sdk rocm-llvm-dev rccl-dev rocdecode-dev rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
@@ -556,6 +570,7 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        rm -rf /opt/rocm
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
     - name: Checkout
