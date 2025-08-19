@@ -30,13 +30,13 @@ RUN apt-get update && \
         gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
         locales lsb-release m4 ninja-build python3-pip software-properties-common \
         texinfo unzip wget vim zip zlib1g-dev && \
-    apt-get autoclean && \
-    OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
-    OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
-    if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \
-        python3 -m pip install 'cmake==3.21' perfetto; \
+    apt-get autoclean
+
+RUN if ! pip install 'cmake==3.21' perfetto 2>&1 | tee pip_output.log | grep -q "externally managed environment"; then \
+        echo "pip install succeeded without --break-system-packages"; \
     else \
-        python3 -m pip install --break-system-packages 'cmake==3.21' perfetto; \
+        echo "Retrying with --break-system-packages"; \
+        pip install --break-system-packages 'cmake==3.21' perfetto; \
     fi
 
 ARG PYTHON_VERSIONS="6 7 8 9 10 11 12 13"
