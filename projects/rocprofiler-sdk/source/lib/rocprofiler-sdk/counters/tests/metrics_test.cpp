@@ -288,7 +288,7 @@ TEST(metrics, check_public_api_query)
             //  permutations included in dimensions_instances  
             std::map<int, int> index_to_count;
 
-            // Iterate over all intances with unique dimensions indexes.
+            // Iterate over all instances with unique dimensions indexes.
             for(size_t j = 0; j < info.dimensions_instances_count; j++)
             {
                 size_t dimension_size = info.dimensions_instances[j]->dimensions_count;
