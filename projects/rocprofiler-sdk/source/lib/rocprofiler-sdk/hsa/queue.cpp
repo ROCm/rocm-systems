@@ -68,19 +68,11 @@ namespace hsa
 {
 namespace
 {
-std::atomic<rocprofiler_dispatch_id_t>&
-get_incomplete_dispatches()
-{
-    static auto*& dispatches =
-        common::static_object<std::atomic<rocprofiler_dispatch_id_t>>::construct(0ul);
-    return *dispatches;
-}
-
+constexpr int64_t NUM_SIGNALS = 16;
 std::atomic<int64_t>&
 get_balanced_signal_slots()
 {
-    constexpr int64_t NUM_SIGNALS = 16;
-    static auto*&     atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
+    static auto*& atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
     return *atomic;
 }
 
@@ -131,7 +123,6 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
     kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
-    --get_incomplete_dispatches();
 
     // Calls our internal callbacks to callers who need to be notified post
     // kernel execution.
@@ -343,8 +334,7 @@ WriteInterceptor(const void* packets,
         static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
                       "failed to compute size field based on offset of reserved_padding field");
 
-        auto dispatch_id = ++sequence_counter;
-        ++get_incomplete_dispatches();
+        auto dispatch_id     = ++sequence_counter;
         auto callback_record = callback_record_t{
             sizeof(callback_record_t),
             rocprofiler_timestamp_t{0},
@@ -648,8 +638,11 @@ Queue::sync() const
         _core_api.hsa_signal_wait_relaxed_fn(
             _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
-    ROCP_CI_LOG_IF(WARNING, get_incomplete_dispatches() != 0)
-        << fmt::format("There are {} incomplete dispatches", get_incomplete_dispatches().load());
+    // get_balanced_signal_slots() increments upon kernel dispatch completion and decrements in
+    // WriteInterceptor with a starting value of NUM_SIGNALS, so the get_balanced_signal_slots()
+    // should be equivalent to NUM_SIGNALS if all kernel dispatches are completed
+    ROCP_CI_LOG_IF(WARNING, get_balanced_signal_slots().load() != NUM_SIGNALS) << fmt::format(
+        "There are {} incomplete dispatches", NUM_SIGNALS - get_balanced_signal_slots().load());
 }
 
 void
