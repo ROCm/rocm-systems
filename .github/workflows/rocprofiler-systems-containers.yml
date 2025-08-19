@@ -26,6 +26,7 @@ env:
 
 jobs:
   prepare_matrix_ci:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
       matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
@@ -96,6 +97,7 @@ jobs:
             popd
 
   prepare_matrix_release:
+    if: github.repository == 'ROCm/rocm-systems'
     runs-on: ubuntu-latest
     outputs:
       matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
