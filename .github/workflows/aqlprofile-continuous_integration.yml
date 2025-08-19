@@ -83,7 +83,7 @@ jobs:
         echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
         add-apt-repository ppa:git-core/ppa
         apt-get update
-        apt-get install -y git rocm-llvm-dev
+        apt-get install -y git rocm-llvm-dev rocm-openmp-sdk
         python3 -m pip install awscli
         export PATH=/usr/local/bin:~/.local/bin:$PATH
         KEY=$(aws s3api list-objects-v2 \
@@ -96,8 +96,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
+        mkdir -p /opt/rocm-7.0.0
         tar -xf *.tar.gz -C /opt/rocm-7.0.0
-        rm -rf /opt/rocm
         ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - uses: actions/checkout@v5
@@ -124,6 +124,7 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
+        ls -lah /opt/rocm/lib/cmake
         pwd
 
     - name: Special Requirements
@@ -235,8 +236,8 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
+        mkdir -p /opt/rocm-7.0.0
         sudo tar -xf *.tar.gz -C /opt/rocm-7.0.0
-        rm -rf /opt/rocm
         sudo ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - name: Install requirements
