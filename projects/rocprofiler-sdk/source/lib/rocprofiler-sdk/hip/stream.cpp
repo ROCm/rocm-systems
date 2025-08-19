@@ -92,18 +92,19 @@ add_stream(hipStream_t stream)
             if(!_data.emplace(_stream, rocprofiler_stream_id_t{.handle = idx}).second)
             {
                 idx_offset += 1;
+                // Handle special hipStreamPerThread case where each thread has it's own implicit
+                // stream ID. No need to update map since hipStreamPerThread is defined as 0x02
+                if(_stream == hipStreamPerThread)
+                {
+                    return rocprofiler_stream_id_t{.handle = idx};
+                }
+                idx            = _data.size() + idx_offset;
                 auto _existing = _data.at(_stream);
                 ROCP_INFO << "existing hipStream_t ("
                           << sdk::utility::as_hex(static_cast<void*>(_stream))
                           << ") reallocated. rocprofiler_stream_id_t{.handle = " << _existing.handle
                           << "} -> rocprofiler_stream_id_t{.handle = " << idx << "}";
                 _data.at(_stream) = rocprofiler_stream_id_t{.handle = idx};
-            }
-            // Handle special hipStreamPerThread case where each thread has it's own implicit stream
-            // ID
-            if(_stream == hipStreamPerThread)
-            {
-                return rocprofiler_stream_id_t{.handle = idx};
             }
             return _data.at(_stream);
         },

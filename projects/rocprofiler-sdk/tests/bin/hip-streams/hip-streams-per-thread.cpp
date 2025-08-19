@@ -1,3 +1,4 @@
+#include <array>
 #include <thread>
 #include <vector>
 
@@ -44,24 +45,28 @@ int
 main()
 {
     // Test hipStreamPerThread with multiple threads
-    const size_t             num_streams = 3;
-    const size_t             thread_cnt  = 9;
-    std::vector<std::thread> threads(thread_cnt);
-    // Creating streams
-    hipStream_t streams[num_streams];
-    threads[0] = std::thread(copy_to_dev, nullptr);
-    threads[1] = std::thread(copy_to_dev, hipStreamPerThread);
-    HIP_ASSERT(hipStreamCreate(&streams[0]));
-    threads[2] = std::thread(copy_to_dev, streams[0]);
-    threads[3] = std::thread(copy_to_dev, hipStreamLegacy);
-    threads[4] = std::thread(copy_to_dev, hipStreamPerThread);
-    HIP_ASSERT(hipStreamCreate(&streams[1]));
-    threads[5] = std::thread(copy_to_dev, streams[1]);
-    threads[6] = std::thread(copy_to_dev, hipStreamLegacy);
-    threads[7] = std::thread(copy_to_dev, hipStreamPerThread);
-    HIP_ASSERT(hipStreamCreate(&streams[2]));
-    threads[8] = std::thread(copy_to_dev, streams[2]);
-
+    const size_t                         num_streams = 3;
+    const size_t                         thread_cnt  = 9;
+    std::vector<std::thread>             threads{};
+    std::array<hipStream_t, num_streams> streams{};
+    threads.reserve(thread_cnt);
+    threads.emplace_back(std::thread(copy_to_dev, nullptr));
+    for(size_t i = 1, j = 0; i < thread_cnt; ++i)
+    {
+        if(i % 3 == 0)
+        {
+            threads.emplace_back(std::thread(copy_to_dev, hipStreamLegacy));
+        }
+        else if(i % 3 == 1)
+        {
+            threads.emplace_back(std::thread(copy_to_dev, hipStreamPerThread));
+        }
+        else
+        {
+            HIP_ASSERT(hipStreamCreate(&streams[j]));
+            threads.emplace_back(std::thread(copy_to_dev, streams[j++]));
+        }
+    }
     for(auto& thread : threads)
     {
         thread.join();
