@@ -83,7 +83,7 @@ jobs:
             popd
       
       - name: Build CI Container (Push)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event_name != 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
