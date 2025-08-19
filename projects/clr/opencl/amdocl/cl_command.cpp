@@ -141,8 +141,8 @@ RUNTIME_ENTRY_RET(cl_command_queue, clCreateCommandQueueWithProperties,
   }
 
   if ((queueRTCUs != amd::CommandQueue::RealTimeDisabled) &&
-      ((queueRTCUs > amdDevice.info().numRTCUs_) || (queueRTCUs == 0)
-        || (queueRTCUs < amdDevice.info().granularityRTCUs_))) {
+      ((queueRTCUs > amdDevice.info().numRTCUs_) || (queueRTCUs == 0) ||
+       (queueRTCUs < amdDevice.info().granularityRTCUs_))) {
     *not_null(errcode_ret) = CL_INVALID_VALUE;
     return (cl_command_queue)0;
   }
@@ -231,7 +231,7 @@ RUNTIME_ENTRY(cl_int, clSetDefaultDeviceCommandQueue,
 
   amd::DeviceQueue* deviceQueue = as_amd(command_queue)->asDeviceQueue();
   if ((deviceQueue == NULL) || (amdContext != &deviceQueue->context()) ||
-	  (amdDevice != &deviceQueue->device())) {
+      (amdDevice != &deviceQueue->device())) {
     return CL_INVALID_COMMAND_QUEUE;
   }
 

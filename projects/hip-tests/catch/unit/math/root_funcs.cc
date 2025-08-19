@@ -604,6 +604,6 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm_Sanity_Positive", "", float, double) {
 TEST_CASE("Unit_Device_rnorm_rnormf_Negative_RTC") { NegativeTestRTCWrapper<18>(kRnorm); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

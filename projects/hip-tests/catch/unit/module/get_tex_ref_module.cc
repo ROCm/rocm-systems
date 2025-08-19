@@ -25,4 +25,4 @@ THE SOFTWARE.
 
 texture<float, 2> tex;
 
-#endif // CUDA_VERSION < CUDA_12000
+#endif  // CUDA_VERSION < CUDA_12000

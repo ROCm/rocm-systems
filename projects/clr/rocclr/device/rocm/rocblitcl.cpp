@@ -24,11 +24,8 @@ namespace amd::roc {
 
 const char* SchedulerSourceCode = BLIT_KERNEL(
 
-  extern void __amd_scheduler_rocm(__global void*);
+    extern void __amd_scheduler_rocm(__global void*);
 
-  __kernel void __amd_rocclr_scheduler(__global void* params) {
-    __amd_scheduler_rocm(params);
-  }
-);
+    __kernel void __amd_rocclr_scheduler(__global void* params) { __amd_scheduler_rocm(params); });
 
 }  // namespace amd::roc

@@ -52,14 +52,15 @@ static constexpr int ARRAY_LOOP{100};
  */
 static void MallocArray_DiffSizes(int gpu) {
   HIP_CHECK_THREAD(hipSetDevice(gpu));
-  //Use of GENERATE in thead function causes random failures with multithread condition.
-  std::vector<std::pair<size_t, size_t>> runs {std::make_pair(NUM_W, NUM_H), std::make_pair(BIGNUM_W, BIGNUM_H)};
+  // Use of GENERATE in thead function causes random failures with multithread condition.
+  std::vector<std::pair<size_t, size_t>> runs{std::make_pair(NUM_W, NUM_H),
+                                              std::make_pair(BIGNUM_W, BIGNUM_H)};
   for (const auto& size : runs) {
     hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
     std::array<hipArray_t, ARRAY_LOOP> A_d;
     for (int i = 0; i < ARRAY_LOOP; i++) {
       HIP_CHECK_THREAD(
-           hipMallocArray(&A_d[i], &desc, std::get<0>(size), std::get<1>(size), hipArrayDefault));
+          hipMallocArray(&A_d[i], &desc, std::get<0>(size), std::get<1>(size), hipArrayDefault));
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
       HIP_CHECK_THREAD(hipFreeArray(A_d[i]));
@@ -417,8 +418,10 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_happy", "", uint, int, int4, ushort, sho
       HIP_CHECK(hipMallocArray(&arrayPtr, &desc, width, height, hipArrayTextureGather));
       testArrayAsTextureWithGather<TestType>(arrayPtr, width, height);
     } else {
-      SUCCEED("tex2Dgather is not supported for gfx90a, Hence"
-               "skipping the testcase for this device " << device);
+      SUCCEED(
+          "tex2Dgather is not supported for gfx90a, Hence"
+          "skipping the testcase for this device "
+          << device);
     }
   }
 #endif

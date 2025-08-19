@@ -32,13 +32,13 @@ THE SOFTWARE.
 #include "mempool_common.hh"  // NOLINT
 
 #define THREADS_PER_BLOCK 512
-static constexpr auto NUM_ELM {1024 * 1024};
+static constexpr auto NUM_ELM{1024 * 1024};
 
 /**
  * Common function to allocate memory using hipMallocAsync API through a stream,
  * launch kernel and perform vectorADD and validate results. Free memory using
  * hipFreeAsync.
-*/
+ */
 static bool checkMallocAsync() {
   streamMemAllocTest testObj(NUM_ELM);
   // create a stream
@@ -74,8 +74,7 @@ static bool checkMallocAsync() {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipDeviceGetMemPool_Basic") {
-  checkMempoolSupported(0)
-  hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
+  checkMempoolSupported(0) hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
   SECTION("Check current mempool is default mempool") {
     // assign default mem pool to device
     HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, 0));
@@ -117,8 +116,8 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Basic") {
 TEST_CASE("Unit_hipDeviceGetMemPool_Functional") {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
-  // assign current mem pool to device
-  HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0));
+      // assign current mem pool to device
+      HIP_CHECK(hipDeviceGetMemPool(&mem_pool, 0));
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value = UINT64_MAX;
@@ -143,8 +142,7 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice") {
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
   for (int i = 0; i < num_devices; i++) {
-    checkMempoolSupported(i)
-    HIP_CHECK(hipSetDevice(i));
+    checkMempoolSupported(i) HIP_CHECK(hipSetDevice(i));
     hipMemPool_t mem_pool_device = nullptr, mem_pool_default = nullptr;
     // assign default mem pool to device
     HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool_default, i));
@@ -170,8 +168,8 @@ TEST_CASE("Unit_hipDeviceGetMemPool_Multidevice") {
 TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Functional") {
   hipMemPool_t mem_pool = nullptr;
   checkMempoolSupported(0)
-  // assign current mem pool to device
-  HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
+      // assign current mem pool to device
+      HIP_CHECK(hipDeviceGetDefaultMemPool(&mem_pool, 0));
   // set attribute hipMemPoolAttrReleaseThreshold as UINT64_MAX
   hipMemPoolAttr attr = hipMemPoolAttrReleaseThreshold;
   std::uint64_t value = UINT64_MAX;

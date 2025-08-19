@@ -23,19 +23,19 @@ THE SOFTWARE.
 #include <performance_common.hh>
 
 #if __linux__
-  static const hipMemAllocationHandleType kHandleType = hipMemHandleTypePosixFileDescriptor;
+static const hipMemAllocationHandleType kHandleType = hipMemHandleTypePosixFileDescriptor;
 #else
-  static const hipMemAllocationHandleType kHandleType = hipMemHandleTypeWin32;
+static const hipMemAllocationHandleType kHandleType = hipMemHandleTypeWin32;
 #endif
 
 static int AreMemPoolsSupported(int device_id) {
   int mem_pools_supported = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pools_supported,
-                                  hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pools_supported, hipDeviceAttributeMemoryPoolsSupported, 0));
   return mem_pools_supported;
 }
 
-static hipMemPoolProps CreateMemPoolProps(const int device_id, const hipMemAllocationHandleType handle_type) {
+static hipMemPoolProps CreateMemPoolProps(const int device_id,
+                                          const hipMemAllocationHandleType handle_type) {
   hipMemPoolProps kPoolProps;
   memset(&kPoolProps, 0, sizeof(kPoolProps));
   kPoolProps.allocType = hipMemAllocationTypePinned;

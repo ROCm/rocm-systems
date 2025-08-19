@@ -118,13 +118,13 @@ template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelPositiveParamet
   }
 }
 
-template <ExtModuleLaunchKernelSig* func> void ModuleLaunchKernelNegativeParameters(
-                                                           bool extLaunch = false) {
+template <ExtModuleLaunchKernelSig* func>
+void ModuleLaunchKernelNegativeParameters(bool extLaunch = false) {
   hipFunction_t f = GetKernel(mg.module(), "NOPKernel");
-  hipError_t expectedErrorLaunchParam = (extLaunch == true) ? hipErrorInvalidConfiguration
-                                                             : hipErrorInvalidValue;
-  hipError_t expectedErrorOverCapacityGridDim = (extLaunch == true) ? hipSuccess
-                                                                    : hipErrorInvalidValue;
+  hipError_t expectedErrorLaunchParam =
+      (extLaunch == true) ? hipErrorInvalidConfiguration : hipErrorInvalidValue;
+  hipError_t expectedErrorOverCapacityGridDim =
+      (extLaunch == true) ? hipSuccess : hipErrorInvalidValue;
 
   SECTION("f == nullptr") {
     HIP_CHECK_ERROR(

@@ -25,8 +25,8 @@ THE SOFTWARE.
 /**
  * Local Function to fill the array with given value
  */
-void fillHostArray(int *arr, int size, int value) {
-  for ( int i = 0; i < size; i++ ) {
+void fillHostArray(int* arr, int size, int value) {
+  for (int i = 0; i < size; i++) {
     arr[i] = value;
   }
 }
@@ -34,9 +34,9 @@ void fillHostArray(int *arr, int size, int value) {
 /**
  * Local Function to validate the array with given reference value
  */
-bool validateHostArray(int *arr, int size, int refValue) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != refValue ) {
+bool validateHostArray(int* arr, int size, int refValue) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != refValue) {
       return false;
     }
   }
@@ -46,8 +46,8 @@ bool validateHostArray(int *arr, int size, int refValue) {
 /**
  * Local Function to fill the character array with given value
  */
-void fillCharHostArray(char *arr, int size, int value) {
-  for ( int i = 0; i < size; i++ ) {
+void fillCharHostArray(char* arr, int size, int value) {
+  for (int i = 0; i < size; i++) {
     arr[i] = value;
   }
 }
@@ -55,9 +55,9 @@ void fillCharHostArray(char *arr, int size, int value) {
 /**
  * Local Function to validate the array with given reference value
  */
-bool validateCharHostArray(char *arr, int size, int refValue) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != refValue ) {
+bool validateCharHostArray(char* arr, int size, int refValue) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != refValue) {
       return false;
     }
   }
@@ -67,9 +67,9 @@ bool validateCharHostArray(char *arr, int size, int refValue) {
 /**
  * Kernel to validate the array with given reference value
  */
-__global__ void verifyArray(int *arr, int size, int refValue, int* status) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != refValue ) {
+__global__ void verifyArray(int* arr, int size, int refValue, int* status) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != refValue) {
       *status = 0;
       return;
     }
@@ -81,8 +81,8 @@ __global__ void verifyArray(int *arr, int size, int refValue, int* status) {
 /**
  * Local Function to validate the device array with given reference value
  */
-bool validateDeviceArray(int *arr, int size, int refValue) {
-  int *devStatus = nullptr;
+bool validateDeviceArray(int* arr, int size, int refValue) {
+  int* devStatus = nullptr;
   HIP_CHECK(hipMalloc(&devStatus, sizeof(int)));
   REQUIRE(devStatus != nullptr);
 
@@ -92,7 +92,7 @@ bool validateDeviceArray(int *arr, int size, int refValue) {
 
   HIP_CHECK(hipFree(devStatus));
 
-  if ( status == 1 ) {
+  if (status == 1) {
     return true;
   } else {
     return false;
@@ -102,10 +102,9 @@ bool validateDeviceArray(int *arr, int size, int refValue) {
 /**
  * Kernel to validate the character array with given reference value
  */
-__global__ void verifyCharArray(char *arr, int size,
-                                int refValue, int* status) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != refValue ) {
+__global__ void verifyCharArray(char* arr, int size, int refValue, int* status) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != refValue) {
       *status = 0;
       return;
     }
@@ -118,18 +117,18 @@ __global__ void verifyCharArray(char *arr, int size,
  * Local Function to validate the character device array with
  * given reference value
  */
-bool validateCharDeviceArray(char *arr, int size, int refValue) {
-  int *devStatus = nullptr;
+bool validateCharDeviceArray(char* arr, int size, int refValue) {
+  int* devStatus = nullptr;
   HIP_CHECK(hipMalloc(&devStatus, sizeof(int)));
   REQUIRE(devStatus != nullptr);
 
-  verifyCharArray<<< 1, 1 >>>(arr, size, refValue, devStatus);
+  verifyCharArray<<<1, 1>>>(arr, size, refValue, devStatus);
   int status;
   HIP_CHECK(hipMemcpy(&status, devStatus, sizeof(int), hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipFree(devStatus));
 
-  if ( status == 1 ) {
+  if (status == 1) {
     return true;
   } else {
     return false;
@@ -139,8 +138,8 @@ bool validateCharDeviceArray(char *arr, int size, int refValue) {
 /**
  * Kernel to fill the array with given value
  */
-__global__ void fillArray(int *arr, int size, int value) {
-  for ( int i = 0; i < size; i++ ) {
+__global__ void fillArray(int* arr, int size, int value) {
+  for (int i = 0; i < size; i++) {
     arr[i] = value;
   }
 }
@@ -148,17 +147,14 @@ __global__ void fillArray(int *arr, int size, int value) {
 /**
  * Local Function to fill the device array with given value
  */
-void fillDeviceArray(int *arr, int size, int value) {
-  fillArray<<<1, 1>>>(arr, size, value);
-}
+void fillDeviceArray(int* arr, int size, int value) { fillArray<<<1, 1>>>(arr, size, value); }
 
 /**
  * Local Function to validate the array of different types
  */
-template<class T>
-bool validateArrayT(T *arr, int size, T value) {
-  for ( int i = 0; i < size; i++ ) {
-    if ( arr[i] != value ) {
+template <class T> bool validateArrayT(T* arr, int size, T value) {
+  for (int i = 0; i < size; i++) {
+    if (arr[i] != value) {
       return false;
     }
   }
@@ -168,10 +164,10 @@ bool validateArrayT(T *arr, int size, T value) {
 /**
  * Kernel to increment 1 value to all the elements in array
  */
-__global__ void addOneKernel(int *a, int size) {
+__global__ void addOneKernel(int* a, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i+= stride) {
+  for (int i = offset; i < size; i += stride) {
     a[i] += 1;
   }
 }
@@ -179,10 +175,10 @@ __global__ void addOneKernel(int *a, int size) {
 /**
  * Kernel to increment 2 value to all the elements in array
  */
-__global__ void addTwoKernel(int *a, int size) {
+__global__ void addTwoKernel(int* a, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i+= stride) {
+  for (int i = offset; i < size; i += stride) {
     a[i] += 2;
   }
 }
@@ -190,21 +186,18 @@ __global__ void addTwoKernel(int *a, int size) {
 /**
  * A Simple Kernel useful for validating some kernel related scenarios
  */
-__global__ void simpleKernel() {
-}
+__global__ void simpleKernel() {}
 
 /**
  * In addTenKernel, integer a value increased by 10
  */
-__global__ void addTenKernel(int *a) {
-  *a = *a + 10;
-}
+__global__ void addTenKernel(int* a) { *a = *a + 10; }
 
 /**
  * Host function adds 10 to the integer a
  */
 void addTen(void* data) {
-  int *a = reinterpret_cast<int *>(data);
+  int* a = reinterpret_cast<int*>(data);
   *a = *a + 10;
 }
 
@@ -212,7 +205,7 @@ void addTen(void* data) {
  * Host function adds 20 to the integer a
  */
 void addTwenty(void* data) {
-  int *a = reinterpret_cast<int *>(data);
+  int* a = reinterpret_cast<int*>(data);
   *a = *a + 20;
 }
 
@@ -222,7 +215,7 @@ void addTwenty(void* data) {
 void callBackFunction(hipStream_t stream, hipError_t status, void* userData) {
   REQUIRE(stream != nullptr);
   REQUIRE(status == hipSuccess);
-  int *a = reinterpret_cast<int *>(userData);
+  int* a = reinterpret_cast<int*>(userData);
   *a += 100;
 }
 

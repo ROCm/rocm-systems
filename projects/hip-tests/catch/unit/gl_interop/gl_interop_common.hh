@@ -78,19 +78,18 @@ class GLImageObject {
 };
 
 static std::once_flag glut_init_flag;
-static void GlutError(const char *fmt, va_list ap)
-{
-    // Print what error occurred
-    fprintf(stderr, "GlutError:");
-    vfprintf(stderr, fmt, ap);
-    fprintf(stderr, "\n");
+static void GlutError(const char* fmt, va_list ap) {
+  // Print what error occurred
+  fprintf(stderr, "GlutError:");
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
 
-    // Mark this test as skipped because this error could be
-    // due to system doesn't have display connected, e.g: Jenkins CI machine
-    HipTest::HIP_SKIP_TEST("GLUT Init Failed");
+  // Mark this test as skipped because this error could be
+  // due to system doesn't have display connected, e.g: Jenkins CI machine
+  HipTest::HIP_SKIP_TEST("GLUT Init Failed");
 
-    glutExit();
-    exit(1);
+  glutExit();
+  exit(1);
 }
 
 class GLUTContextScopeGuard {
@@ -125,8 +124,7 @@ class GLUTContextScopeGuard {
 class EGLContextScopeGuard {
  public:
   EGLContextScopeGuard() {
-
-    if(!HipTest::isImageSupported()) {
+    if (!HipTest::isImageSupported()) {
       HipTest::HIP_SKIP_TEST("Image is not supported on the device. Skipped.");
       exit(1);
     }

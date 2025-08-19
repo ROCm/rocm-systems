@@ -48,10 +48,7 @@ class ThreadPool {
   }
 
   // Busy waits for the number of active tasks to reach zero.
-  void Wait() const {
-    while (active_tasks_.load(std::memory_order_relaxed))
-      ;
-  }
+  void Wait() const { while (active_tasks_.load(std::memory_order_relaxed)); }
 
   size_t thread_count() const { return thread_count_; }
 

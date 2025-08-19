@@ -29,8 +29,7 @@ class OCLPerfMandelbrot : public OCLTestImp {
   virtual ~OCLPerfMandelbrot();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -63,8 +62,7 @@ class OCLPerfAsyncMandelbrot : public OCLPerfMandelbrot {
   OCLPerfAsyncMandelbrot();
   virtual ~OCLPerfAsyncMandelbrot();
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 

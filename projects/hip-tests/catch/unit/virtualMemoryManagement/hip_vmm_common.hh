@@ -49,18 +49,19 @@ THE SOFTWARE.
 #ifdef __linux__
 #define checkSysCallErrors(result)                                                                 \
   if (result == -1) {                                                                              \
-    fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__); exit(EXIT_FAILURE);                 \
+    fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__);                                     \
+    exit(EXIT_FAILURE);                                                                            \
   }
 
 typedef pid_t Process;
 typedef int hipShareableHdl;
 struct ipcHdl {
-    int socket;
-    char *name;
+  int socket;
+  char* name;
 };
 
 class ipcSocketCom {
-  ipcHdl *handle;
+  ipcHdl* handle;
   // method to create socket from server
   int createSocket() {
     int server_fd;
@@ -99,7 +100,7 @@ class ipcSocketCom {
 
     strncpy(servaddr.sun_path, name, len);
 
-    if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
+    if (bind(server_fd, (struct sockaddr*)&servaddr, SUN_LEN(&servaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
       return -1;
     }
@@ -134,7 +135,7 @@ class ipcSocketCom {
     sprintf(name, "%u", getpid());
 
     strcpy(cliaddr.sun_path, name);
-    if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
+    if (bind(sock, (struct sockaddr*)&cliaddr, sizeof(cliaddr)) < 0) {
       perror("Socket failure: Binding socket failed");
       return -1;
     }
@@ -159,7 +160,8 @@ class ipcSocketCom {
     delete handle;
     return 0;
   }
-public:
+
+ public:
   ipcSocketCom() = default;
   ipcSocketCom(bool isServer) {
     if (isServer) {
@@ -168,13 +170,10 @@ public:
       checkSysCallErrors(openSocket());
     }
   }
-  ~ipcSocketCom() {
-  }
-  int closeThisSock() {
-    return closeSocket();
-  }
+  ~ipcSocketCom() {}
+  int closeThisSock() { return closeSocket(); }
   // method to receive shareable handle via socket
-  int recvShareableHdl(hipShareableHdl *shHandle) {
+  int recvShareableHdl(hipShareableHdl* shHandle) {
     int dummy_data;
     struct msghdr msg;
     struct iovec iov[1];
@@ -185,7 +184,7 @@ public:
       char control[CMSG_SPACE(sizeof(int))];
     } control_un;
 
-    struct cmsghdr *cmptr;
+    struct cmsghdr* cmptr;
     ssize_t n;
     int receivedfd;
 
@@ -201,13 +200,12 @@ public:
       perror("Socket failure: Receiving data over socket failed");
       return -1;
     }
-    if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) &&
-       (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
+    if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) && (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
       if ((cmptr->cmsg_level != SOL_SOCKET) || (cmptr->cmsg_type != SCM_RIGHTS)) {
         return -1;
       }
       memmove(&receivedfd, CMSG_DATA(cmptr), sizeof(receivedfd));
-      *(int *)shHandle = receivedfd;
+      *(int*)shHandle = receivedfd;
     } else {
       return -1;
     }
@@ -224,7 +222,7 @@ public:
       char control[CMSG_SPACE(sizeof(int))];
     } control_un;
 
-    struct cmsghdr *cmptr;
+    struct cmsghdr* cmptr;
     struct sockaddr_un cliaddr;
 
     // Construct client address to send this SHareable handle to
@@ -247,7 +245,7 @@ public:
 
     memmove(CMSG_DATA(cmptr), &sendfd, sizeof(sendfd));
 
-    msg.msg_name = (void *)&cliaddr;
+    msg.msg_name = (void*)&cliaddr;
     msg.msg_namelen = sizeof(struct sockaddr_un);
 
     iov[0].iov_base = &dummy_data;

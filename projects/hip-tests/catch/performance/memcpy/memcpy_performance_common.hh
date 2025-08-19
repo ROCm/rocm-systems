@@ -33,12 +33,12 @@ static hip_Memcpy2D CreateMemcpy2DParam(void* dst, size_t dpitch, void* src, siz
   switch (kind) {
     case hipMemcpyDeviceToHost:
     case hipMemcpyHostToHost:
-        params.dstMemoryType = hipMemoryTypeHost;
+      params.dstMemoryType = hipMemoryTypeHost;
       params.dstHost = dst;
       break;
     case hipMemcpyDeviceToDevice:
     case hipMemcpyHostToDevice:
-        params.dstMemoryType = hipMemoryTypeDevice;
+      params.dstMemoryType = hipMemoryTypeDevice;
       params.dstDevice = reinterpret_cast<hipDeviceptr_t>(dst);
       break;
     default:
@@ -49,12 +49,12 @@ static hip_Memcpy2D CreateMemcpy2DParam(void* dst, size_t dpitch, void* src, siz
   switch (kind) {
     case hipMemcpyDeviceToHost:
     case hipMemcpyHostToHost:
-        params.srcMemoryType = hipMemoryTypeHost;
+      params.srcMemoryType = hipMemoryTypeHost;
       params.srcHost = src;
       break;
     case hipMemcpyDeviceToDevice:
     case hipMemcpyHostToDevice:
-        params.srcMemoryType = hipMemoryTypeDevice;
+      params.srcMemoryType = hipMemoryTypeDevice;
       params.srcDevice = reinterpret_cast<hipDeviceptr_t>(src);
       break;
     default:
@@ -72,8 +72,8 @@ static hip_Memcpy2D CreateMemcpy2DParam(void* dst, size_t dpitch, void* src, siz
 }
 
 static hipMemcpy3DParms CreateMemcpy3DParam(hipPitchedPtr dst_ptr, hipPos dst_pos,
-                                            hipPitchedPtr src_ptr, hipPos src_pos,
-                                            hipExtent extent, hipMemcpyKind kind) {
+                                            hipPitchedPtr src_ptr, hipPos src_pos, hipExtent extent,
+                                            hipMemcpyKind kind) {
   hipMemcpy3DParms params = {};
   memset(&params, 0, sizeof(hipMemcpy3DParms));
   params.dstPtr = dst_ptr;

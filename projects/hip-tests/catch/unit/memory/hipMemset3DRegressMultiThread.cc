@@ -41,26 +41,24 @@ Testcase Scenarios :
 /**
  * kernel function sets device memory with value passed
  */
-static __global__ void func_set_value(hipPitchedPtr devicePitchedPointer,
-                               hipExtent extent,
-                               unsigned char val) {
+static __global__ void func_set_value(hipPitchedPtr devicePitchedPointer, hipExtent extent,
+                                      unsigned char val) {
   // Index Calculation
   size_t x = threadIdx.x + blockDim.x * blockIdx.x;
   size_t y = threadIdx.y + blockDim.y * blockIdx.y;
   size_t z = threadIdx.z + blockDim.z * blockIdx.z;
 
   // Get attributes from device pitched pointer
-  char *devicePointer = reinterpret_cast<char *>(devicePitchedPointer.ptr);
+  char* devicePointer = reinterpret_cast<char*>(devicePitchedPointer.ptr);
   size_t pitch = devicePitchedPointer.pitch;
   size_t slicePitch = pitch * extent.height;
 
   // Loop over the device buffer
   if (z < extent.depth) {
-    char *current_slice_index = devicePointer + z * slicePitch;
+    char* current_slice_index = devicePointer + z * slicePitch;
     if (y < extent.height) {
       // Get data array containing all elements from the current row
-      char *current_row = reinterpret_cast<char *>(current_slice_index
-                                                   + y * pitch);
+      char* current_row = reinterpret_cast<char*>(current_slice_index + y * pitch);
       if (x < extent.width) {
         current_row[x] = val;
       }
@@ -72,8 +70,8 @@ static __global__ void func_set_value(hipPitchedPtr devicePitchedPointer,
 /**
  * Thread function queues kernel function and memset cmds
  */
-static void threadFunc(hipStream_t stream, hipPitchedPtr devpPtr,
-      int memsetval, int testval, hipExtent extent, hipMemcpy3DParms myparms) {
+static void threadFunc(hipStream_t stream, hipPitchedPtr devpPtr, int memsetval, int testval,
+                       hipExtent extent, hipMemcpy3DParms myparms) {
   // Kernel Launch Configuration
   constexpr auto size = 8;
   dim3 threadsPerBlock = dim3(size, size, size);
@@ -82,8 +80,8 @@ static void threadFunc(hipStream_t stream, hipPitchedPtr devpPtr,
                 (extent.height + threadsPerBlock.y - 1) / threadsPerBlock.y,
                 (extent.depth + threadsPerBlock.z - 1) / threadsPerBlock.z);
 
-  hipLaunchKernelGGL(func_set_value, dim3(blocks), dim3(threadsPerBlock), 0,
-                     stream, devpPtr, extent, memsetval);
+  hipLaunchKernelGGL(func_set_value, dim3(blocks), dim3(threadsPerBlock), 0, stream, devpPtr,
+                     extent, memsetval);
   HIP_CHECK(hipGetLastError());
   HIPCHECK(hipMemset3DAsync(devpPtr, testval, extent, stream));
   HIPCHECK(hipMemcpy3DAsync(&myparms, stream));
@@ -95,18 +93,18 @@ static void threadFunc(hipStream_t stream, hipPitchedPtr devpPtr,
  */
 bool loopRegression(bool bAsync) {
   bool testPassed = true;
-  char *A_h;
+  char* A_h;
   constexpr int memsetval = 1;
   constexpr size_t numH = 256, numW = 100, depth = 10;
   int numGpu = 0, hasPeerAccess = 0;
   size_t width = numW * sizeof(char);
   hipExtent extent = make_hipExtent(width, numH, depth);
   size_t sizeElements = width * numH * depth;
-  size_t elements = numW* numH* depth;
+  size_t elements = numW * numH * depth;
   std::vector<hipPitchedPtr> devPitchedPtrlist;
   hipPitchedPtr pitchedPtr, devpPtr;
 
-  A_h = reinterpret_cast<char *>(malloc(sizeElements));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
 
@@ -139,8 +137,8 @@ bool loopRegression(bool bAsync) {
       for (int j = 0; j < numGpu; j++) {
         HIP_CHECK(hipDeviceCanAccessPeer(&hasPeerAccess, i, j));
         if (!hasPeerAccess) {
-            // Skip and continue if no peer access
-            continue;
+          // Skip and continue if no peer access
+          continue;
         }
 
         HIP_CHECK(hipSetDevice(i));
@@ -165,9 +163,10 @@ bool loopRegression(bool bAsync) {
         for (size_t indx = 0; indx < elements; indx++) {
           if (A_h[indx] != memsetval) {
             testPassed = false;
-            printf("RegressIter : mismatch at index:%d computed:%02x, "
-            "memsetval:%02x\n", static_cast<int>(indx),
-            static_cast<int>(A_h[indx]), static_cast<int>(memsetval));
+            printf(
+                "RegressIter : mismatch at index:%d computed:%02x, "
+                "memsetval:%02x\n",
+                static_cast<int>(indx), static_cast<int>(A_h[indx]), static_cast<int>(memsetval));
             break;
           }
         }
@@ -215,20 +214,20 @@ TEST_CASE("Unit_hipMemset3DAsync_RegressInLoop") {
 TEST_CASE("Unit_hipMemset3DAsync_ConcurrencyMthread") {
   CHECK_IMAGE_SUPPORT
 
-  char *A_h;
+  char* A_h;
   constexpr int memsetval = 1, testval = 2;
   constexpr size_t numH = 256, numW = 100, depth = 10;
   size_t width = numW * sizeof(char);
   hipExtent extent = make_hipExtent(width, numH, depth);
   size_t sizeElements = width * numH * depth;
-  size_t elements = numW* numH* depth;
+  size_t elements = numW * numH * depth;
   hipPitchedPtr devpPtr;
   hipStream_t stream;
 
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipMalloc3D(&devpPtr, extent));
 
-  A_h = reinterpret_cast<char *>(malloc(sizeElements));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
   memset(A_h, 0, sizeElements);
 
@@ -250,17 +249,17 @@ TEST_CASE("Unit_hipMemset3DAsync_ConcurrencyMthread") {
 
   // Queue cmds concurrently from multiple threads on same stream
   for (int i = 0; i < MAX_THREADS; i++) {
-    threadlist.push_back(std::thread(threadFunc, stream, devpPtr, memsetval,
-                                     testval, extent, myparms));
+    threadlist.push_back(
+        std::thread(threadFunc, stream, devpPtr, memsetval, testval, extent, myparms));
   }
 
-  for (auto &t : threadlist) {
+  for (auto& t : threadlist) {
     t.join();
   }
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
-  for (size_t k = 0 ; k < elements ; k++) {
+  for (size_t k = 0; k < elements; k++) {
     if (A_h[k] != testval) {
       CAPTURE(A_h[k], testval, k);
       REQUIRE(false);

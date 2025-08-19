@@ -18,7 +18,7 @@
  * */
 
 #include <hip_test_common.hh>
- 
+
 #include "hipMalloc.h"
 /**
  * @addtogroup hipMalloc hipMalloc
@@ -49,6 +49,6 @@ TEST_CASE("Unit_hipMalloc_gpptest") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

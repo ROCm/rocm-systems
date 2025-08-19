@@ -34,7 +34,9 @@ class Float16 {
   __host__ __device__ Float16(float x) : x_{__float2half(x)} {}
 
   // __heq doesn't have a __host__ version
-  __host__ __device__ bool operator==(Float16 other) const { return (static_cast<__half_raw>(x_).x == static_cast<__half_raw>(other.x_).x); }
+  __host__ __device__ bool operator==(Float16 other) const {
+    return (static_cast<__half_raw>(x_).x == static_cast<__half_raw>(other.x_).x);
+  }
   __host__ __device__ bool operator!=(Float16 other) const { return !(*this == other); }
 
   __host__ __device__ operator __half() const { return x_; }

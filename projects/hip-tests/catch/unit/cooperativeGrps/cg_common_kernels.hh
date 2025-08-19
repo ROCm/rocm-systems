@@ -31,9 +31,9 @@ static __device__ void busy_wait(unsigned long long wait_period) {
 #endif
   while (time_diff < wait_period) {
 #if HT_AMD
-  unsigned long long cur_clock = wall_clock64();
+    unsigned long long cur_clock = wall_clock64();
 #else
-  unsigned long long cur_clock = clock64();
+    unsigned long long cur_clock = clock64();
 #endif
     if (cur_clock > last_clock) {
       time_diff += (cur_clock - last_clock);

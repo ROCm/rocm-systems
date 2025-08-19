@@ -80,7 +80,8 @@ template <typename Derived, typename T> class WarpVoteTest {
 
     if (random) {
       std::generate(active_masks_.begin(), active_masks_.end(), [] {
-        return GenerateRandomInteger<unsigned long long>(0ul, std::numeric_limits<uint64_t>().max());
+        return GenerateRandomInteger<unsigned long long>(0ul,
+                                                         std::numeric_limits<uint64_t>().max());
       });
     } else {
       unsigned long long int i = 0;

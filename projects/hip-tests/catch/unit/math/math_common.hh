@@ -42,12 +42,14 @@ operator<<(std::ostream& os, const std::pair<T, U>& p) {
 }
 
 template <typename T>
-std::enable_if_t<sizeof(T) / sizeof(decltype(T().x)) == 2 && !std::is_same_v<T, __half2>, std::ostream&>
+std::enable_if_t<sizeof(T) / sizeof(decltype(T().x)) == 2 && !std::is_same_v<T, __half2>,
+                 std::ostream&>
 operator<<(std::ostream& os, const T& p) {
   const auto default_prec = os.precision();
-  return os << "<" << std::setprecision(std::numeric_limits<decltype(T().x)>::max_digits10 - 1) << p.x << ", "
-            << std::setprecision(std::numeric_limits<decltype(T().x)>::max_digits10 - 1) << p.y << ">"
-            << std::setprecision(default_prec);
+  return os << "<" << std::setprecision(std::numeric_limits<decltype(T().x)>::max_digits10 - 1)
+            << p.x << ", "
+            << std::setprecision(std::numeric_limits<decltype(T().x)>::max_digits10 - 1) << p.y
+            << ">" << std::setprecision(default_prec);
 }
 
 // This class represents a generic numerical accuracy math test. Template parameter T is the output
@@ -195,11 +197,17 @@ template <typename T, typename... Ts> class MathTest {
 
 template <typename T> struct RefType {};
 
-template <> struct RefType<Float16> { using type = float; };
+template <> struct RefType<Float16> {
+  using type = float;
+};
 
-template <> struct RefType<float> { using type = double; };
+template <> struct RefType<float> {
+  using type = double;
+};
 
-template <> struct RefType<double> { using type = long double; };
+template <> struct RefType<double> {
+  using type = long double;
+};
 
 template <typename T> using RefType_t = typename RefType<T>::type;
 

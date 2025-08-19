@@ -87,7 +87,8 @@ class SpawnProc {
     }
     if (TestContext::get().isWindows()) {
       exeName = (exeName.find(" ", 0) == std::string::npos) ? exeName : ("\"" + exeName + "\"");
-      tmpFileName = (tmpFileName.find(" ", 0) == std::string::npos) ? tmpFileName : ("\"" + tmpFileName + "\"");
+      tmpFileName = (tmpFileName.find(" ", 0) == std::string::npos) ? tmpFileName
+                                                                    : ("\"" + tmpFileName + "\"");
     }
   }
 

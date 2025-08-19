@@ -32,17 +32,17 @@
 #endif  // defined(USE_COMGR_LIBRARY)
 
 namespace amd {
-  namespace hsa {
-    namespace loader {
-      class Symbol;
-    }  // loader
-    namespace code {
-      namespace Kernel {
-        class Metadata;
-      }  // Kernel
-    }  // code
-  }  // hsa
-}  // amd
+namespace hsa {
+namespace loader {
+class Symbol;
+}  // namespace loader
+namespace code {
+namespace Kernel {
+class Metadata;
+}  // namespace Kernel
+}  // namespace code
+}  // namespace hsa
+}  // namespace amd
 
 namespace amd {
 
@@ -50,9 +50,9 @@ class Device;
 class Program;
 
 namespace option {
-  class Options;
-}  // option
-}
+class Options;
+}  // namespace option
+}  // namespace amd
 
 namespace amd::device {
 class ClBinary;
@@ -85,35 +85,35 @@ class Program : public amd::HeapObject {
 
   //! type of the input file
   typedef enum {
-    FILE_TYPE_DEFAULT         =  0,
-    FILE_TYPE_OPENCL          =  1,
-    FILE_TYPE_LLVMIR_TEXT     =  2,
-    FILE_TYPE_LLVMIR_BINARY   =  3,
-    FILE_TYPE_SPIR_TEXT       =  4,
-    FILE_TYPE_SPIR_BINARY     =  5,
-    FILE_TYPE_AMDIL_TEXT      =  6,
-    FILE_TYPE_AMDIL_BINARY    =  7,
-    FILE_TYPE_HSAIL_TEXT      =  8,
-    FILE_TYPE_HSAIL_BINARY    =  9,
-    FILE_TYPE_X86_TEXT        = 10,
-    FILE_TYPE_X86_BINARY      = 11,
-    FILE_TYPE_CG              = 12,
-    FILE_TYPE_SOURCE          = 13,
-    FILE_TYPE_ISA             = 14,
-    FILE_TYPE_HEADER          = 15,
+    FILE_TYPE_DEFAULT = 0,
+    FILE_TYPE_OPENCL = 1,
+    FILE_TYPE_LLVMIR_TEXT = 2,
+    FILE_TYPE_LLVMIR_BINARY = 3,
+    FILE_TYPE_SPIR_TEXT = 4,
+    FILE_TYPE_SPIR_BINARY = 5,
+    FILE_TYPE_AMDIL_TEXT = 6,
+    FILE_TYPE_AMDIL_BINARY = 7,
+    FILE_TYPE_HSAIL_TEXT = 8,
+    FILE_TYPE_HSAIL_BINARY = 9,
+    FILE_TYPE_X86_TEXT = 10,
+    FILE_TYPE_X86_BINARY = 11,
+    FILE_TYPE_CG = 12,
+    FILE_TYPE_SOURCE = 13,
+    FILE_TYPE_ISA = 14,
+    FILE_TYPE_HEADER = 15,
     FILE_TYPE_RSLLVMIR_BINARY = 16,
-    FILE_TYPE_SPIRV_BINARY    = 17,
-    FILE_TYPE_ASM_TEXT        = 18,
-    FILE_TYPE_LAST            = 19
+    FILE_TYPE_SPIRV_BINARY = 17,
+    FILE_TYPE_ASM_TEXT = 18,
+    FILE_TYPE_LAST = 19
   } file_type_t;
 
  private:
   //! The device target for this binary.
   amd::SharedReference<amd::Device> device_;
-  amd::Program& owner_; //!< owner of this program
+  amd::Program& owner_;  //!< owner of this program
 
-  kernels_t kernels_; //!< The kernel entry points this binary.
-  type_t type_;       //!< type of this program
+  kernels_t kernels_;  //!< The kernel entry points this binary.
+  type_t type_;        //!< type of this program
 
   std::vector<const Kernel*> initKernels_;  //!< Init kernels
   std::vector<const Kernel*> finiKernels_;  //!< Fini kernels
@@ -121,51 +121,51 @@ class Program : public amd::HeapObject {
   bool runInitFiniKernel(const std::vector<const Kernel*>& kernels) const;
 
 #if defined(WITH_COMPILER_LIB)
-  static amd::Monitor buildLock_; //!< Global build lock for HSAIL which isn't thread-safe
+  static amd::Monitor buildLock_;  //!< Global build lock for HSAIL which isn't thread-safe
 #endif
 
  protected:
-   union {
-     struct {
-       uint32_t isNull_ : 1;          //!< Null program no memory allocations
-       uint32_t internal_ : 1;        //!< Internal blit program
-       uint32_t isLC_ : 1;            //!< LC was used for the program compilation
-       uint32_t hasGlobalStores_ : 1; //!< Program has writable program scope variables
-       uint32_t isHIP_ : 1;           //!< Determine if the program is for HIP
-       uint32_t coLoaded_ : 1;        //!< Has the code objected been loaded
-       uint32_t trapHandler_ : 1;     //!< It is a trap handler for debugger
-     };
-     uint32_t flags_;  //!< Program flags
-   };
+  union {
+    struct {
+      uint32_t isNull_ : 1;           //!< Null program no memory allocations
+      uint32_t internal_ : 1;         //!< Internal blit program
+      uint32_t isLC_ : 1;             //!< LC was used for the program compilation
+      uint32_t hasGlobalStores_ : 1;  //!< Program has writable program scope variables
+      uint32_t isHIP_ : 1;            //!< Determine if the program is for HIP
+      uint32_t coLoaded_ : 1;         //!< Has the code objected been loaded
+      uint32_t trapHandler_ : 1;      //!< It is a trap handler for debugger
+    };
+    uint32_t flags_;  //!< Program flags
+  };
 
-  ClBinary* clBinary_;                          //!< The CL program binary file
-  std::string llvmBinary_;                      //!< LLVM IR binary code
-  amd::Elf::ElfSections elfSectionType_;        //!< LLVM IR binary code is in SPIR format
-  std::string compileOptions_;                  //!< compile/build options.
-  std::string linkOptions_;                     //!< link options.
-                                                //!< the option arg passed in to clCompileProgram(), clLinkProgram(),
-                                                //! or clBuildProgram(), whichever is called last
+  ClBinary* clBinary_;                    //!< The CL program binary file
+  std::string llvmBinary_;                //!< LLVM IR binary code
+  amd::Elf::ElfSections elfSectionType_;  //!< LLVM IR binary code is in SPIR format
+  std::string compileOptions_;            //!< compile/build options.
+  std::string linkOptions_;               //!< link options.
+                             //!< the option arg passed in to clCompileProgram(), clLinkProgram(),
+                             //! or clBuildProgram(), whichever is called last
 #if defined(WITH_COMPILER_LIB)
-  aclBinaryOptions binOpts_;        //!< Binary options to create aclBinary
-  aclBinary* binaryElf_;            //!< Binary for the new compiler library
+  aclBinaryOptions binOpts_;  //!< Binary options to create aclBinary
+  aclBinary* binaryElf_;      //!< Binary for the new compiler library
 #endif
 
   std::string lastBuildOptionsArg_;
-  mutable std::string buildLog_;    //!< build log.
-  int32_t buildStatus_;              //!< build status.
-  int32_t buildError_;               //!< build error
+  mutable std::string buildLog_;  //!< build log.
+  int32_t buildStatus_;           //!< build status.
+  int32_t buildError_;            //!< build error
 
 #if defined(WITH_COMPILER_LIB)
-  aclTargetInfo info_;              //!< The info target for this binary.
+  aclTargetInfo info_;  //!< The info target for this binary.
 #endif
   size_t globalVariableTotalSize_;
   amd::option::Options* programOptions_;
 
 
 #if defined(USE_COMGR_LIBRARY)
-  amd_comgr_metadata_node_t metadata_ = {}; //!< COMgr metadata
-  uint32_t codeObjectVer_;                  //!< version of code object
-  std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_; //!< Map of kernel metadata
+  amd_comgr_metadata_node_t metadata_ = {};                             //!< COMgr metadata
+  uint32_t codeObjectVer_;                                              //!< version of code object
+  std::map<std::string, amd_comgr_metadata_node_t> kernelMetadataMap_;  //!< Map of kernel metadata
 #endif
   //! Sanitizer lock - lock when launching init/fini kernels
   static amd::Monitor initFiniLock_;
@@ -187,12 +187,12 @@ class Program : public amd::HeapObject {
 
   //! Compile the device program.
   int32_t compile(const std::string& sourceCode, const std::vector<const std::string*>& headers,
-    const char** headerIncludeNames, const char* origOptions,
-    amd::option::Options* options);
+                  const char** headerIncludeNames, const char* origOptions,
+                  amd::option::Options* options);
 
   //! Link the device program.
   int32_t link(const std::vector<Program*>& inputPrograms, const char* origLinkOptions,
-    amd::option::Options* linkOptions);
+               amd::option::Options* linkOptions);
 
   //! Build the device program.
   int32_t build(const std::string& sourceCode, const char* origOptions,
@@ -301,8 +301,8 @@ class Program : public amd::HeapObject {
   bool getGlobalVarFromCodeObj(std::vector<std::string>* var_names) const;
   bool getUndefinedVarFromCodeObj(std::vector<std::string>* var_names) const;
 
-  virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** dptr,
-                                  size_t* bytes, const char* globalName) const {
+  virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** dptr, size_t* bytes,
+                                  const char* globalName) const {
     ShouldNotReachHere();
     return false;
   }
@@ -321,9 +321,9 @@ class Program : public amd::HeapObject {
   bool finiBuild(bool isBuildGood);
 
   /*! \brief Compiles GPU CL program to LLVM binary (compiler frontend)
-  *
-  *  \return True if we successefully compiled a GPU program
-  */
+   *
+   *  \return True if we successefully compiled a GPU program
+   */
   virtual bool compileImpl(const std::string& sourceCode,  //!< the program's source code
                            const std::vector<const std::string*>& headers,
                            const char** headerIncludeNames,
@@ -335,14 +335,14 @@ class Program : public amd::HeapObject {
 
   //! Link the device programs.
   virtual bool linkImpl(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
-    bool createLibrary);
+                        bool createLibrary);
 
   virtual bool createBinary(amd::option::Options* options) = 0;
 
   //! Initialize Binary (used only for clCreateProgramWithBinary()).
   bool initClBinary(const char* binaryIn, size_t size,
-                    amd::Os::FileDesc fdesc = amd::Os::FDescInit(),
-                    size_t foffset = 0, std::string uri = std::string());
+                    amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
+                    std::string uri = std::string());
 
   //! Initialize Binary
   virtual bool initClBinary();
@@ -357,12 +357,15 @@ class Program : public amd::HeapObject {
   virtual const aclTargetInfo& info() = 0;
 #endif
   virtual bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
-                             bool internalKernel) { return true; }
+                             bool internalKernel) {
+    return true;
+  }
 
-  virtual bool setKernels(
-    void* binary, size_t binSize,
-    amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-    std::string uri = std::string()) { return true; }
+  virtual bool setKernels(void* binary, size_t binSize,
+                          amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
+                          std::string uri = std::string()) {
+    return true;
+  }
 
   //! Returns all the options to be appended while passing to the compiler library
   std::vector<std::string> ProcessOptions(amd::option::Options* options);
@@ -374,20 +377,19 @@ class Program : public amd::HeapObject {
   //! At linking time, get the set of compile options to be used from
   //! the set of input program, warn if they have inconsisten compile options.
   bool getCompileOptionsAtLinking(const std::vector<Program*>& inputPrograms,
-    const amd::option::Options* linkOptions);
+                                  const amd::option::Options* linkOptions);
 
   void setType(type_t newType) { type_ = newType; }
 
   /* \brief Returns the next stage to compile from, based on sections in binary,
-  *  also returns completeStages in a vector, which contains at least ACL_TYPE_DEFAULT,
-  *  sets needOptionsCheck to true if options check is needed to decide whether or not to recompile
-  */
-  file_type_t getCompilationStagesFromBinary(
-    std::vector<file_type_t>& completeStages,
-    bool& needOptionsCheck);
+   *  also returns completeStages in a vector, which contains at least ACL_TYPE_DEFAULT,
+   *  sets needOptionsCheck to true if options check is needed to decide whether or not to recompile
+   */
+  file_type_t getCompilationStagesFromBinary(std::vector<file_type_t>& completeStages,
+                                             bool& needOptionsCheck);
 
   /* \brief Returns the next stage to compile from, based on sections and options in binary
-  */
+   */
   file_type_t getNextCompilationStageFromBinary(amd::option::Options* options);
 
   //! Finds the total size of all global variables in the program
@@ -401,29 +403,29 @@ class Program : public amd::HeapObject {
   }
 
 #if defined(USE_COMGR_LIBRARY)
-  bool getSymbolsFromCodeObj(std::vector<std::string>* var_names, amd_comgr_symbol_type_t sym_type) const;
+  bool getSymbolsFromCodeObj(std::vector<std::string>* var_names,
+                             amd_comgr_symbol_type_t sym_type) const;
 #endif
   bool getUndefinedVarInfo(std::string var_name, void** var_addr, size_t* var_size);
   bool defineUndefinedVars();
 
  private:
-
   //! Compile the device program with LC path
   bool compileImplLC(const std::string& sourceCode, const std::vector<const std::string*>& headers,
                      const char** headerIncludeNames, amd::option::Options* options);
 
   //! Compile the device program with HSAIL path
   bool compileImplHSAIL(const std::string& sourceCode,
-    const std::vector<const std::string*>& headers,
-    const char** headerIncludeNames, amd::option::Options* options);
+                        const std::vector<const std::string*>& headers,
+                        const char** headerIncludeNames, amd::option::Options* options);
 
   //! Link the device programs with LC path
-  bool linkImplLC(const std::vector<Program*>& inputPrograms,
-    amd::option::Options* options, bool createLibrary);
+  bool linkImplLC(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                  bool createLibrary);
 
   //! Link the device programs with HSAIL path
-  bool linkImplHSAIL(const std::vector<Program*>& inputPrograms,
-    amd::option::Options* options, bool createLibrary);
+  bool linkImplHSAIL(const std::vector<Program*>& inputPrograms, amd::option::Options* options,
+                     bool createLibrary);
 
   //! Link the device program with LC path
   bool linkImplLC(amd::option::Options* options);
@@ -442,42 +444,42 @@ class Program : public amd::HeapObject {
   void extractBuildLog(amd_comgr_data_set_t dataSet);
   //! Dump the code object data
   amd_comgr_status_t extractByteCodeBinary(const amd_comgr_data_set_t inDataSet,
-    const amd_comgr_data_kind_t dataKind, const std::string& outFileName,
-    char* outBinary[] = nullptr, size_t* outSize = nullptr);
+                                           const amd_comgr_data_kind_t dataKind,
+                                           const std::string& outFileName,
+                                           char* outBinary[] = nullptr, size_t* outSize = nullptr);
 
   //! Create code object and add it into the data set
-  amd_comgr_status_t addCodeObjData(const char *source,
-    const size_t size, const amd_comgr_data_kind_t type,
-    const char* name, amd_comgr_data_set_t* dataSet);
+  amd_comgr_status_t addCodeObjData(const char* source, const size_t size,
+                                    const amd_comgr_data_kind_t type, const char* name,
+                                    amd_comgr_data_set_t* dataSet);
 
   //! Create action for the specified language, target and options
   amd_comgr_status_t createAction(const amd_comgr_language_t oclver,
-    const std::vector<std::string>& options, amd_comgr_action_info_t* action,
-    bool* hasAction);
+                                  const std::vector<std::string>& options,
+                                  amd_comgr_action_info_t* action, bool* hasAction);
 
   //! Create the bitcode of the linked input dataset
-  bool linkLLVMBitcode(const amd_comgr_data_set_t inputs,
-    const std::vector<std::string>& options,
-    amd::option::Options* amdOptions, amd_comgr_data_set_t* output,
-    char* binaryData[] = nullptr, size_t* binarySize = nullptr);
+  bool linkLLVMBitcode(const amd_comgr_data_set_t inputs, const std::vector<std::string>& options,
+                       amd::option::Options* amdOptions, amd_comgr_data_set_t* output,
+                       char* binaryData[] = nullptr, size_t* binarySize = nullptr);
 
   //! Create the bitcode of the compiled input dataset
   bool compileToLLVMBitcode(const amd_comgr_data_set_t compileInputs,
-    const std::vector<std::string>& options, amd::option::Options* amdOptions,
-    char* binaryData[], size_t* binarySize,
-    const bool link_dev_libs = true);
+                            const std::vector<std::string>& options,
+                            amd::option::Options* amdOptions, char* binaryData[],
+                            size_t* binarySize, const bool link_dev_libs = true);
 
   //! Compile and create the excutable of the input dataset
   bool compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
-    const std::vector<std::string>& options, amd::option::Options* amdOptions, char* executable[],
-    size_t* executableSize, file_type_t continueCompileFrom);
+                                const std::vector<std::string>& options,
+                                amd::option::Options* amdOptions, char* executable[],
+                                size_t* executableSize, file_type_t continueCompileFrom);
 
   //! Create the map for the kernel name and its metadata for fast access
   bool createKernelMetadataMap(void* binary, size_t binSize);
 #endif
 
-  bool trySubstObjFile(const char *SubstCfgFile,
-                       const std::string& sourceCode,
+  bool trySubstObjFile(const char* SubstCfgFile, const std::string& sourceCode,
                        const amd::option::Options* options);
 
   //! Disable default copy constructor
@@ -503,4 +505,4 @@ class ComgrBinaryData {
 
 #endif
 
-} // namespace amd::device
+}  // namespace amd::device

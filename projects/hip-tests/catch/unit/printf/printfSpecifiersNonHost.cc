@@ -22,27 +22,28 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <hip_test_process.hh>
- 
+
 
 /**
-* @addtogroup printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify the different format specifiers. Test case should compile with the compiler option -mprintf-kind=buffered
-* - Fetch the printf content from a process which will verify format specifier. Compare it with reference string.
-* Test source
-* ------------------------
-* - catch/unit/printf/printfSpecifiersNonHost.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 5.7
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify the different format specifiers. Test case should compile with the compiler
+ * option -mprintf-kind=buffered
+ * - Fetch the printf content from a process which will verify format specifier. Compare it with
+ * reference string. Test source
+ * ------------------------
+ * - catch/unit/printf/printfSpecifiersNonHost.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 5.7
+ */
 
 TEST_CASE("Unit_Buffered_Printf_Specifier") {
   int pcieAtomic = 0;
@@ -122,6 +123,6 @@ x
 }
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

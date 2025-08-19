@@ -343,9 +343,7 @@ void Os::setThreadAffinity(const void* handle, const Os::ThreadAffinityMask& mas
   }
 }
 
-bool Os::setThreadAffinityToMainThread() {
-  return true;
-}
+bool Os::setThreadAffinityToMainThread() { return true; }
 void Os::yield() { ::SwitchToThread(); }
 
 uint64_t Os::timeNanos() {
@@ -571,8 +569,7 @@ void Os::getAppPathAndFileName(std::string& appName, std::string& appPathAndName
     // Get filename without path and extension.
     appPathAndName = buff;
     appName = strrchr(buff, '\\') ? strrchr(buff, '\\') + 1 : buff;
-  }
-  else {
+  } else {
     appPathAndName = "";
     appName = "";
   }
@@ -601,8 +598,8 @@ bool Os::GetFileHandle(const char* fname, FileDesc* fd_ptr, size_t* sz_ptr) {
   }
 
   *fd_ptr = INVALID_HANDLE_VALUE;
-  *fd_ptr = CreateFileA(fname, GENERIC_READ, 0x1, NULL, OPEN_EXISTING,
-                        FILE_ATTRIBUTE_READONLY, NULL);
+  *fd_ptr =
+      CreateFileA(fname, GENERIC_READ, 0x1, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
   if (*fd_ptr == INVALID_HANDLE_VALUE) {
     return false;
   }
@@ -622,13 +619,13 @@ bool Os::MemoryMapFileDesc(FileDesc fdesc, size_t fsize, size_t foffset, const v
     return false;
   }
 
-  *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_READ, 0,0,0);
+  *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_READ, 0, 0, 0);
 
   return (*mmap_ptr == NULL) ? false : true;
 }
 
 bool Os::MemoryUnmapFile(const void* mmap_ptr, size_t mmap_size) {
-  if(!UnmapViewOfFile(mmap_ptr)) {
+  if (!UnmapViewOfFile(mmap_ptr)) {
     return false;
   }
 
@@ -640,8 +637,8 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
     return false;
   }
 
-  HANDLE file_handle = CreateFileA(fname, GENERIC_READ, 0, NULL, OPEN_EXISTING,
-                                   FILE_ATTRIBUTE_READONLY, NULL);
+  HANDLE file_handle =
+      CreateFileA(fname, GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_READONLY, NULL);
   if (file_handle == INVALID_HANDLE_VALUE) {
     return false;
   }
@@ -653,7 +650,7 @@ bool Os::MemoryMapFile(const char* fname, const void** mmap_ptr, size_t* mmap_si
   }
 
   *mmap_size = GetFileSize(file_handle, NULL);
-  *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_READ, 0,0,0);
+  *mmap_ptr = MapViewOfFile(map_handle, FILE_MAP_READ, 0, 0, 0);
 
   CloseHandle(file_handle);
   CloseHandle(map_handle);
@@ -695,15 +692,13 @@ bool Os::FindFileNameFromAddress(const void* image, std::string* fname_ptr, size
   return false;
 }
 
-int Os::getProcessId() {
-  return ::_getpid();
-}
+int Os::getProcessId() { return ::_getpid(); }
 
 // ================================================================================================
 void* Os::CreateIpcMemory(const char* fname, size_t size, FileDesc* desc) {
   void* addr = nullptr;
-  *desc = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE,
-      0, static_cast<DWORD>(size), fname);
+  *desc = CreateFileMapping(INVALID_HANDLE_VALUE, NULL, PAGE_READWRITE, 0, static_cast<DWORD>(size),
+                            fname);
   if (*desc != 0) {
     addr = MapViewOfFile(*desc, FILE_MAP_ALL_ACCESS, 0, 0, size);
   }

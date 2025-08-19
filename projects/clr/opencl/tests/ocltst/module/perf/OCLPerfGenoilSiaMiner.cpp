@@ -41,7 +41,7 @@
 static const unsigned int intensities[NUM_INTENSITY] = {
     DEFAULT_INTENSITY, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 28, 29, 30, 31};
 
-static const char *siaKernel =
+static const char* siaKernel =
     "   inline static uint2 ror64(const uint2 x, const uint y)                 "
     "                                   \n"
     "   {                                                                      "
@@ -174,11 +174,10 @@ OCLPerfGenoilSiaMiner::OCLPerfGenoilSiaMiner() { _numSubTests = NUM_INTENSITY; }
 
 OCLPerfGenoilSiaMiner::~OCLPerfGenoilSiaMiner() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfGenoilSiaMiner::setHeader(uint32_t *ptr) {
+void OCLPerfGenoilSiaMiner::setHeader(uint32_t* ptr) {
   ptr[0] = 0x10;
   for (unsigned int i = 1; i < 9; i++) {
     ptr[i] = 0;
@@ -196,12 +195,12 @@ void OCLPerfGenoilSiaMiner::setHeader(uint32_t *ptr) {
   ptr[19] = 0x7c2bac1d;
 }
 
-void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
-                                 double &conversion, unsigned int deviceId) {
+void OCLPerfGenoilSiaMiner::open(unsigned int test, char* units, double& conversion,
+                                 unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   _deviceId = deviceId;
@@ -215,7 +214,7 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -225,13 +224,11 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -250,8 +247,8 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
   }
 
   char getVersion[128];
-  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION,
-                                       sizeof(getVersion), getVersion, NULL);
+  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION, sizeof(getVersion),
+                                       getVersion, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
   platformVersion[0] = getVersion[7];
   platformVersion[1] = getVersion[8];
@@ -264,12 +261,11 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
@@ -277,45 +273,42 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
 
   // Make sure the device can handle our local item size.
   size_t max_group_size = 0;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE,
-                                     sizeof(size_t), &max_group_size, NULL);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_WORK_GROUP_SIZE, sizeof(size_t),
+                                     &max_group_size, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
   if (local_item_size > max_group_size) {
     char buf[256];
-    SNPRINTF(buf, sizeof(buf),
-             "Selected device cannot handle work groups larger than %zu.\n",
+    SNPRINTF(buf, sizeof(buf), "Selected device cannot handle work groups larger than %zu.\n",
              local_item_size);
     local_item_size = max_group_size;
     testDescString = buf;
   }
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   // Create Buffer Objects.
-  blockHeadermobj_ = _wrapper->clCreateBuffer(
-      context_, CL_MEM_READ_ONLY, 80 * sizeof(uint8_t), NULL, &error_);
+  blockHeadermobj_ =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, 80 * sizeof(uint8_t), NULL, &error_);
   CHECK_RESULT(blockHeadermobj_ == 0, "clCreateBuffer(outBuffer) failed");
-  nonceOutmobj_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                           8 * sizeof(uint8_t), NULL, &error_);
+  nonceOutmobj_ =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, 8 * sizeof(uint8_t), NULL, &error_);
   CHECK_RESULT(nonceOutmobj_ == 0, "clCreateBuffer(outBuffer) failed");
 
   // Create kernel program from source file.
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&siaKernel, NULL, &error_);
+  program_ =
+      _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&siaKernel, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
   error_ = _wrapper->clBuildProgram(program_, 1, &device, NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -325,10 +318,8 @@ void OCLPerfGenoilSiaMiner::open(unsigned int test, char *units,
   CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
 
   // Set OpenCL kernel arguments.
-  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                    (void *)&blockHeadermobj_);
-  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem),
-                                    (void *)&nonceOutmobj_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&blockHeadermobj_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&nonceOutmobj_);
 }
 
 void OCLPerfGenoilSiaMiner::run(void) {
@@ -338,7 +329,7 @@ void OCLPerfGenoilSiaMiner::run(void) {
   uint8_t target[32] = {255};
   uint8_t nonceOut[8] = {0};
 
-  setHeader((uint32_t *)blockHeader);
+  setHeader((uint32_t*)blockHeader);
   intensity = intensities[_openTest % NUM_INTENSITY];
   size_t global_item_size = 1ULL << intensity;
 
@@ -354,24 +345,22 @@ void OCLPerfGenoilSiaMiner::run(void) {
     size_t globalid_offset = i * global_item_size;
 
     // Copy input data to the memory buffer.
-    error_ =
-        clEnqueueWriteBuffer(cmd_queue_, blockHeadermobj_, CL_TRUE, 0,
-                             80 * sizeof(uint8_t), blockHeader, 0, NULL, NULL);
+    error_ = clEnqueueWriteBuffer(cmd_queue_, blockHeadermobj_, CL_TRUE, 0, 80 * sizeof(uint8_t),
+                                  blockHeader, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueWriteBuffer failed");
 
-    error_ = clEnqueueWriteBuffer(cmd_queue_, nonceOutmobj_, CL_TRUE, 0,
-                                  8 * sizeof(uint8_t), nonceOut, 0, NULL, NULL);
+    error_ = clEnqueueWriteBuffer(cmd_queue_, nonceOutmobj_, CL_TRUE, 0, 8 * sizeof(uint8_t),
+                                  nonceOut, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueWriteBuffer failed");
 
     // Run the kernel.
-    error_ = clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, &globalid_offset,
-                                    &global_item_size, &local_item_size, 0,
-                                    NULL, NULL);
+    error_ = clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, &globalid_offset, &global_item_size,
+                                    &local_item_size, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
 
     // Copy result to host and see if a block was found.
-    error_ = clEnqueueReadBuffer(cmd_queue_, nonceOutmobj_, CL_TRUE, 0,
-                                 8 * sizeof(uint8_t), nonceOut, 0, NULL, NULL);
+    error_ = clEnqueueReadBuffer(cmd_queue_, nonceOutmobj_, CL_TRUE, 0, 8 * sizeof(uint8_t),
+                                 nonceOut, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueReadBuffer failed");
 
     // if (nonceOut[0] != 0) {
@@ -390,22 +379,19 @@ void OCLPerfGenoilSiaMiner::run(void) {
 
   _perfInfo = (float)hash_rate;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf),
-           " (%4d cycles) Work_items:%10zu Intensity:%d (MH/s) ",
-           cycles_per_iter, global_item_size, intensity);
+  SNPRINTF(buf, sizeof(buf), " (%4d cycles) Work_items:%10zu Intensity:%d (MH/s) ", cycles_per_iter,
+           global_item_size, intensity);
   testDescString = buf;
 }
 
 unsigned int OCLPerfGenoilSiaMiner::close(void) {
   if (blockHeadermobj_) {
     error_ = _wrapper->clReleaseMemObject(blockHeadermobj_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(blockHeadermobj_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(blockHeadermobj_) failed");
   }
   if (nonceOutmobj_) {
     error_ = _wrapper->clReleaseMemObject(nonceOutmobj_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(nonceOutmobj_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(nonceOutmobj_) failed");
   }
   if (kernel_) {
     error_ = _wrapper->clReleaseKernel(kernel_);
@@ -417,8 +403,7 @@ unsigned int OCLPerfGenoilSiaMiner::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

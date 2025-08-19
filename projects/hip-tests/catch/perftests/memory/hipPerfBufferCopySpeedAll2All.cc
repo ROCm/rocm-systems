@@ -32,72 +32,70 @@ THE SOFTWARE.
 #include <iostream>
 #include <sstream>
 #include <iomanip>
-//#define VERIFY_DATA
+// #define VERIFY_DATA
 using namespace std;
-enum DEV_MEM_TYPE { COARSE_GRAINED, FINE_GRAINED, EXTENDED_FINE_GRAINED, UNKNOWN_MEM};
+enum DEV_MEM_TYPE { COARSE_GRAINED, FINE_GRAINED, EXTENDED_FINE_GRAINED, UNKNOWN_MEM };
 
-typedef long long T; // You may change to any type
+typedef long long T;  // You may change to any type
 
-static constexpr int nWarmup = 1; // warmup iteration number
-static constexpr int nIters = 10; // interation number for test
-static constexpr size_t dataBytes = 1024*1024*1024;
+static constexpr int nWarmup = 1;  // warmup iteration number
+static constexpr int nIters = 10;  // interation number for test
+static constexpr size_t dataBytes = 1024 * 1024 * 1024;
 
-template <typename T>
-static __global__ void copy_kernel(T* dst, T* src, size_t N) {
+template <typename T> static __global__ void copy_kernel(T* dst, T* src, size_t N) {
   const size_t off = blockDim.x * gridDim.x;
-  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < N; i += off)
-    dst[i] = src[i];
+  for (size_t i = blockIdx.x * blockDim.x + threadIdx.x; i < N; i += off) dst[i] = src[i];
 }
 
 static string getMemType(DEV_MEM_TYPE memType) {
   switch (memType) {
-  case COARSE_GRAINED:
-    return "coarse";
-  case FINE_GRAINED:
-    return "fine";
-  case EXTENDED_FINE_GRAINED:
-    // Extended - Scope Fine Grained Memory: read is cached, write is not
-    return "extended fine";
-  default:
-    return "unknown mem type";
+    case COARSE_GRAINED:
+      return "coarse";
+    case FINE_GRAINED:
+      return "fine";
+    case EXTENDED_FINE_GRAINED:
+      // Extended - Scope Fine Grained Memory: read is cached, write is not
+      return "extended fine";
+    default:
+      return "unknown mem type";
   }
 }
 
 static void mallocDevBuf(void** pp, size_t size, DEV_MEM_TYPE memType) {
   switch (memType) {
-  case COARSE_GRAINED:
-    HIP_CHECK(hipMalloc(pp, size));
-    break;
-  case FINE_GRAINED:
+    case COARSE_GRAINED:
+      HIP_CHECK(hipMalloc(pp, size));
+      break;
+    case FINE_GRAINED:
 #if HT_AMD
-    HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocFinegrained));
+      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocFinegrained));
 #else
-    fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
-    REQUIRE(false);
+      fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
+      REQUIRE(false);
 #endif
-    break;
-  case EXTENDED_FINE_GRAINED:
-    // Extended - Scope Fine Grained Memory: read is cached, write is not
-    // Perf gain compared with cacheable write
+      break;
+    case EXTENDED_FINE_GRAINED:
+      // Extended - Scope Fine Grained Memory: read is cached, write is not
+      // Perf gain compared with cacheable write
 #if HT_AMD
-    HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocUncached));
+      HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocUncached));
 #else
-    fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
-    REQUIRE(false);
+      fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
+      REQUIRE(false);
 #endif
-    break;
-  default:
-    fprintf(stderr, "Unknown memType = %d\n", memType);
-    REQUIRE(false);
-    break;
+      break;
+    default:
+      fprintf(stderr, "Unknown memType = %d\n", memType);
+      REQUIRE(false);
+      break;
   }
 }
 
-static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
-  DEV_MEM_TYPE srcType, DEV_MEM_TYPE dstType) {
+static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu, DEV_MEM_TYPE srcType,
+                         DEV_MEM_TYPE dstType) {
   int nGpus = 0;
   unsigned int threadsPerBlock = 1024;
-  unsigned int blocks = 16; // DEBUG_CLR_LIMIT_BLIT_WG
+  unsigned int blocks = 16;  // DEBUG_CLR_LIMIT_BLIT_WG
   HIP_CHECK(hipGetDeviceCount(&nGpus));
   if (nGpus < 2) {
     fprintf(stderr, "Need at least 2 GPUs, skipped!\n");
@@ -120,7 +118,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
 #endif
   char** srcBuf = reinterpret_cast<char**>(malloc(nGpus * nGpus * sizeof(char*)));
   char** dstBuf = reinterpret_cast<char**>(malloc(nGpus * nGpus * sizeof(char*)));
-  hipStream_t *streams = (hipStream_t*)malloc(nGpus*nGpus*sizeof(hipStream_t));
+  hipStream_t* streams = (hipStream_t*)malloc(nGpus * nGpus * sizeof(hipStream_t));
   for (int local = 0; local < nGpus; local++) {
     HIP_CHECK(hipSetDevice(local));
     for (int remote = 0; remote < nGpus; remote++) {
@@ -130,48 +128,49 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
       HIP_CHECK(hipStreamCreateWithFlags(&streams[local * nGpus + remote], hipStreamNonBlocking));
       HIP_CHECK(hipDeviceEnablePeerAccess(remote, 0));
 #ifdef VERIFY_DATA
-      HIP_CHECK(hipMemcpy(srcBuf[local * nGpus + remote], hostMem0.data(), dataBytes, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(srcBuf[local * nGpus + remote], hostMem0.data(), dataBytes,
+                          hipMemcpyHostToDevice));
 #endif
     }
   }
 
-  unsigned N = dataBytes / sizeof(T); // Number of T in buffer of dataBytes bytes.
+  unsigned N = dataBytes / sizeof(T);  // Number of T in buffer of dataBytes bytes.
   REQUIRE(N * sizeof(T) == dataBytes);
 
   auto test = [&](int iters) {
     for (int it = 0; it < iters; it++) {
       for (int local = 0; local < nGpus; local++) {
         HIP_CHECK(hipSetDevice(local));
-        for (int i = 0; i < nGpus-1; i++) {
+        for (int i = 0; i < nGpus - 1; i++) {
           int remote = (local + i + 1) % nGpus;
           if (toRemote) {
-              // local to remotes
-              if (kernelCopy) {
-                  hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-                    streams[local * nGpus + remote],
-                    reinterpret_cast<T*>(dstBuf[remote * nGpus + local]),
-                    reinterpret_cast<T*>(srcBuf[local * nGpus + remote]),
-                    static_cast<size_t>(N));
-                  HIP_CHECK(hipGetLastError());
-              } else {
-                  HIP_CHECK(hipMemcpyPeerAsync(dstBuf[remote * nGpus + local], remote,
-                                             srcBuf[local * nGpus + remote], local,
-                                             dataBytes, streams[local * nGpus + remote]));
-              }
+            // local to remotes
+            if (kernelCopy) {
+              hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
+                                 streams[local * nGpus + remote],
+                                 reinterpret_cast<T*>(dstBuf[remote * nGpus + local]),
+                                 reinterpret_cast<T*>(srcBuf[local * nGpus + remote]),
+                                 static_cast<size_t>(N));
+              HIP_CHECK(hipGetLastError());
+            } else {
+              HIP_CHECK(hipMemcpyPeerAsync(dstBuf[remote * nGpus + local], remote,
+                                           srcBuf[local * nGpus + remote], local, dataBytes,
+                                           streams[local * nGpus + remote]));
+            }
           } else {
-              // remotes to local
-              if (kernelCopy) {
-                  hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-                    streams[remote * nGpus + local],
-                    reinterpret_cast<T*>(dstBuf[local * nGpus + remote]),
-                    reinterpret_cast<T*>(srcBuf[remote * nGpus + local]),
-                    static_cast<size_t>(N));
-                  HIP_CHECK(hipGetLastError());
-              } else {
-                  HIPCHECK(hipMemcpyPeerAsync(dstBuf[local * nGpus + remote], local,
-                                        srcBuf[remote* nGpus + local], remote,
-                                        dataBytes, streams[remote * nGpus + local]));
-              }
+            // remotes to local
+            if (kernelCopy) {
+              hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
+                                 streams[remote * nGpus + local],
+                                 reinterpret_cast<T*>(dstBuf[local * nGpus + remote]),
+                                 reinterpret_cast<T*>(srcBuf[remote * nGpus + local]),
+                                 static_cast<size_t>(N));
+              HIP_CHECK(hipGetLastError());
+            } else {
+              HIPCHECK(hipMemcpyPeerAsync(dstBuf[local * nGpus + remote], local,
+                                          srcBuf[remote * nGpus + local], remote, dataBytes,
+                                          streams[remote * nGpus + local]));
+            }
           }
         }
         if (onOneGpu) break;
@@ -197,10 +196,9 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
   test(nWarmup);
   auto cpuStart = std::chrono::steady_clock::now();
   test(nIters);
-  std::chrono::duration<double, std::milli> cpuMS =
-                                      std::chrono::steady_clock::now() - cpuStart;
+  std::chrono::duration<double, std::milli> cpuMS = std::chrono::steady_clock::now() - cpuStart;
   fprintf(stderr, "%s: Time: %f ms/iter, AvgCopyBW: %f GB/s per GPU\n", title.c_str(),
-          cpuMS.count()/nIters, (nGpus-1)*dataBytes/cpuMS.count()*nIters/1e6);
+          cpuMS.count() / nIters, (nGpus - 1) * dataBytes / cpuMS.count() * nIters / 1e6);
 
   // exit
   for (int local = 0; local < nGpus; local++) {
@@ -214,18 +212,17 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
         memset(hostMem1.data(), 0, dataBytes);
         if (toRemote) {
           HIP_CHECK(hipMemcpy(hostMem1.data(), dstBuf[remote * nGpus + local], dataBytes,
-            hipMemcpyDeviceToHost));
-        }
-        else {
+                              hipMemcpyDeviceToHost));
+        } else {
           HIP_CHECK(hipMemcpy(hostMem1.data(), dstBuf[local * nGpus + remote], dataBytes,
-            hipMemcpyDeviceToHost));
+                              hipMemcpyDeviceToHost));
         }
         REQUIRE(hostMem1 == hostMem0);
       } else if (!onOneGpu) {
         // All dstBuf will be enumed regardless of toRemote
         memset(hostMem1.data(), 0, dataBytes);
         HIP_CHECK(hipMemcpy(hostMem1.data(), dstBuf[local * nGpus + remote], dataBytes,
-          hipMemcpyDeviceToHost));
+                            hipMemcpyDeviceToHost));
         REQUIRE(hostMem1 == hostMem0);
       }
 #endif
@@ -245,8 +242,8 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
 #if HT_AMD
   for (int srcType = COARSE_GRAINED; srcType < UNKNOWN_MEM; srcType++) {
     for (int dstType = COARSE_GRAINED; dstType < UNKNOWN_MEM; dstType++) {
-      testCopyPerf(toRemote, kernelCopy, onOneGpu,
-        static_cast<DEV_MEM_TYPE>(srcType), static_cast<DEV_MEM_TYPE>(dstType));
+      testCopyPerf(toRemote, kernelCopy, onOneGpu, static_cast<DEV_MEM_TYPE>(srcType),
+                   static_cast<DEV_MEM_TYPE>(dstType));
     }
   }
 #else
@@ -271,7 +268,7 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
  * - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_PerfBufferCopySpeedAll2All_test - hipMemcpyPeerAsync - remotes to local") {
-    testCopyPerf(false, false, false);
+  testCopyPerf(false, false, false);
 }
 
 /**
@@ -414,6 +411,6 @@ TEST_CASE("Perf_PerfBufferCopySpeedOne2All_test - kernel copy - local to remotes
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

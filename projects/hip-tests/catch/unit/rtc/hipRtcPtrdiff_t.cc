@@ -21,16 +21,16 @@ THE SOFTWARE.
 #include <hip_test_process.hh>
 #include <hip/hiprtc.h>
 /**
-* @addtogroup ptrdiff_t ptrdiff_t
-* @{
-* @ingroup hiprtcHeadersTest
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
-*                                  int numOptions,
-*                                  const char** options);` -
-* This test case verifies the data type of ptrdiff_t via hipRTC API's
-*/
-static constexpr auto ptrdiff_Kernel_String {
-R"(
+ * @addtogroup ptrdiff_t ptrdiff_t
+ * @{
+ * @ingroup hiprtcHeadersTest
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
+ *                                  int numOptions,
+ *                                  const char** options);` -
+ * This test case verifies the data type of ptrdiff_t via hipRTC API's
+ */
+static constexpr auto ptrdiff_Kernel_String{
+    R"(
 extern "C"
 __global__ void ptrdiff_Kernel(unsigned int *res, int platformVar) {
   #if __HIPRTC_PTRDIFF_T_IS_LONG_LONG__
@@ -44,24 +44,24 @@ __global__ void ptrdiff_Kernel(unsigned int *res, int platformVar) {
 }
 )"};
 /**
-* Test Description
-* ------------------------
-*  - Functional Test to verify the data type of ptrdiff_t
-*  - If the macro __HIPRTC_PTRDIFF_T_IS_LONG_LONG__ is
-*  - defined and equal to 1 then the data type of ptrdiff_t
-*  - must be long long on both platforms linux and windows.
-* Test source
-* ------------------------
-*  - unit/rtc/hipRtcPtrdiff_t.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test to verify the data type of ptrdiff_t
+ *  - If the macro __HIPRTC_PTRDIFF_T_IS_LONG_LONG__ is
+ *  - defined and equal to 1 then the data type of ptrdiff_t
+ *  - must be long long on both platforms linux and windows.
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hipRtcPtrdiff_t.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
   std::string kernel_name = "ptrdiff_Kernel";
   const char* kername = kernel_name.c_str();
-  unsigned int *result_h;
-  unsigned int *result_d;
+  unsigned int* result_h;
+  unsigned int* result_d;
   unsigned int Nbytes = sizeof(unsigned int);
   result_h = new unsigned int;
   *result_h = 0;
@@ -77,18 +77,16 @@ TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
   int platformVar = 0;
   SECTION("Test for Macro -D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__ = 0") {
     compiler_options[1] = "-D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__=0";
-    #ifdef __linux__
-      platformVar = 1;
-    #endif
+#ifdef __linux__
+    platformVar = 1;
+#endif
   }
   SECTION("Test for Macro -D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__ = 1") {
     compiler_options[1] = "-D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__=1";
   }
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             2, compiler_options)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -105,14 +103,12 @@ TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
   void* kernelParam[] = {result_d, reinterpret_cast<void*>(platformVar)};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   if (*result_h != 1) {
@@ -125,19 +121,19 @@ TEST_CASE("Unit_hipRTC_Ptrdiff_t_Check") {
   delete[] compiler_options;
 }
 /**
-* Test Description
-* ------------------------
-*  - Functional Test to verify the data type of ptrdiff_t from the child process.
-*  - If the macro __HIPRTC_PTRDIFF_T_IS_LONG_LONG__ is
-*  - defined and equal to 1 then the data type of ptrdiff_t
-*  - must be long long on both platforms linux and windows.
-* Test source
-* ------------------------
-*  - unit/rtc/hipRtcPtrdiff_t.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test to verify the data type of ptrdiff_t from the child process.
+ *  - If the macro __HIPRTC_PTRDIFF_T_IS_LONG_LONG__ is
+ *  - defined and equal to 1 then the data type of ptrdiff_t
+ *  - must be long long on both platforms linux and windows.
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hipRtcPtrdiff_t.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 TEST_CASE("Unit_hipRTC_Check_Ptrdiff_t_FrmChildProcess") {
   // Spawn a process
   hip::SpawnProc proc("ChkPtrdiff_t_Exe", true);

@@ -46,10 +46,10 @@ namespace cg = cooperative_groups;
 
 template <typename T, typename TArg, typename RT, typename RTArg, typename ValidatorBuilder>
 void TernaryFloatingPointBruteForceTest(kernel_sig<T, TArg, TArg, TArg> kernel,
-                                       ref_sig<RT, RTArg, RTArg, RTArg> ref_func,
-                                       const ValidatorBuilder& validator_builder,
-                                       const TArg a = std::numeric_limits<TArg>::lowest(),
-                                       const TArg b = std::numeric_limits<TArg>::max()) {
+                                        ref_sig<RT, RTArg, RTArg, RTArg> ref_func,
+                                        const ValidatorBuilder& validator_builder,
+                                        const TArg a = std::numeric_limits<TArg>::lowest(),
+                                        const TArg b = std::numeric_limits<TArg>::max()) {
   const auto [grid_size, block_size] = GetOccupancyMaxPotentialBlockSize(kernel);
   const uint64_t num_iterations = GetTestIterationCount();
   const auto max_batch_size =

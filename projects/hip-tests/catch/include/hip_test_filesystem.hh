@@ -69,7 +69,7 @@ THE SOFTWARE.
 // Fail if neither header is available with a nice error message
 #else
 #error Could not find system header "<filesystem>" ||
-       "<experimental/filesystem>"
+"<experimental/filesystem>"
 #endif
 
 // We priously determined that we need the exprimental version

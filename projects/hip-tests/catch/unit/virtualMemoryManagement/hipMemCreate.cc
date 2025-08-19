@@ -461,6 +461,6 @@ TEST_CASE("Unit_hipMemCreate_Negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

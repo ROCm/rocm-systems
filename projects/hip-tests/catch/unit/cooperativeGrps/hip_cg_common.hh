@@ -31,16 +31,14 @@ THE SOFTWARE.
 
 constexpr int MaxGPUs = 8;
 
-template <typename T>
-void printResults(T* ptr, int size) {
+template <typename T> void printResults(T* ptr, int size) {
   for (int i = 0; i < size; i++) {
     std::cout << ptr[i] << " ";
   }
   std::cout << '\n';
 }
 
-template <typename T>
-void compareResults(T* cpu, T* gpu, int size) {
+template <typename T> void compareResults(T* cpu, T* gpu, int size) {
   for (unsigned int i = 0; i < size / sizeof(T); i++) {
     if (cpu[i] != gpu[i]) {
       INFO("Results do not match at index " << i);
@@ -51,8 +49,7 @@ void compareResults(T* cpu, T* gpu, int size) {
 
 
 // Search if the sum exists in the expected results array
-template <typename T>
-void verifyResults(T* hPtr, T* dPtr, int size) {
+template <typename T> void verifyResults(T* hPtr, T* dPtr, int size) {
   int i = 0, j = 0;
   for (i = 0; i < size; i++) {
     for (j = 0; j < size; j++) {

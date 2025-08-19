@@ -72,8 +72,8 @@ OCLPerfUncoalescedRead::OCLPerfUncoalescedRead() { _numSubTests = 3; }
 
 OCLPerfUncoalescedRead::~OCLPerfUncoalescedRead() {}
 
-void OCLPerfUncoalescedRead::open(unsigned int test, char* units,
-                                  double& conversion, unsigned int deviceId) {
+void OCLPerfUncoalescedRead::open(unsigned int test, char* units, double& conversion,
+                                  unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "error_ opening test");
   silentFailure = false;
@@ -85,12 +85,11 @@ void OCLPerfUncoalescedRead::open(unsigned int test, char* units,
   if (test > 0) {
     size_t param_size = 0;
     char* strVersion = 0;
-    error_ = _wrapper->clGetDeviceInfo(
-        devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_size);
+    error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0,
+                                       &param_size);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
     strVersion = (char*)malloc(param_size);
-    error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                       CL_DEVICE_OPENCL_C_VERSION, param_size,
+    error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, param_size,
                                        strVersion, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
     if (strVersion[9] < '2') {
@@ -101,12 +100,11 @@ void OCLPerfUncoalescedRead::open(unsigned int test, char* units,
     if (silentFailure) return;
   }
 
-  cl_mem buffer =
-      _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY,
-                               SIZE * NUM_READS * sizeof(cl_float), 0, &error_);
+  cl_mem buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY,
+                                           SIZE * NUM_READS * sizeof(cl_float), 0, &error_);
   buffers_.push_back(buffer);
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY,
-                                    SIZE * sizeof(cl_float), 0, &error_);
+  buffer =
+      _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, SIZE * sizeof(cl_float), 0, &error_);
   buffers_.push_back(buffer);
 
   srand(0x8956);
@@ -115,54 +113,50 @@ void OCLPerfUncoalescedRead::open(unsigned int test, char* units,
     input_buff[i] = (float)rand();
   }
 
-  error_ = _wrapper->clEnqueueWriteBuffer(
-      cmdQueues_[_deviceId], buffers_[0], CL_TRUE, 0,
-      SIZE * NUM_READS * sizeof(cl_float), input_buff, 0, 0, NULL);
+  error_ =
+      _wrapper->clEnqueueWriteBuffer(cmdQueues_[_deviceId], buffers_[0], CL_TRUE, 0,
+                                     SIZE * NUM_READS * sizeof(cl_float), input_buff, 0, 0, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer failed");
 
-  float* buff = (float*)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[_deviceId], buffers_[1], CL_TRUE, CL_MAP_WRITE, 0,
-      SIZE * sizeof(cl_float), 0, 0, 0, &error_);
+  float* buff = (float*)_wrapper->clEnqueueMapBuffer(cmdQueues_[_deviceId], buffers_[1], CL_TRUE,
+                                                     CL_MAP_WRITE, 0, SIZE * sizeof(cl_float), 0, 0,
+                                                     0, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapBuffer failed");
   memset(buff, 0, SIZE * sizeof(cl_float));
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffers_[1],
-                                             buff, 0, 0, 0);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffers_[1], buff, 0, 0, 0);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapBuffer failed");
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource failed");
   std::string compileOptions = "";
   if (test > 0) {
     compileOptions = "-cl-std=CL2.0";
   }
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId],
-                                    compileOptions.c_str(), NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], compileOptions.c_str(), NULL,
+                                    NULL);
 
   if (error_ != CL_SUCCESS) {
     char log[400];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 400, log, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 400, log,
+                                    0);
     printf("\n\n%s\n\n", log);
   }
 
   CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram failed");
   kernel_ = _wrapper->clCreateKernel(program_, "read_uncoalescing", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel failed");
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&buffers_[1]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&buffers_[1]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
 }
 
 void OCLPerfUncoalescedRead::validate(void) {
   bool success = true;
-  float* buff = (float*)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[_deviceId], buffers_[1], CL_TRUE, CL_MAP_READ, 0,
-      SIZE * sizeof(cl_float), 0, 0, 0, &error_);
+  float* buff =
+      (float*)_wrapper->clEnqueueMapBuffer(cmdQueues_[_deviceId], buffers_[1], CL_TRUE, CL_MAP_READ,
+                                           0, SIZE * sizeof(cl_float), 0, 0, 0, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapBuffer failed");
   for (unsigned int i = 0; i < SIZE; ++i) {
     volatile float val = 0;
@@ -179,8 +173,7 @@ void OCLPerfUncoalescedRead::validate(void) {
       break;
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffers_[1],
-                                             buff, 0, 0, 0);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffers_[1], buff, 0, 0, 0);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapBuffer failed");
 }
 
@@ -193,9 +186,8 @@ void OCLPerfUncoalescedRead::run(void) {
   // Warm up
   size_t workGroupSize = SIZE;
   for (int i = 0; i < 50; ++i) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, &workGroupSize, NULL, 0,
-                                              NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL,
+                                              &workGroupSize, NULL, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
     _wrapper->clFinish(cmdQueues_[_deviceId]);
   }
@@ -204,9 +196,8 @@ void OCLPerfUncoalescedRead::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < NUM_ITER; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, &workGroupSize, NULL, 0,
-                                              NULL, &eventArr[i]);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL,
+                                              &workGroupSize, NULL, 0, NULL, &eventArr[i]);
 
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
   }
@@ -217,12 +208,11 @@ void OCLPerfUncoalescedRead::run(void) {
   double sec2 = 0;
   for (unsigned int i = 0; i < NUM_ITER; ++i) {
     cl_ulong startTime = 0, endTime = 0;
-    error_ = _wrapper->clGetEventProfilingInfo(eventArr[i],
-                                               CL_PROFILING_COMMAND_START,
+    error_ = _wrapper->clGetEventProfilingInfo(eventArr[i], CL_PROFILING_COMMAND_START,
                                                sizeof(cl_ulong), &startTime, 0);
     CHECK_RESULT(error_, "clGetEventProfilingInfo failed");
-    error_ = _wrapper->clGetEventProfilingInfo(
-        eventArr[i], CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &endTime, 0);
+    error_ = _wrapper->clGetEventProfilingInfo(eventArr[i], CL_PROFILING_COMMAND_END,
+                                               sizeof(cl_ulong), &endTime, 0);
     CHECK_RESULT(error_, "clGetEventProfilingInfo failed");
     sec2 += 1e-9 * (endTime - startTime);
     error_ = _wrapper->clReleaseEvent(eventArr[i]);
@@ -232,12 +222,8 @@ void OCLPerfUncoalescedRead::run(void) {
   validate();
 
   // Buffer copy bandwidth in GB/s
-  double perf1 = ((double)SIZE * NUM_READS * NUM_ITER * sizeof(cl_float) *
-                  (double)(1e-09)) /
-                 sec1;
-  double perf2 = ((double)SIZE * NUM_READS * NUM_ITER * sizeof(cl_float) *
-                  (double)(1e-09)) /
-                 sec2;
+  double perf1 = ((double)SIZE * NUM_READS * NUM_ITER * sizeof(cl_float) * (double)(1e-09)) / sec1;
+  double perf2 = ((double)SIZE * NUM_READS * NUM_ITER * sizeof(cl_float) * (double)(1e-09)) / sec2;
   _perfInfo = (float)perf2;
 
   std::ostringstream strStream;

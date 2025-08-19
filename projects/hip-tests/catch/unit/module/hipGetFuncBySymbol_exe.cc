@@ -19,29 +19,27 @@ THE SOFTWARE.
 
 #include "hip/hip_runtime.h"
 
-#define ARR_SIZE (32*32)
-#define SIZE (ARR_SIZE*sizeof(int))
+#define ARR_SIZE (32 * 32)
+#define SIZE (ARR_SIZE * sizeof(int))
 
-#define HIP_CHECK(error)                                   \
-{                                                          \
-  hipError_t localError = error;                           \
-  if ((localError != hipSuccess) &&                        \
-      (localError != hipErrorPeerAccessAlreadyEnabled)) {  \
-        printf("error: '%s'(%d) from %s at %s:%d\n",       \
-               hipGetErrorString(localError),              \
-               localError, #error, __FUNCTION__, __LINE__);\
-  exit(0);                                                 \
-  }                                                        \
-}
+#define HIP_CHECK(error)                                                                           \
+  {                                                                                                \
+    hipError_t localError = error;                                                                 \
+    if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
+      printf("error: '%s'(%d) from %s at %s:%d\n", hipGetErrorString(localError), localError,      \
+             #error, __FUNCTION__, __LINE__);                                                      \
+      exit(0);                                                                                     \
+    }                                                                                              \
+  }
 
 /**
  * Sample Kernel to be used for functional test cases
  */
-__global__ void hipKernel(int *a) {
+__global__ void hipKernel(int* a) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
 
-  for (int i = offset; i < ARR_SIZE; i+= stride) {
+  for (int i = offset; i < ARR_SIZE; i += stride) {
     a[i] += a[i];
   }
 }
@@ -53,17 +51,16 @@ __global__ void hipKernel(int *a) {
 int main() {
   hipFunction_t funcPointer;
 
-  if (hipGetFuncBySymbol(&funcPointer,
-      reinterpret_cast<const void*>(hipKernel)) != hipSuccess) {
-        return -1;
+  if (hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) != hipSuccess) {
+    return -1;
   }
 
-  int *h_a = reinterpret_cast<int *>(malloc(SIZE));
+  int* h_a = reinterpret_cast<int*>(malloc(SIZE));
   if (h_a == nullptr) {
     return -1;
   }
 
-  int *output_ref = reinterpret_cast<int *>(malloc(SIZE));
+  int* output_ref = reinterpret_cast<int*>(malloc(SIZE));
   if (output_ref == nullptr) {
     return -1;
   }
@@ -73,7 +70,7 @@ int main() {
     output_ref[i] = 4;
   }
 
-  int *d_a = nullptr;
+  int* d_a = nullptr;
   HIP_CHECK(hipMalloc(&d_a, SIZE));
   if (d_a == nullptr) {
     return -1;
@@ -86,14 +83,12 @@ int main() {
   void* kernelParam[] = {d_a};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-  if (hipModuleLaunchKernel(funcPointer,
-      blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-      threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z,
-      0, 0, nullptr, kernel_parameter) != hipSuccess) {
-        return -1;
+  if (hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
+                            threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, 0, nullptr,
+                            kernel_parameter) != hipSuccess) {
+    return -1;
   }
 
   HIP_CHECK(hipMemcpy(h_a, d_a, SIZE, hipMemcpyDeviceToHost));

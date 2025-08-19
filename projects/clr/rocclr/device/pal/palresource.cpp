@@ -151,7 +151,7 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   }
 
   Pal::GpuMemoryCreateInfo createInfo = {};
-  if (amd::IS_HIP) { //creating svm buffer in case of interop with HIP
+  if (amd::IS_HIP) {  // creating svm buffer in case of interop with HIP
     createInfo.vaRange = Pal::VaRange::Svm;
   }
   GpuMemoryReference* memRef = new (gpuMemSize) GpuMemoryReference(dev);
@@ -235,8 +235,7 @@ GpuMemoryReference* GpuMemoryReference::Create(const Device& dev,
   char* imgMem = new char[imageSize];
   GpuMemoryReference* memRef = new (gpuMemSize) GpuMemoryReference(dev);
   if (memRef != nullptr) {
-    result = dev.iDev()->OpenPeerImage(openInfo, imgMem, &memRef[1], image,
-                                       &memRef->gpuMem_);
+    result = dev.iDev()->OpenPeerImage(openInfo, imgMem, &memRef[1], image, &memRef->gpuMem_);
     if (result == Pal::Result::Success) {
       result = memRef->MakeResident();
     }
@@ -802,8 +801,7 @@ bool Resource::CreateInterop(CreateParams* params) {
     desc_.isDoppTexture_ = (openInfo.doppDesktopInfo.gpuVirtAddr != 0);
     openInfo.flags.isDopp = desc_.isDoppTexture_;
     format = dev().getPalFormat(desc().format_, &channels);
-  }
-  else if (memoryType() == VkInterop) {
+  } else if (memoryType() == VkInterop) {
     VkInteropParams* vparams = reinterpret_cast<VkInteropParams*>(params);
     if (vparams->handle_) {
       openInfo.hExternalResource = vparams->handle_;
@@ -1077,7 +1075,7 @@ bool Resource::CreateIpc(CreateParams* params) {
 }
 
 // ================================================================================================
- bool Resource::CreateP2PAccess(CreateParams* params) {
+bool Resource::CreateP2PAccess(CreateParams* params) {
   if (params->owner_->asImage()) {
     Pal::PeerImageOpenInfo openInfo = {};
     openInfo.pOriginalImage = params->svmBase_->image();
@@ -1197,7 +1195,7 @@ bool Resource::CreateSvm(CreateParams* params, Pal::gpusize svmPtr) {
                                                   createInfo.pReservedGpuVaOwner, &subOffset_);
     if (memRef_ == nullptr) {
       createInfo.alignment = dev().properties().gpuMemoryProperties.fragmentSize;
-      createInfo.size = amd::alignUp (createInfo.size, createInfo.alignment);
+      createInfo.size = amd::alignUp(createInfo.size, createInfo.alignment);
       memRef_ = GpuMemoryReference::Create(dev(), createInfo);
     }
   }
@@ -1329,8 +1327,8 @@ bool Resource::create(MemoryType memType, CreateParams* params, bool forceLinear
   createInfo.size = desc().width_ * elementSize_;
   createInfo.size = amd::alignUp(createInfo.size, MaxGpuAlignment);
   createInfo.alignment = (params && params->alignment_ != 0)
-                         ? params->alignment_
-                         : (desc().scratch_ ? 64 * Ki : MaxGpuAlignment);
+      ? params->alignment_
+      : (desc().scratch_ ? 64 * Ki : MaxGpuAlignment);
   createInfo.vaRange = Pal::VaRange::Default;
   createInfo.priority = Pal::GpuMemPriority::Normal;
 
@@ -1740,8 +1738,7 @@ bool Resource::hostWrite(VirtualGPU* gpu, const void* hostPtr, const amd::Coord3
       for (size_t row = 0; row < size[1]; ++row) {
         // Copy memory
         std::memcpy((reinterpret_cast<address>(dst) + dstOffs),
-                            (reinterpret_cast<const_address>(hostPtr) + srcOffs),
-                            size[0] * elementSize_);
+                    (reinterpret_cast<const_address>(hostPtr) + srcOffs), size[0] * elementSize_);
 
         dstOffs += desc().pitch_ * elementSize_;
         srcOffs += rowPitch;
@@ -1810,8 +1807,7 @@ bool Resource::hostRead(VirtualGPU* gpu, void* hostPtr, const amd::Coord3D& orig
       for (size_t row = 0; row < size[1]; ++row) {
         // Copy memory
         std::memcpy((reinterpret_cast<address>(hostPtr) + dstOffs),
-                    (reinterpret_cast<const_address>(src) + srcOffs),
-                    size[0] * elementSize_);
+                    (reinterpret_cast<const_address>(src) + srcOffs), size[0] * elementSize_);
 
         srcOffs += desc().pitch_ * elementSize_;
         dstOffs += rowPitch;
@@ -1943,8 +1939,8 @@ bool Resource::isMemoryType(MemoryType memType) const {
 
 // ================================================================================================
 bool Resource::isPersistentDirectMap(bool writeMap) const {
-  bool directMap = ((memoryType() == Resource::Persistent) &&
-                    (desc().dimSize_ < 3) && !desc().imageArray_ && writeMap);
+  bool directMap = ((memoryType() == Resource::Persistent) && (desc().dimSize_ < 3) &&
+                    !desc().imageArray_ && writeMap);
 
   // If direct map is possible, then validate it with the current tiling
   if (directMap && desc().tiled_) {
@@ -2101,7 +2097,7 @@ bool CoarseMemorySubAllocator::CreateChunk(const Pal::IGpuMemory* reserved_va) {
   createInfo.heaps[1] = Pal::GpuHeapLocal;
   createInfo.mallPolicy = static_cast<Pal::GpuMemMallPolicy>(device_->settings().mallPolicy_);
   if (amd::IS_HIP && PAL_HIP_IPC_FLAG) {
-    //set interprocess for IPC memory support
+    // set interprocess for IPC memory support
     createInfo.flags.interprocess = 1;
   }
   GpuMemoryReference* mem_ref = GpuMemoryReference::Create(*device_, createInfo);
@@ -2326,8 +2322,7 @@ GpuMemoryReference* ResourceCache::findGpuMemory(Resource::Descriptor* desc, Pal
     // Find if we can reuse this entry
     if ((entry->type_ == desc->type_) && (entry->flags_ == desc->flags_) && (size <= sizeRes) &&
         (size > (sizeRes >> 1)) && ((it.second->iMem()->Desc().gpuVirtAddr % alignment) == 0) &&
-        (entry->isAllocExecute_ == desc->isAllocExecute_) &&
-        (entry->SVMRes_ == desc->SVMRes_) &&
+        (entry->isAllocExecute_ == desc->isAllocExecute_) && (entry->SVMRes_ == desc->SVMRes_) &&
         (entry->gl2CacheDisabled_ == desc->gl2CacheDisabled_) &&
         (entry->interprocess_ == desc->interprocess_)) {
       ref = it.second;

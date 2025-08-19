@@ -43,7 +43,7 @@ int64_t timeNanos() {
 #define THREADS_PER_BLOCK_Y 4
 #define THREADS_PER_BLOCK_Z 1
 
-__global__ void matrixTranspose(float *out, float *in, const int width) {
+__global__ void matrixTranspose(float* out, float* in, const int width) {
   int x = blockDim.x * blockIdx.x + threadIdx.x;
   int y = blockDim.y * blockIdx.y + threadIdx.y;
 
@@ -51,8 +51,7 @@ __global__ void matrixTranspose(float *out, float *in, const int width) {
 }
 
 // CPU implementation of matrix transpose
-void matrixTransposeCPUReference(float *output, float *input,
-                                 const unsigned int width) {
+void matrixTransposeCPUReference(float* output, float* input, const unsigned int width) {
   for (unsigned int j = 0; j < width; j++) {
     for (unsigned int i = 0; i < width; i++) {
       output[i * width + j] = input[j * width + i];
@@ -64,11 +63,11 @@ void thread_run(const int iThread) {
   int i = 0;
   int errors = 0;
   float eventMs = 1.0f;
-  float *matrix = nullptr;
-  float *transposeMatrix = nullptr;
-  float *cpuTransposeMatrix = nullptr;
-  float *gpuMatrix = nullptr;
-  float *gpuTransposeMatrix = nullptr;
+  float* matrix = nullptr;
+  float* transposeMatrix = nullptr;
+  float* cpuTransposeMatrix = nullptr;
+  float* gpuMatrix = nullptr;
+  float* gpuTransposeMatrix = nullptr;
   hipDeviceProp_t devProp;
   memset(&devProp, 0, sizeof(devProp));
   HIP_CHECK(hipGetDeviceProperties(&devProp, iThread));
@@ -80,22 +79,22 @@ void thread_run(const int iThread) {
   auto time = timeNanos();
   HIP_CHECK(hipEventCreate(&start));
   fprintf(stderr, "[%d] hipEventCreate(&start) cost cpu time %6.3fms\n", iThread,
-          (timeNanos() - time)/1000000.0);
+          (timeNanos() - time) / 1000000.0);
 
   HIP_CHECK(hipEventCreate(&stop));
 
-  matrix = (float*) malloc(NUM * sizeof(float));
-  transposeMatrix = (float*) malloc(NUM * sizeof(float));
-  cpuTransposeMatrix = (float*) malloc(NUM * sizeof(float));
+  matrix = (float*)malloc(NUM * sizeof(float));
+  transposeMatrix = (float*)malloc(NUM * sizeof(float));
+  cpuTransposeMatrix = (float*)malloc(NUM * sizeof(float));
 
   // initialize the input data
   for (i = 0; i < NUM; i++) {
-    matrix[i] = (float) i * 10.0f;
+    matrix[i] = (float)i * 10.0f;
   }
 
   // allocate the memory on the device side
-  HIP_CHECK(hipMalloc((void**) &gpuMatrix, NUM * sizeof(float)));
-  HIP_CHECK(hipMalloc((void**) &gpuTransposeMatrix, NUM * sizeof(float)));
+  HIP_CHECK(hipMalloc((void**)&gpuMatrix, NUM * sizeof(float)));
+  HIP_CHECK(hipMalloc((void**)&gpuTransposeMatrix, NUM * sizeof(float)));
 
   time = timeNanos();
   // Record the start event
@@ -103,7 +102,7 @@ void thread_run(const int iThread) {
   // of BlitLinearSourceCode, which will cost 200+ ms.
   HIP_CHECK(hipEventRecord(start));
   fprintf(stderr, "[%d] hipEventRecord(&start) cost cpu time %6.3fms\n", iThread,
-          (timeNanos() - time)/1000000.0);
+          (timeNanos() - time) / 1000000.0);
 
   time = timeNanos();
   // Memory transfer from host to device
@@ -115,8 +114,8 @@ void thread_run(const int iThread) {
 
   HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
 
-  fprintf(stderr, "[%d] hipMemcpyHostToDevice cost gpu time %6.3fms, cpu time %6.3fms\n",
-          iThread, eventMs, (timeNanos() - time)/1000000.0);
+  fprintf(stderr, "[%d] hipMemcpyHostToDevice cost gpu time %6.3fms, cpu time %6.3fms\n", iThread,
+          eventMs, (timeNanos() - time) / 1000000.0);
 
   // Record the start event
   HIP_CHECK(hipEventRecord(start));
@@ -124,28 +123,26 @@ void thread_run(const int iThread) {
   time = timeNanos();
   // Lauching kernel from host
   hipLaunchKernelGGL(
-      matrixTranspose,
-      dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
-      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix,
-      gpuMatrix, WIDTH);
+      matrixTranspose, dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
+      dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0, 0, gpuTransposeMatrix, gpuMatrix, WIDTH);
   // Record the stop event
   HIP_CHECK(hipEventRecord(stop));
 
   fprintf(stderr, "[%d] hipLaunchKernelGGL() cost cpu time %6.3fms\n", iThread,
-          (timeNanos() - time)/1000000.0);
+          (timeNanos() - time) / 1000000.0);
 
   HIP_CHECK(hipEventSynchronize(stop));
   HIP_CHECK(hipEventElapsedTime(&eventMs, start, stop));
 
-  fprintf(stderr, "[%d] kernel Execution cost gpu time %6.3fms, cpu time = %6.3fms\n",
-          iThread, eventMs, (timeNanos() - time)/1000000.0);
+  fprintf(stderr, "[%d] kernel Execution cost gpu time %6.3fms, cpu time = %6.3fms\n", iThread,
+          eventMs, (timeNanos() - time) / 1000000.0);
 
   // Record the start event
   HIP_CHECK(hipEventRecord(start));
 
   // Memory transfer from device to host
-  HIP_CHECK(hipMemcpy(transposeMatrix, gpuTransposeMatrix, NUM * sizeof(float),
-            hipMemcpyDeviceToHost));
+  HIP_CHECK(
+      hipMemcpy(transposeMatrix, gpuTransposeMatrix, NUM * sizeof(float), hipMemcpyDeviceToHost));
 
   // Record the stop event
   HIP_CHECK(hipEventRecord(stop));
@@ -186,14 +183,14 @@ void thread_run(const int iThread) {
 
 void testEventMGpuMThreads(int nThreads = 1) {
   int iThread = 0;
-  std::thread *threads = new std::thread[nThreads];
+  std::thread* threads = new std::thread[nThreads];
   for (iThread = 0; iThread < nThreads; iThread++) {
     threads[iThread] = std::thread(thread_run, iThread);
   }
   for (iThread = 0; iThread < nThreads; iThread++) {
     threads[iThread].join();
   }
-  delete []threads;
+  delete[] threads;
 }
 
 /**
@@ -207,9 +204,7 @@ void testEventMGpuMThreads(int nThreads = 1) {
  * ------------------------
  *  - HIP_VERSION >= 5.2
  */
-TEST_CASE("Unit_hipEventMGpuMThreads_1") {
-  testEventMGpuMThreads(1);
-}
+TEST_CASE("Unit_hipEventMGpuMThreads_1") { testEventMGpuMThreads(1); }
 
 /**
  * Test Description
@@ -257,6 +252,6 @@ TEST_CASE("Unit_hipEventMGpuMThreads_3") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

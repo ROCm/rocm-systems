@@ -201,7 +201,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     reinterpret_cast<int*>(ptrA));
+                       reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipDeviceSynchronize());
     // validate
@@ -232,8 +232,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -247,8 +246,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl") {
     // Wait for the child process to receive msg
     int sig = 0;
     REQUIRE(read(fdSig[0], &sig, sizeof(int)) >= 0);
-    checkSysCallErrors(
-      sockObj.sendShareableHdl(shareable_handle, pid));
+    checkSysCallErrors(sockObj.sendShareableHdl(shareable_handle, pid));
     // Wait for child process to exit.
     int status;
     REQUIRE(wait(&status) >= 0);
@@ -329,7 +327,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
     // Invoke kernel
     hipLaunchKernelGGL(square_kernel, dim3(N / THREADS_PER_BLOCK), dim3(THREADS_PER_BLOCK), 0, 0,
-                     reinterpret_cast<int*>(ptrA));
+                       reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipDeviceSynchronize());
 
     // free resources
@@ -356,8 +354,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -516,8 +513,7 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
     HIP_CHECK(
         hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
     REQUIRE(granularity > 0);
-    size_t size_mem =
-    ((granularity + buffer_size - 1) / granularity) * granularity;
+    size_t size_mem = ((granularity + buffer_size - 1) / granularity) * granularity;
     hipMemGenericAllocationHandle_t handle;
     HIP_CHECK(hipMemCreate(&handle, size_mem, &prop, 0));
 
@@ -547,6 +543,6 @@ TEST_CASE("Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl") {
   }
 }
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

@@ -50,19 +50,18 @@ OCLPlatformAtomics::OCLPlatformAtomics() {
 
 OCLPlatformAtomics::~OCLPlatformAtomics() {}
 
-void OCLPlatformAtomics::open(unsigned int test, char* units,
-                              double& conversion, unsigned int deviceId) {
+void OCLPlatformAtomics::open(unsigned int test, char* units, double& conversion,
+                              unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION,
-                                     param_size, strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -70,16 +69,14 @@ void OCLPlatformAtomics::open(unsigned int test, char* units,
   }
   delete strVersion;
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -114,9 +111,8 @@ void OCLPlatformAtomics::run(void) {
   if (failed_) return;
 
 #ifdef CL_VERSION_2_0
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_SVM_CAPABILITIES,
-                                sizeof(svmCaps_), &svmCaps_, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_SVM_CAPABILITIES,
+                                     sizeof(svmCaps_), &svmCaps_, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clGetDeviceInfo()  failed");
 
   if (!(svmCaps_ & CL_DEVICE_SVM_ATOMICS)) {
@@ -125,23 +121,19 @@ void OCLPlatformAtomics::run(void) {
   }
 
   volatile cl_int* pSyncBuf = (volatile cl_int*)_wrapper->clSVMAlloc(
-      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS,
-      sizeof(cl_int), 0);
+      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, sizeof(cl_int), 0);
   CHECK_RESULT(!pSyncBuf, "clSVMAlloc() failed");
   *pSyncBuf = 0;
 
   volatile cl_int* pAtomicBuf = (volatile cl_int*)_wrapper->clSVMAlloc(
-      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS,
-      sizeof(cl_int), 0);
+      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, sizeof(cl_int), 0);
   CHECK_RESULT(!pAtomicBuf, "clSVMAlloc() failed");
   *pAtomicBuf = 0;
 
-  error_ =
-      _wrapper->clSetKernelArgSVMPointer(kernel_, 0, (const void*)pSyncBuf);
+  error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, 0, (const void*)pSyncBuf);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArgSVMPointer() failed");
 
-  error_ =
-      _wrapper->clSetKernelArgSVMPointer(kernel_, 1, (const void*)pAtomicBuf);
+  error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, 1, (const void*)pAtomicBuf);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArgSVMPointer() failed");
 
   cl_int numIterations = 0x100000;
@@ -149,9 +141,8 @@ void OCLPlatformAtomics::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   size_t globalWorkSize[1] = {1};
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL,
-                                       globalWorkSize, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, globalWorkSize,
+                                            NULL, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   clFlush(cmdQueues_[_deviceId]);
@@ -160,8 +151,7 @@ void OCLPlatformAtomics::run(void) {
 
   // wait until we see some activity from a device (try to run host side
   // simultaneously).
-  while (AtomicLoad(pAtomicBuf /*, memory_order_relaxed*/) == 0)
-    ;
+  while (AtomicLoad(pAtomicBuf /*, memory_order_relaxed*/) == 0);
 
   for (int i = 0; i < numIterations; i++) {
     AtomicIncrement(pAtomicBuf);
@@ -171,8 +161,7 @@ void OCLPlatformAtomics::run(void) {
   CHECK_ERROR(error_, "clFinish() failed");
 
   int expected = numIterations * 2;
-  CHECK_RESULT(*pAtomicBuf != expected, "Expected: 0x%x, found: 0x%x", expected,
-               *pAtomicBuf);
+  CHECK_RESULT(*pAtomicBuf != expected, "Expected: 0x%x, found: 0x%x", expected, *pAtomicBuf);
 
   _wrapper->clSVMFree(context_, (void*)pSyncBuf);
   _wrapper->clSVMFree(context_, (void*)pAtomicBuf);

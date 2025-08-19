@@ -209,8 +209,8 @@ void MemcpyWithDirectionCommonTests(F memcpy_func, const hipStream_t kernel_stre
   }
 
   SECTION("Host to host with default kind") {
-    MemcpyHostToHostShell<should_synchronize>(std::bind(memcpy_func, _1, _2, _3,
-                                              hipMemcpyDefault), kernel_stream);
+    MemcpyHostToHostShell<should_synchronize>(std::bind(memcpy_func, _1, _2, _3, hipMemcpyDefault),
+                                              kernel_stream);
   }
 
   SECTION("Device to device") {

@@ -337,8 +337,7 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
       params.blocks = GenerateAtomicExchBlockDimensions();
     }
     using LA = LinearAllocs;
-    for (const auto alloc_type :
-         {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
+    for (const auto alloc_type : {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
       params.alloc_type = alloc_type;
       DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
         AtomicExch<TestType, false, scope, memory_scope>().run(params);
@@ -372,8 +371,7 @@ void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type :
-       {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
+  for (const auto alloc_type : {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       AtomicExch<TestType, false, scope>().run(params);
@@ -399,12 +397,13 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
 
   if (kernel_count > 1) {
     for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
+      int canAccess = 0;
       for (auto j = 0u; j < num_devices; ++j) {
         if (i != j) {
           HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
+          if (canAccess == 0) {
+            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) +
+                ",dev2:" + std::to_string(j);
             HipTest::HIP_SKIP_TEST(msg.c_str());
             return;
           }
@@ -429,7 +428,7 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
   params.host_thread_count = host_thread_count;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipHostMalloc , LA::hipMallocManaged}) {
+  for (const auto alloc_type : {LA::hipHostMalloc, LA::hipMallocManaged}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       AtomicExch<TestType, false, AtomicScopes::system>().run(params);
