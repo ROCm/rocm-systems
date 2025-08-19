@@ -168,8 +168,8 @@ Analyze mode
 
       $ rocprof-compute analyze --help
 
-   See :doc:`analyze/mode` to learn about this mode in depth and to get started
-   with analysis using ROCm Compute Profiler.
+See :doc:`analyze/mode` to learn about this mode in depth and to get started
+with analysis using ROCm Compute Profiler.
 
 .. _modes-database:
 

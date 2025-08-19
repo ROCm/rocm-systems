@@ -776,7 +776,10 @@ def test_analyze_rocpd(binary_handler_profile_rocprof_compute, binary_handler_an
     db_name = "test"
     code = binary_handler_analyze_rocprof_compute([
         "analyze",
-        "--db",
+        "--output-format",
+        "db",
+        "--output-name",
+        f"{db_name}",
         db_name,
         "--path",
         workload_dir,
