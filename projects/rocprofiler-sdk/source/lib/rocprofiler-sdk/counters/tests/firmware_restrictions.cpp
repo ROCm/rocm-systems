@@ -46,7 +46,7 @@ rocprofiler-sdk:
         - architectures: ["gfx908"]
           block: SQ
           event: 1
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: CP
       min_version: 199
@@ -88,7 +88,7 @@ TEST(FirmwareRestrictions, EmptyRestrictionsList)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions: []
 )";
 
@@ -104,7 +104,7 @@ TEST(FirmwareRestrictions, MissingOptionalReason)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: CP
       min_version: 199
@@ -128,7 +128,7 @@ TEST(FirmwareRestrictions, EmptyArchitecturesList)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: RLC
       min_version: 100
@@ -148,7 +148,7 @@ rocprofiler-sdk:
 TEST(FirmwareRestrictions, MissingTopLevelKey)
 {
     std::string yaml_content = R"(
-fw_restriction_schema_version: 1
+fw-restriction-schema-version: 1
 firmware_restrictions:
   - firmware_type: CP
     min_version: 199
@@ -181,7 +181,7 @@ TEST(FirmwareRestrictions, MissingRequiredFirmwareType)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - min_version: 199
       affected_architectures:
@@ -199,7 +199,7 @@ TEST(FirmwareRestrictions, MissingRequiredMinVersion)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: CP
       affected_architectures:
@@ -217,7 +217,7 @@ TEST(FirmwareRestrictions, InvalidYamlSyntax)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: CP
       min_version: 199
@@ -236,7 +236,7 @@ TEST(FirmwareRestrictions, MultipleRestrictions)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: CP
       min_version: 199
@@ -280,7 +280,7 @@ TEST(FirmwareRestrictions, LargeVersionNumbers)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: TEST
       min_version: 4294967295
@@ -301,7 +301,7 @@ TEST(FirmwareRestrictions, NoRestrictionsField)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
 )";
 
     auto result = parse_firmware_restrictions(yaml_content);
@@ -317,7 +317,7 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictions)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions: []
 )";
 
@@ -329,7 +329,7 @@ rocprofiler-sdk:
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: MEC
       min_version: 99999
@@ -353,7 +353,7 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictionsCallOnce)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: MEC
       min_version: 1
@@ -424,7 +424,7 @@ TEST(FirmwareRestrictions, CheckAgentFirmwareRestrictionsWithRealAgents)
 rocprofiler-sdk:
   counters-schema-version: 1
   counters: []
-  fw_restriction_schema_version: 1
+  fw-restriction-schema-version: 1
   firmware_restrictions:
     - firmware_type: MEC
       min_version: 99999

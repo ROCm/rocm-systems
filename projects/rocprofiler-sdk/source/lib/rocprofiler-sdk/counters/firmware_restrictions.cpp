@@ -94,13 +94,13 @@ parse_firmware_restrictions(const std::string& yaml_content)
         YAML::Node sdk_node = root["rocprofiler-sdk"];
 
         // Check for schema version
-        if(!sdk_node["fw_restriction_schema_version"])
+        if(!sdk_node["fw-restriction-schema-version"])
         {
             return std::nullopt;
         }
 
         // For future reference on how to read schema versions:
-        // int schema_version = sdk_node["fw_restriction_schema_version"].as<int>();
+        // int schema_version = sdk_node["fw-restriction-schema-version"].as<int>();
         // if(schema_version != 1)
         // {
         //     return std::nullopt;
