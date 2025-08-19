@@ -162,8 +162,8 @@ Examples:
         required=False,
         default=False,
         action="store_true",
-        help=argparse.SUPPRESS,
-        # help="\t\t\tKokkos trace, traces Kokkos API calls.",
+        # help=argparse.SUPPRESS,
+        help="\t\t\tKokkos trace, traces Kokkos API calls.",
     )
     profile_group.add_argument(
         "-k",
