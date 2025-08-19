@@ -5546,6 +5546,8 @@ class AMDSMICommands():
         if not self.helpers.is_virtual_os():
             if violation:
                 args.violation = violation
+        else:
+            args.violation = False  # Disable violation for virtual OS
 
         # Handle No GPU passed
         if args.gpu == None:
