@@ -298,7 +298,7 @@ class RocProfCompute_Base:
         """Perform any pre-processing steps prior to profiling."""
         console_debug("profiling", "pre-processing using %s profiler" % self.__profiler)
 
-        if self.__args.pid:
+        if self.__args.attach_pid:
             self.__args.remaining = ""
 
         # verify soc compatibility
@@ -327,7 +327,7 @@ class RocProfCompute_Base:
                     % self.__args.remaining[0]
                 )
             self.__args.remaining = " ".join(self.__args.remaining)
-        elif not self.__args.pid:
+        elif not self.__args.attach_pid:
             console_error(
                 (
                     "Profiling command required. Pass application executable after -- "
@@ -444,7 +444,7 @@ class RocProfCompute_Base:
             # Only 1-run case is permitted for attach/detach
             if ((isinstance(options, list) and "--pid" in options) or (isinstance(options, dict) and (options.get("ROCPROF_ATTACH_PID") is not None))):
                 if total_runs > 1:
-                    console_error(f"Cannot attach process for profiling as number of required application replays {total_runs} is greater than 1")
+                    console_error(f"Cannot attach process for profiling as the requsted performance counters excceed the collection capacity of single pass counter collection. The current setup of requested counter blocks needs {total_runs} number of passes. Please use \"--block\" or \"--set\" to adjust or reduce the requested performance metrics!")
 
             if (
                 self.__profiler == "rocprofv1"

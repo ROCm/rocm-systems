@@ -90,7 +90,7 @@ def binary_handler_profile_rocprof_compute(request):
                     + config[app_name]
             else:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--pid" , str(attach_detach_para["pid"])]
+                    + ["--attach-pid" , str(attach_detach_para["attach_pid"])]
                 if attach_detach_para["attach-duration-msec"]:
                     command_rocprof_compute = command_rocprof_compute \
                     + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]
@@ -119,7 +119,7 @@ def binary_handler_profile_rocprof_compute(request):
                     + config[app_name]
             else:
                 command_rocprof_compute = command_rocprof_compute \
-                    + ["--pid" , str(attach_detach_para["pid"])]
+                    + ["--attach-pid" , str(attach_detach_para["attach_pid"])]
                 if attach_detach_para["attach-duration-msec"]:
                     command_rocprof_compute = command_rocprof_compute \
                     + ["--attach-duration-msec" , str(attach_detach_para["attach-duration-msec"])]

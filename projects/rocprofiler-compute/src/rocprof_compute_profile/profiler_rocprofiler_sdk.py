@@ -64,10 +64,10 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_OUTPUT_PATH": self.get_args().path + "/out/pmc_1",
         }
         
-        if self.get_args().pid:
+        if self.get_args().attach_pid:
             options.update({
                 "ROCPROF_ATTACH_TOOL_LIBRARY": rocprofiler_attach_tool_path,
-                "ROCPROF_ATTACH_PID": self.get_args().pid,
+                "ROCPROF_ATTACH_PID": self.get_args().attach_pid,
             })
 
             if self.get_args().attach_duration_msec:
@@ -105,7 +105,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
                     dispatch.append(f"{int(dispatch_id) + 1}")
         if dispatch:
             options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
-        if not self.get_args().pid:
+        if not self.get_args().attach_pid:
             options["APP_CMD"] = app_cmd
         return options
 

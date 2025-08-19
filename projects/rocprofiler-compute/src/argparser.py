@@ -122,9 +122,9 @@ Examples:
         "--target", type=str, default=None, help=argparse.SUPPRESS
     )
     profile_group.add_argument(
-        "--pid",
+        "--attach-pid",
         type=str,
-        dest="pid",
+        dest="attach_pid",
         metavar="",
         default=None,
         required=False,
@@ -137,7 +137,7 @@ Examples:
         metavar="",
         default=None,
         required=False,
-        help="\t\t\tWhen --pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach",
+        help="\t\t\tWhen --attach-pid is used, sets the amount of time in milliseconds the profiler will be attached before detaching. When unset, the profiler will wait until Enter is pressed to detach",
     )
     profile_group.add_argument(
         "-p",

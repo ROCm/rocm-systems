@@ -62,9 +62,9 @@ class rocprof_v3_profiler(RocProfCompute_Base):
             self.get_args().format_rocprof_output,
         ]
 
-        if self.get_args().pid:
+        if self.get_args().attach_pid:
             args.append("--pid")
-            args.append(self.get_args().pid)
+            args.append(self.get_args().attach_pid)
 
             if self.get_args().attach_duration_msec:
                 args.append("--attach-duration-msec")
@@ -88,7 +88,7 @@ class rocprof_v3_profiler(RocProfCompute_Base):
         if dispatch:
             args.extend(["--kernel-iteration-range", f"[{','.join(dispatch)}]"])
 
-        if not self.get_args().pid:
+        if not self.get_args().attach_pid:
             args.append("--")
             args.extend(app_cmd)
 
