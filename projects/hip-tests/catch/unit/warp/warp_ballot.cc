@@ -110,16 +110,12 @@ TEST_CASE("Unit_Warp_Ballot_Positive_Basic") {
     return;
   }
 
-  SECTION("Warp Ballot with specified active mask") {
-    WarpBallot().run(false);
-  }
+  SECTION("Warp Ballot with specified active mask") { WarpBallot().run(false); }
 
-  SECTION("Warp Ballot with random active mask") {
-    WarpBallot().run(true);
-  }
+  SECTION("Warp Ballot with random active mask") { WarpBallot().run(true); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

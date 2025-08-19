@@ -172,6 +172,6 @@ TEST_CASE("Performance_hipStreamWaitValue64") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

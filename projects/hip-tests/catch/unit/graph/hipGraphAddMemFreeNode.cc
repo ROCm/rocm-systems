@@ -102,7 +102,7 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_Params") {
                     hipErrorInvalidValue);
   }
 
-#if HT_NVIDIA // EXSWHTEC-352
+#if HT_NVIDIA  // EXSWHTEC-352
   SECTION("Passing address not allocated with alloc node to dev_ptr") {
     LinearAllocGuard<int> dev_alloc =
         LinearAllocGuard<int>(LinearAllocs::hipMalloc, N * sizeof(int));
@@ -154,8 +154,7 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
   REQUIRE(alloc_param.dptr != nullptr);
   int* A_d = reinterpret_cast<int*>(alloc_param.dptr);
 
-  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph2, nullptr, 0,
-                                         (void*)A_d));
+  HIP_CHECK(hipGraphAddMemFreeNode(&free_node, graph2, nullptr, 0, (void*)A_d));
 
   SECTION("More than one instantation of the graph exists") {
     hipGraphExec_t graph_exec1, graph_exec2;
@@ -165,7 +164,7 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
     HIP_CHECK(hipGraphExecDestroy(graph_exec1));
   }
 
-#if HT_NVIDIA // EXSWHTEC-352
+#if HT_NVIDIA  // EXSWHTEC-352
   SECTION("Clone graph with mem free node") {
     hipGraph_t cloned_graph;
     HIP_CHECK_ERROR(hipGraphClone(&cloned_graph, graph2), hipErrorNotSupported);
@@ -194,32 +193,32 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Negative_NotSupported") {
 
 
 /**
-* Test Description
-* ------------------------
-* - Functional Test for API hipGraphAddMemFreeNode -
-* Measure memory footprint before creating graph.
-* Create a graph and add a node with hipGraphAddMemAllocNode and
-* hipGraphAddMemFreeNode and launch it.
-* Measure memory footprint after the launch and destroy of the graph.
-* Both before and after memory should be same after graph execution.
-* Test source
-* ------------------------
-* - /unit/graph/hipGraphAddMemFreeNode.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ * - Functional Test for API hipGraphAddMemFreeNode -
+ * Measure memory footprint before creating graph.
+ * Create a graph and add a node with hipGraphAddMemAllocNode and
+ * hipGraphAddMemFreeNode and launch it.
+ * Measure memory footprint after the launch and destroy of the graph.
+ * Both before and after memory should be same after graph execution.
+ * Test source
+ * ------------------------
+ * - /unit/graph/hipGraphAddMemFreeNode.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.1
+ */
 TEST_CASE("Unit_hipGraphAddMemFreeNode_Functional") {
   int mem_pool_support = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support,
-            hipDeviceAttributeMemoryPoolsSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&mem_pool_support, hipDeviceAttributeMemoryPoolsSupported, 0));
   if (!mem_pool_support) {
-    HipTest::HIP_SKIP_TEST("Runtime doesn't support Memory Pool."
-                            " Skip the test case.");
+    HipTest::HIP_SKIP_TEST(
+        "Runtime doesn't support Memory Pool."
+        " Skip the test case.");
     return;
   }
 
-  constexpr size_t Nbytes = 512 * 1024 *1024;
+  constexpr size_t Nbytes = 512 * 1024 * 1024;
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipStream_t stream;
@@ -235,11 +234,10 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Functional") {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph,
-                                      NULL, 0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, NULL, 0, &allocParam));
   REQUIRE(allocParam.dptr != nullptr);
   HIP_CHECK(hipGraphAddMemFreeNode(&freeNodeA, graph, &allocNodeA, 1,
-                          reinterpret_cast<void *>(allocParam.dptr)));
+                                   reinterpret_cast<void*>(allocParam.dptr)));
 
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
@@ -258,6 +256,6 @@ TEST_CASE("Unit_hipGraphAddMemFreeNode_Functional") {
   REQUIRE(before == after);
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

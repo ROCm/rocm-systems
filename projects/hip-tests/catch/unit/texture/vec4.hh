@@ -24,10 +24,14 @@ THE SOFTWARE.
 
 #include <hip/hip_runtime_api.h>
 
-template <typename T> struct vec4_struct { using type = void; };
+template <typename T> struct vec4_struct {
+  using type = void;
+};
 
 #define DEFINE_VEC4_OVERLOAD(base_type, vec_type)                                                  \
-  template <> struct vec4_struct<base_type> { using type = vec_type; }
+  template <> struct vec4_struct<base_type> {                                                      \
+    using type = vec_type;                                                                         \
+  }
 
 DEFINE_VEC4_OVERLOAD(char, char4);
 DEFINE_VEC4_OVERLOAD(short, short4);

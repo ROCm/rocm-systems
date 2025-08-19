@@ -448,6 +448,6 @@ TEST_CASE("Unit_Device___ushort_as_half_Accuracy_Positive") {
 }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

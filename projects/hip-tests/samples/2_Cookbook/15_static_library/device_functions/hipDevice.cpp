@@ -22,7 +22,4 @@
 
 #include <hip/hip_runtime.h>
 
-__device__ int square_me(int A) {
-  return A*A;
-}
-
+__device__ int square_me(int A) { return A * A; }

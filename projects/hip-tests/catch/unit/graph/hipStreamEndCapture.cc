@@ -198,6 +198,6 @@ TEST_CASE("Unit_hipStreamEndCapture_Positive_Thread") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

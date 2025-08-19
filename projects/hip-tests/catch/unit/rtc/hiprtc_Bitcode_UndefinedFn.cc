@@ -35,8 +35,8 @@ THE SOFTWARE.
 TEST_CASE("Unit_hiprtc_bitcode_undefined_function") {
   using namespace std;
 
-  static constexpr auto kernel {
-  R"(
+  static constexpr auto kernel{
+      R"(
       __device__ void foo();
 
       extern "C"
@@ -70,5 +70,4 @@ TEST_CASE("Unit_hiprtc_bitcode_undefined_function") {
   REQUIRE(compileResult == HIPRTC_SUCCESS);
 
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-
 }

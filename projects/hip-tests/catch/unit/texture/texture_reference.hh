@@ -27,19 +27,17 @@ THE SOFTWARE.
 
 #if defined(_WIN64)
 typedef __int64 ssize_t;
-#endif // _WIN64
+#endif  // _WIN64
 
-template <typename TexelType, bool normalized_read>
-class TextureReference {
+template <typename TexelType, bool normalized_read> class TextureReference {
   using valType = decltype(TexelType::x);
   static constexpr bool supportFilter = normalized_read || std::is_floating_point<valType>::value;
+
  public:
   TextureReference(TexelType* alloc, hipExtent extent, size_t layers)
       : alloc_(alloc), extent_{extent}, layers_{layers} {}
 
-  auto Tex1D(float x, const hipTextureDesc& tex_desc) const {
-    return Tex1DLayered(x, 0, tex_desc);
-  }
+  auto Tex1D(float x, const hipTextureDesc& tex_desc) const { return Tex1DLayered(x, 0, tex_desc); }
 
   auto Tex2DGather(float x, float y, int comp, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
@@ -71,11 +69,8 @@ class TextureReference {
       }
     };
 
-    decltype(T_i0j0) texel {
-      IndexVec4(T_i0j1, comp),
-      IndexVec4(T_i1j1, comp),
-      IndexVec4(T_i1j0, comp),
-      IndexVec4(T_i0j0, comp)};
+    decltype(T_i0j0) texel{IndexVec4(T_i0j1, comp), IndexVec4(T_i1j1, comp),
+                           IndexVec4(T_i1j0, comp), IndexVec4(T_i0j0, comp)};
     return texel;
   }
 
@@ -209,12 +204,12 @@ class TextureReference {
   const size_t layers_;
 
   TexelType Zero() const {
-    TexelType ret {0, 0, 0, 0};
+    TexelType ret{0, 0, 0, 0};
     return ret;
   }
 
   vec4<float> Zerof() const {
-    vec4<float> ret {0., 0., 0., 0.};
+    vec4<float> ret{0., 0., 0., 0.};
     return ret;
   }
 
@@ -259,8 +254,7 @@ class TextureReference {
       if (std::isnan(x) || std::isnan(y)) {
         return Zerof();
       }
-      return Vec4Map(
-          ptr(layer)[static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)]);
+      return Vec4Map(ptr(layer)[static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)]);
     } else {
       if (std::isnan(x) || std::isnan(y)) {
         return Zero();
@@ -278,8 +272,7 @@ class TextureReference {
       if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
         return Zerof();
       }
-      return Vec4Map(
-          ptr(0)[static_cast<size_t>(z) * extent_.width * extent_.height +
+      return Vec4Map(ptr(0)[static_cast<size_t>(z) * extent_.width * extent_.height +
                             static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)]);
     } else {
       if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
@@ -303,7 +296,7 @@ class TextureReference {
   }
 
   auto LinearFiltering(float x, float y, int layer,
-                            const hipTextureAddressMode* address_mode) const {
+                       const hipTextureAddressMode* address_mode) const {
     const auto [i, alpha] = GetLinearFilteringParams(x);
     const auto [j, beta] = GetLinearFilteringParams(y);
 
@@ -320,8 +313,7 @@ class TextureReference {
     return term_i0j0 + term_i1j0 + term_i0j1 + term_i1j1;
   }
 
-  auto LinearFiltering(float x, float y, float z,
-                            const hipTextureAddressMode* address_mode) const {
+  auto LinearFiltering(float x, float y, float z, const hipTextureAddressMode* address_mode) const {
     const auto [i, alpha] = GetLinearFilteringParams(x);
     const auto [j, beta] = GetLinearFilteringParams(y);
     const auto [k, gamma] = GetLinearFilteringParams(z);
@@ -345,7 +337,7 @@ class TextureReference {
     const auto term_i1j1k1 = Vec4Scale(alpha * beta * gamma, T_i1j1k1);
 
     return term_i0j0k0 + term_i1j0k0 + term_i0j1k0 + term_i1j1k0 + term_i0j0k1 + term_i1j0k1 +
-                   term_i0j1k1 + term_i1j1k1;
+        term_i0j1k1 + term_i1j1k1;
   }
 
   float ApplyClamp(float coord, size_t dim) const {

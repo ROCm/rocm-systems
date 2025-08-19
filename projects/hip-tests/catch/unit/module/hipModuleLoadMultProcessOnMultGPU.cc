@@ -20,18 +20,18 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <hip_test_process.hh>
 /**
-* @addtogroup hipModuleLoad hipModuleLoadData hipModuleLoadDataEx
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
-* Loads code object from file into a module
-* `hipError_t 	hipModuleLoadData (hipModule_t *module, const void *image)` -
-* Builds module from code object which resides in host memory. Image is pointer to that location.
-* `hipError_t 	hipModuleLoadDataEx (hipModule_t *module, const void *image,
-*        unsigned int numOptions, hipJitOption *options, void **optionValues)` -
-* Builds module from code object which resides in host memory. Image is pointer to that
-* location. Options are not used.
-*/
+ * @addtogroup hipModuleLoad hipModuleLoadData hipModuleLoadDataEx
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleLoad(hipModule_t* module, const char* fname)` -
+ * Loads code object from file into a module
+ * `hipError_t 	hipModuleLoadData (hipModule_t *module, const void *image)` -
+ * Builds module from code object which resides in host memory. Image is pointer to that location.
+ * `hipError_t 	hipModuleLoadDataEx (hipModule_t *module, const void *image,
+ *        unsigned int numOptions, hipJitOption *options, void **optionValues)` -
+ * Builds module from code object which resides in host memory. Image is pointer to that
+ * location. Options are not used.
+ */
 
 /**
  * Test Description

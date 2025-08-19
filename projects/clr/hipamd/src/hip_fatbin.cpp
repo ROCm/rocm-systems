@@ -273,8 +273,7 @@ static bool UncompressAndPopulateCodeObject(
     bundle_ids.push_back(bundle_id_str.c_str());
   }
 
-  const auto obheader =
-      reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
+  const auto obheader = reinterpret_cast<const symbols::ClangOffloadBundleCompressedHeader*>(image);
   const size_t size = obheader->totalSize;
 
   bool passed = false;
@@ -720,7 +719,8 @@ hipError_t FatBinaryInfo::AddDevProgram(hip::Device* device, const void* binary_
   }
   if (CL_SUCCESS !=
       program->addDeviceProgram(*ctx->devices()[0], binary_image, binary_size, false, nullptr,
-                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()), binary_offset, uri_)) {
+                                nullptr, (ufd_ != nullptr ? ufd_->fdesc_ : amd::Os::FDescInit()),
+                                binary_offset, uri_)) {
     return hipErrorInvalidKernelFile;
   }
   return hipSuccess;

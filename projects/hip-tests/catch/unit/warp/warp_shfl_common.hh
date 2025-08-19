@@ -29,7 +29,9 @@ static bool operator==(__half x, __half y) {
   // __heq doesn't have a __host__ version
   return static_cast<__half_raw>(x).x == static_cast<__half_raw>(y).x;
 }
-static bool operator!=(__half x, __half y) { return static_cast<__half_raw>(x).x != static_cast<__half_raw>(y).x; }
+static bool operator!=(__half x, __half y) {
+  return static_cast<__half_raw>(x).x != static_cast<__half_raw>(y).x;
+}
 
 static bool operator==(__half2 x, __half2 y) { return __hbeq2(x, y); }
 static bool operator!=(__half2 x, __half2 y) { return !(__hbeq2(x, y)); }
@@ -83,7 +85,8 @@ template <typename Derived, typename T> class WarpShflTest {
   void generate_input(T* input, bool random) {
     if (random) {
       std::generate(active_masks_.begin(), active_masks_.end(), [] {
-        return GenerateRandomInteger<unsigned long long>(0ul, std::numeric_limits<uint64_t>().max());
+        return GenerateRandomInteger<unsigned long long>(0ul,
+                                                         std::numeric_limits<uint64_t>().max());
       });
 
       if constexpr (std::is_same_v<float, T> || std::is_same_v<double, T>) {

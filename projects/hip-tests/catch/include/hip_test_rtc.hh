@@ -241,7 +241,8 @@ void launchRTCKernel(std::string (*getKernelName)(), dim3 numBlocks, dim3 numThr
               hiprtcGetLoweredName(rtcProgram, kernelExpression.c_str(), &loweredName));
       REQUIRE(hipSuccess == hipModuleGetFunction(&kernelFunction, module, loweredName));
 
-      /* After obtaining the kernelFunction, the program is no longer needed. So it can be destroyed */
+      /* After obtaining the kernelFunction, the program is no longer needed. So it can be destroyed
+       */
       REQUIRE(HIPRTC_SUCCESS == hiprtcDestroyProgram(&rtcProgram));
 
       testContext.trackRtcState(kernelExpression, module, kernelFunction);

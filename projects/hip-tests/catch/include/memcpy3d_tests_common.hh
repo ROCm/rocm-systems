@@ -212,8 +212,7 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
                     dst_alloc.height() / threads_per_block.y + 1, dst_alloc.depth());
   // Using dst_alloc width and height to set only the elements that will be copied over to
   // dst_alloc
-  Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(),
-                                      dst_alloc.width_logical(),
+  Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(), dst_alloc.width_logical(),
                                       dst_alloc.height(), dst_alloc.depth());
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
@@ -428,7 +427,7 @@ void Memcpy3DHtoDSyncBehavior(F memcpy_func, const bool should_sync,
   using LA = LinearAllocs;
   LinearAllocGuard3D<int> device_alloc(make_hipExtent(32 * sizeof(int), 32, 8));
   LinearAllocGuard<int> host_alloc(
-    LA::hipHostMalloc, device_alloc.width() * device_alloc.height() * device_alloc.depth());
+      LA::hipHostMalloc, device_alloc.width() * device_alloc.height() * device_alloc.depth());
   MemcpySyncBehaviorCheck(
       std::bind(memcpy_func, device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
                 make_hipPitchedPtr(host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
@@ -449,7 +448,7 @@ void Memcpy3DDtoHPageableSyncBehavior(F memcpy_func, const bool should_sync,
                                    device_alloc.height()),
                 make_hipPos(0, 0, 0), device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
                 device_alloc.extent(), hipMemcpyDeviceToHost, kernel_stream),
-                should_sync, kernel_stream);
+      should_sync, kernel_stream);
 }
 
 template <typename F>

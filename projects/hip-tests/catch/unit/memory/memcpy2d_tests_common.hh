@@ -201,7 +201,7 @@ void Memcpy2DHtoDSyncBehavior(F memcpy_func, const bool should_sync,
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, device_alloc.ptr(), device_alloc.pitch(),
                                     host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
                                     device_alloc.height(), hipMemcpyHostToDevice),
-                                    should_sync, kernel_stream);
+                          should_sync, kernel_stream);
 }
 
 template <bool unaligned = false, typename F>
@@ -333,21 +333,13 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
   }
 }
 
-constexpr auto MemTypeHost() {
-  return hipMemoryTypeHost;
-}
+constexpr auto MemTypeHost() { return hipMemoryTypeHost; }
 
-constexpr auto MemTypeDevice() {
-  return hipMemoryTypeDevice;
-}
+constexpr auto MemTypeDevice() { return hipMemoryTypeDevice; }
 
-constexpr auto MemTypeArray() {
-  return hipMemoryTypeArray;
-}
+constexpr auto MemTypeArray() { return hipMemoryTypeArray; }
 
-constexpr auto MemTypeUnified() {
-  return hipMemoryTypeUnified;
-}
+constexpr auto MemTypeUnified() { return hipMemoryTypeUnified; }
 
 using PtrVariant = std::variant<void*, hipArray_t>;
 

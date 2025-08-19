@@ -40,8 +40,9 @@ void captureSequenceSimple(T* hostMem1, T* devMem1, T* hostMem2, size_t N,
 template <typename T>
 void captureSequenceLinear(T* hostMem1, T* devMem1, T* hostMem2, T* devMem2, size_t N,
                            hipStream_t captureStream) {
-
-  {(void)(hostMem2);} //unused hostMem2
+  {
+    (void)(hostMem2);
+  }  // unused hostMem2
   size_t Nbytes = N * sizeof(T);
 
   HIP_CHECK(hipMemcpyAsync(devMem1, hostMem1, Nbytes, hipMemcpyHostToDevice, captureStream));
@@ -53,7 +54,9 @@ template <typename T>
 void captureSequenceBranched(T* hostMem1, T* devMem1, T* hostMem2, T* devMem2, size_t N,
                              hipStream_t captureStream, std::vector<hipStream_t>& streams,
                              std::vector<hipEvent_t>& events) {
-  {(void)(hostMem2);} //unused hostMem2
+  {
+    (void)(hostMem2);
+  }  // unused hostMem2
   size_t Nbytes = N * sizeof(T);
 
   HIP_CHECK(hipEventRecord(events[0], captureStream));

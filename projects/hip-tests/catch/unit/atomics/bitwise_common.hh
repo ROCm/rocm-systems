@@ -189,7 +189,8 @@ std::tuple<std::vector<TestType>, std::vector<TestType>> TestKernelHostRef(const
         auto& res = res_vals[tid % p.width + (i * p.width)];
         old_vals.push_back(res);
 
-        if constexpr (operation == AtomicOperation::kAnd || operation == AtomicOperation::kAndSystem ||
+        if constexpr (operation == AtomicOperation::kAnd ||
+                      operation == AtomicOperation::kAndSystem ||
                       operation == AtomicOperation::kBuiltinAnd) {
           res = res & mask;
         } else if constexpr (operation == AtomicOperation::kOr ||
@@ -258,7 +259,7 @@ void TestCore(const TestParams& p) {
 
   // Host Memory
   std::vector<TestType> old_vals(p.num_devices * p.kernel_count * p.ThreadCount());
-  std::vector<TestType> res_vals(p.num_devices * p.width );
+  std::vector<TestType> res_vals(p.num_devices * p.width);
 
   // Test Values on Device
   TestType test_value = GetTestValue<TestType, operation>();
@@ -289,8 +290,8 @@ void TestCore(const TestParams& p) {
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy2D(res_vals.data() + i*p.width, sizeof(TestType), mem_devs[i].ptr(), p.pitch, sizeof(TestType),
-                       p.width, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy2D(res_vals.data() + i * p.width, sizeof(TestType), mem_devs[i].ptr(),
+                          p.pitch, sizeof(TestType), p.width, hipMemcpyDeviceToHost));
   }
 
   Verify<TestType, operation>(p, res_vals, old_vals);
@@ -339,8 +340,7 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
       params.blocks = GenerateBlockDimensions();
     }
     using LA = LinearAllocs;
-    for (const auto alloc_type :
-         {LA::hipMalloc}) {
+    for (const auto alloc_type : {LA::hipMalloc}) {
       params.alloc_type = alloc_type;
       DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
         TestCore<TestType, operation, false>(params);
@@ -375,8 +375,7 @@ void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsig
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type :
-       {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false>(params);
@@ -398,12 +397,13 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
 
   if (kernel_count > 1) {
     for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
+      int canAccess = 0;
       for (auto j = 0u; j < num_devices; ++j) {
         if (i != j) {
           HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
+          if (canAccess == 0) {
+            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) +
+                ",dev2:" + std::to_string(j);
             HipTest::HIP_SKIP_TEST(msg.c_str());
             return;
           }

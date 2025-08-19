@@ -222,9 +222,7 @@ TEST_CASE("Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime") {
 TEST_CASE("Unit_hipGraphAddEventRecordNode_Functional_WithFlags") {
   // Create events with different flags using hipEventCreate and
   // elapsed time is not validated
-  SECTION("Flag = hipEventDefault") {
-    validateAddEventRecordNode(false, true, 1, hipEventDefault);
-  }
+  SECTION("Flag = hipEventDefault") { validateAddEventRecordNode(false, true, 1, hipEventDefault); }
 
   SECTION("Flag = hipEventBlockingSync") {
     validateAddEventRecordNode(false, true, 1, hipEventBlockingSync);

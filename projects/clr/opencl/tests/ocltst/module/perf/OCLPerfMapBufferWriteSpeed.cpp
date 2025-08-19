@@ -36,11 +36,9 @@
 
 #define NUM_SIZES 4
 // 256KB, 1 MB, 4MB, 16 MB
-static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304,
-                                              16777216};
+static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304, 16777216};
 
-static const unsigned int Iterations[2] = {
-    1, OCLPerfMapBufferWriteSpeed::NUM_ITER};
+static const unsigned int Iterations[2] = {1, OCLPerfMapBufferWriteSpeed::NUM_ITER};
 #define NUM_OFFSETS 1
 static const unsigned int offsets[NUM_OFFSETS] = {0};
 #define NUM_SUBTESTS (3 + NUM_OFFSETS)
@@ -50,17 +48,15 @@ OCLPerfMapBufferWriteSpeed::OCLPerfMapBufferWriteSpeed() {
 
 OCLPerfMapBufferWriteSpeed::~OCLPerfMapBufferWriteSpeed() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
-                                      double &conversion,
+void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char* units, double& conversion,
                                       unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -81,7 +77,7 @@ void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -91,13 +87,11 @@ void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -121,8 +115,8 @@ void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
   char getVersion[128];
-  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION,
-                                       sizeof(getVersion), getVersion, NULL);
+  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION, sizeof(getVersion),
+                                       getVersion, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
   platformVersion[0] = getVersion[7];
   platformVersion[1] = getVersion[8];
@@ -146,19 +140,17 @@ void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
   } else {
     mapFlags = CL_MAP_WRITE_INVALIDATE_REGION;
   }
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
@@ -171,24 +163,19 @@ void OCLPerfMapBufferWriteSpeed::open(unsigned int test, char *units,
     flags |= CL_MEM_ALLOC_HOST_PTR;
   } else if (useHostPtr) {
     flags |= CL_MEM_USE_HOST_PTR;
-    hostMem = (char *)malloc(bufSize_ + alignment - 1 + offset);
+    hostMem = (char*)malloc(bufSize_ + alignment - 1 + offset);
     CHECK_RESULT(hostMem == 0, "malloc(hostMem) failed");
-    alignedMem =
-        (char *)((((intptr_t)hostMem + alignment - 1) & ~(alignment - 1)) +
-                 offset);
+    alignedMem = (char*)((((intptr_t)hostMem + alignment - 1) & ~(alignment - 1)) + offset);
   }
-  outBuffer_ =
-      _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedMem, &error_);
+  outBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedMem, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
   // Force memory to be on GPU if possible
   {
-    cl_mem memBuffer =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    cl_mem memBuffer = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(memBuffer == 0, "clCreateBuffer(memBuffer) failed");
 
-    _wrapper->clEnqueueCopyBuffer(cmd_queue_, outBuffer_, memBuffer, 0, 0,
-                                  bufSize_, 0, NULL, NULL);
+    _wrapper->clEnqueueCopyBuffer(cmd_queue_, outBuffer_, memBuffer, 0, 0, bufSize_, 0, NULL, NULL);
     _wrapper->clFinish(cmd_queue_);
 
     _wrapper->clReleaseMemObject(memBuffer);
@@ -208,14 +195,13 @@ void OCLPerfMapBufferWriteSpeed::run(void) {
       return;
     }
   }
-  void *mem;
+  void* mem;
   // Warm up
-  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags,
-                                     0, bufSize_, 0, NULL, NULL, &error_);
+  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags, 0, bufSize_, 0,
+                                     NULL, NULL, &error_);
 
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0, NULL, NULL);
   CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
   error_ = _wrapper->clFinish(cmd_queue_);
   CHECK_RESULT(error_, "clFinish failed");
@@ -223,13 +209,11 @@ void OCLPerfMapBufferWriteSpeed::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < numIter; i++) {
-    mem =
-        _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags,
-                                     0, bufSize_, 0, NULL, NULL, &error_);
+    mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags, 0, bufSize_, 0,
+                                       NULL, NULL, &error_);
 
     CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
-    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0,
-                                               NULL, NULL);
+    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
     error_ = _wrapper->clFinish(cmd_queue_);
     CHECK_RESULT(error_, "clFinish failed");
@@ -263,21 +247,18 @@ void OCLPerfMapBufferWriteSpeed::run(void) {
     SNPRINTF(str2, sizeof(str2), "%29s", str);
   }
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " (%8d bytes) i: %4d %37s ", bufSize_, numIter,
-           str2);
+  SNPRINTF(buf, sizeof(buf), " (%8d bytes) i: %4d %37s ", bufSize_, numIter, str2);
   testDescString = buf;
 }
 
 unsigned int OCLPerfMapBufferWriteSpeed::close(void) {
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

@@ -23,8 +23,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <resource_guards.hh>
 
-template <typename T> __global__ void updateResult(T* C_d, T* Res_d, T val,
-                                                  int NELEM) {
+template <typename T> __global__ void updateResult(T* C_d, T* Res_d, T val, int NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -33,8 +32,8 @@ template <typename T> __global__ void updateResult(T* C_d, T* Res_d, T val,
   }
 }
 
-template <typename T> __global__ void vectorSum(const T* A_d, const T* B_d,
-                                 const T* C_d, T* Res_d, size_t NELEM) {
+template <typename T>
+__global__ void vectorSum(const T* A_d, const T* B_d, const T* C_d, T* Res_d, size_t NELEM) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -45,8 +44,8 @@ template <typename T> __global__ void vectorSum(const T* A_d, const T* B_d,
 
 template <typename T>
 void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T* devMem2,
-                        T* hostMem3, T* devMem3, size_t N, std::vector<hipGraphNode_t>& from,
-                        std::vector<hipGraphNode_t>& to, std::vector<hipGraphNode_t>& nodelist) {
+                      T* hostMem3, T* devMem3, size_t N, std::vector<hipGraphNode_t>& from,
+                      std::vector<hipGraphNode_t>& to, std::vector<hipGraphNode_t>& nodelist) {
   size_t Nbytes = N * sizeof(T);
   constexpr auto blocksPerCU = 6;  // to hide latency
   constexpr auto threadsPerBlock = 256;
@@ -134,8 +133,8 @@ void graphNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T
 
 template <typename T>
 void captureNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2, T* devMem2,
-                          T* hostMem3, T* devMem3, size_t N, std::vector<hipStream_t>& streams,
-                          std::vector<hipEvent_t>& events) {
+                        T* hostMem3, T* devMem3, size_t N, std::vector<hipStream_t>& streams,
+                        std::vector<hipEvent_t>& events) {
   size_t Nbytes = N * sizeof(T);
   constexpr unsigned threadsPerBlock = 256;
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -170,8 +169,8 @@ void captureNodesCommon(hipGraph_t& graph, T* hostMem1, T* devMem1, T* hostMem2,
 enum class GraphGetNodesTest { equalNumNodes, lesserNumNodes, greaterNumNodes };
 
 template <typename F>
-static void validateGraphNodesCommon(
-    F f, std::vector<hipGraphNode_t>& nodelist, size_t testNumNodes, GraphGetNodesTest test_type) {
+static void validateGraphNodesCommon(F f, std::vector<hipGraphNode_t>& nodelist,
+                                     size_t testNumNodes, GraphGetNodesTest test_type) {
   size_t numNodes = testNumNodes;
   hipGraphNode_t* nodes = new hipGraphNode_t[numNodes]{};
   int found_count{0};

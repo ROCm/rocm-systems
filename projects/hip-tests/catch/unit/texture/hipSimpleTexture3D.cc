@@ -25,22 +25,21 @@ THE SOFTWARE.
 
 // Texture reference for 3D texture
 texture<float, hipTextureType3D, hipReadModeElementType> texf;
-texture<int, hipTextureType3D, hipReadModeElementType>   texi;
-texture<char, hipTextureType3D, hipReadModeElementType>  texc;
+texture<int, hipTextureType3D, hipReadModeElementType> texi;
+texture<char, hipTextureType3D, hipReadModeElementType> texc;
 
 template <typename T>
-__global__ void simpleKernel3DArray(T* outputData, int width,
-                                    int height, int depth) {
+__global__ void simpleKernel3DArray(T* outputData, int width, int height, int depth) {
 #if !__HIP_NO_IMAGE_SUPPORT
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
         if (std::is_same<T, float>::value)
-          outputData[i*width*height + j*width + k] = tex3D(texf, k, j, i);
+          outputData[i * width * height + j * width + k] = tex3D(texf, k, j, i);
         else if (std::is_same<T, int>::value)
-          outputData[i*width*height + j*width + k] = tex3D(texi, k, j, i);
+          outputData[i * width * height + j * width + k] = tex3D(texi, k, j, i);
         else if (std::is_same<T, char>::value)
-          outputData[i*width*height + j*width + k] = tex3D(texc, k, j, i);
+          outputData[i * width * height + j * width + k] = tex3D(texc, k, j, i);
       }
     }
   }
@@ -49,7 +48,7 @@ __global__ void simpleKernel3DArray(T* outputData, int width,
 
 template <typename T>
 static void runSimpleTexture3D_Check(int width, int height, int depth,
-            texture<T, hipTextureType3D, hipReadModeElementType> *tex) {
+                                     texture<T, hipTextureType3D, hipReadModeElementType>* tex) {
   unsigned int size = width * height * depth * sizeof(T);
   T* hData = reinterpret_cast<T*>(malloc(size));
   REQUIRE(hData != nullptr);
@@ -58,7 +57,7 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width +k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
@@ -67,8 +66,8 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   hipChannelFormatDesc channelDesc = hipCreateChannelDesc<T>();
   hipArray_t arr;
 
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc,
-            make_hipExtent(width, height, depth), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth), hipArrayDefault));
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
@@ -93,15 +92,15 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
   HIP_CHECK(hipMalloc(&dData, size));
   REQUIRE(dData != nullptr);
 
-  hipLaunchKernelGGL(simpleKernel3DArray, dim3(1, 1, 1), dim3(1, 1, 1),
-                     0, 0, dData, width, height, depth);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(simpleKernel3DArray, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, dData, width, height,
+                     depth);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
   // Allocate mem for the result on host side
-  T *hOutputData = reinterpret_cast<T*>(malloc(size));
+  T* hOutputData = reinterpret_cast<T*>(malloc(size));
   REQUIRE(hOutputData != nullptr);
-  memset(hOutputData, 0,  size);
+  memset(hOutputData, 0, size);
 
   // copy result from device to host
   HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
@@ -121,13 +120,12 @@ TEST_CASE("Unit_hipSimpleTexture3D_Check_DataTypes") {
   return;
 #endif
 
-  for ( int i = 1; i < 25; i++ ) {
+  for (int i = 1; i < 25; i++) {
     runSimpleTexture3D_Check<float>(i, i, i, &texf);
-    runSimpleTexture3D_Check<int>(i+1, i, i, &texi);
-    runSimpleTexture3D_Check<char>(i, i+1, i, &texc);
+    runSimpleTexture3D_Check<int>(i + 1, i, i, &texi);
+    runSimpleTexture3D_Check<char>(i, i + 1, i, &texc);
   }
 }
 
 
-
-#endif // CUDA_VERSION < CUDA_12000
+#endif  // CUDA_VERSION < CUDA_12000

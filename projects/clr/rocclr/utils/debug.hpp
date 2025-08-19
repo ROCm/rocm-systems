@@ -36,37 +36,37 @@
 namespace amd { /*@{*/
 
 enum LogLevel {
-  LOG_NONE           = 0,
-  LOG_ERROR          = 1,
-  LOG_WARNING        = 2,
-  LOG_INFO           = 3,
-  LOG_DEBUG          = 4,
-  LOG_EXTRA_DEBUG    = 5
+  LOG_NONE = 0,
+  LOG_ERROR = 1,
+  LOG_WARNING = 2,
+  LOG_INFO = 3,
+  LOG_DEBUG = 4,
+  LOG_EXTRA_DEBUG = 5
 };
 
 enum LogMask {
-  LOG_API       = 1,      //!< (0x1)     API call
-  LOG_CMD       = 2,      //!< (0x2)     Kernel and Copy Commands and Barriers
-  LOG_WAIT      = 4,      //!< (0x4)     Synchronization and waiting for commands to finish
-  LOG_AQL       = 8,      //!< (0x8)     Decode and display AQL packets
-  LOG_QUEUE     = 16,     //!< (0x10)    Queue commands and queue contents
-  LOG_SIG       = 32,     //!< (0x20)    Signal creation, allocation, pool
-  LOG_LOCK      = 64,     //!< (0x40)    Locks and thread-safety code.
-  LOG_KERN      = 128,    //!< (0x80)    Kernel creations and arguments, etc.
-  LOG_COPY      = 256,    //!< (0x100)   Copy debug
-  LOG_COPY2     = 512,    //!< (0x200)   Detailed copy debug
-  LOG_RESOURCE  = 1024,   //!< (0x400)   Resource allocation, performance-impacting events.
-  LOG_INIT      = 2048,   //!< (0x800)   Initialization and shutdown
-  LOG_MISC      = 4096,   //!< (0x1000)  Misc debug, not yet classified
-  LOG_AQL2      = 8192,   //!< (0x2000)  Show raw bytes of AQL packet
-  LOG_CODE      = 16384,  //!< (0x4000)  Show code creation debug
-  LOG_CMD2      = 32768,  //!< (0x8000)  More detailed command info, including barrier commands
-  LOG_LOCATION  = 65536,  //!< (0x10000) Log message location
-  LOG_MEM       = 131072, //!< (0x20000) Memory allocation
-  LOG_MEM_POOL  = 262144, //!< (0x40000) Memory pool allocation, including memory in graphs
-  LOG_TS        = 524288, //!< (0x80000) Timestamp details
-  LOG_COMGR     = 1048576,//!< (0x100000) Comgr path information print
-  LOG_ALWAYS    = -1      //!< (0xFFFFFFFF) Log always even mask flag is zero
+  LOG_API = 1,            //!< (0x1)     API call
+  LOG_CMD = 2,            //!< (0x2)     Kernel and Copy Commands and Barriers
+  LOG_WAIT = 4,           //!< (0x4)     Synchronization and waiting for commands to finish
+  LOG_AQL = 8,            //!< (0x8)     Decode and display AQL packets
+  LOG_QUEUE = 16,         //!< (0x10)    Queue commands and queue contents
+  LOG_SIG = 32,           //!< (0x20)    Signal creation, allocation, pool
+  LOG_LOCK = 64,          //!< (0x40)    Locks and thread-safety code.
+  LOG_KERN = 128,         //!< (0x80)    Kernel creations and arguments, etc.
+  LOG_COPY = 256,         //!< (0x100)   Copy debug
+  LOG_COPY2 = 512,        //!< (0x200)   Detailed copy debug
+  LOG_RESOURCE = 1024,    //!< (0x400)   Resource allocation, performance-impacting events.
+  LOG_INIT = 2048,        //!< (0x800)   Initialization and shutdown
+  LOG_MISC = 4096,        //!< (0x1000)  Misc debug, not yet classified
+  LOG_AQL2 = 8192,        //!< (0x2000)  Show raw bytes of AQL packet
+  LOG_CODE = 16384,       //!< (0x4000)  Show code creation debug
+  LOG_CMD2 = 32768,       //!< (0x8000)  More detailed command info, including barrier commands
+  LOG_LOCATION = 65536,   //!< (0x10000) Log message location
+  LOG_MEM = 131072,       //!< (0x20000) Memory allocation
+  LOG_MEM_POOL = 262144,  //!< (0x40000) Memory pool allocation, including memory in graphs
+  LOG_TS = 524288,        //!< (0x80000) Timestamp details
+  LOG_COMGR = 1048576,    //!< (0x100000) Comgr path information print
+  LOG_ALWAYS = -1         //!< (0xFFFFFFFF) Log always even mask flag is zero
 };
 
 //! \brief log file output
@@ -83,9 +83,11 @@ extern void log_timestamped(LogLevel level, const char* file, int line, const ch
 
 //! \brief Insert a printf-style log entry.
 extern void log_printf(LogLevel level, const char* file, int line, const char* format, ...);
-extern void log_printf(LogLevel level, const char* file, int line, uint64_t *start, const char* format, ...);
+extern void log_printf(LogLevel level, const char* file, int line, uint64_t* start,
+                       const char* format, ...);
 
-/*@}*/} // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #if __INTEL_COMPILER
 
@@ -209,17 +211,19 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
     }                                                                                              \
   } while (false)
 
-#define IsLogEnabled(level, mask) (AMD_LOG_LEVEL >= level && (AMD_LOG_MASK & mask || AMD_LOG_MASK == amd::LOG_ALWAYS))
+#define IsLogEnabled(level, mask)                                                                  \
+  (AMD_LOG_LEVEL >= level && (AMD_LOG_MASK & mask || AMD_LOG_MASK == amd::LOG_ALWAYS))
 
-//called on entry and exit, calculates duration with local starttime variable defined in HIP_INIT_API
+// called on entry and exit, calculates duration with local starttime variable defined in
+// HIP_INIT_API
 #define HIPPrintDuration(level, mask, startTimeUs, format, ...)                                    \
   do {                                                                                             \
     if (AMD_LOG_LEVEL >= level) {                                                                  \
       if (AMD_LOG_MASK & mask || mask == amd::LOG_ALWAYS) {                                        \
         if (AMD_LOG_MASK & amd::LOG_LOCATION) {                                                    \
-          amd::log_printf(level, __FILENAME__, __LINE__, startTimeUs,format, ##__VA_ARGS__);       \
+          amd::log_printf(level, __FILENAME__, __LINE__, startTimeUs, format, ##__VA_ARGS__);      \
         } else {                                                                                   \
-           amd::log_printf(level, "", 0, startTimeUs, format, ##__VA_ARGS__);                      \
+          amd::log_printf(level, "", 0, startTimeUs, format, ##__VA_ARGS__);                       \
         }                                                                                          \
       }                                                                                            \
     }                                                                                              \
@@ -248,15 +252,16 @@ inline void warning(const char* msg) { amd::report_warning(msg); }
 
 #define LogPrintfDebug(format, ...) ClPrint(amd::LOG_DEBUG, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfError(format, ...) ClPrint(amd::LOG_ERROR, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
-#define LogPrintfWarning(format, ...) ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
+#define LogPrintfWarning(format, ...)                                                              \
+  ClPrint(amd::LOG_WARNING, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 #define LogPrintfInfo(format, ...) ClPrint(amd::LOG_INFO, amd::LOG_ALWAYS, format, ##__VA_ARGS__)
 
 #if (defined(DEBUG) || defined(DEV_LOG_ENABLE))
-  #define DevLogPrintfError(format, ...)  LogPrintfError(format, ##__VA_ARGS__)
-  #define DevLogError(msg) LogError(msg)
+#define DevLogPrintfError(format, ...) LogPrintfError(format, ##__VA_ARGS__)
+#define DevLogError(msg) LogError(msg)
 #else
-  #define DevLogPrintfError(format, ...)
-  #define DevLogError(msg)
+#define DevLogPrintfError(format, ...)
+#define DevLogError(msg)
 #endif
 
 #endif /*DEBUG_HPP_*/

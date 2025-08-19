@@ -60,15 +60,15 @@ class Context : public RuntimeObject {
   };
 
   enum Flags {
-    GLDeviceKhr = 1 << GLDeviceKhrIdx,            //!< GL
-    D3D10DeviceKhr = 1 << D3D10DeviceKhrIdx,      //!< D3D10
-    OfflineDevices = 1 << OfflineDevicesIdx,      //!< Offline devices
-    D3D11DeviceKhr = 1 << D3D11DeviceKhrIdx,      //!< D3D11
-    InteropUserSync = 1 << InteropUserSyncIdx,    //!< Interop user sync enabled
-    D3D9DeviceKhr = 1 << D3D9DeviceKhrIdx,        //!< d3d9 device
-    D3D9DeviceEXKhr = 1 << D3D9DeviceEXKhrIdx,    //!< d3d9EX device
-    D3D9DeviceVAKhr = 1 << D3D9DeviceVAKhrIdx,    //!< d3d9VA device
-    EGLDeviceKhr = 1 << EGLDeviceKhrIdx,          //!< EGL device
+    GLDeviceKhr = 1 << GLDeviceKhrIdx,          //!< GL
+    D3D10DeviceKhr = 1 << D3D10DeviceKhrIdx,    //!< D3D10
+    OfflineDevices = 1 << OfflineDevicesIdx,    //!< Offline devices
+    D3D11DeviceKhr = 1 << D3D11DeviceKhrIdx,    //!< D3D11
+    InteropUserSync = 1 << InteropUserSyncIdx,  //!< Interop user sync enabled
+    D3D9DeviceKhr = 1 << D3D9DeviceKhrIdx,      //!< d3d9 device
+    D3D9DeviceEXKhr = 1 << D3D9DeviceEXKhrIdx,  //!< d3d9EX device
+    D3D9DeviceVAKhr = 1 << D3D9DeviceVAKhrIdx,  //!< d3d9VA device
+    EGLDeviceKhr = 1 << EGLDeviceKhrIdx,        //!< EGL device
   };
 
   //! Context info structure
@@ -108,12 +108,12 @@ class Context : public RuntimeObject {
    */
   static int checkProperties(const cl_context_properties* properties,  //!< Properties
                              Info* info                                //!< Info structure
-                             );
+  );
 
   //! Default constructor
   Context(const std::vector<Device*>& devices,  //!< List of all devices
           const Info& info                      //!< Context info structure
-          );
+  );
 
   //! Compare two Context instances.
   bool operator==(const Context& rhs) const { return this == &rhs; }
@@ -125,7 +125,7 @@ class Context : public RuntimeObject {
    *          CL_SUCCESS otherwise
    */
   int create(const intptr_t* properties  //!< Original context properties
-             );
+  );
 
   /**
    * Allocate host memory using either a custom device allocator or a generic
@@ -201,16 +201,17 @@ class Context : public RuntimeObject {
   void addDeviceQueue(const Device& dev,   //!< Device object
                       DeviceQueue* queue,  //!< Device queue
                       bool defDevQueue     //!< Added device queue will be the default queue
-                      );
+  );
 
   //! Removes a device queue from the list of queues
   void removeDeviceQueue(const Device& dev,  //!< Device object
                          DeviceQueue* queue  //!< Device queue
-                         );
+  );
 
   //! Set the default device queue
-  void setDefDeviceQueue(const Device& dev, DeviceQueue* queue)
-      { deviceQueues_[&dev].defDeviceQueue_ = queue; };
+  void setDefDeviceQueue(const Device& dev, DeviceQueue* queue) {
+    deviceQueues_[&dev].defDeviceQueue_ = queue;
+  };
 
  private:
   Info info_;                            //!< Context info structure
@@ -219,7 +220,7 @@ class Context : public RuntimeObject {
   Device* customHostAllocDevice_;        //!< Device responsible for host allocations
   std::vector<Device*> svmAllocDevice_;  //!< Devices can support SVM allocations
   std::unordered_map<const Device*, DeviceQueueInfo> deviceQueues_;  //!< Device queues mapping
-  mutable Monitor ctxLock_;                                          //!< Lock for the context access
+  mutable Monitor ctxLock_;  //!< Lock for the context access
 };
 
 /*! @}

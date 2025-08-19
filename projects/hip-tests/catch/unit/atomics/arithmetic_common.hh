@@ -172,7 +172,7 @@ __global__ void TestKernel(TestType* const global_mem, TestType* const old_vals,
     __syncthreads();
   }
 
-  old_vals[tid]  = PerformAtomicOperation<TestType, operation, memory_scope>(mem, allocType);
+  old_vals[tid] = PerformAtomicOperation<TestType, operation, memory_scope>(mem, allocType);
 
 
   if constexpr (use_shared_mem) {
@@ -287,14 +287,14 @@ std::tuple<std::vector<TestType>, std::vector<TestType>> TestKernelHostRef(const
   const auto val = GetTestValue<TestType, operation>();
 
   const auto total_thread_count = p.num_devices * p.kernel_count * p.ThreadCount() +
-                                  p.host_thread_count * p.HostIterationsPerThread();
+      p.host_thread_count * p.HostIterationsPerThread();
 
-  std::vector<TestType> res_vals((p.num_devices  + 1)* p.width);
+  std::vector<TestType> res_vals((p.num_devices + 1) * p.width);
   std::vector<TestType> old_vals;
   old_vals.reserve(total_thread_count);
 
   auto perform_op = [&](unsigned id, unsigned dev) {
-    auto& res = res_vals[id % p.width + (dev*p.width)];
+    auto& res = res_vals[id % p.width + (dev * p.width)];
     old_vals.push_back(res);
 
     if constexpr (operation == AtomicOperation::kAdd || operation == AtomicOperation::kAddSystem ||
@@ -362,7 +362,7 @@ void LaunchKernel(const TestParams& p, hipStream_t stream, TestType* const mem_p
   else
     TestKernel<TestType, operation, use_shared_mem, memory_scope>
         <<<p.blocks, p.threads, shared_mem_size, stream>>>(mem_ptr, old_vals, p.width, p.pitch,
-            p.alloc_type);
+                                                           p.alloc_type);
 }
 
 // Performs a host atomic operation on parameter `mem` based on the `operation` enumerator.
@@ -414,7 +414,6 @@ void PerformHostAtomicOperation(const TestParams& p, TestType* mem, TestType* co
 template <typename TestType, AtomicOperation operation, bool use_shared_mem,
           int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
 void TestCore(const TestParams& p) {
-
   // Device Memory Allocation
   const auto old_vals_alloc_size = p.kernel_count * p.ThreadCount() * sizeof(TestType);
   const auto mem_alloc_size = p.width * p.pitch;
@@ -444,7 +443,7 @@ void TestCore(const TestParams& p) {
     HIP_CHECK(hipMemset(mem_ptr, 0, mem_alloc_size));
   }
 
- // Launch Kernel
+  // Launch Kernel
   for (auto i = 0u; i < p.num_devices; ++i) {
     HIP_CHECK(hipSetDevice(i));
     for (auto j = 0u; j < p.kernel_count; ++j) {
@@ -457,7 +456,8 @@ void TestCore(const TestParams& p) {
 
   // Launch Host Threads
   mem_devs.emplace_back(LinearAllocs::hipHostMalloc, mem_alloc_size);
-  PerformHostAtomicOperation<TestType, operation>(p, mem_devs[p.num_devices].host_ptr(), old_vals.data());
+  PerformHostAtomicOperation<TestType, operation>(p, mem_devs[p.num_devices].host_ptr(),
+                                                  old_vals.data());
 
   for (auto i = 0; i < p.num_devices; ++i) {
     HIP_CHECK(hipSetDevice(i));
@@ -469,12 +469,13 @@ void TestCore(const TestParams& p) {
     const auto device_offset = i * p.kernel_count * p.ThreadCount();
     HIP_CHECK(hipMemcpy(old_vals.data() + device_offset, old_vals_devs[i].ptr(),
                         old_vals_alloc_size, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy2D(res_vals.data() + i*p.width, sizeof(TestType), mem_devs[i].ptr(), p.pitch, sizeof(TestType),
-                        p.width, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy2D(res_vals.data() + i * p.width, sizeof(TestType), mem_devs[i].ptr(),
+                          p.pitch, sizeof(TestType), p.width, hipMemcpyDeviceToHost));
   }
 
-    HIP_CHECK(hipMemcpy2D(res_vals.data() + p.num_devices*p.width, sizeof(TestType), mem_devs[p.num_devices].host_ptr(), p.pitch, sizeof(TestType),
-                        p.width, hipMemcpyHostToHost));
+  HIP_CHECK(hipMemcpy2D(res_vals.data() + p.num_devices * p.width, sizeof(TestType),
+                        mem_devs[p.num_devices].host_ptr(), p.pitch, sizeof(TestType), p.width,
+                        hipMemcpyHostToHost));
 
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
@@ -520,8 +521,7 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
       params.blocks = GenerateBlockDimensions();
     }
     using LA = LinearAllocs;
-    for (const auto alloc_type :
-         {LA::hipMalloc}) {
+    for (const auto alloc_type : {LA::hipMalloc}) {
       params.alloc_type = alloc_type;
       DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
         TestCore<TestType, operation, false, memory_scope>(params);
@@ -529,7 +529,7 @@ void SingleDeviceSingleKernelTest(const unsigned int width, const unsigned int p
     }
   }
 #ifdef __linux__
-   SECTION("Shared memory") {
+  SECTION("Shared memory") {
     params.blocks = dim3(1);
     params.alloc_type = LinearAllocs::hipMalloc;
     TestCore<TestType, operation, true, memory_scope>(params);
@@ -557,8 +557,7 @@ void SingleDeviceMultipleKernelTest(const unsigned int kernel_count, const unsig
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type :
-       {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false>(params);
@@ -585,12 +584,13 @@ void MultipleDeviceMultipleKernelAndHostTest(const unsigned int num_devices,
 
   if (kernel_count > 1) {
     for (auto i = 0u; i < num_devices; ++i) {
-      int canAccess  = 0;
+      int canAccess = 0;
       for (auto j = 0u; j < num_devices; ++j) {
         if (i != j) {
           HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
-          if(canAccess == 0) {
-            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) + ",dev2:" + std::to_string(j);
+          if (canAccess == 0) {
+            std::string msg = "P2P access check failed between dev1:" + std::to_string(i) +
+                ",dev2:" + std::to_string(j);
             HipTest::HIP_SKIP_TEST(msg.c_str());
             return;
           }

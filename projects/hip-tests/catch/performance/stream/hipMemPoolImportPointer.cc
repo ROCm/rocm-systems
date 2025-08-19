@@ -40,7 +40,8 @@ class MemPoolImportPointerBenchmark : public Benchmark<MemPoolImportPointerBench
     HIP_CHECK(hipMemPoolExportPointer(&exp_data, device_ptr));
 
     TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolImportPointer(reinterpret_cast<void**>(&device_ptr_import), mem_pool, &exp_data));
+      HIP_CHECK(hipMemPoolImportPointer(reinterpret_cast<void**>(&device_ptr_import), mem_pool,
+                                        &exp_data));
     }
 
     HIP_CHECK(hipFree(device_ptr));
@@ -78,8 +79,9 @@ static void RunBenchmark(const size_t array_size) {
  */
 TEST_CASE("Performance_hipMemPoolImportPointer") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   size_t array_size = GENERATE(4_KB, 4_MB, 16_MB);
@@ -87,6 +89,6 @@ TEST_CASE("Performance_hipMemPoolImportPointer") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

@@ -51,7 +51,7 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
 
   static hipStreamBatchMemOpParams paramArray[2], newParamArray[2];
   std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void **)&opsArray[0], sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = opsArray[0];
@@ -66,16 +66,14 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
   int totalOps = 2;
   // Setup the batch memory operation node parameters
   hipBatchMemOpNodeParams batchNodeParams;
-  batchNodeParams.ctx = ctx;        // Use the current HIP context
-  batchNodeParams.count = totalOps;  // Total number of memory operations
-  batchNodeParams.paramArray =
-      paramArray;            // Pointer to the array of memory operations
-  batchNodeParams.flags = 0;  // No special flags
+  batchNodeParams.ctx = ctx;                // Use the current HIP context
+  batchNodeParams.count = totalOps;         // Total number of memory operations
+  batchNodeParams.paramArray = paramArray;  // Pointer to the array of memory operations
+  batchNodeParams.flags = 0;                // No special flags
 
   // Add a batch memory operation node to the graph
   hipGraphNode_t batchMemOpNode;
-  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode, graph, nullptr, 0,
-                                      &batchNodeParams));
+  HIP_CHECK(hipGraphAddBatchMemOpNode(&batchMemOpNode, graph, nullptr, 0, &batchNodeParams));
   for (int i = 0; i < totalOps; i++) {
     newParamArray[i] = paramArray[i];
   }
@@ -95,31 +93,27 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
   invalidNewBatchNodeParams.flags = -4;
 
   SECTION("Batch Memory Node as nullptr") {
-    HIP_CHECK_ERROR(
-        hipGraphBatchMemOpNodeSetParams(nullptr, &newBatchNodeParams),
-        hipErrorInvalidValue);
-  }
-  // Disabled for NVIDIA due to the defect SWDEV-502247
-  #if HT_AMD
-  SECTION("Batch Memory Node Params as nullptr") {
-    HIP_CHECK_ERROR(hipGraphBatchMemOpNodeSetParams(batchMemOpNode, nullptr),
+    HIP_CHECK_ERROR(hipGraphBatchMemOpNodeSetParams(nullptr, &newBatchNodeParams),
                     hipErrorInvalidValue);
   }
-  #endif
-  // Disabled due to defect SWDEV-502219
-  #if 0
+// Disabled for NVIDIA due to the defect SWDEV-502247
+#if HT_AMD
+  SECTION("Batch Memory Node Params as nullptr") {
+    HIP_CHECK_ERROR(hipGraphBatchMemOpNodeSetParams(batchMemOpNode, nullptr), hipErrorInvalidValue);
+  }
+#endif
+// Disabled due to defect SWDEV-502219
+#if 0
   SECTION("InvalidBatch Memory Node Params") {
     HIP_CHECK_ERROR(hipGraphBatchMemOpNodeSetParams(batchMemOpNode,
                                                    &invalidNewBatchNodeParams),
                     hipErrorInvalidValue);
   }
-  #endif
+#endif
   SECTION("Unchanged Batch Memory Node Params") {
-    HIP_CHECK_ERROR(
-        hipGraphBatchMemOpNodeSetParams(batchMemOpNode, &batchNodeParams),
-        hipSuccess);
+    HIP_CHECK_ERROR(hipGraphBatchMemOpNodeSetParams(batchMemOpNode, &batchNodeParams), hipSuccess);
   }
-  HIP_CHECK(hipFree((void *)opsArray[0]));
+  HIP_CHECK(hipFree((void*)opsArray[0]));
   HIP_CHECK(hipGraphDestroy(graph));
   HIP_CHECK(hipCtxPopCurrent(&ctx));
   HIP_CHECK(hipCtxDestroy(ctx));
@@ -137,12 +131,10 @@ TEST_CASE("Unit_hipGraphBatchMemOpNodeSetParams_NegativeTsts") {
  */
 TEST_CASE("Unit_hipGraphBatchMemOpNodeGetParams_NegativeTsts") {
   hipBatchMemOpNodeParams retrievedNodeParams;
-  HIP_CHECK_ERROR(hipGraphBatchMemOpNodeGetParams(nullptr,
-                                                  &retrievedNodeParams),
-                                                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipGraphBatchMemOpNodeGetParams(nullptr, &retrievedNodeParams),
+                  hipErrorInvalidValue);
 }
 /**
  * End doxygen group GraphTest.
  * @}
  */
-

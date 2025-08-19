@@ -196,7 +196,7 @@ THE SOFTWARE.
  * @}
  */
 
- /**
+/**
  * @defgroup MathTest Math Device Functions
  * @{
  * This section describes tests for device math functions of HIP runtime API.
@@ -234,6 +234,7 @@ THE SOFTWARE.
 /**
  * @defgroup ModuleTest Module Functions Management
  * @{
- * This section describes the loading of modules from code object files and invocation of different kernels.
+ * This section describes the loading of modules from code object files and invocation of different
+ * kernels.
  * @}
  */

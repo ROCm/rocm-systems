@@ -21,7 +21,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
+
 #ifdef __linux__
 #include <unistd.h>
 #include <sys/wait.h>
@@ -35,7 +35,7 @@ THE SOFTWARE.
  * Fetches Gpu device count
  */
 #ifdef __linux__
-void getDeviceCount(int *pdevCnt) {
+void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
   // create pipe descriptors
@@ -88,10 +88,9 @@ bool testMaskedDevice(int actualNumGPUs) {
     setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
     uint32_t linktype;
     uint32_t hopcount;
-    for (int count = 1;
-        count < actualNumGPUs; count++) {
-      err = hipExtGetLinkTypeAndHopCount(VISIBLE_DEVICE,
-            VISIBLE_DEVICE+count, &linktype, &hopcount);
+    for (int count = 1; count < actualNumGPUs; count++) {
+      err = hipExtGetLinkTypeAndHopCount(VISIBLE_DEVICE, VISIBLE_DEVICE + count, &linktype,
+                                         &hopcount);
       REQUIRE(err == hipSuccess);
     }
     close(fd[0]);
@@ -143,8 +142,7 @@ bool testhipInvalidDevice(int numDevices) {
 #ifdef __linux__
 bool testhipInvalidLinkType() {
   uint32_t hopcount;
-  REQUIRE(hipSuccess != hipExtGetLinkTypeAndHopCount(0, 1, nullptr,
-                                                     &hopcount));
+  REQUIRE(hipSuccess != hipExtGetLinkTypeAndHopCount(0, 1, nullptr, &hopcount));
   return true;
 }
 
@@ -169,13 +167,11 @@ bool testhipLinkTypeHopcountDeviceOrderRev(int numDevices) {
   bool TestPassed = true;
   // Get the unique pair of devices
   for (int x = 0; x < numDevices; x++) {
-    for (int y = x+1; y < numDevices; y++) {
+    for (int y = x + 1; y < numDevices; y++) {
       uint32_t linktype1 = 0, linktype2 = 0;
       uint32_t hopcount1 = 0, hopcount2 = 0;
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y,
-                          &linktype1, &hopcount1));
-      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x,
-                          &linktype2, &hopcount2));
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(x, y, &linktype1, &hopcount1));
+      HIP_CHECK(hipExtGetLinkTypeAndHopCount(y, x, &linktype2, &hopcount2));
       if (hopcount1 != hopcount2) {
         TestPassed = false;
         break;
@@ -188,19 +184,17 @@ bool testhipLinkTypeHopcountDeviceOrderRev(int numDevices) {
 /**
  * Internal Function
  */
-bool validateLinkType(uint32_t linktype_Hip,
-                      RSMI_IO_LINK_TYPE linktype_RocmSmi) {
+bool validateLinkType(uint32_t linktype_Hip, RSMI_IO_LINK_TYPE linktype_RocmSmi) {
   bool TestPassed = false;
 
   if ((linktype_Hip == HSA_AMD_LINK_INFO_TYPE_PCIE) &&
-     (linktype_RocmSmi == RSMI_IOLINK_TYPE_PCIEXPRESS)) {
+      (linktype_RocmSmi == RSMI_IOLINK_TYPE_PCIEXPRESS)) {
     TestPassed = true;
   } else if ((linktype_Hip == HSA_AMD_LINK_INFO_TYPE_XGMI) &&
-     (linktype_RocmSmi == RSMI_IOLINK_TYPE_XGMI)) {
+             (linktype_RocmSmi == RSMI_IOLINK_TYPE_XGMI)) {
     TestPassed = true;
   } else {
-    printf("linktype Hip = %u, linktype RocmSmi = %u\n",
-            linktype_Hip, linktype_RocmSmi);
+    printf("linktype Hip = %u, linktype RocmSmi = %u\n", linktype_Hip, linktype_RocmSmi);
     TestPassed = false;
   }
   return TestPassed;
@@ -209,21 +203,19 @@ bool validateLinkType(uint32_t linktype_Hip,
 bool testhipLinkTypeHopcountDevice(int numDevices) {
   bool TestPassed = true;
   // Opening and initializing rocm-smi library
-  void *lib_rocm_smi_hdl;
-  rsmi_status_t (*fntopo_get_link_type)(uint32_t, uint32_t, uint64_t*,
-                      RSMI_IO_LINK_TYPE*);
+  void* lib_rocm_smi_hdl;
+  rsmi_status_t (*fntopo_get_link_type)(uint32_t, uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*);
   rsmi_status_t (*fntopo_init)(uint64_t);
   rsmi_status_t (*fntopo_shut_down)();
 
-  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so",
-                        RTLD_LAZY);
+  lib_rocm_smi_hdl = dlopen("/opt/rocm/lib/librocm_smi64.so", RTLD_LAZY);
   REQUIRE(lib_rocm_smi_hdl);
 
   void* fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_topo_get_link_type");
   REQUIRE(fnsym);
 
-  fntopo_get_link_type = reinterpret_cast<rsmi_status_t (*)(uint32_t,
-            uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*)>(fnsym);
+  fntopo_get_link_type =
+      reinterpret_cast<rsmi_status_t (*)(uint32_t, uint32_t, uint64_t*, RSMI_IO_LINK_TYPE*)>(fnsym);
 
   fnsym = dlsym(lib_rocm_smi_hdl, "rsmi_init");
   REQUIRE(fnsym);
@@ -246,12 +238,11 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   std::vector<struct devicePair> devicePairList;
   // Get the unique pair of devices
   for (int x = 0; x < numDevices; x++) {
-    for (int y = x+1; y < numDevices; y++) {
+    for (int y = x + 1; y < numDevices; y++) {
       devicePairList.push_back({x, y});
     }
   }
-  for (auto pos=devicePairList.begin();
-       pos != devicePairList.end(); pos++) {
+  for (auto pos = devicePairList.begin(); pos != devicePairList.end(); pos++) {
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2));
     if (!can_access_peer) {
@@ -262,10 +253,8 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
     RSMI_IO_LINK_TYPE linktype2 = RSMI_IOLINK_TYPE_UNDEFINED;
     uint64_t hopcount2 = 0;
     rsmi_status_t retsmi;
-    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1,
-                (*pos).device2, &linktype1, &hopcount1));
-    retsmi = fntopo_get_link_type((*pos).device1,
-                (*pos).device2, &hopcount2, &linktype2);
+    HIPCHECK(hipExtGetLinkTypeAndHopCount((*pos).device1, (*pos).device2, &linktype1, &hopcount1));
+    retsmi = fntopo_get_link_type((*pos).device1, (*pos).device2, &hopcount2, &linktype2);
     REQUIRE(RSMI_STATUS_SUCCESS == retsmi);
 
     // Validate linktype
@@ -281,8 +270,8 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
  * @addtogroup hipExtGetLinkTypeAndHopCount hipExtGetLinkTypeAndHopCount
  * @{
  * @ingroup p2pTest
- * `hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype, uint32_t* hopcount)` -
- * Returns the link type and hop count between two devices
+ * `hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype, uint32_t*
+ * hopcount)` - Returns the link type and hop count between two devices
  * @}
  */
 
@@ -351,11 +340,11 @@ TEST_CASE("Unit_hipP2pLinkTypeAndHopFunc") {
     REQUIRE(TestPassed == true);
   }
 #else
-    printf("This test is skipped due to non linux environment.\n");
+  printf("This test is skipped due to non linux environment.\n");
 #endif
 }
 
 /**
-* End doxygen group p2pTest.
-* @}
-*/
+ * End doxygen group p2pTest.
+ * @}
+ */

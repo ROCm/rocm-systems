@@ -25,8 +25,7 @@
 
 #include "OCLLog.h"
 
-oclLog::oclLog()
-    : m_stdout_fp(stdout), m_filename(""), m_writeToFileIsEnabled(false) {}
+oclLog::oclLog() : m_stdout_fp(stdout), m_filename(""), m_writeToFileIsEnabled(false) {}
 
 oclLog::~oclLog() { disable_write_to_file(); }
 
@@ -35,8 +34,7 @@ void oclLog::enable_write_to_file(std::string filename) {
   m_filename = filename;
   FILE* fp = fopen(m_filename.c_str(), "w");
   if (fp == NULL) {
-    oclTestLog(OCLTEST_LOG_ALWAYS,
-               "ERROR: Cannot open file %s. Disabling logging to file.\n",
+    oclTestLog(OCLTEST_LOG_ALWAYS, "ERROR: Cannot open file %s. Disabling logging to file.\n",
                filename.c_str());
     m_writeToFileIsEnabled = false;
   } else {
@@ -59,8 +57,7 @@ void oclLog::vprint(char const* fmt, va_list args) {
   if (m_writeToFileIsEnabled) {
     FILE* fp = fopen(m_filename.c_str(), "a");
     if (fp == NULL) {
-      oclTestLog(OCLTEST_LOG_ALWAYS,
-                 "ERROR: Cannot open file %s. Disabling logging to file.\n",
+      oclTestLog(OCLTEST_LOG_ALWAYS, "ERROR: Cannot open file %s. Disabling logging to file.\n",
                  m_filename.c_str());
       m_writeToFileIsEnabled = false;
     }
@@ -93,9 +90,7 @@ void oclTestLog(oclLoggingLevel logLevel, const char* fmt, ...) {
   }
 }
 
-void oclTestEnableLogToFile(const char* filename) {
-  theLog().enable_write_to_file(filename);
-}
+void oclTestEnableLogToFile(const char* filename) { theLog().enable_write_to_file(filename); }
 
 void oclTestSetLogLevel(int level) {
   if (level >= 0) {

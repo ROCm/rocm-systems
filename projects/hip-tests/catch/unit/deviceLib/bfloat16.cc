@@ -323,7 +323,7 @@ TEST_CASE("Unit_bf16_basic") {
     std::vector<unsigned> res(size, 0);
     HIP_CHECK(hipMemcpy(res.data(), d_res, sizeof(unsigned) * size, hipMemcpyDeviceToHost));
 
-    for(size_t i = 0; i < res.size(); i++) {
+    for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " output: " << res[i]);
       REQUIRE(res[i] == 1);
     }
@@ -349,7 +349,7 @@ TEST_CASE("Unit_bf16_basic") {
 
     HIP_CHECK(hipFree(d_in));
     HIP_CHECK(hipFree(d_res));
-    for(size_t i = 0; i < res.size(); i++) {
+    for (size_t i = 0; i < res.size(); i++) {
       INFO("Index: " << i << " input: " << in[i] << " expected: " << res_cmp[i]
                      << " result: " << res[i]);
       REQUIRE(abs(static_cast<int>(res_cmp[i] - res[i])) <= 2);

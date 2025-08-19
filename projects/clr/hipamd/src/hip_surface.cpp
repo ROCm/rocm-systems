@@ -62,7 +62,7 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
   }
 
   if (pResDesc->res.array.array->flags != hipArrayDefault &&
-     (pResDesc->res.array.array->flags & hipArraySurfaceLoadStore) == 0) {
+      (pResDesc->res.array.array->flags & hipArraySurfaceLoadStore) == 0) {
     return hipErrorInvalidValue;
   }
 
@@ -78,8 +78,8 @@ hipError_t ihipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject,
   image = as_amd(memObj)->asImage();
 
   void* surfObjectBuffer = nullptr;
-  hipError_t err = ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface),
-                              CL_MEM_SVM_FINE_GRAIN_BUFFER);
+  hipError_t err =
+      ihipMalloc(&surfObjectBuffer, sizeof(__hip_surface), CL_MEM_SVM_FINE_GRAIN_BUFFER);
   if (surfObjectBuffer == nullptr || err != hipSuccess) {
     return hipErrorOutOfMemory;
   }
@@ -112,4 +112,4 @@ hipError_t hipDestroySurfaceObject(hipSurfaceObject_t surfaceObject) {
 
   HIP_RETURN(ihipDestroySurfaceObject(surfaceObject));
 }
-} //namespace hip
+}  // namespace hip

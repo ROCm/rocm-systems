@@ -254,9 +254,8 @@ void handlePrintf(uint64_t* output, const uint64_t* input, uint64_t len) {
 //    "0:0:<format_string_hash>,<actual_format_string>"
 // i.e the hash is part of the format string itself
 // delimited by character ','.
-bool populateFormatStringHashMap(
-    const std::vector<device::PrintfInfo> &printfInfo,
-    std::map<uint64_t, std::string> &strMap) {
+bool populateFormatStringHashMap(const std::vector<device::PrintfInfo>& printfInfo,
+                                 std::map<uint64_t, std::string>& strMap) {
   for (auto it : printfInfo) {
     auto Delim = it.fmtString_.find_first_of(',');
     auto HashStr = it.fmtString_.substr(0, Delim);
@@ -273,8 +272,7 @@ bool populateFormatStringHashMap(
   return true;
 }
 
-void handlePrintfDelayed(const uint64_t* input, uint64_t len, uint64_t control)
-{
+void handlePrintfDelayed(const uint64_t* input, uint64_t len, uint64_t control) {
   auto end = input + len;
   FILE* stream = stdout;
 
@@ -287,7 +285,6 @@ void handlePrintfDelayed(const uint64_t* input, uint64_t len, uint64_t control)
   }
 
   format(stream, input, end);
-
 }
 
-} // namespace amd
+}  // namespace amd

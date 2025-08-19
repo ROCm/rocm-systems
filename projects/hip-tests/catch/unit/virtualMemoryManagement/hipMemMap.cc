@@ -393,7 +393,8 @@ TEST_CASE("Unit_hipMemMap_VMMMemoryReuse_SingleGPU") {
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), A_h.data()));
 #if HT_NVIDIA
-    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(reinterpret_cast<int*>(ptrA));
+    square_kernel<<<dim3(N / threadsPerBlk), dim3(threadsPerBlk), 0, 0>>>(
+        reinterpret_cast<int*>(ptrA));
     HIP_CHECK(hipMemcpyDtoH(B_h.data(), ptrA, buffer_size));
     HIP_CHECK(hipStreamSynchronize(0));
     REQUIRE(true == std::equal(B_h.begin(), B_h.end(), C_h.data()));
@@ -590,7 +591,7 @@ TEST_CASE("Unit_hipMemMap_negative") {
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to ptrA") {
-    REQUIRE(hipMemMap((hipDeviceptr_t)nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
+    REQUIRE(hipMemMap((hipDeviceptr_t) nullptr, size_mem, 0, handle, 0) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") {
@@ -603,6 +604,6 @@ TEST_CASE("Unit_hipMemMap_negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

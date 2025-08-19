@@ -81,8 +81,8 @@ THE SOFTWARE.
     hipError_t localError = error;                                                                 \
     if ((localError == ignoredError)) {                                                            \
       INFO("Skipped: " << hipGetErrorString(localError) << "\n    Code: " << localError            \
-                     << "\n    Str: " << #error << "\n    In File: " << __FILE__                   \
-                     << "\n    At line: " << __LINE__);                                            \
+                       << "\n    Str: " << #error << "\n    In File: " << __FILE__                 \
+                       << "\n    At line: " << __LINE__);                                          \
       return;                                                                                      \
     }                                                                                              \
     if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
@@ -118,19 +118,21 @@ THE SOFTWARE.
 
 // Do not call before all threads have joined
 #define HIP_CHECK_THREAD_FINALIZE()                                                                \
-  { TestContext::get().finalizeResults(); }
+  {                                                                                                \
+    TestContext::get().finalizeResults();                                                          \
+  }
 
 
 // Check that an expression, errorExpr, evaluates to the expected error_t, expectedError.
 #define HIP_CHECK_ERROR(errorExpr, expectedError)                                                  \
   {                                                                                                \
     hipError_t localError = errorExpr;                                                             \
-    INFO("Matching Errors: "                                                                       \
-         << "\n    Expected Error: " << hipGetErrorString(expectedError)                           \
-         << "\n    Expected Code: " << expectedError << '\n'                                       \
-         << "                  Actual Error:   " << hipGetErrorString(localError)                  \
-         << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr                       \
-         << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);                       \
+    INFO("Matching Errors: " << "\n    Expected Error: " << hipGetErrorString(expectedError)       \
+                             << "\n    Expected Code: " << expectedError << '\n'                   \
+                             << "                  Actual Error:   "                               \
+                             << hipGetErrorString(localError)                                      \
+                             << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr   \
+                             << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);   \
     REQUIRE(localError == expectedError);                                                          \
   }
 
@@ -139,12 +141,13 @@ THE SOFTWARE.
 #define HIP_CHECK_ERRORS(errorExpr, expectedError, expectedError1)                                 \
   {                                                                                                \
     hipError_t localError = errorExpr;                                                             \
-    INFO("Matching Errors: "                                                                       \
-         << "\n    Expected Error: " << hipGetErrorString(expectedError)                           \
-         << "\n    Expected Code: " << expectedError << " or " << expectedError << '\n'            \
-         << "                  Actual Error:   " << hipGetErrorString(localError)                  \
-         << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr                       \
-         << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);                       \
+    INFO("Matching Errors: " << "\n    Expected Error: " << hipGetErrorString(expectedError)       \
+                             << "\n    Expected Code: " << expectedError << " or "                 \
+                             << expectedError << '\n'                                              \
+                             << "                  Actual Error:   "                               \
+                             << hipGetErrorString(localError)                                      \
+                             << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr   \
+                             << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);   \
     REQUIRE((localError == expectedError || localError == expectedError1));                        \
   }
 
@@ -164,18 +167,20 @@ THE SOFTWARE.
 #define HIPRTC_CHECK_ERROR(errorExpr, expectedError)                                               \
   {                                                                                                \
     auto localError = errorExpr;                                                                   \
-    INFO("Matching Errors: "                                                                       \
-         << "\n    Expected Error: " << hiprtcGetErrorString(expectedError)                        \
-         << "\n    Expected Code: " << expectedError << '\n'                                       \
-         << "                  Actual Error:   " << hiprtcGetErrorString(localError)               \
-         << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr                       \
-         << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);                       \
+    INFO("Matching Errors: " << "\n    Expected Error: " << hiprtcGetErrorString(expectedError)    \
+                             << "\n    Expected Code: " << expectedError << '\n'                   \
+                             << "                  Actual Error:   "                               \
+                             << hiprtcGetErrorString(localError)                                   \
+                             << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr   \
+                             << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);   \
     REQUIRE(localError == expectedError);                                                          \
   }
 
 // Although its assert, it will be evaluated at runtime
 #define HIP_ASSERT(x)                                                                              \
-  { REQUIRE((x)); }
+  {                                                                                                \
+    REQUIRE((x));                                                                                  \
+  }
 
 #define HIPCHECK(error)                                                                            \
   {                                                                                                \
@@ -191,12 +196,12 @@ THE SOFTWARE.
 #define HIPRTC_CHECK_ERROR(errorExpr, expectedError)                                               \
   {                                                                                                \
     auto localError = errorExpr;                                                                   \
-    INFO("Matching Errors: "                                                                       \
-         << "\n    Expected Error: " << hiprtcGetErrorString(expectedError)                        \
-         << "\n    Expected Code: " << expectedError << '\n'                                       \
-         << "                  Actual Error:   " << hiprtcGetErrorString(localError)               \
-         << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr                       \
-         << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);                       \
+    INFO("Matching Errors: " << "\n    Expected Error: " << hiprtcGetErrorString(expectedError)    \
+                             << "\n    Expected Code: " << expectedError << '\n'                   \
+                             << "                  Actual Error:   "                               \
+                             << hiprtcGetErrorString(localError)                                   \
+                             << "\n    Actual Code:   " << localError << "\nStr: " << #errorExpr   \
+                             << "\n    In File: " << __FILE__ << "\n    At line: " << __LINE__);   \
     REQUIRE(localError == expectedError);                                                          \
   }
 
@@ -238,7 +243,7 @@ static inline int getWarpSize() {
   HIP_CHECK(hipDeviceGetAttribute(&warpSize, hipDeviceAttributeWarpSize, device));
   return warpSize;
 #else
-  std::cout<<"Have to be either Nvidia or AMD platform, asserting"<<std::endl;
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
   assert(false);
 #endif
 }
@@ -338,17 +343,17 @@ inline bool isPcieAtomicsSupported() {
   int pcieAtomics = 1;
   int device;
   HIP_CHECK(hipGetDevice(&device));
-  HIPCHECK(hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported,
-           device));
+  HIPCHECK(
+      hipDeviceGetAttribute(&pcieAtomics, hipDeviceAttributeHostNativeAtomicSupported, device));
   return pcieAtomics != 0;
 }
 
 inline bool isP2PSupported(int& d1, int& d2) {
   int num_devices = HipTest::getDeviceCount();
-  int supported  = 1;
+  int supported = 1;
   for (auto i = 0u; i < num_devices; ++i) {
     int canAccess = 0;
-    for (auto j = 0u; j < num_devices; ++j) {  
+    for (auto j = 0u; j < num_devices; ++j) {
       if (i != j) {
         HIP_CHECK(hipDeviceCanAccessPeer(&canAccess, i, j));
         if (!canAccess) {
@@ -391,7 +396,7 @@ static inline void HIP_SKIP_TEST(char const* const reason) noexcept {
  *
  * @return constexpr std::tuple<FArgs...> the expected arguments of the kernel.
  */
-template <typename... FArgs> std::tuple<FArgs...> getExpectedArgs(void(FArgs...)){};
+template <typename... FArgs> std::tuple<FArgs...> getExpectedArgs(void(FArgs...)) {};
 
 /**
  * @brief Asserts that the types of the arguments of a function match exactly with the types in the
@@ -530,9 +535,7 @@ class BlockingContext {
     HIP_CHECK(hipStreamAddCallback(stream, blocking_callback, (void*)&blocked, 0));
   }
 
-  void unblock_stream() {
-    blocked = false;
-  }
+  void unblock_stream() { blocked = false; }
 
   bool is_blocked() const { return hipStreamQuery(stream) == hipErrorNotReady; }
 
@@ -558,9 +561,9 @@ class BlockingContext {
 
 #define CHECK_P2P_SUPPORT                                                                          \
   int d1, d2;                                                                                      \
-  if (!HipTest::isP2PSupported(d1,d2)) {                                                           \
-    std::string msg = "P2P access check failed between dev1:" + std::to_string(d1) + ",dev2:" +    \
-                                                                std::to_string(d2);                \
+  if (!HipTest::isP2PSupported(d1, d2)) {                                                          \
+    std::string msg = "P2P access check failed between dev1:" + std::to_string(d1) +               \
+        ",dev2:" + std::to_string(d2);                                                             \
     HipTest::HIP_SKIP_TEST(msg.c_str());                                                           \
     return;                                                                                        \
   }                                                                                                \

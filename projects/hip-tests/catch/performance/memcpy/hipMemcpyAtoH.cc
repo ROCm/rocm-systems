@@ -28,9 +28,7 @@ THE SOFTWARE.
 class MemcpyAtoHBenchmark : public Benchmark<MemcpyAtoHBenchmark> {
  public:
   void operator()(void* dst, hipArray_t src_array, size_t allocation_size) {
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpyAtoH(dst, src_array, 0, allocation_size));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyAtoH(dst, src_array, 0, allocation_size)); }
   }
 };
 

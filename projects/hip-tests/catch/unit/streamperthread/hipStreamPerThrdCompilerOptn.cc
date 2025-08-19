@@ -30,34 +30,33 @@ THE SOFTWARE.
 namespace cg = cooperative_groups;
 
 namespace DefltStrmPT {
-  int64_t N = 1024 * 1024 * 100;
-  int64_t Sz = N * sizeof(int64_t);
-  int64_t *DevA, *HstA, *HstRes;
-  int64_t OneMB = 1024 * 1024;
-  int64_t OneMBSz = OneMB * sizeof(int64_t);
-  hipStream_t Strm;
-  int clockrate, CONST = 123;
-  size_t numH = 1024, numW = 1024;
-  size_t pitch_A, width = numW * sizeof(int64_t);
-  size_t sizeElements = width * numH;
-  size_t elements = numW * numH;
+int64_t N = 1024 * 1024 * 100;
+int64_t Sz = N * sizeof(int64_t);
+int64_t *DevA, *HstA, *HstRes;
+int64_t OneMB = 1024 * 1024;
+int64_t OneMBSz = OneMB * sizeof(int64_t);
+hipStream_t Strm;
+int clockrate, CONST = 123;
+size_t numH = 1024, numW = 1024;
+size_t pitch_A, width = numW * sizeof(int64_t);
+size_t sizeElements = width * numH;
+size_t elements = numW * numH;
 }  // namespace DefltStrmPT
 
 __device__ int64_t globalInDStrmPT[1024 * 1024];
 __managed__ int SigComplte = 0;
 
 // Kernel codes
-__global__ void DefltStrmPT_Square(int64_t *C_d, int64_t N) {
-    int64_t offset = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x);
-    int64_t stride = hipBlockDim_x * hipGridDim_x;
+__global__ void DefltStrmPT_Square(int64_t* C_d, int64_t N) {
+  int64_t offset = (hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x);
+  int64_t stride = hipBlockDim_x * hipGridDim_x;
 
-    for (int64_t i = offset; i < N; i += stride) {
-        C_d[i] = C_d[i] * C_d[i];
-    }
+  for (int64_t i = offset; i < N; i += stride) {
+    C_d[i] = C_d[i] * C_d[i];
+  }
 }
 
-__global__ void Wait_Kernel3(int clockrate, uint64_t WaitSecs,
-                             int PassSignal = 0) {
+__global__ void Wait_Kernel3(int clockrate, uint64_t WaitSecs, int PassSignal = 0) {
   uint64_t num_cycles = WaitSecs * clockrate * 1000;
   uint64_t start = clock64(), cycles = 0;
   while (cycles < num_cycles) {
@@ -68,88 +67,83 @@ __global__ void Wait_Kernel3(int clockrate, uint64_t WaitSecs,
   }
 }
 
-static __global__ void notifiedKernel(volatile unsigned int *notified, int PassSignal = 0) {
-  while (*notified == 0) {} // wait until notified to exit.
+static __global__ void notifiedKernel(volatile unsigned int* notified, int PassSignal = 0) {
+  while (*notified == 0) {
+  }  // wait until notified to exit.
   if (PassSignal) {
     SigComplte = 1;
   }
 }
-__global__ void DefltStrmPT_Test_gws(uint* buf, uint bufSize,
-                                       int64_t* tmpBuf, int64_t* result) {
-    extern __shared__ int64_t tmp[];
-    uint offset = blockIdx.x * blockDim.x + threadIdx.x;
-    uint stride = gridDim.x  * blockDim.x;
-    cg::grid_group gg = cg::this_grid();
+__global__ void DefltStrmPT_Test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_t* result) {
+  extern __shared__ int64_t tmp[];
+  uint offset = blockIdx.x * blockDim.x + threadIdx.x;
+  uint stride = gridDim.x * blockDim.x;
+  cg::grid_group gg = cg::this_grid();
 
-    int64_t sum = 0;
-    for (uint i = offset; i < bufSize; i += stride) {
-        sum += buf[i];
+  int64_t sum = 0;
+  for (uint i = offset; i < bufSize; i += stride) {
+    sum += buf[i];
+  }
+  tmp[threadIdx.x] = sum;
+
+  __syncthreads();
+
+  if (threadIdx.x == 0) {
+    sum = 0;
+    for (uint i = 0; i < blockDim.x; i++) {
+      sum += tmp[i];
     }
-    tmp[threadIdx.x] = sum;
+    tmpBuf[blockIdx.x] = sum;
+  }
 
-    __syncthreads();
+  gg.sync();
 
-    if (threadIdx.x == 0) {
-        sum = 0;
-        for (uint i = 0; i < blockDim.x; i++) {
-            sum += tmp[i];
-        }
-        tmpBuf[blockIdx.x] = sum;
+  if (offset == 0) {
+    for (uint i = 1; i < gridDim.x; ++i) {
+      sum += tmpBuf[i];
     }
-
-    gg.sync();
-
-    if (offset == 0) {
-        for (uint i = 1; i < gridDim.x; ++i) {
-          sum += tmpBuf[i];
-       }
-       *result = sum;
-    }
+    *result = sum;
+  }
 }
 
 float DefaultPT2_Memcpy_MemSet(int CpyAsync, int MemSetAsync) {
   bool IfTstPassed = true;
-  DefltStrmPT::HstA = reinterpret_cast<int64_t*> (malloc(DefltStrmPT::Sz));
-  DefltStrmPT::HstRes = reinterpret_cast<int64_t*> (malloc(DefltStrmPT::Sz));
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate),
-            hipDeviceAttributeMemoryClockRate, 0));
+  DefltStrmPT::HstA = reinterpret_cast<int64_t*>(malloc(DefltStrmPT::Sz));
+  DefltStrmPT::HstRes = reinterpret_cast<int64_t*>(malloc(DefltStrmPT::Sz));
+  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
   HIP_CHECK(hipMalloc(&(DefltStrmPT::DevA), DefltStrmPT::Sz));
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
     DefltStrmPT::HstA[i] = DefltStrmPT::CONST;
   }
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   if (CpyAsync) {
-    HIP_CHECK(hipMemcpyAsync(DefltStrmPT::DevA, DefltStrmPT::HstA,
-                             DefltStrmPT::Sz, hipMemcpyHostToDevice,
-                             DefltStrmPT::Strm));
+    HIP_CHECK(hipMemcpyAsync(DefltStrmPT::DevA, DefltStrmPT::HstA, DefltStrmPT::Sz,
+                             hipMemcpyHostToDevice, DefltStrmPT::Strm));
     HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
   } else {
-    HIP_CHECK(hipMemcpy(DefltStrmPT::DevA, DefltStrmPT::HstA,
-                        DefltStrmPT::Sz, hipMemcpyHostToDevice));
+    HIP_CHECK(
+        hipMemcpy(DefltStrmPT::DevA, DefltStrmPT::HstA, DefltStrmPT::Sz, hipMemcpyHostToDevice));
   }
-  DefltStrmPT_Square<<<(DefltStrmPT::N/256 + 1), 256, 0, DefltStrmPT::Strm>>>
-                      (DefltStrmPT::DevA, DefltStrmPT::N);
+  DefltStrmPT_Square<<<(DefltStrmPT::N / 256 + 1), 256, 0, DefltStrmPT::Strm>>>(DefltStrmPT::DevA,
+                                                                                DefltStrmPT::N);
   HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
-  HIP_CHECK(hipMemcpy(DefltStrmPT::HstRes, DefltStrmPT::DevA,
-                      DefltStrmPT::Sz, hipMemcpyDeviceToHost));
+  HIP_CHECK(
+      hipMemcpy(DefltStrmPT::HstRes, DefltStrmPT::DevA, DefltStrmPT::Sz, hipMemcpyDeviceToHost));
   // Verifying the result
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
-    if (DefltStrmPT::HstRes[i] !=
-       (DefltStrmPT::HstA[i] * DefltStrmPT::HstA[i])) {
+    if (DefltStrmPT::HstRes[i] != (DefltStrmPT::HstA[i] * DefltStrmPT::HstA[i])) {
       IfTstPassed = false;
     }
   }
   if (MemSetAsync) {
-    HIP_CHECK(hipMemsetAsync(DefltStrmPT::DevA, 0, DefltStrmPT::Sz,
-                             DefltStrmPT::Strm));
+    HIP_CHECK(hipMemsetAsync(DefltStrmPT::DevA, 0, DefltStrmPT::Sz, DefltStrmPT::Strm));
     HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
   } else {
-    HIP_CHECK(hipMemset(DefltStrmPT::DevA, 0,
-                        DefltStrmPT::Sz));
+    HIP_CHECK(hipMemset(DefltStrmPT::DevA, 0, DefltStrmPT::Sz));
   }
   // Copying the device memory to host to check if Memset is successful
-  HIP_CHECK(hipMemcpy(DefltStrmPT::HstA, DefltStrmPT::DevA,
-                      DefltStrmPT::Sz, hipMemcpyDeviceToHost));
+  HIP_CHECK(
+      hipMemcpy(DefltStrmPT::HstA, DefltStrmPT::DevA, DefltStrmPT::Sz, hipMemcpyDeviceToHost));
   // verifying if memset was successful
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
     if (DefltStrmPT::HstA[i] != 0) {
@@ -173,8 +167,7 @@ void DefaultPT2_Memset2D(int Async) {
   size_t elements = numW * numH;
   char *A_d, *A_h;
 
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width,
-                          numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, numH));
   A_h = reinterpret_cast<char*>(malloc(sizeElements));
   REQUIRE(A_h != nullptr);
 
@@ -191,13 +184,12 @@ void DefaultPT2_Memset2D(int Async) {
   } else {
     HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, numW, numH));
   }
-  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH,
-                       hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2D(A_h, width, A_d, pitch_A, numW, numH, hipMemcpyDeviceToHost));
 
   for (size_t i = 0; i < elements; i++) {
     if (A_h[i] != memsetval) {
-      INFO("Memset2D mismatch at index:" << i << " computed:"
-                                     << A_h[i] << " memsetval:" << memsetval);
+      INFO("Memset2D mismatch at index:" << i << " computed:" << A_h[i]
+                                         << " memsetval:" << memsetval);
       REQUIRE(false);
     }
   }
@@ -215,17 +207,17 @@ void PerThrdDefltStrm_Memset3D(int Async) {
   size_t width = numW * sizeof(char);
   size_t sizeElements = width * numH * depth;
   size_t elements = numW * numH * depth;
-  char *A_h;
+  char* A_h;
 
   hipExtent extent = make_hipExtent(width, numH, depth);
   hipPitchedPtr devPitchedPtr;
 
   HIP_CHECK(hipMalloc3D(&devPitchedPtr, extent));
-  A_h = reinterpret_cast<char *>(malloc(sizeElements));
+  A_h = reinterpret_cast<char*>(malloc(sizeElements));
   if (A_h == nullptr) REQUIRE(false);
 
   for (size_t i = 0; i < elements; i++) {
-      A_h[i] = 1;
+    A_h[i] = 1;
   }
 
   if (Async) {
@@ -240,7 +232,7 @@ void PerThrdDefltStrm_Memset3D(int Async) {
   hipMemcpy3DParms myparms{};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.dstPtr = make_hipPitchedPtr(A_h, width , numW, numH);
+  myparms.dstPtr = make_hipPitchedPtr(A_h, width, numW, numH);
   myparms.srcPtr = devPitchedPtr;
   myparms.extent = extent;
 #if HT_NVIDIA
@@ -251,11 +243,11 @@ void PerThrdDefltStrm_Memset3D(int Async) {
   HIP_CHECK(hipMemcpy3D(&myparms));
 
   for (size_t i = 0; i < elements; i++) {
-      if (A_h[i] != memsetval) {
-        INFO("Memset3D mismatch at index:" << i << " computed:"
-                                      << A_h[i] << " memsetval:" << memsetval);
-        REQUIRE(false);
-      }
+    if (A_h[i] != memsetval) {
+      INFO("Memset3D mismatch at index:" << i << " computed:" << A_h[i]
+                                         << " memsetval:" << memsetval);
+      REQUIRE(false);
+    }
   }
   HIP_CHECK(hipFree(devPitchedPtr.ptr));
   free(A_h);
@@ -263,7 +255,7 @@ void PerThrdDefltStrm_Memset3D(int Async) {
 
 
 void DefaultPT2_StrmQuery() {
-  unsigned int *notified = nullptr;
+  unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
@@ -279,8 +271,7 @@ void DefaultPT2_StrmQuery() {
 
 
 void DefaultPT2_StreamSync() {
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate),
-          hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   // Calling hipStreamSync on user created stream object
   Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 1);
@@ -302,7 +293,7 @@ void DefaultPT2_StrmWaitEvent() {
 
   hipEvent_t evt;
   hipStream_t Strm1;
-  unsigned int *notified = nullptr;
+  unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
@@ -332,7 +323,7 @@ void DefaultPT2_StrmWaitEvent() {
 void DefaultPT2_EvtQuery() {
   hipEvent_t evt, evt1;
   hipError_t err;
-  unsigned int *notified = nullptr;
+  unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
@@ -348,7 +339,7 @@ void DefaultPT2_EvtQuery() {
   HIP_CHECK(hipEventRecord(evt1, 0));
   int Got_hipSuccess = 0;  // 0 for no, 1 for yes
   std::this_thread::sleep_for(std::chrono::milliseconds(500));
-  *notified = 1; // notify to exit
+  *notified = 1;  // notify to exit
   std::chrono::time_point start = std::chrono::steady_clock::now();
   while (true) {
     err = hipEventQuery(evt1);
@@ -371,33 +362,31 @@ void DefaultPT2_EvtQuery() {
 
 
 void Default_LaunchKernel(int NullStrm) {
-  DefltStrmPT::N =  DefltStrmPT::N/4;
+  DefltStrmPT::N = DefltStrmPT::N / 4;
   DefltStrmPT::Sz = DefltStrmPT::N * sizeof(int64_t);
-  DefltStrmPT::HstA = reinterpret_cast<int64_t*> (malloc(DefltStrmPT::Sz));
+  DefltStrmPT::HstA = reinterpret_cast<int64_t*>(malloc(DefltStrmPT::Sz));
   HIP_CHECK(hipMalloc(&(DefltStrmPT::DevA), DefltStrmPT::Sz));
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
     DefltStrmPT::HstA[i] = DefltStrmPT::CONST;
   }
-  HIP_CHECK(hipMemcpy(DefltStrmPT::DevA, DefltStrmPT::HstA, DefltStrmPT::Sz,
-            hipMemcpyHostToDevice));
+  HIP_CHECK(
+      hipMemcpy(DefltStrmPT::DevA, DefltStrmPT::HstA, DefltStrmPT::Sz, hipMemcpyHostToDevice));
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   unsigned ThrdsPerBlk = 32;
-  unsigned Blocks = ((DefltStrmPT::N + ThrdsPerBlk - 1)/ThrdsPerBlk);
-  void *Args[] = {&(DefltStrmPT::DevA), &(DefltStrmPT::N)};
+  unsigned Blocks = ((DefltStrmPT::N + ThrdsPerBlk - 1) / ThrdsPerBlk);
+  void* Args[] = {&(DefltStrmPT::DevA), &(DefltStrmPT::N)};
   // launch Kernel
   if (NullStrm) {
-    HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square,
-             dim3(Blocks, 1, 1), dim3(ThrdsPerBlk, 1, 1), Args, 0,
-             0));
+    HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square, dim3(Blocks, 1, 1),
+                              dim3(ThrdsPerBlk, 1, 1), Args, 0, 0));
     HIP_CHECK(hipStreamSynchronize(0));
   } else {
-    HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square,
-           dim3(Blocks, 1, 1), dim3(ThrdsPerBlk, 1, 1), Args, 0,
-           DefltStrmPT::Strm));
+    HIP_CHECK(hipLaunchKernel((const void*)DefltStrmPT_Square, dim3(Blocks, 1, 1),
+                              dim3(ThrdsPerBlk, 1, 1), Args, 0, DefltStrmPT::Strm));
     HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
   }
-  HIP_CHECK(hipMemcpy(DefltStrmPT::HstA, DefltStrmPT::DevA, DefltStrmPT::Sz,
-            hipMemcpyDeviceToHost));
+  HIP_CHECK(
+      hipMemcpy(DefltStrmPT::HstA, DefltStrmPT::DevA, DefltStrmPT::Sz, hipMemcpyDeviceToHost));
   for (int64_t i = 0; i < DefltStrmPT::N; ++i) {
     if (DefltStrmPT::HstA[i] != (DefltStrmPT::CONST * DefltStrmPT::CONST)) {
       REQUIRE(false);
@@ -411,7 +400,7 @@ void Default_LaunchKernel(int NullStrm) {
 
 void DefaultPT2_LaunchCooperativeKernel(int NullStrm) {
   bool IfTestPassed = true;
-  uint32_t *dA;
+  uint32_t* dA;
   int64_t *dB, *dC;
   uint32_t BufferSizeInDwords = 448 * 1024 * 1024;
   uint32_t* init = new uint32_t[BufferSizeInDwords];
@@ -427,49 +416,45 @@ void DefaultPT2_LaunchCooperativeKernel(int NullStrm) {
   HIPCHECK(hipMemcpy(dA, init, SIZE, hipMemcpyHostToDevice));
 
   dim3 dimBlock = dim3(1);
-  dim3 dimGrid  = dim3(1);
+  dim3 dimGrid = dim3(1);
   int numBlocks = 0;
   dimBlock.x = 32;
   // Calculate the device occupancy to know how many blocks can be run
   //  concurrently
-  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks,
-                  DefltStrmPT_Test_gws,
-                  dimBlock.x * dimBlock.y * dimBlock.z,
-                  dimBlock.x * sizeof(int64_t)));
+  HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, DefltStrmPT_Test_gws,
+                                                         dimBlock.x * dimBlock.y * dimBlock.z,
+                                                         dimBlock.x * sizeof(int64_t)));
   dimGrid.x = deviceProp.multiProcessorCount * std::min(numBlocks, 32);
-  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&dB),
-                     dimGrid.x * sizeof(int64_t)));
+  HIPCHECK(hipMalloc(reinterpret_cast<void**>(&dB), dimGrid.x * sizeof(int64_t)));
 
-  void *params[4];
+  void* params[4];
   params[0] = reinterpret_cast<void*>(&dA);
   params[1] = reinterpret_cast<void*>(&BufferSizeInDwords);
   params[2] = reinterpret_cast<void*>(&dB);
   params[3] = reinterpret_cast<void*>(&dC);
   if (NullStrm) {
-    HIPCHECK(hipLaunchCooperativeKernel(
-             reinterpret_cast<void*>(DefltStrmPT_Test_gws),
-             dimGrid, dimBlock, params, dimBlock.x * sizeof(int64_t), 0));
+    HIPCHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(DefltStrmPT_Test_gws), dimGrid,
+                                        dimBlock, params, dimBlock.x * sizeof(int64_t), 0));
     HIP_CHECK(hipStreamSynchronize(0));
   } else {
-    HIPCHECK(hipLaunchCooperativeKernel(
-             reinterpret_cast<void*>(DefltStrmPT_Test_gws),
-             dimGrid, dimBlock, params, dimBlock.x * sizeof(int64_t),
-             DefltStrmPT::Strm));
+    HIPCHECK(hipLaunchCooperativeKernel(reinterpret_cast<void*>(DefltStrmPT_Test_gws), dimGrid,
+                                        dimBlock, params, dimBlock.x * sizeof(int64_t),
+                                        DefltStrmPT::Strm));
     HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
   }
   HIPCHECK(hipMemcpy(init, dC, sizeof(int64_t), hipMemcpyDeviceToHost));
 
   if (*dC != (((int64_t)(BufferSizeInDwords) * (BufferSizeInDwords - 1)) / 2)) {
-    std::cout << "Data validation failed for grid size = " << dimGrid.x <<
-    " and block size = " << dimBlock.x << "\n";
-        std::cout << "Test failed! \n";
-        IfTestPassed = false;
+    std::cout << "Data validation failed for grid size = " << dimGrid.x
+              << " and block size = " << dimBlock.x << "\n";
+    std::cout << "Test failed! \n";
+    IfTestPassed = false;
   }
   HIPCHECK(hipStreamDestroy(DefltStrmPT::Strm));
   HIPCHECK(hipHostFree(dC));
   HIPCHECK(hipFree(dB));
   HIPCHECK(hipFree(dA));
-  delete [] init;
+  delete[] init;
   REQUIRE(IfTestPassed);
 }
 
@@ -483,8 +468,7 @@ void DefaultPT2_StrmGetFlag() {
     REQUIRE(false);
   }
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
-  HIP_CHECK(hipStreamCreateWithFlags(&(DefltStrmPT::Strm),
-                                     hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&(DefltStrmPT::Strm), hipStreamNonBlocking));
   flag = 9999;
   HIP_CHECK(hipStreamGetFlags(DefltStrmPT::Strm, &flag));
   if (flag != 1) {
@@ -505,16 +489,14 @@ void DefaultPT2_StrmGetPriority() {
   for (int hipStrmFlg = 0; hipStrmFlg < 2; ++hipStrmFlg) {
     for (int Priority = low; Priority <= high; ++Priority) {
       if (hipStrmFlg == 0) {
-        HIP_CHECK(hipStreamCreateWithPriority(&(DefltStrmPT::Strm),
-                  hipStreamDefault, Priority));
+        HIP_CHECK(hipStreamCreateWithPriority(&(DefltStrmPT::Strm), hipStreamDefault, Priority));
       } else {
-        HIP_CHECK(hipStreamCreateWithPriority(&(DefltStrmPT::Strm),
-                  hipStreamNonBlocking, Priority));
+        HIP_CHECK(
+            hipStreamCreateWithPriority(&(DefltStrmPT::Strm), hipStreamNonBlocking, Priority));
       }
       HIP_CHECK(hipStreamGetPriority(DefltStrmPT::Strm, &ObsrvdPriority));
       if (ObsrvdPriority != Priority) {
-        INFO("Expected priority: %d" << Priority << " Observed Priority: %d\n"
-             << ObsrvdPriority);
+        INFO("Expected priority: %d" << Priority << " Observed Priority: %d\n" << ObsrvdPriority);
         INFO("Test Failed!\n\n");
         REQUIRE(false);
       }
@@ -524,28 +506,27 @@ void DefaultPT2_StrmGetPriority() {
   INFO("Checking priority on null stream!!\n");
   HIP_CHECK(hipStreamGetPriority(0, &ObsrvdPriority));
   if (ObsrvdPriority != 0) {
-        INFO("Expected priority: 0, Observed Priority: %d\n"
-             << ObsrvdPriority);
-        INFO("Test Failed!\n\n");
-        REQUIRE(false);
+    INFO("Expected priority: 0, Observed Priority: %d\n" << ObsrvdPriority);
+    INFO("Test Failed!\n\n");
+    REQUIRE(false);
   }
 }
 
 
 void DefaultPT2_hipMemcpyFromSymbol() {
-  int64_t *Hst = nullptr;
+  int64_t* Hst = nullptr;
   HIP_CHECK(hipHostMalloc(&(Hst), DefltStrmPT::OneMBSz));
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
   for (int i = 0; i < DefltStrmPT::OneMB; ++i) {
     Hst[i] = DefltStrmPT::CONST;
   }
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(globalInDStrmPT), Hst,
-            DefltStrmPT::OneMBSz, 0, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(globalInDStrmPT), Hst, DefltStrmPT::OneMBSz, 0,
+                              hipMemcpyHostToDevice));
   for (int i = 0; i < DefltStrmPT::OneMB; ++i) {
     Hst[i] = 0;
   }
-  HIP_CHECK(hipMemcpyFromSymbol(Hst, HIP_SYMBOL(globalInDStrmPT),
-            DefltStrmPT::OneMBSz, 0, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpyFromSymbol(Hst, HIP_SYMBOL(globalInDStrmPT), DefltStrmPT::OneMBSz, 0,
+                                hipMemcpyDeviceToHost));
   for (int i = 0; i < DefltStrmPT::OneMB; ++i) {
     if (Hst[i] != DefltStrmPT::CONST) {
       REQUIRE(false);
@@ -560,46 +541,42 @@ void DefaultPT2_hipMemcpy2D(int Async) {
   DefltStrmPT::numW = 1024;
   DefltStrmPT::width = DefltStrmPT::numW * sizeof(int64_t);
   HIP_CHECK(hipHostMalloc(&(DefltStrmPT::HstA),
-            (DefltStrmPT::numH * DefltStrmPT::numW * sizeof(int64_t))));
+                          (DefltStrmPT::numH * DefltStrmPT::numW * sizeof(int64_t))));
   HIP_CHECK(hipHostMalloc(&(DefltStrmPT::HstRes),
-            (DefltStrmPT::numH * DefltStrmPT::numW * sizeof(int64_t))));
+                          (DefltStrmPT::numH * DefltStrmPT::numW * sizeof(int64_t))));
   DefltStrmPT::width = DefltStrmPT::numW * sizeof(int64_t);
   for (size_t row = 0; row < DefltStrmPT::numH; ++row) {
     for (size_t column = 0; column < DefltStrmPT::numW; ++column) {
-      DefltStrmPT::HstA[(row * DefltStrmPT::numW) + column] =
-                   DefltStrmPT::CONST;
+      DefltStrmPT::HstA[(row * DefltStrmPT::numW) + column] = DefltStrmPT::CONST;
       DefltStrmPT::HstRes[(row * DefltStrmPT::numW) + column] = 0;
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&(DefltStrmPT::DevA)),
-            &(DefltStrmPT::pitch_A), DefltStrmPT::width, DefltStrmPT::numH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&(DefltStrmPT::DevA)), &(DefltStrmPT::pitch_A),
+                           DefltStrmPT::width, DefltStrmPT::numH));
   if (Async) {
     HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
-    HIP_CHECK(hipMemcpy2DAsync(DefltStrmPT::DevA, DefltStrmPT::pitch_A,
-            DefltStrmPT::HstA, DefltStrmPT::numW*sizeof(int64_t),
-            DefltStrmPT::numW*sizeof(int64_t), DefltStrmPT::numH,
-            hipMemcpyHostToDevice, DefltStrmPT::Strm));
-    HIP_CHECK(hipMemcpy2DAsync(DefltStrmPT::HstRes,
-            DefltStrmPT::numW*sizeof(int64_t),
-            DefltStrmPT::DevA, DefltStrmPT::pitch_A,
-            DefltStrmPT::numW*sizeof(int64_t), DefltStrmPT::numH,
-            hipMemcpyDeviceToHost, DefltStrmPT::Strm));
+    HIP_CHECK(hipMemcpy2DAsync(DefltStrmPT::DevA, DefltStrmPT::pitch_A, DefltStrmPT::HstA,
+                               DefltStrmPT::numW * sizeof(int64_t),
+                               DefltStrmPT::numW * sizeof(int64_t), DefltStrmPT::numH,
+                               hipMemcpyHostToDevice, DefltStrmPT::Strm));
+    HIP_CHECK(hipMemcpy2DAsync(DefltStrmPT::HstRes, DefltStrmPT::numW * sizeof(int64_t),
+                               DefltStrmPT::DevA, DefltStrmPT::pitch_A,
+                               DefltStrmPT::numW * sizeof(int64_t), DefltStrmPT::numH,
+                               hipMemcpyDeviceToHost, DefltStrmPT::Strm));
     HIP_CHECK(hipStreamSynchronize(DefltStrmPT::Strm));
     HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
   } else {
-    HIP_CHECK(hipMemcpy2D(DefltStrmPT::DevA, DefltStrmPT::pitch_A,
-              DefltStrmPT::HstA, DefltStrmPT::numW*sizeof(int64_t),
-              DefltStrmPT::numW*sizeof(int64_t), DefltStrmPT::numH,
-              hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy2D(DefltStrmPT::HstRes,
-              DefltStrmPT::numW*sizeof(int64_t), DefltStrmPT::DevA,
-              DefltStrmPT::pitch_A, DefltStrmPT::numW*sizeof(int64_t),
-              DefltStrmPT::numH, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy2D(DefltStrmPT::DevA, DefltStrmPT::pitch_A, DefltStrmPT::HstA,
+                          DefltStrmPT::numW * sizeof(int64_t), DefltStrmPT::numW * sizeof(int64_t),
+                          DefltStrmPT::numH, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy2D(DefltStrmPT::HstRes, DefltStrmPT::numW * sizeof(int64_t),
+                          DefltStrmPT::DevA, DefltStrmPT::pitch_A,
+                          DefltStrmPT::numW * sizeof(int64_t), DefltStrmPT::numH,
+                          hipMemcpyDeviceToHost));
   }
   for (size_t row = 0; row < DefltStrmPT::numH; ++row) {
     for (size_t column = 0; column < DefltStrmPT::numW; ++column) {
-      if (DefltStrmPT::HstRes[(row * DefltStrmPT::numW) + column]
-          != DefltStrmPT::CONST) {
+      if (DefltStrmPT::HstRes[(row * DefltStrmPT::numW) + column] != DefltStrmPT::CONST) {
         REQUIRE(false);
       }
     }
@@ -621,13 +598,11 @@ void DefaultPT2_hipMemcpy2DToArray() {
     Hptr[i] = DefltStrmPT::CONST;
   }
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-  HIP_CHECK(hipMallocArray(&(Dptr), &desc, DefltStrmPT::numW,
-                           DefltStrmPT::numH, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(Dptr, 0, 0, Hptr, DefltStrmPT::width,
-                             DefltStrmPT::width,  DefltStrmPT::numH,
-                             hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy2DFromArray(HRes, DefltStrmPT::width, Dptr, 0, 0,
-            DefltStrmPT::width, DefltStrmPT::numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMallocArray(&(Dptr), &desc, DefltStrmPT::numW, DefltStrmPT::numH, hipArrayDefault));
+  HIP_CHECK(hipMemcpy2DToArray(Dptr, 0, 0, Hptr, DefltStrmPT::width, DefltStrmPT::width,
+                               DefltStrmPT::numH, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DFromArray(HRes, DefltStrmPT::width, Dptr, 0, 0, DefltStrmPT::width,
+                                 DefltStrmPT::numH, hipMemcpyDeviceToHost));
   // verifying the result
   for (size_t i = 0; i < DefltStrmPT::numW * DefltStrmPT::numH; ++i) {
     if (HRes[i] != DefltStrmPT::CONST) {
@@ -646,26 +621,20 @@ float DefaultPT2_hipMemcpy2DFromArray() {
   DefltStrmPT::numH = 1024;
   DefltStrmPT::numW = 1024;
   DefltStrmPT::width = DefltStrmPT::numW * sizeof(float);
-  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate),
-          hipDeviceAttributeMemoryClockRate, 0));
-  HIP_CHECK(hipHostMalloc(&(Hptr_A),
-            (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
-  HIP_CHECK(hipHostMalloc(&(Hptr_B),
-            (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
+  HIP_CHECK(hipDeviceGetAttribute(&(DefltStrmPT::clockrate), hipDeviceAttributeMemoryClockRate, 0));
+  HIP_CHECK(hipHostMalloc(&(Hptr_A), (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
+  HIP_CHECK(hipHostMalloc(&(Hptr_B), (DefltStrmPT::width * DefltStrmPT::numH * sizeof(float))));
   for (size_t i = 0; i < (DefltStrmPT::width * DefltStrmPT::numH); ++i) {
     Hptr_A[i] = DefltStrmPT::CONST;
   }
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
-  HIP_CHECK(hipMallocArray(&(Dptr), &desc, DefltStrmPT::numW,
-                           DefltStrmPT::numH, hipArrayDefault));
+  HIP_CHECK(hipMallocArray(&(Dptr), &desc, DefltStrmPT::numW, DefltStrmPT::numH, hipArrayDefault));
   HIP_CHECK(hipStreamCreate(&(DefltStrmPT::Strm)));
-  HIP_CHECK(hipMemcpy2DToArray(Dptr, 0, 0, Hptr_A, DefltStrmPT::width,
-                             DefltStrmPT::width,  DefltStrmPT::numH,
-                             hipMemcpyHostToDevice));
-  Wait_Kernel3 <<< 1, 1, 0, DefltStrmPT::Strm >>> (DefltStrmPT::clockrate,
-                                                      1);
-  HIP_CHECK(hipMemcpy2DFromArray(Hptr_B, DefltStrmPT::width, Dptr, 0, 0,
-              DefltStrmPT::width, DefltStrmPT::numH, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy2DToArray(Dptr, 0, 0, Hptr_A, DefltStrmPT::width, DefltStrmPT::width,
+                               DefltStrmPT::numH, hipMemcpyHostToDevice));
+  Wait_Kernel3<<<1, 1, 0, DefltStrmPT::Strm>>>(DefltStrmPT::clockrate, 1);
+  HIP_CHECK(hipMemcpy2DFromArray(Hptr_B, DefltStrmPT::width, Dptr, 0, 0, DefltStrmPT::width,
+                                 DefltStrmPT::numH, hipMemcpyDeviceToHost));
   HIP_CHECK(hipStreamDestroy(DefltStrmPT::Strm));
   HIP_CHECK(hipFreeArray(Dptr));
   HIP_CHECK(hipHostFree(Hptr_A));
@@ -685,22 +654,21 @@ void DefaultPT2_hipMemcpy3D() {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        Hptr[i*width*height + j*width +k] = i*width*height + j*width + k;
+        Hptr[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(float)*8, 0,
-                       0, 0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc =
+      hipCreateChannelDesc(sizeof(float) * 8, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t arr;
 
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc,
-            make_hipExtent(width, height, depth), hipArrayDefault));
-  hipMemcpy3DParms myparms{0, {0, 0, 0}, {0, 0, 0, 0}, 0, {0, 0, 0},
-                           {0, 0, 0, 0}, {0, 0, 0}, hipMemcpyDefault};
+  HIP_CHECK(
+      hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth), hipArrayDefault));
+  hipMemcpy3DParms myparms{0,         {0, 0, 0},    {0, 0, 0, 0}, 0,
+                           {0, 0, 0}, {0, 0, 0, 0}, {0, 0, 0},    hipMemcpyDefault};
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.srcPtr = make_hipPitchedPtr(Hptr, width * sizeof(float), width,
-                                      height);
+  myparms.srcPtr = make_hipPitchedPtr(Hptr, width * sizeof(float), width, height);
   myparms.dstArray = arr;
   myparms.extent = extent;
 
@@ -716,8 +684,7 @@ void DefaultPT2_hipMemcpy3D() {
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.dstPtr = make_hipPitchedPtr(HRes, width * sizeof(float), width,
-                                      height);
+  myparms.dstPtr = make_hipPitchedPtr(HRes, width * sizeof(float), width, height);
   myparms.srcArray = arr;
   myparms.extent = extent;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -730,7 +697,7 @@ void DefaultPT2_hipMemcpy3D() {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        if (HRes[i*width*height + j*width +k] != i*width*height + j*width + k) {
+        if (HRes[i * width * height + j * width + k] != i * width * height + j * width + k) {
           REQUIRE(false);
         }
       }
@@ -761,13 +728,9 @@ TEST_CASE("Unit_hipStrmPerThrdDefault") {
     PerThrdDefltStrm_Memset3D(1);
   }
 
-  SECTION("Testing_hipStreamQuery()") {
-    DefaultPT2_StrmQuery();
-  }
+  SECTION("Testing_hipStreamQuery()") { DefaultPT2_StrmQuery(); }
 
-  SECTION("Testing_hipStreamSynchronize()") {
-    DefaultPT2_StreamSync();
-  }
+  SECTION("Testing_hipStreamSynchronize()") { DefaultPT2_StreamSync(); }
 
   SECTION("Testing_hipLaunchKernel()") {
     // launch with null stream
@@ -790,36 +753,22 @@ TEST_CASE("Unit_hipStrmPerThrdDefault") {
     INFO(" the test Testing_hipLaunchCooperativeKernel()");
   }
 
-  SECTION("Testing_StrmWaitEvent()") {
-    DefaultPT2_StrmWaitEvent();
-  }
+  SECTION("Testing_StrmWaitEvent()") { DefaultPT2_StrmWaitEvent(); }
 
-  SECTION("Testing_hipStreamGetFlag()") {
-    DefaultPT2_StrmGetFlag();
-  }
+  SECTION("Testing_hipStreamGetFlag()") { DefaultPT2_StrmGetFlag(); }
 
-  SECTION("Testing_hipStreamGetPriority()") {
-    DefaultPT2_StrmGetPriority();
-  }
+  SECTION("Testing_hipStreamGetPriority()") { DefaultPT2_StrmGetPriority(); }
 
-  SECTION("Testing_hipMemcpyFrom/To/Symbol()") {
-    DefaultPT2_hipMemcpyFromSymbol();
-  }
+  SECTION("Testing_hipMemcpyFrom/To/Symbol()") { DefaultPT2_hipMemcpyFromSymbol(); }
 
   SECTION("Testing_hipMemcpy2D() & its Async version") {
     DefaultPT2_hipMemcpy2D(0);
     DefaultPT2_hipMemcpy2D(1);
   }
 
-  SECTION("Testing_hipMemcpy2DToArray()") {
-    DefaultPT2_hipMemcpy2DToArray();
-  }
+  SECTION("Testing_hipMemcpy2DToArray()") { DefaultPT2_hipMemcpy2DToArray(); }
 
-  SECTION("Testing_hipMemcpy3D()") {
-    DefaultPT2_hipMemcpy3D();
-  }
+  SECTION("Testing_hipMemcpy3D()") { DefaultPT2_hipMemcpy3D(); }
 
-  SECTION("Testing_hipEventQuery()") {
-    DefaultPT2_EvtQuery();
-  }
+  SECTION("Testing_hipEventQuery()") { DefaultPT2_EvtQuery(); }
 }

@@ -31,8 +31,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <ios>
 
-#define MASK_SHIFT(x, n) \
-  (x & (static_cast<uint64_t>(1) << n)) >> n
+#define MASK_SHIFT(x, n) (x & (static_cast<uint64_t>(1) << n)) >> n
 
 const unsigned long long Every5thBit = 0x1084210842108421;
 const unsigned long long Every9thBit = 0x8040201008040201;
@@ -101,7 +100,9 @@ inline uint64_t get_active_mask(unsigned int warp_id, unsigned int warp_size) {
 }
 
 template <typename T, std::enable_if_t<std::is_integral<T>::value, bool> = true>
-inline T expandPrecision(int X) { return X; }
+inline T expandPrecision(int X) {
+  return X;
+}
 
 template <typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
 inline T expandPrecision(int X) {
@@ -126,57 +127,46 @@ inline void expandPrecision(T* Array, int size) {
 }
 
 template <typename T, std::enable_if_t<std::is_floating_point<T>::value, bool> = true>
-inline void expandPrecision(T *Array, int size) {
+inline void expandPrecision(T* Array, int size) {
   for (int i = 0; i != size; ++i) {
     Array[i] *= 3.141592653589793115997963468544185161590576171875;
   }
 }
 
-template <typename T>
-inline void initializeInput(T *Input, int size) {
-  int Values[] = {0, -1, 2, 3, 4, 5, -6, 7,
-                  8, -9, 10, 11, 12, 13, -14, 15,
-                  16, 17, -18, 19, 20, -21, 22, 23,
-                  24, 25, 26, -27, 28, 29, 30, 31,
-                  -32, 33, 34, 35, -36, 37, 38, -39,
-                  40, 41, 42, 43, -44, -45, 46, 47,
-                  48, 49, 50, -51, 52, 53, -54, 55,
-                  56, 57, -58, 59, 60, 61, 62, -63};
+template <typename T> inline void initializeInput(T* Input, int size) {
+  int Values[] = {0,   -1, 2,   3,   4,   5,   -6,  7,   8,  -9, 10,  11,  12,  13,  -14, 15,
+                  16,  17, -18, 19,  20,  -21, 22,  23,  24, 25, 26,  -27, 28,  29,  30,  31,
+                  -32, 33, 34,  35,  -36, 37,  38,  -39, 40, 41, 42,  43,  -44, -45, 46,  47,
+                  48,  49, 50,  -51, 52,  53,  -54, 55,  56, 57, -58, 59,  60,  61,  62,  -63};
 
   for (int i = 0; i != size; ++i) {
     Input[i] = expandPrecision<T>(Values[i]);
   }
 }
 
-template <typename T>
-inline void initializeExpected(T *Expected, int *Values, int size) {
+template <typename T> inline void initializeExpected(T* Expected, int* Values, int size) {
   for (int i = 0; i != size; ++i) {
     Expected[i] = expandPrecision<T>(Values[i]);
   }
 }
 
-template <typename T>
-inline bool compareEqual(T X, T Y) { return X == Y; }
+template <typename T> inline bool compareEqual(T X, T Y) { return X == Y; }
 
-template <>
-inline bool compareEqual(__half X, __half Y) {
+template <> inline bool compareEqual(__half X, __half Y) {
   return __half2float(X) == __half2float(Y);
 }
 
-template <>
-inline bool compareEqual(__half2 X, __half2 Y) {
+template <> inline bool compareEqual(__half2 X, __half2 Y) {
   return compareEqual(X.x, Y.x) && compareEqual(X.y, Y.y);
 }
 
-inline bool compareMaskEqual(unsigned long long *Actual, unsigned long long *Expected,
-                       int i, int warpSize) {
-  if (warpSize == 32)
-    return (unsigned)Actual[i] == (unsigned)Expected[i];
+inline bool compareMaskEqual(unsigned long long* Actual, unsigned long long* Expected, int i,
+                             int warpSize) {
+  if (warpSize == 32) return (unsigned)Actual[i] == (unsigned)Expected[i];
   return Actual[i] == Expected[i];
 }
 
-template <typename T>
-inline T alignUp(T num, size_t n) {
+template <typename T> inline T alignUp(T num, size_t n) {
   if (num % n == 0) {
     return num;
   }
@@ -184,80 +174,53 @@ inline T alignUp(T num, size_t n) {
   return ((num + n - 1) / n) * n;
 }
 
-template <class T>
-struct DistributionType {
+template <class T> struct DistributionType {
   using type = std::uniform_int_distribution<T>;
 };
 
 // there is no std::uniform_real_distribution for 'half' type, so we cast from
 // unsigned short, avoiding Nan and Infinity
-template <>
-struct DistributionType<__half> {
+template <> struct DistributionType<__half> {
   using type = std::uniform_int_distribution<unsigned short>;
 };
 
-template <>
-struct DistributionType<float> {
+template <> struct DistributionType<float> {
   using type = std::uniform_real_distribution<float>;
 };
 
-template <>
-struct DistributionType<double> {
+template <> struct DistributionType<double> {
   using type = std::uniform_real_distribution<double>;
 };
 
 
-template <class T>
-struct MinOp {
-  T operator()(const T& lhs, const T& rhs) const
-  {
-    return std::min(lhs, rhs);
-  }
+template <class T> struct MinOp {
+  T operator()(const T& lhs, const T& rhs) const { return std::min(lhs, rhs); }
 };
 
-template <class T>
-struct MaxOp {
-  T operator()(const T& lhs, const T& rhs) const
-  {
-    return std::max(lhs, rhs);
-  }
+template <class T> struct MaxOp {
+  T operator()(const T& lhs, const T& rhs) const { return std::max(lhs, rhs); }
 };
 
-template <class T>
-struct XorOp {
-  __host__ __device__ T operator()(const T& lhs, const T& rhs)
-  {
-    return (!lhs) != (!rhs) == 1;
-  }
+template <class T> struct XorOp {
+  __host__ __device__ T operator()(const T& lhs, const T& rhs) { return (!lhs) != (!rhs) == 1; }
 };
 
 // typeid(T).name() does seem to return a very descriptive name for primitive types,
 // at least on clang, so we roll out an equivalent
-template<class T>
-const char* typeToString()
-{
-  if (std::is_same<T, int>::value)
-    return "int";
-  if (std::is_same<T, unsigned int>::value)
-    return "unsigned int";
-  if (std::is_same<T, long long>::value)
-    return "long long";
-  if (std::is_same<T, unsigned long long>::value)
-    return "unsigned long long";
-  if (std::is_same<T, half>::value)
-    return "half";
-  if (std::is_same<T, float>::value)
-    return "float";
-  if (std::is_same<T, double>::value)
-    return "double";
+template <class T> const char* typeToString() {
+  if (std::is_same<T, int>::value) return "int";
+  if (std::is_same<T, unsigned int>::value) return "unsigned int";
+  if (std::is_same<T, long long>::value) return "long long";
+  if (std::is_same<T, unsigned long long>::value) return "unsigned long long";
+  if (std::is_same<T, half>::value) return "half";
+  if (std::is_same<T, float>::value) return "float";
+  if (std::is_same<T, double>::value) return "double";
 
   assert(false && "Missing conversion to string for type");
   return "";
 }
 
-template<class T, template <typename> class Op>
-const char* opToString()
-{
+template <class T, template <typename> class Op> const char* opToString() {
   if constexpr (std::is_same<Op<T>, std::plus<T>>::value)
     return "add";
   else if constexpr (std::is_same<Op<T>, MinOp<T>>::value)
@@ -277,11 +240,7 @@ const char* opToString()
 }
 
 template <class T, class Gen>
-void genRandomMasks(LinearAllocGuard<T>& d_buf,
-                    LinearAllocGuard<T>& buf,
-                    Gen& gen,
-                    int numItems)
-{
+void genRandomMasks(LinearAllocGuard<T>& d_buf, LinearAllocGuard<T>& buf, Gen& gen, int numItems) {
   // masks must be != 0, hence passing 1 as the 'a' distribution parameter
   std::uniform_int_distribution<unsigned long long> dist(1);
   int numBytes = numItems * sizeof(T);
@@ -294,8 +253,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
   for (int i = 0; i < numItems; i++) {
     T mask = dist(gen);
 
-    if (getWarpSize() == 32)
-      mask &= 0xFFFFFFFF;
+    if (getWarpSize() == 32) mask &= 0xFFFFFFFF;
 
     buf.ptr()[i] = mask;
   }
@@ -307,9 +265,7 @@ void genRandomMasks(LinearAllocGuard<T>& d_buf,
 // which is problematic)
 // @expDist needs to be between [0-2^5-2]
 template <class Gen>
-__half genRandomHalf(std::uniform_int_distribution<unsigned short>& dist,
-                     Gen& gen)
-{
+__half genRandomHalf(std::uniform_int_distribution<unsigned short>& dist, Gen& gen) {
   __half_raw tmp;
 
   tmp.x = dist(gen);
@@ -321,12 +277,8 @@ __half genRandomHalf(std::uniform_int_distribution<unsigned short>& dist,
 
 // generates a random buffer in buf, copies it to device memory in d_buf
 template <class T, class Dist, class Gen>
-void genRandomBuffers(LinearAllocGuard<T>& d_buf,
-                      LinearAllocGuard<T>& buf,
-                      Dist& dist,
-                      Gen& gen,
-                      int numItems)
-{
+void genRandomBuffers(LinearAllocGuard<T>& d_buf, LinearAllocGuard<T>& buf, Dist& dist, Gen& gen,
+                      int numItems) {
   int numBytes = numItems * sizeof(T);
   LinearAllocGuard<T> tmp(LinearAllocs::malloc, numBytes);
   LinearAllocGuard<T> d_tmp(LinearAllocs::hipMalloc, numBytes);
@@ -345,27 +297,24 @@ void genRandomBuffers(LinearAllocGuard<T>& d_buf,
 
 // given an operation produces the expected result of the reduction
 // @mask indicates the lanes that will participate in the computation
-template <class T, class Op>
-T calculateExpected(const T* input, Op op, unsigned long long mask)
-{
+template <class T, class Op> T calculateExpected(const T* input, Op op, unsigned long long mask) {
   T result;
   int wavefrontSize = getWarpSize();
 
   if (std::is_same<Op, std::plus<T>>::value) {
-    T tmp[64] = { 0 };
+    T tmp[64] = {0};
 
     for (int i = 0; i < wavefrontSize; i++) {
-       if (mask & (1ul << i)) {
-         tmp[i] = input[i];
-       }
+      if (mask & (1ul << i)) {
+        tmp[i] = input[i];
+      }
     }
 
     for (int modulo = 2; modulo <= wavefrontSize; modulo *= 2) {
       for (int i = 0; i < wavefrontSize; i += modulo) {
         int j = i + modulo / 2;
 
-        if (j < wavefrontSize)
-          tmp[i] += tmp[j];
+        if (j < wavefrontSize) tmp[i] += tmp[j];
       }
     }
     result = tmp[0];
@@ -387,8 +336,7 @@ T calculateExpected(const T* input, Op op, unsigned long long mask)
 }
 
 template <class T>
-void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask)
-{
+void printMismatch(const T& result, const T& expected, const T* input, unsigned long long mask) {
   std::ios init(NULL);
 
   init.copyfmt(std::cout);
@@ -399,7 +347,7 @@ void printMismatch(const T& result, const T& expected, const T* input, unsigned 
   for (int i = 0; i < getWarpSize(); i++) {
     if ((1ul << i) & mask) {
       if constexpr (std::is_same<T, __half>::value)
-                     std::cout << "Lane " << i << ": " << __half2float(input[i]) << "\n";
+        std::cout << "Lane " << i << ": " << __half2float(input[i]) << "\n";
       else
         std::cout << "Lane " << i << ": " << input[i] << "\n";
     }
@@ -415,8 +363,8 @@ void printMismatch(const T& result, const T& expected, const T* input, unsigned 
 }
 
 template <class T>
-void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask, const T* input)
-{
+void compareFloatingPoint(const T& result, const T& expected, unsigned long long mask,
+                          const T* input) {
   using namespace Catch::Matchers;
   if constexpr (std::is_same<T, __half>::value) {
     float resultFloat = __half2float(result);
@@ -435,7 +383,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
           std::cout << "Relative epsilon: " << relativeEpsilon << "\n";
           std::cout << "Difference: " << absDifference << "\n";
         }
-       }
+      }
 
       REQUIRE_THAT(__half2float(resultFloat), WithinRel(expectedFloat, eps));
     }
@@ -462,8 +410,7 @@ void compareFloatingPoint(const T& result, const T& expected, unsigned long long
 // @tparam Reduce a functor; abstracts away kernel dispatching
 //         (via hiprtc or normal execution)
 template <class T, class Reduce, template <typename> class Op>
-void runTestReduce(int iteration, Reduce reduce)
-{
+void runTestReduce(int iteration, Reduce reduce) {
   using namespace Catch::Matchers;
   using distribution = typename DistributionType<T>::type;
   unsigned int wavefrontSize = getWarpSize();
@@ -474,8 +421,8 @@ void runTestReduce(int iteration, Reduce reduce)
   // for float16, we generate any random unsigned short, but cap the exponent later on
   // to keep it in the range (-8.0..8.0) (just to avoid overflows)
   // On the rest of the types, just use a bigger reduced range of numbers to avoid overflows too
-  T a = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::lowest() : -1023;
-  T b = std::is_same<T, half>::value? std::numeric_limits<unsigned short>::max() : 1023;
+  T a = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::lowest() : -1023;
+  T b = std::is_same<T, half>::value ? std::numeric_limits<unsigned short>::max() : 1023;
   distribution dist(a, b);
   LinearAllocGuard<T> input, d_input;
   LinearAllocGuard<unsigned long long> masks, d_masks;
@@ -510,7 +457,6 @@ void runTestReduce(int iteration, Reduce reduce)
           }
         } else
           compareFloatingPoint(result, expected, mask, input.ptr());
-
       }
       lane++;
     }

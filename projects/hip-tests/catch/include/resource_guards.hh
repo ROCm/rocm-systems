@@ -55,8 +55,7 @@ template <typename T> class LinearAllocGuard {
 
   LinearAllocGuard(const LinearAllocs allocation_type, const size_t size,
                    const unsigned int flags = 0u)
-    : allocation_type_{allocation_type},
-      size_{size} {
+      : allocation_type_{allocation_type}, size_{size} {
     switch (allocation_type_) {
       case LinearAllocs::malloc:
         ptr_ = host_ptr_ = reinterpret_cast<T*>(malloc(size));

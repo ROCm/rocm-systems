@@ -83,50 +83,33 @@ template <>
 struct vector_info<uchar4>
     : type_and_size_and_format<unsigned char, 4, HIP_AD_FORMAT_UNSIGNED_INT8> {};
 
-template <
-  typename T,
-  typename std::enable_if<std::is_scalar<T>::value == false>::type* = nullptr>
+template <typename T, typename std::enable_if<std::is_scalar<T>::value == false>::type* = nullptr>
 static inline __host__ __device__ constexpr int rank() {
   return sizeof(T) / sizeof(decltype(T::x));
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 1>::type* = nullptr>
-static inline bool isEqual(const T &val0, const T &val1) {
+template <typename T, typename std::enable_if<rank<T>() == 1>::type* = nullptr>
+static inline bool isEqual(const T& val0, const T& val1) {
   return val0.x == val1.x;
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 2>::type* = nullptr>
-static inline bool isEqual(const T &val0, const T &val1) {
-  return val0.x == val1.x &&
-         val0.y == val1.y;
+template <typename T, typename std::enable_if<rank<T>() == 2>::type* = nullptr>
+static inline bool isEqual(const T& val0, const T& val1) {
+  return val0.x == val1.x && val0.y == val1.y;
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline bool isEqual(const T &val0, const T &val1) {
-  return val0.x == val1.x &&
-         val0.y == val1.y &&
-         val0.z == val1.z &&
-         val0.w == val1.w;
+template <typename T, typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline bool isEqual(const T& val0, const T& val1) {
+  return val0.x == val1.x && val0.y == val1.y && val0.z == val1.z && val0.w == val1.w;
 }
 
-template<
-  typename T,
-  typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
-static inline bool isEqual(const T &val0, const T &val1) {
+template <typename T, typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
+static inline bool isEqual(const T& val0, const T& val1) {
   return val0 == val1;
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 1>::type* = nullptr>
-const std::string getString(const T& t)
-{
+template <typename T, typename std::enable_if<rank<T>() == 1>::type* = nullptr>
+const std::string getString(const T& t) {
   std::ostringstream os;
   if constexpr (std::is_same<decltype(T::x), char>::value ||
                 std::is_same<decltype(T::x), unsigned char>::value) {
@@ -137,11 +120,8 @@ const std::string getString(const T& t)
   return os.str();
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 2>::type* = nullptr>
-const std::string getString(const T& t)
-{
+template <typename T, typename std::enable_if<rank<T>() == 2>::type* = nullptr>
+const std::string getString(const T& t) {
   std::ostringstream os;
   if constexpr (std::is_same<decltype(T::x), char>::value ||
                 std::is_same<decltype(T::x), unsigned char>::value) {
@@ -152,46 +132,36 @@ const std::string getString(const T& t)
   return os.str();
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 3>::type* = nullptr>
-const std::string getString(const T& t)
-{
+template <typename T, typename std::enable_if<rank<T>() == 3>::type* = nullptr>
+const std::string getString(const T& t) {
   std::ostringstream os;
   if constexpr (std::is_same<decltype(T::x), char>::value ||
                 std::is_same<decltype(T::x), unsigned char>::value) {
-    os << "(" << static_cast<int>(t.x) << ", " << static_cast<int>(t.y) << ", " <<
-        static_cast<int>(t.z) << ")";
+    os << "(" << static_cast<int>(t.x) << ", " << static_cast<int>(t.y) << ", "
+       << static_cast<int>(t.z) << ")";
   } else {
     os << "(" << t.x << ", " << t.y << ", " << t.z << ")";
   }
   return os.str();
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-const std::string getString(const T& t)
-{
+template <typename T, typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+const std::string getString(const T& t) {
   std::ostringstream os;
   if constexpr (std::is_same<decltype(T::x), char>::value ||
                 std::is_same<decltype(T::x), unsigned char>::value) {
-    os << "(" << static_cast<int>(t.x) << ", " << static_cast<int>(t.y) << ", " <<
-        static_cast<int>(t.z) << ", " << static_cast<int>(t.w) << ")";
+    os << "(" << static_cast<int>(t.x) << ", " << static_cast<int>(t.y) << ", "
+       << static_cast<int>(t.z) << ", " << static_cast<int>(t.w) << ")";
   } else {
     os << "(" << t.x << ", " << t.y << ", " << t.z << ", " << t.w << ")";
   }
   return os.str();
 }
 
-template<
-  typename T,
-  typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
-std::string getString(const T& t)
-{
+template <typename T, typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
+std::string getString(const T& t) {
   std::ostringstream os;
-  if constexpr (std::is_same<T, char>::value ||
-                std::is_same<T, unsigned char>::value) {
+  if constexpr (std::is_same<T, char>::value || std::is_same<T, unsigned char>::value) {
     os << static_cast<int>(t);
   } else {
     os << t;
@@ -199,8 +169,7 @@ std::string getString(const T& t)
   return os.str();
 }
 
-template<typename T>
-static inline T getRandom() {
+template <typename T> static inline T getRandom() {
   double r = 0;
   if (std::is_signed<T>::value) {
     r = (std::rand() - RAND_MAX / 2.0) / (RAND_MAX / 2.0 + 1.);
@@ -216,40 +185,32 @@ static inline T getRandom() {
   }
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 1>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 1>::type* = nullptr>
+static inline void initVal(T& val) {
   val.x = getRandom<decltype(T::x)>();
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 2>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 2>::type* = nullptr>
+static inline void initVal(T& val) {
   val.x = getRandom<decltype(T::x)>();
   val.y = getRandom<decltype(T::x)>();
 }
 
-template<
-  typename T,
-  typename std::enable_if<rank<T>() == 4>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<rank<T>() == 4>::type* = nullptr>
+static inline void initVal(T& val) {
   val.x = getRandom<decltype(T::x)>();
   val.y = getRandom<decltype(T::x)>();
   val.z = getRandom<decltype(T::x)>();
   val.w = getRandom<decltype(T::x)>();
 }
 
-template<
-  typename T,
-  typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
-static inline void initVal(T &val) {
+template <typename T, typename std::enable_if<std::is_scalar<T>::value>::type* = nullptr>
+static inline void initVal(T& val) {
   val = getRandom<T>();
 }
 
 /*Convert normalized floatx to typex*/
-template <typename T, typename F> inline __device__ T getTypeFromNormalizedFloat(const F &f) {
+template <typename T, typename F> inline __device__ T getTypeFromNormalizedFloat(const F& f) {
   T t;
   if constexpr (std::is_scalar<T>::value)
     t = static_cast<T>(f.x * std::numeric_limits<T>::max());
@@ -267,8 +228,7 @@ template <typename T, typename F> inline __device__ T getTypeFromNormalizedFloat
 }
 
 /*Convert typex to normalized floatx*/
-template <class T>
-inline auto getNormalizedFloatType(const T &t) {
+template <class T> inline auto getNormalizedFloatType(const T& t) {
   if constexpr (std::is_scalar<T>::value)
     return static_cast<float>(t) / std::numeric_limits<T>::max();
   else {
@@ -277,7 +237,7 @@ inline auto getNormalizedFloatType(const T &t) {
       return f;
     }
     if constexpr (rank<T>() == 2) {
-      float2 f{static_cast<float>(t.x) / std::numeric_limits<decltype(T::x)>::max(), 
+      float2 f{static_cast<float>(t.x) / std::numeric_limits<decltype(T::x)>::max(),
                static_cast<float>(t.y) / std::numeric_limits<decltype(T::y)>::max()};
       return f;
     }
@@ -310,8 +270,7 @@ template <typename T> inline bool constexpr isFloat() {
 template <typename T>
 void getStatics(T* data, size_t N, double& mean, double* deviation = nullptr) {
   double t = 0;
-  for (size_t i = 0; i < N; i++)
-    t += static_cast<double>(data[i]);
+  for (size_t i = 0; i < N; i++) t += static_cast<double>(data[i]);
   mean = t / N;
   if (!deviation) return;
   double d = 0;
@@ -326,7 +285,7 @@ template <typename T> bool verify(T* data, T* data1, size_t N) {
   for (size_t i = 0; i < N; i++) {
     if (!isEqual(data[i], data1[i])) {
       printf("Difference [ %zu ]:%s ----%s\n", i, getString(data[i]).c_str(),
-        getString(data1[i]).c_str());
+             getString(data1[i]).c_str());
       return false;
     }
   }
