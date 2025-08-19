@@ -304,7 +304,7 @@ TEST(metrics, check_public_api_query)
             {
                 ASSERT_EQ(pr.second, info.dimensions_instances_count/current_dimension_size);
             }
-            ASSERT_EQ(index_to_count.rbegin()->first + 1,current_dimension_size);
+            ASSERT_EQ(index_to_count.rbegin()->first + 1, current_dimension_size);
         }
     }
 }
