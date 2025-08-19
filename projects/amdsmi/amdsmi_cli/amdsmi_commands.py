@@ -4860,8 +4860,12 @@ class AMDSMICommands():
                     if val == clk_tuple['max_clk']:
                         val_changed = False # Clock limit value did not changed
             except amdsmi_exception.AmdSmiLibraryException as e:
-                logging.debug("Failed to get clock extremum info for gpu %s | %s", gpu_id, e.get_error_info())
-                self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to change {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED and lim_type == "min" and clk_type == "mclk":
+                    logging.debug("Setting mclk min is not supported")
+                    self.logger.store_output(args.gpu, 'clk_limit', f"Setting mclk min is not supported")
+                else:
+                    logging.debug("Failed to get clock extremum info for gpu %s | %s", gpu_id, e.get_error_info())
+                    self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to change {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
@@ -4873,7 +4877,11 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Command requires elevation') from e
-                self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to set {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
+                elif e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED and lim_type == "min" and clk_type == "mclk":
+                    logging.debug("Setting mclk min is not supported")
+                    self.logger.store_output(args.gpu, 'clk_limit', f"Setting mclk min is not supported")
+                else:
+                    self.logger.store_output(args.gpu, 'clk_limit', f"[{e.get_error_info(detailed=False)}] Unable to set {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}MHz")
                 self.logger.print_output()
                 self.logger.clear_multiple_devices_output()
                 return
