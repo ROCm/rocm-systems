@@ -61,88 +61,133 @@ def write_sql_query_to_csv(
 
 def write_agent_info_csv(importData, config) -> None:
 
-    query = """
+    # Define mapping of output column name to JSON key
+    json_keys = {
+        "Node_Id": "node_id",
+        "Logical_Node_Id": "logical_node_id",
+        "Cpu_Cores_Count": "cpu_cores_count",
+        "Simd_Count": "simd_count",
+        "Cpu_Core_Id_Base": "cpu_core_id_base",
+        "Simd_Id_Base": "simd_id_base",
+        "Max_Waves_Per_Simd": "max_waves_per_simd",
+        "Lds_Size_In_Kb": "lds_size_in_kb",
+        "Gds_Size_In_Kb": "gds_size_in_kb",
+        "Num_Gws": "num_gws",
+        "Wave_Front_Size": "wave_front_size",
+        "Num_Xcc": "num_xcc",
+        "Cu_Count": "cu_count",
+        "Array_Count": "array_count",
+        "Num_Shader_Banks": "num_shader_banks",
+        "Simd_Arrays_Per_Engine": "simd_arrays_per_engine",
+        "Cu_Per_Simd_Array": "cu_per_simd_array",
+        "Simd_Per_Cu": "simd_per_cu",
+        "Max_Slots_Scratch_Cu": "max_slots_scratch_cu",
+        "Gfx_Target_Version": "gfx_target_version",
+        "Vendor_Id": "vendor_id",
+        "Device_Id": "device_id",
+        "Location_Id": "location_id",
+        "Domain": "domain",
+        "Drm_Render_Minor": "drm_render_minor",
+        "Num_Sdma_Engines": "num_sdma_engines",
+        "Num_Sdma_Xgmi_Engines": "num_sdma_xgmi_engines",
+        "Num_Sdma_Queues_Per_Engine": "num_sdma_queues_per_engine",
+        "Num_Cp_Queues": "num_cp_queues",
+        "Max_Engine_Clk_Ccompute": "max_engine_clk_ccompute",
+        "Max_Engine_Clk_Fcompute": "max_engine_clk_fcompute",
+        "Sdma_Fw_Version": "sdma_fw_version.uCodeSDMA",
+        "Fw_Version": "fw_version.uCode",
+        "Cu_per_engine": "cu_per_engine",
+        "Max_Waves_Per_Cu": "max_waves_per_cu",
+        "Workgroup_Max_Size": "workgroup_max_size",
+        "Family_Id": "family_id",
+        "Grid_Max_Size": "grid_max_size",
+        "Local_Mem_Size": "local_mem_size",
+        "Hive_Id": "hive_id",
+        "Gpu_Id": "gpu_id",
+        "Workgroup_Max_Dim_X": "workgroup_max_dim.x",
+        "Workgroup_Max_Dim_Y": "workgroup_max_dim.y",
+        "Workgroup_Max_Dim_Z": "workgroup_max_dim.z",
+        "Grid_Max_Dim_X": "grid_max_dim.x",
+        "Grid_Max_Dim_Y": "grid_max_dim.y",
+        "Grid_Max_Dim_Z": "grid_max_dim.z",
+        "Vendor_Name": "vendor_name",
+        "Product_Name": "product_name",
+    }
+
+    # Build SELECT clause for json_extract columns
+    select_json = [
+        f"json_extract(extdata, '$.{json_key}') AS {col_name}"
+        for col_name, json_key in json_keys.items()
+    ]
+
+    # Build Capability value for SELECT clause
+    def cap_expr(key, shift, mask=None):
+        base = f"COALESCE(json_extract(extdata, '$.capability.{key}'), 0)"
+        if mask is not None:
+            base = f"({base} & {mask})"
+        return f"({base} << {hex(shift)})"
+
+    capability_bits = [
+        ("HotPluggable", 0x0),
+        ("HSAMMUPresent", 0x1),
+        ("SharedWithGraphics", 0x2),
+        ("QueueSizePowerOfTwo", 0x3),
+        ("QueueSize32bit", 0x4),
+        ("QueueIdleEvent", 0x5),
+        ("VALimit", 0x6),
+        ("WatchPointsSupported", 0x7),
+        ("WatchPointsTotalBits", 0x8, 0xF),
+        ("DoorbellType", 0xC, 0x3),
+        ("AQLQueueDoubleMap", 0xE),
+        ("DebugTrapSupported", 0xF),
+        ("WaveLaunchTrapOverrideSupported", 0x10),
+        ("WaveLaunchModeSupported", 0x11),
+        ("PreciseMemoryOperationsSupported", 0x12),
+        ("DEPRECATED_SRAM_EDCSupport", 0x13),
+        ("Mem_EDCSupport", 0x14),
+        ("RASEventNotify", 0x15),
+        ("ASICRevision", 0x16, 0xF),
+        ("SRAM_EDCSupport", 0x1A),
+        ("SVMAPISupported", 0x1B),
+        ("CoherentHostAccess", 0x1C),
+        ("DebugSupportedFirmware", 0x1D),
+        ("PreciseALUOperationsSupported", 0x1E),
+        ("PerQueueResetSupported", 0x1F),
+    ]
+
+    capability_exprs = [cap_expr(*args) for args in capability_bits]
+
+    select_capability = [" | ".join(capability_exprs) + " AS Capability"]
+
+    # Add non-JSON columns
+    select_fixed = [
+        "guid AS Guid",
+        "type AS Agent_Type",
+        "name AS Name",
+        "model_name AS Model_Name",
+    ]
+
+    # to mimic the previous order
+    select_clause = (
+        select_fixed[:1]
+        + select_json[:2]
+        + select_fixed[1:2]
+        + select_json[2:33]
+        + select_capability
+        + select_json[33:47]
+        + select_fixed[2:3]
+        + select_json[47:]
+        + select_fixed[3:4]
+    )
+
+    select_clause = ",\n    ".join(select_clause)
+
+    query = f"""
         SELECT
-            guid AS Guid,
-            json_extract(extdata, '$.node_id') AS Node_Id,
-            json_extract(extdata, '$.logical_node_id') AS Logical_Node_Id,
-            type AS Agent_Type,
-            json_extract(extdata, '$.cpu_cores_count') AS Cpu_Cores_Count,
-            json_extract(extdata, '$.simd_count') AS Simd_Count,
-            json_extract(extdata, '$.cpu_core_id_base') AS Cpu_Core_Id_Base,
-            json_extract(extdata, '$.simd_id_base') AS Simd_Id_Base,
-            json_extract(extdata, '$.max_waves_per_simd') AS Max_Waves_Per_Simd,
-            json_extract(extdata, '$.lds_size_in_kb') AS Lds_Size_In_Kb,
-            json_extract(extdata, '$.gds_size_in_kb') AS Gds_Size_In_Kb,
-            json_extract(extdata, '$.num_gws') AS Num_Gws,
-            json_extract(extdata, '$.wave_front_size') AS Wave_Front_Size,
-            json_extract(extdata, '$.num_xcc') AS Num_Xcc,
-            json_extract(extdata, '$.cu_count') AS Cu_Count,
-            json_extract(extdata, '$.array_count') AS Array_Count,
-            json_extract(extdata, '$.num_shader_banks') AS Num_Shader_Banks,
-            json_extract(extdata, '$.simd_arrays_per_engine') AS Simd_Arrays_Per_Engine,
-            json_extract(extdata, '$.cu_per_simd_array') AS Cu_Per_Simd_Array,
-            json_extract(extdata, '$.simd_per_cu') AS Simd_Per_Cu,
-            json_extract(extdata, '$.max_slots_scratch_cu') AS Max_Slots_Scratch_Cu,
-            json_extract(extdata, '$.gfx_target_version') AS Gfx_Target_Version,
-            json_extract(extdata, '$.vendor_id') AS Vendor_Id,
-            json_extract(extdata, '$.device_id') AS Device_Id,
-            json_extract(extdata, '$.location_id') AS Location_Id,
-            json_extract(extdata, '$.domain') AS Domain,
-            json_extract(extdata, '$.drm_render_minor') AS Drm_Render_Minor,
-            json_extract(extdata, '$.num_sdma_engines') AS Num_Sdma_Engines,
-            json_extract(extdata, '$.num_sdma_xgmi_engines') AS Num_Sdma_Xgmi_Engines,
-            json_extract(extdata, '$.num_sdma_queues_per_engine') AS Num_Sdma_Queues_Per_Engine,
-            json_extract(extdata, '$.num_cp_queues') AS Num_Cp_Queues,
-            json_extract(extdata, '$.max_engine_clk_ccompute') AS Max_Engine_Clk_Ccompute,
-            json_extract(extdata, '$.max_engine_clk_fcompute')  AS Max_Engine_Clk_Fcompute,
-            json_extract(extdata, '$.sdma_fw_version.uCodeSDMA') AS Sdma_Fw_Version,
-            json_extract(extdata, '$.fw_version.uCode') AS Fw_Version,
-            (COALESCE(json_extract(extdata, '$.capability.HotPluggable'), 0) << 0x0) |
-            (COALESCE(json_extract(extdata, '$.capability.HSAMMUPresent'), 0) << 0x1) |
-            (COALESCE(json_extract(extdata, '$.capability.SharedWithGraphics'), 0) << 0x2) |
-            (COALESCE(json_extract(extdata, '$.capability.QueueSizePowerOfTwo'), 0) << 0x3) |
-            (COALESCE(json_extract(extdata, '$.capability.QueueSize32bit'), 0) << 0x4) |
-            (COALESCE(json_extract(extdata, '$.capability.QueueIdleEvent'), 0) << 0x5) |
-            (COALESCE(json_extract(extdata, '$.capability.VALimit'), 0) << 0x6) |
-            (COALESCE(json_extract(extdata, '$.capability.WatchPointsSupported'), 0) << 0x7) |
-            ((COALESCE(json_extract(extdata, '$.capability.WatchPointsTotalBits'), 0) & 0xF) << 0x8) |
-            ((COALESCE(json_extract(extdata, '$.capability.DoorbellType'), 0) & 0x3) << 0xC) |
-            (COALESCE(json_extract(extdata, '$.capability.AQLQueueDoubleMap'), 0) << 0xE) |
-            (COALESCE(json_extract(extdata, '$.capability.DebugTrapSupported'), 0) << 0xF) |
-            (COALESCE(json_extract(extdata, '$.capability.WaveLaunchTrapOverrideSupported'), 0) << 0x10) |
-            (COALESCE(json_extract(extdata, '$.capability.WaveLaunchModeSupported'), 0) << 0x11) |
-            (COALESCE(json_extract(extdata, '$.capability.PreciseMemoryOperationsSupported'), 0) << 0x12) |
-            (COALESCE(json_extract(extdata, '$.capability.DEPRECATED_SRAM_EDCSupport'), 0) << 0x13) |
-            (COALESCE(json_extract(extdata, '$.capability.Mem_EDCSupport'), 0) << 0x14) |
-            (COALESCE(json_extract(extdata, '$.capability.RASEventNotify'), 0) << 0x15) |
-            ((COALESCE(json_extract(extdata, '$.capability.ASICRevision'), 0) & 0xF) << 0x16) |
-            (COALESCE(json_extract(extdata, '$.capability.SRAM_EDCSupport'), 0) << 0x1A) |
-            (COALESCE(json_extract(extdata, '$.capability.SVMAPISupported'), 0) << 0x1B) |
-            (COALESCE(json_extract(extdata, '$.capability.CoherentHostAccess'), 0) << 0x1C) |
-            (COALESCE(json_extract(extdata, '$.capability.DebugSupportedFirmware'), 0) << 0x1D) |
-            (COALESCE(json_extract(extdata, '$.capability.PreciseALUOperationsSupported'), 0) << 0x1E) |
-            (COALESCE(json_extract(extdata, '$.capability.PerQueueResetSupported'), 0) << 0x1F) AS Capability,
-            json_extract(extdata, '$.cu_per_engine') AS Cu_Per_Engine,
-            json_extract(extdata, '$.max_waves_per_cu') AS Max_Waves_Per_Cu,
-            json_extract(extdata, '$.workgroup_max_size') AS Workgroup_Max_Size,
-            json_extract(extdata, '$.family_id') AS Family_Id,
-            json_extract(extdata, '$.grid_max_size') AS Grid_Max_Size,
-            json_extract(extdata, '$.local_mem_size') AS Local_Mem_Size,
-            json_extract(extdata, '$.hive_id') AS Hive_Id,
-            json_extract(extdata, '$.gpu_id') AS Gpu_Id,
-            json_extract(extdata, '$.workgroup_max_dim.x') AS Workgroup_Max_Dim_X,
-            json_extract(extdata, '$.workgroup_max_dim.y') AS Workgroup_Max_Dim_Y,
-            json_extract(extdata, '$.workgroup_max_dim.z') AS Workgroup_Max_Dim_Z,
-            json_extract(extdata, '$.grid_max_dim.x') AS Grid_Max_Dim_X,
-            json_extract(extdata, '$.grid_max_dim.y') AS Grid_Max_Dim_Y,
-            json_extract(extdata, '$.grid_max_dim.z') AS Grid_Max_Dim_Z,
-            name AS Name,
-            json_extract(extdata, '$.vendor_name') AS Vendor_Name,
-            json_extract(extdata, '$.product_name') AS Product_Name,
-            model_name AS Model_Name
+            {select_clause}
         FROM "rocpd_info_agent"
     """
+
     write_sql_query_to_csv(
         importData, query, config.output_path, config.output_file, "agent_info", ""
     )
