@@ -1673,7 +1673,7 @@ def test_live_attach_detach_block(binary_handler_profile_rocprof_compute):
     time_to_detach="60000"
 
     attach_detach=dict()
-    attach_detach["attach_pid"] = process_workload.attach_pid
+    attach_detach["attach_pid"] = process_workload.pid
     attach_detach["attach-duration-msec"] = time_to_detach
 
     _ = binary_handler_profile_rocprof_compute(
@@ -1718,7 +1718,7 @@ def test_live_attach_detach_singlepath_launch_stats(binary_handler_profile_rocpr
     time_to_detach="60000"
 
     attach_detach=dict()
-    attach_detach["attach_pid"] = process_workload.attach_pid
+    attach_detach["attach_pid"] = process_workload.pid
     attach_detach["attach-duration-msec"] = time_to_detach
 
     _ = binary_handler_profile_rocprof_compute(
