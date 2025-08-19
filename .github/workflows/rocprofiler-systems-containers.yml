@@ -78,8 +78,8 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            PUSH_COMMAND="--push"
-            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
+            PUSH_COMMAND=${{ github.event_name == 'pull_request' && '--push' || '' }}
+            echo $PUSH_COMMAND
             ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND} --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
             popd
 
@@ -135,7 +135,7 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            PUSH_COMMAND="--push"
-            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
+            PUSH_COMMAND=${{ github.event_name == 'pull_request' && '--push' || '' }}
+            echo $PUSH_COMMAND
             ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND}
             popd
