@@ -698,8 +698,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
 
-    const char* name = nullptr;
-
+    const char* name = "";
 #if(ROCPROFILER_VERSION >= 600)
     std::string check_name;
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT)
@@ -707,7 +706,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         check_name = ompt_get_detailed_callback_name(record);
         name       = check_name.c_str();
     }
-    if(name == nullptr)
+    if(strlen(name) == 0)
 #endif
         rocprofiler_query_callback_tracing_kind_operation_name(
             record.kind, record.operation, &name, nullptr);
