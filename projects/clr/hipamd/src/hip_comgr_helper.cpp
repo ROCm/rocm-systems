@@ -19,18 +19,11 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#define LLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING 1
-#include "llvm/BinaryFormat/ELF.h"
-
+#include "hip_comgr_helper.hpp"
 #if defined(_WIN32)
 #include <io.h>
-#if defined(__has_attribute)
-// MS compiler doesn't support __has_attribute
-#undef __has_attribute
 #endif
-#endif
-#include "hip_comgr_helper.hpp"
-using namespace llvm::ELF;
+#include "../src/amd_hsa_elf.hpp"
 
 namespace hip {
 std::unordered_set<LinkProgram*> LinkProgram::linker_set_;

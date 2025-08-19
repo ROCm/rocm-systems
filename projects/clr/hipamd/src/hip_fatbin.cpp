@@ -21,16 +21,13 @@ THE SOFTWARE.
 */
 
 #include "hip/hip_runtime_api.h"
-#include "llvm/BinaryFormat/ELF.h"
-
 #include "hip_fatbin.hpp"
 #include "hip_global.hpp"
-
 #include <unordered_map>
 #include "hip_code_object.hpp"
 #include "hip_platform.hpp"
 #include "comgrctx.hpp"
-
+#include "amd_hsa_elf.hpp"
 namespace hip {
 namespace comgr_helper {
 
@@ -251,7 +248,7 @@ static bool IsCodeObjectCompressed(const void* image) {
 
 static bool IsCodeObjectElf(const void* image) {
   const amd::Elf64_Ehdr* ehdr = reinterpret_cast<const amd::Elf64_Ehdr*>(image);
-  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == llvm::ELF::ELFOSABI_AMDGPU_HSA;
+  return ehdr->e_machine == EM_AMDGPU && ehdr->e_ident[EI_OSABI] == ELFOSABI_AMDGPU_HSA;
 }
 
 static bool UncompressAndPopulateCodeObject(

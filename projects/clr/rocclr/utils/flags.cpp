@@ -151,8 +151,12 @@ bool Flag::init() {
   if (!flagIsDefault(AMD_LOG_LEVEL)) {
     if (!flagIsDefault(AMD_LOG_LEVEL_FILE)) {
       std::string fileName = AMD_LOG_LEVEL_FILE;
-      fileName = fileName + "_" + std::to_string(Os::getProcessId());
+      std::string pid = std::to_string(Os::getProcessId());
+      fileName = fileName + "_" + pid;
       outFile = fopen(fileName.c_str(), "a");
+      if (outFile == NULL) {
+        outFile = fopen(("clr_logs_" + pid + ".txt").c_str(), "a");
+      }
     }
   }
 

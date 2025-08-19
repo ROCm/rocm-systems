@@ -239,7 +239,7 @@ struct mesa_glinterop_export_out {
    /* Structure version 1 ends here. */
 };
 
-
+#if IS_LINUX
 /**
  * Query device information.
  *
@@ -300,6 +300,8 @@ typedef int (PFNMESAGLINTEROPGLXEXPORTOBJECTPROC)(struct _XDisplay *dpy, struct 
 typedef int (PFNMESAGLINTEROPEGLEXPORTOBJECTPROC)(EGLDisplay dpy, EGLContext context,
                                                   struct mesa_glinterop_export_in *in,
                                                   struct mesa_glinterop_export_out *out);
+
+#endif // IS_LINUX
 
 #ifdef __cplusplus
 }

@@ -21,6 +21,7 @@
 #include <hip/hip_runtime.h>
 
 #include "hip_internal.hpp"
+#include "hip_platform.hpp"
 
 #undef hipChooseDevice
 #undef hipDeviceProp_t
@@ -714,6 +715,60 @@ hipError_t hipGetDeviceFlags(unsigned int* flags) {
   }
   *flags = hip::getCurrentDevice()->getFlags();
   HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipGetDriverEntryPoint_common(const char* symbol, void** funcPtr, unsigned long long flags,
+                                  hipDriverEntryPointQueryResult* status) {
+  std::string symbolString = symbol;
+  if (symbol == nullptr || symbolString == "" || funcPtr == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (flags != hipEnableDefault && flags != hipEnableLegacyStream
+      && flags != hipEnablePerThreadDefaultStream) {
+    return hipErrorInvalidValue;
+  }
+
+  void* handle = hip::PlatformState::instance().getDynamicLibraryHandle();
+  if (handle == nullptr) {
+    return hipErrorInvalidValue;
+  }
+
+  if (flags == hipEnablePerThreadDefaultStream) {
+      symbolString += "_spt";
+  }
+
+  *funcPtr = amd::Os::getSymbol(handle, symbolString.c_str());
+  if (funcPtr == nullptr) {
+    if (flags == hipEnablePerThreadDefaultStream) {
+      *funcPtr = amd::Os::getSymbol(handle, symbol);
+    }
+    if (funcPtr == nullptr) {
+      if (status != nullptr) {
+        *status = hipDriverEntryPointSymbolNotFound;
+      }
+      return hipErrorInvalidValue;
+    }
+  }
+
+  if (status != nullptr) {
+    *status = hipDriverEntryPointSuccess;
+  }
+
+  return hipSuccess;
+}
+
+hipError_t hipGetDriverEntryPoint(const char* symbol, void** funcPtr, unsigned long long flags,
+                                  hipDriverEntryPointQueryResult* status) {
+  HIP_INIT_API(hipGetDriverEntryPoint, symbol, funcPtr, flags, status);
+  HIP_RETURN(hipGetDriverEntryPoint_common(symbol, funcPtr, flags, status));
+}
+
+hipError_t hipGetDriverEntryPoint_spt(const char* symbol, void** funcPtr, unsigned long long flags,
+                                      hipDriverEntryPointQueryResult* status) {
+  HIP_INIT_API(hipGetDriverEntryPoint, symbol, funcPtr, flags, status);
+  flags = (flags == hipEnableDefault) ? hipEnablePerThreadDefaultStream : flags;
+  HIP_RETURN(hipGetDriverEntryPoint_common(symbol, funcPtr, flags, status));
 }
 
 hipError_t hipSetDevice(int device) {

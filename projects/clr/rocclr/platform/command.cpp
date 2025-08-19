@@ -421,20 +421,21 @@ const Context& Command::context() const { return queue_->context(); }
 NDRangeKernelCommand::NDRangeKernelCommand(HostQueue& queue, const EventWaitList& eventWaitList,
                                            Kernel& kernel, const NDRangeContainer& sizes,
                                            uint32_t sharedMemBytes, uint32_t extraParam,
-                                           uint32_t gridId, uint32_t numGrids,
-                                           uint64_t prevGridSum, uint64_t allGridSum,
-                                           uint32_t firstDevice, bool forceProfiling) :
-    Command(queue, CL_COMMAND_NDRANGE_KERNEL, eventWaitList, AMD_SERIALIZE_KERNEL |
-                                                            (HIP_LAUNCH_BLOCKING << 1)),
-    kernel_(kernel),
-    sizes_(sizes),
-    sharedMemBytes_(sharedMemBytes),
-    extraParam_(extraParam),
-    gridId_(gridId),
-    numGrids_(numGrids),
-    prevGridSum_(prevGridSum),
-    allGridSum_(allGridSum),
-    firstDevice_(firstDevice) {
+                                           uint32_t gridId, uint32_t numGrids, uint64_t prevGridSum,
+                                           uint64_t allGridSum, uint32_t firstDevice,
+                                           bool forceProfiling)
+    : Command(queue, CL_COMMAND_NDRANGE_KERNEL, eventWaitList,
+              AMD_SERIALIZE_KERNEL | (HIP_LAUNCH_BLOCKING << 1)),
+      kernel_(kernel),
+      sizes_(sizes),
+      sharedMemBytes_(sharedMemBytes),
+      extraParam_(extraParam),
+      gridId_(gridId),
+      numGrids_(numGrids),
+      prevGridSum_(prevGridSum),
+      allGridSum_(allGridSum),
+      firstDevice_(firstDevice),
+      parameters_(nullptr) {
   auto& device = queue.device();
   auto devKernel = const_cast<device::Kernel*>(kernel.getDeviceKernel(device));
   if (cooperativeGroups()) {

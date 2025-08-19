@@ -1087,18 +1087,11 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
        case CL_MEM_OBJECT_IMAGE1D:
        case CL_MEM_OBJECT_IMAGE2D:
        case CL_MEM_OBJECT_IMAGE3D:
-         image = new (context) amd::Image(*buffer->asBuffer(),
-                                          imageType,
-                                          CL_MEM_READ_WRITE,
-                                          imageFormat,
-                                          imageWidth,
-                                          (imageHeight == 0) ? 1 : imageHeight,
-                                          (imageDepth == 0) ? 1 : imageDepth,
-                                          imageRowPitch,
-                                          imageSlicePitch,
-                                          numMipLevels,
-                                          offset);
-       break;
+         image = new (buffer->getContext())
+             amd::Image(*buffer->asBuffer(), imageType, CL_MEM_READ_WRITE, imageFormat, imageWidth,
+                        (imageHeight == 0) ? 1 : imageHeight, (imageDepth == 0) ? 1 : imageDepth,
+                        imageRowPitch, imageSlicePitch, numMipLevels, offset);
+         break;
        default:
         LogPrintfError("Cannot create image of imageType: 0x%x for external buffer", imageType);
      }
@@ -1106,17 +1099,10 @@ amd::Image* ihipImageCreate(const cl_channel_order channelOrder,
     switch (imageType) {
     case CL_MEM_OBJECT_IMAGE1D_BUFFER:
     case CL_MEM_OBJECT_IMAGE2D:
-      image = new (context) amd::Image(*buffer->asBuffer(),
-                                       imageType,
-                                       CL_MEM_READ_WRITE,
-                                       imageFormat,
-                                       (imageWidth == 0) ? 1 : imageWidth,
-                                       (imageHeight == 0) ? 1 : imageHeight,
-                                       (imageDepth == 0) ? 1 : imageDepth,
-                                       imageRowPitch,
-                                       imageSlicePitch,
-                                       numMipLevels,
-                                       offset);
+      image = new (buffer->getContext()) amd::Image(
+          *buffer->asBuffer(), imageType, CL_MEM_READ_WRITE, imageFormat,
+          (imageWidth == 0) ? 1 : imageWidth, (imageHeight == 0) ? 1 : imageHeight,
+          (imageDepth == 0) ? 1 : imageDepth, imageRowPitch, imageSlicePitch, numMipLevels, offset);
       break;
     default:
       LogPrintfError("Cannot create image of imageType: 0x%x", imageType);
@@ -2773,7 +2759,7 @@ hipError_t ihipMemcpy3DCommand(amd::Command*& command, const hipMemcpy3DParms* p
   return ihipGetMemcpyParam3DCommand(command, &desc, stream);
 }
 
-hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream, bool isAsync = false) {
+hipError_t ihipMemcpy3D(const hipMemcpy3DParms* p, hipStream_t stream, bool isAsync) {
   hipError_t status = ihipMemcpy3D_validate(p);
   if (status != hipSuccess) {
     return status;
@@ -2822,8 +2808,70 @@ hipError_t hipDrvMemcpy3D(const HIP_MEMCPY3D* pCopy) {
 
 hipError_t hipDrvMemcpy3DAsync(const HIP_MEMCPY3D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipDrvMemcpy3DAsync, pCopy, stream);
-
   HIP_RETURN_DURATION(ihipMemcpyParam3D(pCopy, stream, true));
+}
+
+hipError_t hipMemcpyBatchAsync(void **dsts, void **srcs, size_t *sizes, size_t count,
+                               hipMemcpyAttributes *attrs, size_t *attrsIdxs, size_t numAttrs,
+                               size_t *failIdx, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpyBatchAsync, dsts, srcs, sizes,  count, attrs, attrsIdxs, numAttrs, failIdx,
+             stream);
+  // validate stream
+  if(!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  // validate inputs
+  if (dsts == nullptr || srcs == nullptr || sizes == nullptr || failIdx == nullptr ||
+      count == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  // no support for memcpy attributes
+  if (numAttrs > 0) {
+    HIP_RETURN(hipErrorNotSupported);
+  }
+
+  hipError_t status = hipSuccess;
+
+  *failIdx = SIZE_MAX;
+  for (int i = 0; i < count; ++i) {
+    if (sizes[i] == 0) {
+      *failIdx = i;
+      status = hipErrorInvalidValue;
+      break;
+    }
+    status = ihipMemcpy(dsts[i], srcs[i], sizes[i], hipMemcpyDefault, *hip::getStream(stream),
+                        true, true);
+    if (status != hipSuccess) {
+      *failIdx = i;
+      break;
+    }
+  }
+  HIP_RETURN(status);
+}
+
+hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp *opList, size_t *failIdx,
+                                 unsigned long long flags, hipStream_t stream) {
+  HIP_INIT_API(hipMemcpy3DBatchAsync, numOps, opList, failIdx, flags, stream);
+  if (flags != 0 || opList == nullptr || numOps == 0) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+
+  hipError_t status = hipSuccess;
+
+  *failIdx = SIZE_MAX;
+  for (int i = 0; i < numOps; ++i) {
+    hipMemcpy3DParms parms = getMemcpy3DParms(opList[i]);
+    status = ihipMemcpy3D(&parms, stream, true);
+    if (status != hipSuccess) {
+      *failIdx = i;
+      break;
+    }
+  }
+  HIP_RETURN(status);
 }
 
 hipError_t packFillMemoryCommand(amd::Command*& command, amd::Memory* memory, size_t offset,
@@ -3117,7 +3165,7 @@ hipError_t ihipMemset3DCommand(std::vector<amd::Command*> &commands, hipPitchedP
 
 
 hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
-                        hipStream_t stream, bool isAsync = false) {
+                        hipStream_t stream, bool isAsync = false, size_t elementSize = 1) {
   auto sizeBytes = extent.width * extent.height * extent.depth;
 
   if (sizeBytes == 0) {
@@ -3142,7 +3190,7 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   std::vector<amd::Command*> commands;
-  status = ihipMemset3DCommand(commands, pitchedDevPtr, value, extent, hip_stream);
+  status = ihipMemset3DCommand(commands, pitchedDevPtr, value, extent, hip_stream, elementSize);
   if (status != hipSuccess) {
     return status;
   }
@@ -3157,9 +3205,10 @@ hipError_t ihipMemset3D(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent
 }
 
 hipError_t hipMemset2D_common(void* dst, size_t pitch, int value, size_t width,
-                              size_t height, hipStream_t stream=nullptr) {
+                              size_t height, hipStream_t stream=nullptr, size_t elementSize = 1) {
   CHECK_STREAM_CAPTURING();
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream);
+  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, false,
+                       elementSize);
 }
 
 hipError_t hipMemset2D_spt(void* dst, size_t pitch, int value, size_t width, size_t height) {
@@ -3173,11 +3222,11 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
   HIP_RETURN(hipMemset2D_common(dst, pitch, value, width, height));
 }
 
-hipError_t hipMemset2DAsync_common(void* dst, size_t pitch, int value,
-                            size_t width, size_t height, hipStream_t stream) {
+hipError_t hipMemset2DAsync_common(void* dst, size_t pitch, int value, size_t width, size_t height,
+                                   hipStream_t stream, size_t elementSize = 1) {
   STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, width, height);
-
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true);
+  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true,
+                       elementSize);
 }
 
 hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value,
@@ -3191,6 +3240,48 @@ hipError_t hipMemset2DAsync_spt(void* dst, size_t pitch, int value,
   HIP_INIT_API(hipMemset2DAsync, dst, pitch, value, width, height, stream);
   PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipMemset2DAsync_common(dst, pitch, value, width, height, stream));
+}
+
+hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
+                         size_t height) {
+  HIP_INIT_API(hipMemsetD2D8, dst, dstPitch, value, width, height);
+  HIP_RETURN(hipMemset2D_common(dst, dstPitch, value, width, height, nullptr,
+                                sizeof(unsigned char)));
+}
+
+hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
+                              size_t height, hipStream_t stream) {
+  HIP_INIT_API(hipMemsetD2D8Async, dst, dstPitch, value, width, height, stream);
+  HIP_RETURN(hipMemset2DAsync_common(dst, dstPitch, value, width, height, stream,
+                                     sizeof(unsigned char)));
+}
+
+hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short value, size_t width,
+                          size_t height) {
+  HIP_INIT_API(hipMemsetD2D16, dst, dstPitch, value, width, height);
+  HIP_RETURN(hipMemset2D_common(dst, dstPitch, value, width, height, nullptr,
+                                sizeof(unsigned short)));
+}
+
+hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
+                               size_t width, size_t height, hipStream_t stream) {
+  HIP_INIT_API(hipMemsetD2D16Async, dst, dstPitch, value, width, height, stream);
+  HIP_RETURN(hipMemset2DAsync_common(dst, dstPitch, value, width, height, stream,
+                                     sizeof(unsigned short)));
+}
+
+hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int value, size_t width,
+                          size_t height) {
+  HIP_INIT_API(hipMemsetD2D32, dst, dstPitch, value, width, height);
+  HIP_RETURN(hipMemset2D_common(dst, dstPitch, value, width, height, nullptr,
+                                sizeof(unsigned int)));
+}
+
+hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
+                               size_t width, size_t height, hipStream_t stream) {
+  HIP_INIT_API(hipMemsetD2D32Async, dst, dstPitch, value, width, height, stream);
+  HIP_RETURN(hipMemset2DAsync_common(dst, dstPitch, value, width, height, stream,
+                                     sizeof(unsigned int)));
 }
 
 // ================================================================================================
@@ -4310,7 +4401,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
                                    (size_t)mipmapDesc->offset, buf));
 }
 
-hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size, 
+hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, size_t size,
                                           hipMemRangeHandleType handleType,
                                           unsigned long long flags) {
   HIP_INIT_API(hipMemGetHandleForAddressRange, handle, dptr, size, handleType, flags);
