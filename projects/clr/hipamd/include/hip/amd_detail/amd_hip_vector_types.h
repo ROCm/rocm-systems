@@ -51,8 +51,8 @@ THE SOFTWARE.
     #include <type_traits>
 #endif // defined(__HIPCC_RTC__)
 
-template <class T, int N> constexpr __hip_internal::size_t __hip_vec_align_v() {
-  return (N == 4 && alignof(T) == 8) ? 16 : N * alignof(T);
+template <class T, int _hip_N> constexpr __hip_internal::size_t __hip_vec_align_v() {
+  return (_hip_N == 4 && alignof(T) == 8) ? 16 : _hip_N * alignof(T);
 }
 
 template <typename T, unsigned int n> struct HIP_vector_base;

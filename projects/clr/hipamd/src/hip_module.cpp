@@ -48,6 +48,11 @@ hipError_t hipModuleUnload(hipModule_t hmod) {
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_RETURN(PlatformState::instance().unloadModule(hmod));
 }
+hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
+  HIP_INIT_API(hipModuleLoadFatBinary, module, fatbin);
+  HIP_RETURN(PlatformState::instance().loadModule(module, 0, fatbin));
+  HIP_RETURN(hipSuccess);
+}
 
 hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
   HIP_INIT_API(hipModuleLoad, module, fname);
@@ -87,6 +92,15 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const ch
   }
 
   HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
+  HIP_INIT_API(hipModuleGetFunctionCount, count, mod);
+
+  if (mod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  HIP_RETURN(PlatformState::instance().getFuncCount(count, mod););
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
@@ -371,6 +385,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     assert(kernelParams == nullptr);
     if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER || extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE ||
         extra[4] != HIP_LAUNCH_PARAM_END) {
+      kernelCommand->release();
       return hipErrorInvalidValue;
     }
     kernargs = reinterpret_cast<address>(extra[1]);
@@ -429,7 +444,11 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
                                   uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
                                   uint32_t firstDevice = 0) {
   int deviceId = hip::Stream::DeviceId(hStream);
-  if (deviceId != ihipGetDevice()) {
+
+  // Ensure the stream's device matches the current device,
+  // or the grid's assigned device in CooperativeKernelMultiDevice mode
+  int targetDevice = (numGrids == 0) ? ihipGetDevice() : gridId;
+  if (deviceId != targetDevice) {
     return hipErrorInvalidResourceHandle;
   }
   HIP_RETURN_ONFAIL(PlatformState::instance().initStatManagedVarDevicePtr(deviceId));
@@ -1093,9 +1112,47 @@ hipError_t hipLinkCreate(unsigned int num_options, hipJitOption* options_ptr,
   }
 
   if (num_options != 0) {
-    for (int i = 0; i < num_options; i++) {
-      if (options_ptr == nullptr || options_vals_pptr == nullptr) {
-        HIP_RETURN(hipErrorInvalidValue);
+    if (options_ptr == nullptr || options_vals_pptr == nullptr) {
+      HIP_RETURN(hipErrorInvalidValue);
+    }
+
+    for (int i = 0; i < num_options; ++i) {
+      switch (options_ptr[i]) {
+        // CUDA only options
+        case hipJitOptionMaxRegisters:
+        case hipJitOptionThreadsPerBlock:
+        case hipJitOptionWallTime:
+        case hipJitOptionInfoLogBuffer:
+        case hipJitOptionInfoLogBufferSizeBytes:
+        case hipJitOptionErrorLogBuffer:
+        case hipJitOptionErrorLogBufferSizeBytes:
+        case hipJitOptionOptimizationLevel:
+        case hipJitOptionTargetFromContext:
+        case hipJitOptionTarget:
+        case hipJitOptionFallbackStrategy:
+        case hipJitOptionGenerateDebugInfo:
+        case hipJitOptionLogVerbose:
+        case hipJitOptionGenerateLineInfo:
+        case hipJitOptionCacheMode:
+        case hipJitOptionSm3xOpt:
+        case hipJitOptionFastCompile:
+        case hipJitOptionGlobalSymbolNames:
+        case hipJitOptionGlobalSymbolAddresses:
+        case hipJitOptionGlobalSymbolCount:
+        case hipJitOptionLto:
+        case hipJitOptionFtz:
+        case hipJitOptionPrecDiv:
+        case hipJitOptionPrecSqrt:
+        case hipJitOptionFma:
+        case hipJitOptionPositionIndependentCode:
+        case hipJitOptionMinCTAPerSM:
+        case hipJitOptionMaxThreadsPerBlock:
+        case hipJitOptionOverrideDirectiveValues:
+        case hipJitOptionNumOptions:
+          HIP_RETURN(hipErrorInvalidValue);
+        default:
+          // everything else is fine
+          break;
       }
     }
   }

@@ -87,6 +87,9 @@ TEST_CASE("Unit_hipStreamAttachMemAsync_Positive_AttachGlobal") {
   HIP_CHECK(hipStreamSynchronize(nullptr));
 
   for (int i = 0; i < stream_count; ++i) {
+    if (device_count > 1) {
+      HIP_CHECK(hipSetDevice(i));
+    }
     HipTest::launchKernel(Set, 1, 1, 0, streams.at(i)->stream(), managed_global.ptr() + i, i);
   }
 

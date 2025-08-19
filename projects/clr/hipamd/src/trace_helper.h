@@ -20,10 +20,13 @@
 
 #pragma once
 
+#include "hip_formatting.hpp"
+
 #include <iostream>
 #include <iomanip>
 #include <sstream>
 #include <string>
+
 //---
 // Helper functions to convert HIP function arguments into strings.
 // Handles POD data types as well as enumerations (ie hipMemcpyKind).
@@ -109,6 +112,9 @@ inline std::string ToHexString(T v) {
     return ss.str();
 };
 
+//---
+// Template overloads for ToString to handle specific types
+
 template <typename T>
 inline std::string ToString(T* v) {
     std::ostringstream ss;
@@ -131,9 +137,6 @@ inline std::string ToString(T** v) {
     return ss.str();
 };
 
-//---
-// Template overloads for ToString to handle specific types
-
 // This is the default which works for most types:
 template <typename T>
 inline std::string ToString(T v) {
@@ -142,100 +145,8 @@ inline std::string ToString(T v) {
     return ss.str();
 };
 
-template <>
-inline std::string ToString(hipFunction_t v) {
-    std::ostringstream ss;
-    ss << "0x" << std::hex << static_cast<void*>(v);
-    return ss.str();
-};
-
-//  hipEvent_t specialization. TODO - maybe add an event ID for debug?
-template <>
-inline std::string ToString(hipEvent_t v) {
-    std::ostringstream ss;
-    ss << "event:" << std::hex << static_cast<void*>(v);
-    return ss.str();
-};
-//  hipStream_t
-template <>
-inline std::string ToString(hipStream_t v) {
-    std::ostringstream ss;
-    if (v == NULL) {
-        ss << "stream:<null>";
-    } else {
-        ss << "stream:" << std::hex << static_cast<void*>(v);
-    }
-
-    return ss.str();
-};
-
-//  hipCtx_t
-template <>
-inline std::string ToString(hipCtx_t v) {
-    std::ostringstream ss;
-    if (v == NULL) {
-        ss << "context:<null>";
-    } else {
-        ss << "context:" << std::hex << static_cast<void*>(v);
-    }
-
-    return ss.str();
-};
-
-//  hipPitchedPtr
-template <>
-inline std::string ToString(hipPitchedPtr v) {
-    std::ostringstream ss;
-    ss << "pitchPtr:" << std::hex << static_cast<void*>(v.ptr);
-    return ss.str();
-};
-
-//  hipMemcpyKind specialization
-template <>
-inline std::string ToString(hipMemcpyKind v) {
-    switch (v) {
-        CASE_STR(hipMemcpyHostToHost);
-        CASE_STR(hipMemcpyHostToDevice);
-        CASE_STR(hipMemcpyDeviceToHost);
-        CASE_STR(hipMemcpyDeviceToDevice);
-        CASE_STR(hipMemcpyDefault);
-        CASE_STR(hipMemcpyDeviceToDeviceNoCU);
-        default:
-            return ToHexString(v);
-    };
-};
-
-template <>
-inline std::string ToString(hipFuncCache_t v) {
-    switch (v) {
-        CASE_STR(hipFuncCachePreferNone);
-        CASE_STR(hipFuncCachePreferShared);
-        CASE_STR(hipFuncCachePreferL1);
-        CASE_STR(hipFuncCachePreferEqual);
-        default:
-            return ToHexString(v);
-    };
-};
-
-template <>
-inline std::string ToString(hipSharedMemConfig v) {
-    switch (v) {
-        CASE_STR(hipSharedMemBankSizeDefault);
-        CASE_STR(hipSharedMemBankSizeFourByte);
-        CASE_STR(hipSharedMemBankSizeEightByte);
-        default:
-            return ToHexString(v);
-    };
-};
-
-template <>
-inline std::string ToString(hipError_t v) {
-    return ihipErrorString(v);
-};
-
 // Catch empty arguments case
 inline std::string ToString() { return (""); }
-
 
 //---
 // C++11 variadic template - peels off first argument, converts to string, and calls itself again to
@@ -244,7 +155,6 @@ template <typename T, typename... Args>
 inline std::string ToString(T first, Args... args) {
     return ToString(first) + ", " + ToString(args...);
 }
-
 
 inline hipError_t ConvertCLErrorIntoHIPError(cl_int cl_error) {
   hipError_t hip_error = hipSuccess;

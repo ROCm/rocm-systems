@@ -114,3 +114,20 @@ set_tests_properties(
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
                ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})
+
+# Test occupancy mode
+add_test(NAME thread-trace-api-extra-args
+         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
+
+set_tests_properties(
+    thread-trace-api-extra-args
+    PROPERTIES TIMEOUT
+               10
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${PRELOAD_ENV};ATT_NODETAIL=1"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               ${ROCPROFILER_DISABLE_UNSTABLE_CTESTS})

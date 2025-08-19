@@ -68,7 +68,7 @@ OccupancyFile(const Fspath&                                     dir,
             json_event.push_back(event.time);
             json_event.push_back(event.cu);
             json_event.push_back(event.simd);
-            json_event.push_back(event.slot);
+            json_event.push_back(event.wave_id);
             json_event.push_back(event.start);
             json_event.push_back(get_kernel_id(event.pc));
             list.push_back(json_event);

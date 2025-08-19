@@ -499,7 +499,7 @@ hipError_t ihipGetDeviceProperties(hipDeviceProp_tR0600* props, int device) {
   deviceProps.multiProcessorCount = info.maxComputeUnits_;
   deviceProps.l2CacheSize = info.l2CacheSize_;
   deviceProps.maxThreadsPerMultiProcessor = info.maxThreadsPerCU_;
-  deviceProps.maxBlocksPerMultiProcessor = int(info.maxThreadsPerCU_ / info.maxWorkGroupSize_);
+  deviceProps.maxBlocksPerMultiProcessor = int(info.maxThreadsPerCU_ / info.wavefrontWidth_);
   deviceProps.computeMode = 0;
   deviceProps.clockInstructionRate = info.timeStampFrequency_;
   deviceProps.arch.hasGlobalInt32Atomics = 1;

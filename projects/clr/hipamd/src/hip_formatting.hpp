@@ -923,3 +923,43 @@ inline std::ostream& operator<<(std::ostream& os, const hipIpcEventHandle_t* s) 
   //TODO fill in later
   return os;
 }
+
+inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr& p) {
+  os << "pitchPtr:" << std::hex << reinterpret_cast<uintptr_t>(p.ptr);
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr* p) {
+  if (p) {
+    os << *p;
+  } else {
+    os << "nullptr";
+  }
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const hipMemLocation& s) {
+  os << "{type=";
+  switch (s.type) {
+    case hipMemLocationTypeInvalid:
+      os << "hipMemLocationTypeInvalid";
+      break;
+    case hipMemLocationTypeDevice:
+      os << "hipMemLocationTypeDevice";
+      break;
+    case hipMemLocationTypeHost:
+      os << "hipMemLocationTypeHost";
+      break;
+    case hipMemLocationTypeHostNuma:
+      os << "hipMemLocationTypeHostNuma";
+      break;
+    case hipMemLocationTypeHostNumaCurrent:
+      os << "hipMemLocationTypeHostNumaCurrent";
+      break;
+    default:
+      os << static_cast<int>(s.type);
+      break;
+  }
+  os << ", id=" << s.id << "}";
+  return os;
+}

@@ -1368,6 +1368,15 @@ THE SOFTWARE.
                     static_cast<__half_raw>(x).data +
                     static_cast<__half_raw>(y).data};
             }
+            inline
+            __HOST_DEVICE__
+            __half __hadd_rn(__half x, __half y)
+            {
+#pragma clang fp contract(off)
+                return __half_raw{
+                    static_cast<__half_raw>(x).data +
+                    static_cast<__half_raw>(y).data};
+            }
 	        inline
 	        __HOST_DEVICE__
 	        __half __habs(__half x)
@@ -1390,8 +1399,26 @@ THE SOFTWARE.
             }
             inline
             __HOST_DEVICE__
+            __half __hsub_rn(__half x, __half y)
+            {
+#pragma clang fp contract(off)
+                return __half_raw{
+                    static_cast<__half_raw>(x).data -
+                    static_cast<__half_raw>(y).data};
+            }
+            inline
+            __HOST_DEVICE__
             __half __hmul(__half x, __half y)
             {
+                return __half_raw{
+                    static_cast<__half_raw>(x).data *
+                    static_cast<__half_raw>(y).data};
+            }
+            inline
+            __HOST_DEVICE__
+            __half __hmul_rn(__half x, __half y)
+            {
+#pragma clang fp contract(off)
                 return __half_raw{
                     static_cast<__half_raw>(x).data *
                     static_cast<__half_raw>(y).data};
@@ -1446,6 +1473,16 @@ THE SOFTWARE.
                     static_cast<__half2_raw>(x).data +
                     static_cast<__half2_raw>(y).data};
             }
+            inline
+            __HOST_DEVICE__
+            __half2 __hadd2_rn(__half2 x, __half2 y)
+            {
+#pragma clang fp contract(off)
+                return __half2{
+                    static_cast<__half2_raw>(x).data +
+                    static_cast<__half2_raw>(y).data};
+            }
+
 	        inline
 	        __HOST_DEVICE__
 	        __half2 __habs2(__half2 x)
@@ -1462,8 +1499,26 @@ THE SOFTWARE.
             }
             inline
             __HOST_DEVICE__
+            __half2 __hsub2_rn(__half2 x, __half2 y)
+            {
+#pragma clang fp contract(off)
+                return __half2{
+                    static_cast<__half2_raw>(x).data -
+                    static_cast<__half2_raw>(y).data};
+            }
+            inline
+            __HOST_DEVICE__
             __half2 __hmul2(__half2 x, __half2 y)
             {
+                return __half2{
+                    static_cast<__half2_raw>(x).data *
+                    static_cast<__half2_raw>(y).data};
+            }
+            inline
+            __HOST_DEVICE__
+            __half2 __hmul2_rn(__half2 x, __half2 y)
+            {
+#pragma clang fp contract(off)
                 return __half2{
                     static_cast<__half2_raw>(x).data *
                     static_cast<__half2_raw>(y).data};
