@@ -70,7 +70,7 @@ jobs:
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
       - name: Build CI Container (PR - No Push)
-        if: ${{ github.event_name == 'pull_request' }}
+        if: github.event_name == 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -139,7 +139,7 @@ jobs:
           password: ${{ secrets.ROCPROF_SYS_DOCKER_TOKEN }}
 
       - name: Build Base Container (PR - No Push)
-        if: ${{ github.event_name == 'pull_request' }}
+        if: github.event_name == 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
@@ -152,7 +152,7 @@ jobs:
             popd
       
       - name: Build Base Container (Push)
-        if: ${{ github.event_name != 'pull_request' }}
+        if: github.event_name != 'pull_request'
         timeout-minutes: 45
         uses: nick-fields/retry@v3
         with:
