@@ -1495,13 +1495,13 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
-        afid_help = "Generate an AFID (AMD Field ID) using a CPER record, which is similar to XID."
+        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
         folder_help = "Folder to dump current CPER report files"
         file_limit_help = "Maximum number of current CPER files in target folder\n    Older files beyond limit will be deleted"
-        cper_file_help = "Full path of a retrieved cper record file to generate the AFID"
+        cper_file_help = "Full path of a retrieved CPER record file to generate the AFID"
         follow_help = "Continuously monitor for new CPER entries"
 
         ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)

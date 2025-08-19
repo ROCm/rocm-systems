@@ -831,12 +831,12 @@ This command accepts options only; no positional arguments are required.
 RAS arguments:
   -h, --help                          show this help message and exit
   --cper                              Trigger CPER data retrieval
-  --afid                              Generate an AFID (AMD Field ID) using CPER record, which is similar to XID.
+  --afid                              Generate an AFID (AMD Field ID) given a CPER record file.
   --severity SEVERITY [SEVERITY ...]  Set the SEVERITY filters from the following:
                                           nonfatal-uncorrected, fatal, nonfatal-corrected, all
   --folder FOLDER                     Folder to dump CPER report files
   --file-limit FILE_LIMIT             Maximum number of entries per output file
-  --cper-file CPER_FILE               Full path of the cper record file to generate the AFID
+  --cper-file CPER_FILE               Full path of the CPER record file to generate the AFID
   --follow                            Continuously monitor for new entries
 
 Device Arguments:
