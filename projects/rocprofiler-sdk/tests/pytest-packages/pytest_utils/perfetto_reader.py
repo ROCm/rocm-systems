@@ -343,7 +343,7 @@ class PerfettoReader:
                 [self.dataframe, counter_collection_df], ignore_index=True
             )
 
-        scratch_df = self.query_tp(
+        scratch_df_odd = self.query_tp(
             """SELECT
                 begin.id as slice_id,
                 begin.track_id,
@@ -360,6 +360,29 @@ class PerfettoReader:
             JOIN counter_track ON begin.track_id = counter_track.id
             WHERE counter_track.name LIKE '%SCRATCH MEMORY%' AND begin.id % 2 == 1"""
         )
+
+        scratch_df_even = self.query_tp(
+            """SELECT
+                begin.id as slice_id,
+                begin.track_id,
+                'scratch_memory' as category,
+                0 as depth,
+                0 as stack_id,
+                0 as parent_stack_id,
+                begin.ts as ts,
+                end.ts - begin.ts as dur,
+                counter_track.name as name
+            FROM counter AS begin
+            JOIN counter AS end ON begin.id + 1 == end.id AND
+                end.track_id == begin.track_id AND begin.value == end.value
+            JOIN counter_track ON begin.track_id = counter_track.id
+            WHERE counter_track.name LIKE '%SCRATCH MEMORY%' AND begin.id % 2 == 0"""
+        )
+
+        if len(scratch_df_even) >= len(scratch_df_odd):
+            scratch_df = scratch_df_even
+        else:
+            scratch_df = scratch_df_odd
 
         # Transform scratch memory data to match the main dataframe schema
         if not scratch_df.empty:
