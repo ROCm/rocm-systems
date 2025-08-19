@@ -95,6 +95,7 @@ set(TEST_SRC
     hipMemsetD2D32Async.cc
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
+    hipMemcpy3DBatchAsync.cc
     )
 
 if(UNIX)
