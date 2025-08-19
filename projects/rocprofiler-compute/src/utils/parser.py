@@ -753,19 +753,21 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def init_metric_evaluator(_raw_pmc_df: dict, _ammolite_vars: dict) -> None:
-    global raw_pmc_df, __pmc_perf
-    raw_pmc_df = _raw_pmc_df
-    __pmc_perf = _raw_pmc_df.get("pmc_perf")
-    
-    globals().update(_ammolite_vars)
+def init_metric_evaluator(raw_pmc_df: dict, ammolite_vars: dict) -> None:
+    raw_pmc_df_keys = set(raw_pmc_df.columns.get_level_values(0))
+    raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
+
+    # The globals here are not shared across all processes, they exist only within the subprocess's context,
+    # and their lifetime ends when the process terminates.
+    # The process-local globals are used for performance optimization.
+    globals().update(raw_pmc_df_items)
+    globals().update(ammolite_vars)
     
     
 def run_metric_evaluator(row_expr: str) -> str:
     try:
-        # caching 'pmc_perf'
-        row_expr = row_expr.replace("raw_pmc_df.get('pmc_perf')", '__pmc_perf')
-
+        # cache dataframes of 'raw_pmc_df'
+        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r'raw_pmc_df_\1', row_expr)
         out = eval(compile(row_expr, "<string>", "eval"))
 
         if np.isnan(out):
@@ -1037,7 +1039,6 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
 
     # Empirically, 16 is about as much as we need.
     processes = min(16, multiprocessing.cpu_count())
-    # print(f"Evaluating {len(row_exprs)} metrics using {processes} processes.")
 
     with multiprocessing.Pool(processes=processes, initializer=init_metric_evaluator, initargs=(raw_pmc_df, ammolite_vars)) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)

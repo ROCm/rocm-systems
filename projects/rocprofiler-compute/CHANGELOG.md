@@ -69,7 +69,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
 
-* Improve post-analysis function performance by caching and multi-processing
+* Improve post-analysis runtime performance by caching and multi-processing
 
 ### Removed
 
