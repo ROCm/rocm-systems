@@ -6014,6 +6014,102 @@ class AMDSMICommands():
 
             self.logger.table_header += 'PCIE_BW'.rjust(12)
 
+        # Store process list seperately
+        if args.process:
+            # Populate initial processes
+            try:
+                process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
+                raise e
+
+            try:
+                num_compute_units = amdsmi_interface.amdsmi_get_gpu_asic_info(args.gpu)['num_compute_units']
+            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
+                num_compute_units = "N/A"
+                logging.debug("Failed to get num compute units for gpu %s | %s", gpu_id, e.get_error_info())
+
+            # Clean processes dictionary
+            filtered_process_values = []
+            for process_info in process_list:
+                process_info.pop('engine_usage')  # Remove 'engine_usage' value
+                process_info['mem_usage'] = process_info.pop('mem')
+                process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
+
+                memory_usage_unit = "B"
+
+                if self.logger.is_human_readable_format():
+                    process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
+                    for usage_metric in process_info['memory_usage']:
+                        process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
+                    memory_usage_unit = ""
+
+                process_info['mem_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['mem_usage'],
+                                                                     memory_usage_unit)
+
+                for usage_metric in process_info['memory_usage']:
+                    process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
+                                                                                          process_info['memory_usage'][usage_metric],
+                                                                                          memory_usage_unit)
+
+                if 'cu_occupancy' in process_info:
+                    try:
+                        cu_occupancy = process_info['cu_occupancy']
+                        if num_compute_units != "N/A" and num_compute_units > 0 and cu_occupancy != "N/A":
+                            cu_percentage = round((cu_occupancy / num_compute_units) * 100, 1)
+                            process_info['cu_occupancy'] = self.helpers.unit_format(self.logger,
+                                                                                    cu_percentage,
+                                                                                    '%')
+                        else:
+                            process_info['cu_occupancy'] = "N/A"
+                    except Exception as e:
+                        process_info['cu_occupancy'] = "N/A"
+                        logging.debug("Failed to calculate cu_occupancy percentage for GPU %s | %s", gpu_id, str(e))
+
+                filtered_process_values.append({'process_info': process_info})
+
+            # If no processes are populated then we populate an N/A placeholder
+            if not filtered_process_values:
+                logging.debug("Monitor - Failed to detect any process on gpu %s", gpu_id)
+                filtered_process_values.append({'process_info': "N/A"})
+
+            for index, process in enumerate(filtered_process_values):
+                if process['process_info'] == "N/A":
+                    filtered_process_values[index]['process_info'] = "No running processes detected"
+
+            # Build the process table's title and header
+            self.logger.secondary_table_title = "PROCESS INFO"
+            self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9)
+
+            if watching_output:
+                self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
+
+            logging.debug(f"Monitor - Process Info for GPU {gpu_id} | {filtered_process_values}")
+
+            if self.logger.is_json_format():
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+            if self.logger.is_human_readable_format():
+                # Print out process in flattened format
+                # The logger detects if process list is present and pulls it out and prints
+                #  that table with timestamp, gpu, and prints headers separately
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+            if self.logger.is_csv_format():
+                dual_csv_output = True
+                # The logger detects if process list is present and pulls it out and prints
+                #  that table with timestamp, gpu, and prints headers separately
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+        ###################
+        ### XCP Metrics ###
+        ###################
+        # Must come after process list - XCP detail is a multi-dimensional array, which is displayed
+        # in tabular format with XCP values for same gpu shown on muliple lines.
         if args.violation:
             violation_status = {
                 "pviol": "N/A",
@@ -6112,8 +6208,8 @@ class AMDSMICommands():
                     if watching_output:
                         self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
 
-                    self.logger.store_output(args.gpu, 'xcp', current_xcp)
                     if current_xcp != 0:  # set all other values without XCP stats to N/A
+                        self.logger.store_output(args.gpu, 'xcp', current_xcp)
                         monitor_values['pviol'] = "N/A"
                         monitor_values['tviol'] = "N/A"
                         monitor_values['tviol_active'] = "N/A"
@@ -6137,120 +6233,28 @@ class AMDSMICommands():
                         monitor_values['low_utilviol'] = monitor_values_deepcopy['low_utilviol'][f"xcp_{current_xcp}"]
 
                     if self.logger.is_human_readable_format():
-                        monitor_values['pviol'] = monitor_values['pviol'].rjust(kPVIOL_MAX_WIDTH, ' ')
-                        monitor_values['tviol'] = monitor_values['tviol'].rjust(kTVIOL_MAX_WIDTH, ' ')
-                        monitor_values['phot_tviol'] = monitor_values['phot_tviol'].rjust(kPHOT_MAX_WIDTH, ' ')
-                        monitor_values['vr_tviol'] = monitor_values['vr_tviol'].rjust(kVR_MAX_WIDTH, ' ')
-                        monitor_values['hbm_tviol'] = monitor_values['hbm_tviol'].rjust(kHBM_MAX_WIDTH, ' ')
-                        monitor_values['gfx_clkviol'] = monitor_values['gfx_clkviol'].rjust(kGFXC_MAX_WIDTH, ' ')
-                        monitor_values['gfxclk_pviol'] = str(monitor_values['gfxclk_pviol']).rjust(kGFXC_PVIOL_MAX_WIDTH, ' ').strip().replace('\'', '')
-                        monitor_values['gfxclk_tviol'] = str(monitor_values['gfxclk_tviol']).rjust(kGFXC_TVIOL_MAX_WIDTH, ' ').strip().replace('\'', '')
-                        monitor_values['gfxclk_totalviol'] = str(monitor_values['gfxclk_totalviol']).rjust(kGFXC_TOTALVIOL_MAX_WIDTH, ' ').strip().replace('\'', '')
-                        monitor_values['low_utilviol'] = str(monitor_values['low_utilviol']).rjust(kLOW_UTILVIOL_MAX_WIDTH, ' ').strip().replace('\'', '')
+                        monitor_values['pviol'] = monitor_values['pviol']
+                        monitor_values['tviol'] = monitor_values['tviol']
+                        monitor_values['phot_tviol'] = monitor_values['phot_tviol']
+                        monitor_values['vr_tviol'] = monitor_values['vr_tviol']
+                        monitor_values['hbm_tviol'] = monitor_values['hbm_tviol']
+                        monitor_values['gfx_clkviol'] = monitor_values['gfx_clkviol']
+                        monitor_values['gfxclk_pviol'] = str(monitor_values['gfxclk_pviol']).replace('\'', '')
+                        monitor_values['gfxclk_tviol'] = str(monitor_values['gfxclk_tviol']).replace('\'', '')
+                        monitor_values['gfxclk_totalviol'] = str(monitor_values['gfxclk_totalviol']).replace('\'', '')
+                        monitor_values['low_utilviol'] = str(monitor_values['low_utilviol']).replace('\'', '')
                     self.logger.store_output(args.gpu, 'values', monitor_values)
                     self.logger.store_multiple_device_output()
                     current_xcp += 1
             else:
                 self.logger.store_output(args.gpu, 'xcp', num_xcp)
                 self.logger.store_output(args.gpu, 'values', monitor_values)
-                self.logger.store_multiple_device_output()
 
         # Store typical output for all commands (XCP data will be handled separately, eg. violation status)
         if not args.violation:
             self.logger.store_output(args.gpu, 'values', monitor_values)
         # intialize dual_csv_format; applicable to process only
         dual_csv_output = False
-
-        # Store process list seperately
-        if args.process:
-            # Populate initial processes
-            try:
-                process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
-                raise e
-
-            try:
-                num_compute_units = amdsmi_interface.amdsmi_get_gpu_asic_info(args.gpu)['num_compute_units']
-            except (KeyError, amdsmi_exception.AmdSmiLibraryException) as e:
-                num_compute_units = "N/A"
-                logging.debug("Failed to get num compute units for gpu %s | %s", gpu_id, e.get_error_info())
-
-            # Clean processes dictionary
-            filtered_process_values = []
-            for process_info in process_list:
-                process_info.pop('engine_usage')  # Remove 'engine_usage' value
-                process_info['mem_usage'] = process_info.pop('mem')
-                process_info['cu_occupancy'] = process_info.pop('cu_occupancy')
-
-                memory_usage_unit = "B"
-
-                if self.logger.is_human_readable_format():
-                    process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
-                    for usage_metric in process_info['memory_usage']:
-                        process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
-                    memory_usage_unit = ""
-
-                process_info['mem_usage'] = self.helpers.unit_format(self.logger,
-                                                                     process_info['mem_usage'],
-                                                                     memory_usage_unit)
-
-                for usage_metric in process_info['memory_usage']:
-                    process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
-                                                                                          process_info['memory_usage'][usage_metric],
-                                                                                          memory_usage_unit)
-
-                if 'cu_occupancy' in process_info:
-                    try:
-                        cu_occupancy = process_info['cu_occupancy']
-                        if num_compute_units != "N/A" and num_compute_units > 0 and cu_occupancy != "N/A":
-                            cu_percentage = round((cu_occupancy / num_compute_units) * 100, 1)
-                            process_info['cu_occupancy'] = self.helpers.unit_format(self.logger,
-                                                                                    cu_percentage,
-                                                                                    '%')
-                        else:
-                            process_info['cu_occupancy'] = "N/A"
-                    except Exception as e:
-                        process_info['cu_occupancy'] = "N/A"
-                        logging.debug("Failed to calculate cu_occupancy percentage for GPU %s | %s", gpu_id, str(e))
-
-                filtered_process_values.append({'process_info': process_info})
-
-            # If no processes are populated then we populate an N/A placeholder
-            if not filtered_process_values:
-                logging.debug("Monitor - Failed to detect any process on gpu %s", gpu_id)
-                filtered_process_values.append({'process_info': "N/A"})
-
-            for index, process in enumerate(filtered_process_values):
-                if process['process_info'] == "N/A":
-                    filtered_process_values[index]['process_info'] = "No running processes detected"
-
-            # Build the process table's title and header
-            self.logger.secondary_table_title = "PROCESS INFO"
-            self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(19) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
-                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USG".rjust(10) + "CU%".rjust(9)
-
-            if watching_output:
-                self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
-
-            logging.debug(f"Monitor - Process Info for GPU {gpu_id} | {filtered_process_values}")
-
-            if self.logger.is_json_format():
-                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
-
-            if self.logger.is_human_readable_format():
-                # Print out process in flattened format
-                # The logger detects if process list is present and pulls it out and prints
-                #  that table with timestamp, gpu, and prints headers separately
-                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
-
-            if self.logger.is_csv_format():
-                dual_csv_output = True
-                # The logger detects if process list is present and pulls it out and prints
-                #  that table with timestamp, gpu, and prints headers separately
-                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
 
         # Now handling the single gpu case only
         if multiple_devices:
@@ -6261,7 +6265,12 @@ class AMDSMICommands():
             self.logger.store_watch_output(multiple_device_enabled=False)
 
 
-        self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
+        if args.violation:
+            # Print violation status for single gpu, which have different xcp information per 1 gpu
+            self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
+        else:
+            # Print the output for single gpu, which currently does not have multiple xcp information
+            self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
     def xgmi(self, args, multiple_devices=False, gpu=None, metric=None, xgmi_link_status=None):
