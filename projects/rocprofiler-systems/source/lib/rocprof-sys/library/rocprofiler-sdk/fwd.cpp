@@ -237,7 +237,7 @@ client_data::set_agents()
         const auto& _agents = agent_mngr.get_agents_by_type(type);
         for(const auto& agent : _agents)
         {
-            out.emplace_back(tool_agent{ agent->handle, agent.get() });
+            out.emplace_back(tool_agent{ agent->device_type_index, agent.get() });
         }
     };
 
