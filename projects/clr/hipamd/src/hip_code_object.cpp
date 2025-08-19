@@ -19,17 +19,19 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#define LLVM_DISABLE_ABI_BREAKING_CHECKS_ENFORCING 1
-#include "llvm/BinaryFormat/ELF.h"
-#if defined(_WIN32)
-#if defined(__has_attribute)
-// MS compiler doesn't support __has_attribute
-#undef __has_attribute
-#endif
-#endif
 #include "hip_code_object.hpp"
+#include "amd_hsa_elf.hpp"
+
+#include <cstring>
+
+#include <hip/driver_types.h>
+#include "hip/hip_runtime_api.h"
+#include "hip/hip_runtime.h"
+#include "hip_internal.hpp"
+#include "platform/program.hpp"
+#include <elf/elf.hpp>
+#include "comgrctx.hpp"
 #include "hip_comgr_helper.hpp"
-using namespace llvm::ELF;
 
 namespace hip {
 hipError_t ihipFree(void* ptr);
@@ -120,6 +122,15 @@ hipError_t DynCO::getDynFunc(hipFunction_t* hfunc, std::string func_name) {
 
   /* See if this could be solved */
   return it->second->getDynFunc(hfunc, module_);
+}
+
+hipError_t DynCO::getFuncCount(unsigned int* count) {
+  amd::ScopedLock lock(dclock_);
+  if (count == nullptr) {
+    return hipErrorInvalidValue;
+  }
+  *count = functions_.size();
+  return hipSuccess;
 }
 
 bool DynCO::isValidDynFunc(const void* hfunc) {

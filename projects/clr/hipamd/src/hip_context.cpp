@@ -45,7 +45,11 @@ void init(bool* status) {
 #if DISABLE_DIRECT_DISPATCH
   constexpr bool kDirectDispatch = false;
 #else
-  constexpr bool kDirectDispatch = IS_LINUX;
+#ifndef WITHOUT_HSA_BACKEND
+  constexpr bool kDirectDispatch = true;
+#else
+  constexpr bool kDirectDispatch = false;
+#endif
 #endif
   AMD_DIRECT_DISPATCH = flagIsDefault(AMD_DIRECT_DISPATCH) ? kDirectDispatch : AMD_DIRECT_DISPATCH;
   if (!amd::Runtime::init()) {

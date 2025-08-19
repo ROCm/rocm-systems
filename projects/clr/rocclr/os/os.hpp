@@ -332,8 +332,14 @@ class Os : AllStatic {
   //! Return the current process id
   static int getProcessId();
 
-  // Prints the location of the currently loaded library (shared object or DLL)
+  //! Prints the location of the currently loaded library (shared object or DLL)
   static void PrintLibraryLocation();
+
+  //! Checks if a core dump must be generated (rocgdb detection). Returns false in Windows
+  static bool DumpCoreFile();
+
+  //! Demangle a C++ name. The function will return the same name if couldn't demangle
+  static void CxaDemangle(const std::string& name, std::string* demangle);
 };
 
 /*@}*/

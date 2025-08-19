@@ -12,6 +12,10 @@ on:
     paths:
       - '.github/workflows/rocprofiler-systems-containers.yml'
       - 'projects/rocprofiler-systems/docker/**'
+  pull_request:
+    paths:
+      - '.github/workflows/rocprofiler-systems-containers.yml'
+      - 'projects/rocprofiler-systems/docker/**'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -21,29 +25,31 @@ env:
   GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
 jobs:
+  prepare_matrix_ci:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix_ci.outputs.matrix_data }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Output data for containers matrix
+        id: generate_matrix_ci
+        run: |
+          pushd projects/rocprofiler-systems/docker
+          MATRIX_CONTENT=$(cat containers-ci.yml | yq '.matrix' -I=0 -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+
   rocprofiler-systems-ci:
+    needs: prepare_matrix_ci
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - distro: "ubuntu"
-            version: "22.04"
-          - distro: "ubuntu"
-            version: "24.04"
-          - distro: "opensuse"
-            version: "15.5"
-          - distro: "opensuse"
-            version: "15.6"
-          - distro: "rhel"
-            version: "8.10"
-          - distro: "rhel"
-            version: "9.3"
-          - distro: "rhel"
-            version: "9.4"
-          - distro: "rhel"
-            version: "9.5"
+        include: ${{ fromJSON(needs.prepare_matrix_ci.outputs.matrix_data) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -72,85 +78,37 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} --push --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
+            PUSH_COMMAND="--push"
+            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
+            ./build-docker-ci.sh --distro ${{ matrix.distro }} --versions ${{ matrix.version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND} --jobs 2 --elfutils-version 0.188 --boost-version 1.79.0
             popd
 
-  rocprofiler-systems-release:
+  prepare_matrix_release:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix_data: ${{ steps.generate_matrix_release.outputs.matrix_data }}
 
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Output data for containers matrix
+        id: generate_matrix_release
+        run: |
+          pushd projects/rocprofiler-systems/docker
+          MATRIX_CONTENT=$(cat containers.yml | yq '.matrix' -I=0 -o=json)
+          echo "matrix_data=$MATRIX_CONTENT" >> $GITHUB_OUTPUT
+          
+  rocprofiler-systems-release:
+    needs: prepare_matrix_release
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # ubuntu 22.04
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.3"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.4"
-          # ubuntu 24.04
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "6.3"
-          - os-distro: "ubuntu"
-            os-version: "24.04"
-            rocm-version: "6.4"
-          # opensuse 15.5
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "6.3"
-          # opensuse 15.6
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "6.3"
-          - os-distro: "opensuse"
-            os-version: "15.6"
-            rocm-version: "6.4"
-          # RHEL 8.10
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "8.10"
-            rocm-version: "6.4"
-          # RHEL 9.4
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "9.4"
-            rocm-version: "6.4"
-          # RHEL 9.5
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "6.3"
-          - os-distro: "rhel"
-            os-version: "9.5"
-            rocm-version: "6.4"
-
+        include: ${{ fromJSON(needs.prepare_matrix_release.outputs.matrix_data) }}
+          
     steps:
       - uses: actions/checkout@v4
         with:
@@ -177,5 +135,7 @@ jobs:
           max_attempts: 3
           command: |
             pushd projects/rocprofiler-systems/docker
-            ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} --push
+            PUSH_COMMAND="--push"
+            if [ ${{ github.event_name == 'pull_request' }} ]; then PUSH_COMMAND=""; fi
+            ./build-docker.sh --distro ${{ matrix.os-distro }} --versions ${{ matrix.os-version }} --rocm-versions ${{ matrix.rocm-version }} --user ${{ secrets.ROCPROF_SYS_DOCKER_LOGIN }} ${PUSH_COMMAND}
             popd

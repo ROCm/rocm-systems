@@ -38,25 +38,22 @@ bool IPCEvent::createIpcEventShmemIfNeeded() {
     return true;
   }
 
-  char name_template[] = "/tmp/eventXXXXXX";
 #if !defined(_MSC_VER)
-  int temp_fd = mkstemp(name_template);
+  static std::atomic<int> counter{0};
+  ipc_evt_.ipc_name_ = "/hip_" + std::to_string(getpid()) + "_" + std::to_string(counter++);
 #else
+  char name_template[] = "/hip_XXXXXX";
   _mktemp_s(name_template, sizeof(name_template));
-#endif
-
   ipc_evt_.ipc_name_ = name_template;
   ipc_evt_.ipc_name_.replace(0, 5, "/hip_");
+#endif
+
   if (!amd::Os::MemoryMapFileTruncated(
           ipc_evt_.ipc_name_.c_str(),
           const_cast<const void**>(reinterpret_cast<void**>(&(ipc_evt_.ipc_shmem_))),
           sizeof(hip::ihipIpcEventShmem_t))) {
     return false;
   }
-
-#if !defined(_MSC_VER)
-  close(temp_fd);
-#endif
 
   ipc_evt_.ipc_shmem_->owners = 1;
   ipc_evt_.ipc_shmem_->read_index = -1;
@@ -134,21 +131,28 @@ hipError_t IPCEvent::enqueueRecordCommand(hip::Stream* stream, amd::Command* com
   ipc_evt_.ipc_shmem_->owners_device_id = deviceId();
   command->enqueue();
 
-    // device writes 0 to signal after the hipEventRecord command is completed
-    // the signal value is checked by WaitThenDecrementSignal cb
-    hipError_t status = ihipStreamOperation(
-        reinterpret_cast<hipStream_t>(stream), ROCCLR_COMMAND_STREAM_WRITE_VALUE,
-        &(ipc_evt_.ipc_shmem_->signal[offset]), 0, 0, 0, sizeof(uint32_t));
-    if (status != hipSuccess) {
-      return status;
-    }
+  // Set event_ in order to release marked command when event is destroyed
+  if (event_ != nullptr) {
+    event_->release();
+  }
+  event_ = &command->event();
+
+  // device writes 0 to signal after the hipEventRecord command is completed
+  // the signal value is checked by WaitThenDecrementSignal cb
+  hipError_t status =
+      ihipStreamOperation(reinterpret_cast<hipStream_t>(stream), ROCCLR_COMMAND_STREAM_WRITE_VALUE,
+                          &(ipc_evt_.ipc_shmem_->signal[offset]), 0, 0, 0, sizeof(uint32_t));
+
+  if (status != hipSuccess) {
+    return status;
+  }
 
   // Update read index to indicate new signal.
   int expected = write_index - 1;
   while (!ipc_evt_.ipc_shmem_->read_index.compare_exchange_weak(expected, write_index)) {
     amd::Os::sleep(1);
   }
-  
+
   return hipSuccess;
 }
 
@@ -213,6 +217,7 @@ hipError_t hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHandle_t handle) 
 
   hip::Event* e = reinterpret_cast<hip::Event*>(*event);
   ihipIpcEventHandle_t* iHandle = reinterpret_cast<ihipIpcEventHandle_t*>(&handle);
+
   status = e->OpenHandle(iHandle);
   // Free the event in case of failure
   if (status != hipSuccess) {

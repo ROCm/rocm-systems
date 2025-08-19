@@ -1856,13 +1856,15 @@ class SvmPrefetchAsyncCommand : public Command {
   const void* dev_ptr_;   //!< Device pointer to memory for prefetch
   size_t count_;          //!< the size for prefetch
   bool cpu_access_;       //!< Prefetch data into CPU location
+  int numa_id_;           //!< Host NUMA node id
   amd::Device* dev_;      //!< Destination device to prefetch to
 
  public:
   SvmPrefetchAsyncCommand(HostQueue& queue, const EventWaitList& eventWaitList,
-                          const void* dev_ptr, size_t count, amd::Device* dev, bool cpu_access)
+                          const void* dev_ptr, size_t count, amd::Device* dev,
+                          bool cpu_access, int numa_id)
       : Command(queue, 1, eventWaitList), dev_ptr_(dev_ptr), count_(count),
-        cpu_access_(cpu_access), dev_(dev) {}
+        cpu_access_(cpu_access), dev_(dev), numa_id_(numa_id) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 
@@ -1872,6 +1874,7 @@ class SvmPrefetchAsyncCommand : public Command {
   size_t count() const { return count_; }
   amd::Device* device() const { return dev_; }
   size_t cpu_access() const { return cpu_access_; }
+  int numa_id() const { return numa_id_; }
 };
 
 /*! \brief  A virtual map memory command.

@@ -204,11 +204,17 @@ void Memory::cpuUnmap(device::VirtualDevice& vDev) {
 }
 
 // ================================================================================================
-hsa_status_t Memory::interopMapBuffer(int fd) {
+hsa_status_t Memory::interopMapBuffer(amd::Os::FileDesc fdn) {
   hsa_agent_t agent = dev().getBackendDevice();
   size_t size;
   size_t metadata_size = 0;
   void* metadata;
+#if IS_WINDOWS
+  int fd = 0;
+  assert(!"Unimplemented");
+#else
+  auto fd = fdn;
+#endif
   hsa_status_t status = hsa_amd_interop_map_buffer(
       1, &agent, fd, 0, &size, &interop_deviceMemory_,
       &metadata_size, (const void**)&metadata);
@@ -232,7 +238,7 @@ hsa_status_t Memory::interopMapBuffer(int fd) {
 // Setup an interop buffer (dmabuf handle) as an OpenCL buffer
 // ================================================================================================
 bool Memory::createInteropBuffer(GLenum targetType, int miplevel) {
-#if defined(_WIN32)
+#if IS_WINDOWS
   return false;
 #else
   assert(owner()->isInterop() && "Object is not an interop object.");
@@ -851,8 +857,7 @@ bool Buffer::create(bool alloc_local) {
             return false;
           }
 
-          deviceMemory_ = const_cast<long int*>(signalValuePtr);  // conversion to void * is
-                                                                  // implicit
+          deviceMemory_ = const_cast<void*>(reinterpret_cast<volatile void*>(signalValuePtr));
 
           // Disable host access to force blit path for memeory writes.
           flags_ &= ~HostMemoryDirectAccess;

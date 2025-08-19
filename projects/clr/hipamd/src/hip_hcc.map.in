@@ -605,3 +605,27 @@ global:
 local:
     *;
 } hip_6.4;
+
+hip_7.1 {
+global:
+    hipModuleGetFunctionCount;
+    hipMemsetD2D8;
+    hipMemsetD2D8Async;
+    hipMemsetD2D16;
+    hipMemsetD2D16Async;
+    hipMemsetD2D32;
+    hipMemsetD2D32Async;
+    hipStreamGetAttribute;
+    hipStreamSetAttribute;
+    hipModuleLoadFatBinary;
+    hipMemcpyBatchAsync;
+    hipMemcpy3DBatchAsync;
+    hipMemcpy3DPeer;
+    hipMemcpy3DPeerAsync;
+    hipGetDriverEntryPoint;
+    hipGetDriverEntryPoint_spt;
+    hipMemPrefetchAsync_v2;
+    hipMemAdvise_v2;
+local:
+    *;
+} hip_6.5;

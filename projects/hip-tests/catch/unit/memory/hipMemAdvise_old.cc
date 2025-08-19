@@ -836,7 +836,6 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
     int *Hmm = NULL, NumElms = (1024 * 1024), InitVal = 123, blockSize = 64;
     int *Hmm1 = NULL, DataMismatch = 0;
     hipStream_t strm;
-    HIP_CHECK(hipStreamCreate(&strm));
     HIP_CHECK(hipMallocManaged(&Hmm, (NumElms * sizeof(int))));
     // Initializing memory
     for (int i = 0; i < NumElms; ++i) {
@@ -852,6 +851,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
       for (int i = 1; i < Ngpus; ++i) {
         DataMismatch = 0;
         HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMallocManaged(&Hmm1, (NumElms * sizeof(int))));
         MemAdvise3<<<dimGrid, dimBlock, 0, strm>>>(Hmm, Hmm1, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
@@ -865,6 +865,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
           WARN("DataMismatch is observed with the gpu: " << i);
           REQUIRE(false);
         }
+        HIP_CHECK(hipStreamDestroy(strm));
         HIP_CHECK(hipFree(Hmm1));
       }
     }
@@ -873,10 +874,12 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
       for (int i = 0; i < Ngpus; ++i) {
         DataMismatch = 0;
         HIP_CHECK(hipSetDevice(i));
+        HIP_CHECK(hipStreamCreate(&strm));
         HIP_CHECK(hipMemAdvise(Hmm, (NumElms * sizeof(int)),
                                hipMemAdviseSetReadMostly, i));
         MemAdvise2<<<dimGrid, dimBlock, 0, strm>>>(Hmm, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
+        HIP_CHECK(hipStreamDestroy(strm));
       }
       // verifying the final result
       for (int i = 0; i < NumElms; ++i) {
@@ -892,7 +895,7 @@ TEST_CASE("Unit_hipMemAdvise_ReadMosltyMgpuTst") {
     }
 #endif
     HIP_CHECK(hipFree(Hmm));
-    HIP_CHECK(hipStreamDestroy(strm));
+
   } else {
     SUCCEED("GPU 0 doesn't support hipDeviceAttributeManagedMemory "
            "attribute. Hence skipping the testing with Pass result.\n");
