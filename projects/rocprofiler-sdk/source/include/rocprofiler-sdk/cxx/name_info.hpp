@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/details/mpl.hpp>
 
+#include <functional>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -109,6 +110,78 @@ get_callback_tracing_names();
 template <typename Tp = std::string_view>
 buffer_name_info_t<Tp>
 get_buffer_tracing_names();
+
+/**
+ * @brief Get a filtered list of buffer tracing operations object for passing to
+ * ::rocprofiler_configure_buffer_tracing_service. This is useful for getting the operation IDs of a
+ * subset of buffer tracing operations.
+ *
+ * @code
+ *      auto ctx = rocprofiler_context_id_t{};
+ *      auto buffer = rocprofiler_buffer_id_t{};
+ *
+ *      // ... context and buffer setup ...
+ *
+ *      auto hip_runtime_ops = get_callback_tracing_operations(
+ *          ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+ *          [](std::string_view name) {
+ *              static auto unwanted_api_calls =
+ *                  std::regex("^hip(GetDeviceCount|GetDeviceProperties.*|GetLastError|GetError.*)$");
+ *              auto unwanted = std::regex_match(name, unwanted_api_calls);
+ *              return !unwanted;
+ *          });
+ *
+ *      rocprofiler_configure_callback_tracing_service(
+ *                             ctx, ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
+ *                             hip_runtime_ops.data(), hip_runtime_ops.size(), callback, nullptr);
+ * @code
+ *
+ * @tparam PredicateT Must return boolean, must accept string type (const char*, std::string, or
+ * std::string_view)
+ * @param kind ::rocprofiler_callback_tracing_kind_t
+ * @param predicate Unary operator which accepts string type and returns whether it should be
+ * included in the list of operations
+ * @return std::vector<rocprofiler_tracing_operation_t>
+ */
+template <typename PredicateT>
+std::vector<rocprofiler_tracing_operation_t>
+get_callback_tracing_operations(rocprofiler_callback_tracing_kind_t kind, PredicateT&& predicate);
+
+/**
+ * @brief Get a filtered list of buffer tracing operations object for passing to
+ * ::rocprofiler_configure_buffer_tracing_service. This is useful for getting the operation IDs of a
+ * subset of buffer tracing operations.
+ *
+ * @code
+ *      auto ctx = rocprofiler_context_id_t{};
+ *      auto buffer = rocprofiler_buffer_id_t{};
+ *
+ *      // ... context and buffer setup ...
+ *
+ *      auto hip_runtime_ops = get_buffer_tracing_operations(
+ *          ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+ *          [](std::string_view name) {
+ *              static auto unwanted_api_calls =
+ *                  std::regex("^hip(GetDeviceCount|GetDeviceProperties.*|GetLastError|GetError.*)$");
+ *              auto unwanted = std::regex_match(name, unwanted_api_calls);
+ *              return !unwanted;
+ *          });
+ *
+ *      rocprofiler_configure_buffer_tracing_service(
+ *                             ctx, ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+ *                             hip_runtime_ops.data(), hip_runtime_ops.size(), buffer);
+ * @code
+ *
+ * @tparam PredicateT Must return boolean, must accept string type (const char*, std::string, or
+ * std::string_view)
+ * @param kind ::rocprofiler_buffer_tracing_kind_t
+ * @param predicate Unary operator which accepts string type and returns whether it should be
+ * included in the list of operations
+ * @return std::vector<rocprofiler_tracing_operation_t>
+ */
+template <typename PredicateT>
+std::vector<rocprofiler_tracing_operation_t>
+get_buffer_tracing_operations(rocprofiler_buffer_tracing_kind_t kind, PredicateT&& predicate);
 }  // namespace sdk
 }  // namespace rocprofiler
 

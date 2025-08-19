@@ -26,6 +26,8 @@
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <rocprofiler-sdk/cxx/name_info.hpp>
+
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -33,6 +35,8 @@
 #include "lib/rocprofiler-sdk/tests/common.hpp"
 
 #include <gtest/gtest.h>
+
+#include <regex>
 
 TEST(rocprofiler_lib, api_id_names)
 {
@@ -309,4 +313,46 @@ TEST(rocprofiler_lib, api_id_names)
                 std::string_view{marker_name_names.at(itr)});
         }
     }
+}
+
+TEST(rocprofiler_lib, api_filter)
+{
+    auto all_buffered_tracing_ops = rocprofiler::sdk::get_buffer_tracing_operations(
+        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API, [](std::string_view) { return true; });
+
+    auto all_callback_tracing_ops = rocprofiler::sdk::get_callback_tracing_operations(
+        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API, [](std::string_view) { return true; });
+
+    static auto unwanted_api_calls =
+        std::regex("^hip(GetDeviceCount|GetDeviceProperties(R0600|R0000)|GetLastError|"
+                   "GetError(Name|String))$");
+
+    auto filtered_buffered_tracing_ops = rocprofiler::sdk::get_buffer_tracing_operations(
+        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API, [](std::string_view name) {
+            auto unwanted = std::regex_match(name.data(), unwanted_api_calls);
+            return !unwanted;
+        });
+
+    auto filtered_callback_tracing_ops = rocprofiler::sdk::get_callback_tracing_operations(
+        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API, [](std::string_view name) {
+            auto unwanted = std::regex_match(name.data(), unwanted_api_calls);
+            return !unwanted;
+        });
+
+    auto callback_names = rocprofiler::sdk::get_callback_tracing_names();
+    auto buffered_names = rocprofiler::sdk::get_buffer_tracing_names();
+
+    EXPECT_EQ(callback_names[ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API].operations.size(),
+              all_callback_tracing_ops.size());
+
+    EXPECT_EQ(buffered_names[ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API].operations.size(),
+              all_buffered_tracing_ops.size());
+
+    EXPECT_LT(filtered_callback_tracing_ops.size(), all_callback_tracing_ops.size());
+
+    EXPECT_LT(filtered_buffered_tracing_ops.size(), all_buffered_tracing_ops.size());
+
+    EXPECT_EQ(filtered_callback_tracing_ops.size() + 6, all_callback_tracing_ops.size());
+
+    EXPECT_EQ(filtered_buffered_tracing_ops.size() + 6, all_buffered_tracing_ops.size());
 }

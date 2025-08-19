@@ -27,6 +27,8 @@
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
 
+#include <rocprofiler-sdk/cxx/details/mpl.hpp>
+
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -177,6 +179,62 @@ get_buffer_tracing_names()
     rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb, &cb_name_info);
 
     return cb_name_info;
+}
+
+template <typename PredicateT>
+std::vector<rocprofiler_tracing_operation_t>
+get_callback_tracing_operations(rocprofiler_callback_tracing_kind_t kind, PredicateT&& predicate)
+{
+    auto _data       = get_callback_tracing_names<const char*>();
+    auto _operations = std::vector<rocprofiler_tracing_operation_t>{};
+    for(const auto& itr : _data[kind].items())
+    {
+        if constexpr(std::is_invocable<PredicateT, const char*>::value)
+        {
+            static_assert(std::is_same<std::invoke_result_t<PredicateT, const char*>, bool>::value,
+                          "PredicateT must return bool");
+
+            if(predicate(*itr.second))
+            {
+                _operations.emplace_back(itr.first);
+            }
+        }
+        else
+        {
+            static_assert(
+                mpl::assert_false<PredicateT>::value,
+                "PredicateT must be invocable with std::string_view, const char*, or std::string");
+        }
+    }
+    return _operations;
+}
+
+template <typename PredicateT>
+std::vector<rocprofiler_tracing_operation_t>
+get_buffer_tracing_operations(rocprofiler_buffer_tracing_kind_t kind, PredicateT&& predicate)
+{
+    auto _data       = get_buffer_tracing_names();
+    auto _operations = std::vector<rocprofiler_tracing_operation_t>{};
+    for(const auto& itr : _data[kind].items())
+    {
+        if constexpr(std::is_invocable<PredicateT, const char*>::value)
+        {
+            static_assert(std::is_same<std::invoke_result_t<PredicateT, const char*>, bool>::value,
+                          "PredicateT must return bool");
+
+            if(predicate(*itr.second))
+            {
+                _operations.emplace_back(itr.first);
+            }
+        }
+        else
+        {
+            static_assert(
+                mpl::assert_false<PredicateT>::value,
+                "PredicateT must be invocable with std::string_view, const char*, or std::string");
+        }
+    }
+    return _operations;
 }
 }  // namespace sdk
 }  // namespace rocprofiler
