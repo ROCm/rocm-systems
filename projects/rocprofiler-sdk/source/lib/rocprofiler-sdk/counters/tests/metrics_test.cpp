@@ -276,7 +276,7 @@ TEST(metrics, check_public_api_query)
         }
         ASSERT_EQ(instance_count, dim_permutations.size());
 
-        // Iterate over all dimensions availiable for this metric.
+        // Iterate over all dimensions available for this metric.
         for(size_t i = 0; i <info.dimensions_count; i++)
         {
             // Current dimension size, like SE[0:3] has size of 4.
