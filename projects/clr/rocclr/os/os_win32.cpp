@@ -735,6 +735,7 @@ void Os::CloseIpcMemory(const FileDesc desc, const void* ptr, size_t size) {
   }
 }
 
+// ================================================================================================
 void Os::PrintLibraryLocation() {
   HMODULE hm = NULL;
   if (GetModuleHandleExA(
@@ -748,6 +749,12 @@ void Os::PrintLibraryLocation() {
   }
   ClPrint(amd::LOG_INFO, amd::LOG_INIT, "HIP Library Path: <unknown>");
 }
+
+// ================================================================================================
+bool Os::DumpCoreFile() { return false; }
+
+// ================================================================================================
+void Os::CxaDemangle(const std::string& name, std::string* result) { *result = name; }
 
 }  // namespace amd
 

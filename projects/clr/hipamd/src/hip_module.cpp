@@ -48,6 +48,11 @@ hipError_t hipModuleUnload(hipModule_t hmod) {
   CHECK_STREAM_CAPTURE_SUPPORTED();
   HIP_RETURN(PlatformState::instance().unloadModule(hmod));
 }
+hipError_t hipModuleLoadFatBinary(hipModule_t* module, const void* fatbin) {
+  HIP_INIT_API(hipModuleLoadFatBinary, module, fatbin);
+  HIP_RETURN(PlatformState::instance().loadModule(module, 0, fatbin));
+  HIP_RETURN(hipSuccess);
+}
 
 hipError_t hipModuleLoad(hipModule_t* module, const char* fname) {
   HIP_INIT_API(hipModuleLoad, module, fname);
@@ -87,6 +92,15 @@ hipError_t hipModuleGetFunction(hipFunction_t* hfunc, hipModule_t hmod, const ch
   }
 
   HIP_RETURN(hipSuccess);
+}
+
+hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod) {
+  HIP_INIT_API(hipModuleGetFunctionCount, count, mod);
+
+  if (mod == nullptr) {
+    HIP_RETURN(hipErrorInvalidResourceHandle);
+  }
+  HIP_RETURN(PlatformState::instance().getFuncCount(count, mod););
 }
 
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
@@ -371,6 +385,7 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     assert(kernelParams == nullptr);
     if (extra[0] != HIP_LAUNCH_PARAM_BUFFER_POINTER || extra[2] != HIP_LAUNCH_PARAM_BUFFER_SIZE ||
         extra[4] != HIP_LAUNCH_PARAM_END) {
+      kernelCommand->release();
       return hipErrorInvalidValue;
     }
     kernargs = reinterpret_cast<address>(extra[1]);

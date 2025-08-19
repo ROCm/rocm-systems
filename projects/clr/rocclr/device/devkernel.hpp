@@ -367,9 +367,6 @@ class Kernel : public amd::HeapObject {
   //! Retrieve kernel attribute and code properties metadata
   bool GetAttrCodePropMetadata();
 
-  //! Retrieve the available SGPRs and VGPRs
-  bool SetAvailableSgprVgpr();
-
   //! Retrieve the printf string metadata
   bool GetPrintfStr(std::vector<std::string>* printfStr);
 

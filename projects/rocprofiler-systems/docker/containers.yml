@@ -68,4 +68,3 @@ matrix:
   - os-distro: "rhel"
     os-version: "9.5"
     rocm-version: "6.4"
-  - os-distro: "rhel"

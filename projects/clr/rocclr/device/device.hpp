@@ -1383,6 +1383,14 @@ class VirtualDevice : public amd::HeapObject {
 namespace amd {
 /*! IHIP IPC MEMORY Structure */
 #define AMD_IPC_MEM_HANDLE_SIZE 32
+
+typedef enum SyncPolicy {
+    Auto = 1,
+    Spin = 2,
+    Yield = 3,
+    Blocking = 4
+} SyncPolicy;
+
 //! MemoryObject map lookup  class
 class MemObjMap : public AllStatic {
  public:
@@ -1565,6 +1573,20 @@ class Isa {
     return localMemBanks_;
   }
 
+#if defined(USE_COMGR_LIBRARY)
+  /// @returns This Isa's available sgprs per wavefront
+  size_t sgprPerWavefront() const {
+    setAvailableSgprVgprCached();
+    return sgprPerWavefront_;
+  }
+
+  /// @returns This Isa's available vgprs per wavefront
+  size_t vgprPerWavefront() const {
+    setAvailableSgprVgprCached();
+    return vgprPerWavefront_;
+  }
+#endif
+
   /// @returns True if @p codeObjectIsa and @p agentIsa are compatible,
   /// false otherwise.
   static bool isCompatible(const Isa &codeObjectIsa, const Isa &agentIsa);
@@ -1604,10 +1626,18 @@ class Isa {
         simdInstructionWidth_(simdInstructionWidth),
         memChannelBankWidth_(memChannelBankWidth),
         localMemSizePerCU_(localMemSizePerCU),
-        localMemBanks_(localMemBanks) {}
+        localMemBanks_(localMemBanks),
+        sgprPerWavefront_(0),
+        vgprPerWavefront_(0) {}
 
   // @brief Returns the begin and end iterators for the suppported ISAs.
   static std::pair<const Isa*, const Isa*> supportedIsas();
+
+#if defined(USE_COMGR_LIBRARY)
+  // @brief Populate this Isa's available sgprs/vgprs per wavefront from comgr.
+  // Only called once per Isa.
+  void setAvailableSgprVgprCached() const;
+#endif
 
   // @brief Isa's target ID name. Used for LLVM COde Object Manager
   // compilations.
@@ -1631,6 +1661,10 @@ class Isa {
   uint32_t memChannelBankWidth_;   //!< Memory channel bank width.
   uint32_t localMemSizePerCU_;     //!< Local memory size per CU.
   uint32_t localMemBanks_;         //!< Number of banks of local memory.
+
+  mutable size_t sgprPerWavefront_;        //!< Number of sgpr per wavefront.
+  mutable size_t vgprPerWavefront_;        //!< Number of vgpr per wavefront.
+  mutable std::once_flag setSgprVgprFlag;  //!< Once flag for sgpr and vgpr retrieval.
 }; // class Isa
 
 /*! \addtogroup Runtime
@@ -1989,8 +2023,8 @@ class Device : public RuntimeObject {
   /**
    * @return True if the device successfully applied the SVM attributes in HMM for device memory
    */
-  virtual bool SetSvmAttributes(const void* dev_ptr, size_t count,
-                                amd::MemoryAdvice advice, bool use_cpu = false) const {
+  virtual bool SetSvmAttributes(const void* dev_ptr, size_t count, amd::MemoryAdvice advice,
+                                bool use_cpu = false, int numa_id = kDefaultNumaNode) const {
     ShouldNotCallThis();
     return false;
   }
@@ -2024,9 +2058,9 @@ class Device : public RuntimeObject {
 
   // Returns the status of HW event, associated with amd::Event
   virtual bool IsHwEventReady(
-      const amd::Event& event,    //!< AMD event for HW status validation
-      bool wait = false,          //!< If true then forces the event completion
-      uint32_t hip_event_flags = 0 //!< flags associated with the event. 0 = hipEventDefault
+      const amd::Event& event,      //!< AMD event for HW status validation
+      bool wait = false,            //!< If true then forces the event completion
+      amd::SyncPolicy policy = amd::SyncPolicy::Auto
       ) const {
     return false;
   };
@@ -2200,7 +2234,12 @@ class Device : public RuntimeObject {
 
   bool GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle);
 
- protected:
+  // Registers a memory object allocated via hostcall for later cleanup.
+  void TrackHostcallMemory(amd::Memory* memory);
+
+  // Removes a memory object from hostcall tracking.
+  void RemoveHostcallMemory(amd::Memory* memory);
+
   //! Enable the specified extension
   char* getExtensionString();
 
@@ -2247,7 +2286,10 @@ class Device : public RuntimeObject {
   static amd::Monitor lockP2P_;
   Monitor* vaCacheAccess_;                            //!< Lock to serialize VA caching access
   std::map<uintptr_t, device::Memory*>* vaCacheMap_;  //!< VA cache map
-  uint32_t index_;  //!< Unique device index
+  uint32_t index_;                                    //!< Unique device index
+  static constexpr int kDefaultNumaNode = -1;         //! Default NUMA node value for SVM operations
+  // Tracks all amd::Memory objects allocated via hostcall for this device.
+  std::vector<amd::Memory*> hostcall_allocated_memories_;
 };
 
 /*! @}

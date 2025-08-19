@@ -937,3 +937,29 @@ inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr* p) {
   }
   return os;
 }
+
+inline std::ostream& operator<<(std::ostream& os, const hipMemLocation& s) {
+  os << "{type=";
+  switch (s.type) {
+    case hipMemLocationTypeInvalid:
+      os << "hipMemLocationTypeInvalid";
+      break;
+    case hipMemLocationTypeDevice:
+      os << "hipMemLocationTypeDevice";
+      break;
+    case hipMemLocationTypeHost:
+      os << "hipMemLocationTypeHost";
+      break;
+    case hipMemLocationTypeHostNuma:
+      os << "hipMemLocationTypeHostNuma";
+      break;
+    case hipMemLocationTypeHostNumaCurrent:
+      os << "hipMemLocationTypeHostNumaCurrent";
+      break;
+    default:
+      os << static_cast<int>(s.type);
+      break;
+  }
+  os << ", id=" << s.id << "}";
+  return os;
+}
