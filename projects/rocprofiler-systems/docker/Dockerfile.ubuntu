@@ -3,20 +3,20 @@ ARG DISTRO
 ARG VERSION
 FROM ${DISTRO}:${VERSION}
 
-ENV HOME /root
-ENV LANG en_US.UTF-8
-ENV LANGUAGE en_US
-ENV LC_ALL C
-ENV SHELL /bin/bash
-ENV BASH_ENV /etc/bash.bashrc
-ENV DEBIAN_FRONTEND noninteractive
+ENV HOME=/root
+ENV LANG=en_US.UTF-8
+ENV LANGUAGE=en_US
+ENV LC_ALL=C
+ENV SHELL=/bin/bash
+ENV BASH_ENV=/etc/bash.bashrc
+ENV DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
 ARG ROCM_VERSION="0.0"
-ENV PATH ${HOME}/.local/bin:${PATH}
+ENV PATH=${HOME}/.local/bin:${PATH}
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
@@ -63,6 +63,6 @@ RUN wget https://github.com/conda-forge/miniforge/releases/latest/download/Minif
     conda clean -a -y && \
     conda init
 
-ENV LC_ALL C.UTF-8
+ENV LC_ALL=C.UTF-8
 WORKDIR /home
 SHELL [ "/bin/bash", "--login", "-c" ]
