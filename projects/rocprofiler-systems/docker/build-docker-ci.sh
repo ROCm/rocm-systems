@@ -4,7 +4,7 @@ set -e
 
 : ${USER:=$(whoami)}
 : ${DISTRO:=ubuntu}
-: ${VERSIONS:=20.04}
+: ${VERSIONS:=24.04}
 : ${NJOBS=$(nproc)}
 : ${ELFUTILS_VERSION:=0.188}
 : ${BOOST_VERSION:=1.79.0}
