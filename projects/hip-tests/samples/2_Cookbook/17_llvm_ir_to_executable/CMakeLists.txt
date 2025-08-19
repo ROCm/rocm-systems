@@ -123,7 +123,7 @@ endforeach()
 list(JOIN TARGETS "," TARGET_STR)
 list(TRANSFORM INPUTS PREPEND "-input=")
 add_custom_target(ir_to_exec ${ALL_OPTION} DEPENDS ll_to_bc host_obj ${arch_obj_list}
-                            COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o -bundle-align=4096 -targets=host-x86_64-unknown--linux,${TARGET_STR} -input=/dev/null ${INPUTS} -output=${SQ_DEVICE_HIPFB}
+                            COMMAND ${CLANG_OFFLOAD_BUNDLER} -type=o -bundle-align=4096 -targets=host-x86_64-unknown-linux-gnu,${TARGET_STR} -input=/dev/null ${INPUTS} -output=${SQ_DEVICE_HIPFB}
                             COMMAND ${LLVM_MC} ${MCIN_OBJ_GEN} -o ${SQ_DEVICE_OBJ} --filetype=obj
                             COMMAND ${HIPCC} ${SQ_HOST_OBJ} ${SQ_DEVICE_OBJ} -o ${SQ_IR_EXE})
 
