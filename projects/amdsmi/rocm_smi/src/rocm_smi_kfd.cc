@@ -383,6 +383,38 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
     q_dentry = readdir(queues_dir_hd);
   }
 
+  // if no queues were present, fallback to grab KFD GPU IDs from parent dir names
+  if (gpu_set->empty()) {
+
+    std::string pdir = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
+    auto queues_dir_kfd = opendir(pdir.c_str());
+
+    if (queues_dir_kfd == nullptr) {
+      std::string err_str = "Unable to open KFD process directory for process ";
+      err_str += std::to_string(pid);
+      perror(err_str.c_str());
+      return ESRCH;
+    }
+
+    struct dirent* e;
+
+    while ((e = readdir(queues_dir_kfd))) {
+
+      // These files encode the KFD GPU ID when process is running
+      if (!strncmp(e->d_name, "stats_", 6)) {
+        gpu_set->insert(strtoull(e->d_name + 6, nullptr, 10));
+      } else if (!strncmp(e->d_name, "vram_", 5)) {
+        gpu_set->insert(strtoull(e->d_name + 5, nullptr, 10));
+      } else if (!strncmp(e->d_name, "counters_", 9)) {
+        gpu_set->insert(strtoull(e->d_name + 9, nullptr, 10));
+      } else if (!strncmp(e->d_name, "sdma_", 5)) {
+        gpu_set->insert(strtoull(e->d_name + 5, nullptr, 10));
+      }
+    }
+  
+    closedir(queues_dir_kfd);
+  }
+
   errno = 0;
   if (closedir(queues_dir_hd)) {
     return errno;
