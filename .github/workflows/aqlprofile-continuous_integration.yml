@@ -70,7 +70,7 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Install Latest ROCm
+    - name: Install Latest Nightly ROCm using TheRock Tarballs
       shell: bash
       working-directory: /tmp
       run: |
@@ -97,6 +97,7 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        rm -rf /opt/rocm
         ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - uses: actions/checkout@v5
@@ -177,33 +178,12 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
-    - name: Install Latest ROCm
-      shell: bash
-      working-directory: /tmp
-      run: |
-        python3 -m pip install --upgrade pip pipx
-        python3 -m pipx install awscli
-        python3 -m pipx ensurepath
-        source ~/.bashrc
-        KEY=$(aws s3api list-objects-v2 \
-          --bucket therock-nightly-tarball \
-          --no-sign-request \
-          --output json \
-          --query "sort_by(Contents[?contains(Key, 'gfx94X')], &LastModified)[-1].Key")
-        KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
-        ls -lh rocm.tar.gz
-        echo "Downloaded: ${KEY}"
-        sudo mkdir -p /opt/rocm
-        sudo tar -xf *.tar.gz -C /opt/rocm
-
     - uses: actions/checkout@v5
       with:
         sparse-checkout: projects/aqlprofile
         set-safe-directory: true
 
-    - name: Install Latest ROCm LLVM for RHEL
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.1
       if: ${{ matrix.system.os == 'rhel-9.1' }}
       shell: bash
       working-directory: /tmp
@@ -221,7 +201,7 @@ jobs:
         sudo dnf clean all
         sudo dnf install -y git rocm-llvm-devel rocm-openmp-sdk
 
-    - name: Install Latest ROCm LLVM for SLES
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.4
       if: ${{ matrix.system.os == 'sles-15.4' }}
       shell: bash
       working-directory: /tmp
@@ -237,7 +217,7 @@ jobs:
         sudo zypper --gpg-auto-import-keys refresh
         sudo zypper install -y git rocm-llvm-devel rocm-openmp-sdk
 
-    - name: Install Latest ROCm
+    - name: Install Latest Nightly ROCm using TheRock Tarballs
       shell: bash
       working-directory: /tmp
       run: |
@@ -256,6 +236,7 @@ jobs:
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
         sudo tar -xf *.tar.gz -C /opt/rocm-7.0.0
+        rm -rf /opt/rocm
         sudo ln -s /opt/rocm-7.0.0 /opt/rocm
 
     - name: Install requirements

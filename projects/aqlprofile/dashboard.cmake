@@ -8,7 +8,7 @@ macro(dashboard_submit)
   endif()
 endmacro()
 
-set(CTEST_PROJECT_NAME AQLProfile)
+set(CTEST_PROJECT_NAME "AQLProfile")
 set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 set(CTEST_DROP_METHOD "https")
 set(CTEST_DROP_SITE "my.cdash.org")
