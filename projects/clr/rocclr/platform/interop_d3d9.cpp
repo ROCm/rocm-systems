@@ -116,10 +116,10 @@ size_t D3D9Object::getElementBytes(D3DFORMAT d3d9Format, cl_uint plane) {
     case D3DFMT_A32B32G32R32F:
       bytesPerPixel = 16;
       break;
-    //#if !defined(D3D_DISABLE_9EX)
-    // case D3DFMT_D32_LOCKABLE:
-    // case D3DFMT_S8_LOCKABLE:
-    //#endif // !D3D_DISABLE_9EX
+    // #if !defined(D3D_DISABLE_9EX)
+    //  case D3DFMT_D32_LOCKABLE:
+    //  case D3DFMT_S8_LOCKABLE:
+    // #endif // !D3D_DISABLE_9EX
     case D3DFMT_NV_12:
       if (plane == 0) {
         bytesPerPixel = 1;
@@ -168,7 +168,7 @@ void setObjDesc(amd::D3D9ObjDesc_t& objDesc, D3DSURFACE_DESC& resDesc, cl_uint p
         objDesc.surfRect_.right = resDesc.Width;  // resDesc.Width/2-1;
         objDesc.surfRect_.bottom = 3 * resDesc.Height / 2;
         ;  // 3*resDesc.Height/2-1;
-      }    // plane != 0 or != 1 shouldn't happen here
+      }  // plane != 0 or != 1 shouldn't happen here
       break;
     case D3DFMT_YV_12:
       objDesc.surfRect_.left = 0;
@@ -258,8 +258,7 @@ int D3D9Object::initD3D9Object(const Context& amdContext,
   if (nullptr == shared_handle) {
     bool found = false;
     for (const auto& it : resources_) {
-      if (it.first.surfInfo.resource == cl_surf_info->resource &&
-          it.first.surfPlane != plane) {
+      if (it.first.surfInfo.resource == cl_surf_info->resource && it.first.surfPlane != plane) {
         obj.handleShared_ = it.second.surfInfo.shared_handle;
         obj.pD3D9Res_ = it.second.surfInfo.resource;
         obj.pD3D9Res_->AddRef();
@@ -478,23 +477,23 @@ cl_image_format D3D9Object::getCLFormatFromD3D9(D3DFORMAT d3d9Fmt, cl_uint plane
     case D3DFMT_D16:
     case D3DFMT_D32F_LOCKABLE:
     case D3DFMT_D24FS8:
-    //#if !defined(D3D_DISABLE_9EX)
+    // #if !defined(D3D_DISABLE_9EX)
     case D3DFMT_D32_LOCKABLE:
     case D3DFMT_S8_LOCKABLE:
-    //#endif // !D3D_DISABLE_9EX
+    // #endif // !D3D_DISABLE_9EX
     case D3DFMT_VERTEXDATA:
     case D3DFMT_INDEX16:
     case D3DFMT_INDEX32:
     case D3DFMT_Q16W16V16U16:
     case D3DFMT_MULTI2_ARGB8:
     case D3DFMT_CxV8U8:
-    //#if !defined(D3D_DISABLE_9EX)
+    // #if !defined(D3D_DISABLE_9EX)
     case D3DFMT_A1:
     case D3DFMT_A2B10G10R10_XR_BIAS:
     case D3DFMT_BINARYBUFFER:
       _ASSERT(FALSE);  // NOT SURPPORTED
       break;
-    //#endif // !D3D_DISABLE_9EX
+    // #endif // !D3D_DISABLE_9EX
     default:
       _ASSERT(FALSE);
       break;

@@ -19,25 +19,23 @@ THE SOFTWARE.
 
 #include "hip/hip_runtime.h"
 
-#define HIP_CHECK(error)                                                       \
-  {                                                                            \
-    hipError_t localError = error;                                             \
-    if ((localError != hipSuccess) &&                                          \
-        (localError != hipErrorPeerAccessAlreadyEnabled)) {                    \
-      printf("error: '%s'(%d) from %s at %s:%d\n",                             \
-             hipGetErrorString(localError), localError, #error, __FUNCTION__,  \
-             __LINE__);                                                        \
-      return -1;                                                               \
-    }                                                                          \
+#define HIP_CHECK(error)                                                                           \
+  {                                                                                                \
+    hipError_t localError = error;                                                                 \
+    if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
+      printf("error: '%s'(%d) from %s at %s:%d\n", hipGetErrorString(localError), localError,      \
+             #error, __FUNCTION__, __LINE__);                                                      \
+      return -1;                                                                                   \
+    }                                                                                              \
   }
 
-#define REQUIRE(res)                                                           \
-  {                                                                            \
-    if (res) {                                                                 \
-      return 0;                                                                \
-    } else {                                                                   \
-      return -1;                                                               \
-    }                                                                          \
+#define REQUIRE(res)                                                                               \
+  {                                                                                                \
+    if (res) {                                                                                     \
+      return 0;                                                                                    \
+    } else {                                                                                       \
+      return -1;                                                                                   \
+    }                                                                                              \
   }
 
 /*

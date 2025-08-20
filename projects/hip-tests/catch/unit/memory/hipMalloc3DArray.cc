@@ -49,8 +49,8 @@ static constexpr auto ARRAY_LOOP{100};
  */
 static void Malloc3DArray_DiffSizes(int gpu) {
   HIP_CHECK_THREAD(hipSetDevice(gpu));
-  //Use of GENERATE in thead function causes random failures with multithread condition.
-  std::vector<size_t> runs {ARRAY_SIZE, BIG_ARRAY_SIZE};
+  // Use of GENERATE in thead function causes random failures with multithread condition.
+  std::vector<size_t> runs{ARRAY_SIZE, BIG_ARRAY_SIZE};
   for (const auto& size : runs) {
     size_t width{size}, height{size}, depth{size};
     hipChannelFormatDesc channelDesc = hipCreateChannelDesc<float>();
@@ -58,7 +58,7 @@ static void Malloc3DArray_DiffSizes(int gpu) {
 
     for (int i = 0; i < ARRAY_LOOP; i++) {
       HIP_CHECK_THREAD(hipMalloc3DArray(&arr[i], &channelDesc, make_hipExtent(width, height, depth),
-                                      hipArrayDefault));
+                                        hipArrayDefault));
     }
     for (int i = 0; i < ARRAY_LOOP; i++) {
       HIP_CHECK_THREAD(hipFreeArray(arr[i]));
@@ -201,20 +201,20 @@ TEMPLATE_TEST_CASE("Unit_hipMalloc3DArray_MaxTexture", "", int, uint4, short, us
     HIP_CHECK(hipFreeArray(array));
   }
   SECTION("Negative") {
-    std::vector<hipExtent> extentsToTest {
-      make_hipExtent(sizes.max1D + 1, 0, 0),                          // 1D max
-          make_hipExtent(sizes.max2D[0] + 1, s, 0),                   // 2D max width
-          make_hipExtent(s, sizes.max2D[1] + 1, 0),                   // 2D max height
-          make_hipExtent(sizes.max2D[0] + 1, sizes.max2D[1] + 1, 0),  // 2D max
-          make_hipExtent(sizes.max3D[0] + 1, s, s),                   // 3D max width
-          make_hipExtent(s, sizes.max3D[1] + 1, s),                   // 3D max height
-#if !HT_NVIDIA                                       // leads to hipSuccess on NVIDIA
-          make_hipExtent(s, s, sizes.max3D[2] + 1),  // 3D max depth
+    std::vector<hipExtent> extentsToTest{
+        make_hipExtent(sizes.max1D + 1, 0, 0),                      // 1D max
+        make_hipExtent(sizes.max2D[0] + 1, s, 0),                   // 2D max width
+        make_hipExtent(s, sizes.max2D[1] + 1, 0),                   // 2D max height
+        make_hipExtent(sizes.max2D[0] + 1, sizes.max2D[1] + 1, 0),  // 2D max
+        make_hipExtent(sizes.max3D[0] + 1, s, s),                   // 3D max width
+        make_hipExtent(s, sizes.max3D[1] + 1, s),                   // 3D max height
+#if !HT_NVIDIA                                                      // leads to hipSuccess on NVIDIA
+        make_hipExtent(s, s, sizes.max3D[2] + 1),                   // 3D max depth
 #endif
-          make_hipExtent(s, sizes.max3D[1] + 1, sizes.max3D[2] + 1),  // 3D max height and depth
-          make_hipExtent(sizes.max3D[0] + 1, s, sizes.max3D[2] + 1),  // 3D max width and depth
-          make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
-          make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
+        make_hipExtent(s, sizes.max3D[1] + 1, sizes.max3D[2] + 1),  // 3D max height and depth
+        make_hipExtent(sizes.max3D[0] + 1, s, sizes.max3D[2] + 1),  // 3D max width and depth
+        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, s),  // 3D max width and height
+        make_hipExtent(sizes.max3D[0] + 1, sizes.max3D[1] + 1, sizes.max3D[2] + 1)  // 3D max
     };
     const auto extent =
         GENERATE_COPY(from_range(std::begin(extentsToTest), std::end(extentsToTest)));

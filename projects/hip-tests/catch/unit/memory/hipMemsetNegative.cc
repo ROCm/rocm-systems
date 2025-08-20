@@ -71,7 +71,6 @@ TEST_CASE("Unit_hipMemset_Negative_InvalidPtr") {
 
 
 TEST_CASE("Unit_hipMemset_Negative_OutOfBoundsSize") {
-
 #if !HT_AMD
   void* dst;
   constexpr size_t outOfBoundsSize{width + 1};

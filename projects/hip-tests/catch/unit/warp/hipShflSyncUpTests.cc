@@ -20,25 +20,21 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
-template <typename T>
-__global__ void shflUp_1(T* Input, T *Output) {
+template <typename T> __global__ void shflUp_1(T* Input, T* Output) {
   auto tid = threadIdx.x;
   int srcLane = (tid > 3) ? 3 : 0;
   Output[tid] = __shfl_up_sync(AllThreads, Input[tid], srcLane);
 }
 
-template <typename T>
-static void runTestShflUp_1() {
+template <typename T> static void runTestShflUp_1() {
   const int size = 64;
   T Input[size];
   T Output[size];
   T Expected[size];
-  int Values[] = {0, -1, 2, 3, -1, 2, 3, 4, 5, -6, 7, 8,
-                  -9, 10, 11, 12, 13, -14, 15, 16, 17, -18, 19, 20,
-                  -21, 22, 23, 24, 25, 26, -27, 28, 29, 30, 31, -32,
-                  33, 34, 35, -36, 37, 38, -39, 40, 41, 42, 43, -44,
-                  -45, 46, 47, 48, 49, 50, -51, 52, 53, -54, 55, 56,
-                  57, -58, 59, 60};
+  int Values[] = {0,   -1,  2,  3,   -1, 2,   3,   4,   5,   -6,  7,   8,  -9, 10,  11,  12,
+                  13,  -14, 15, 16,  17, -18, 19,  20,  -21, 22,  23,  24, 25, 26,  -27, 28,
+                  29,  30,  31, -32, 33, 34,  35,  -36, 37,  38,  -39, 40, 41, 42,  43,  -44,
+                  -45, 46,  47, 48,  49, 50,  -51, 52,  53,  -54, 55,  56, 57, -58, 59,  60};
 
   initializeInput(Input, size);
   initializeExpected(Expected, Values, size);
@@ -59,26 +55,22 @@ static void runTestShflUp_1() {
   }
 }
 
-template <typename T>
-__global__ void shflUp_2(T* Input, T *Output) {
+template <typename T> __global__ void shflUp_2(T* Input, T* Output) {
   auto tid = threadIdx.x;
   auto mask = __match_any_sync(AllThreads, tid / 12);
   int srcLane = (tid % 12) < 3 ? 0 : 3;
   Output[tid] = __shfl_up_sync(mask, Input[tid], srcLane);
 }
 
-template <typename T>
-static void runTestShflUp_2() {
+template <typename T> static void runTestShflUp_2() {
   const int size = 64;
   T Input[size];
   T Output[size];
   T Expected[size];
-  int Values[size] = {0, -1, 2, 0, -1, 2, 3, 4, 5, -6, 7, 8,
-                      12, 13, -14, 12, 13, -14, 15, 16, 17, -18, 19, 20,
-                      24, 25, 26, 24, 25, 26, -27, 28, 29, 30, 31, -32,
-                      -36, 37, 38, -36, 37, 38, -39, 40, 41, 42, 43, -44,
-                      48, 49, 50, 48, 49, 50, -51, 52, 53, -54, 55, 56,
-                      60, 61, 62, 60};
+  int Values[size] = {0,  -1,  2,  0,   -1,  2,   3,   4,   5,  -6,  7,   8,  12, 13, -14, 12,
+                      13, -14, 15, 16,  17,  -18, 19,  20,  24, 25,  26,  24, 25, 26, -27, 28,
+                      29, 30,  31, -32, -36, 37,  38,  -36, 37, 38,  -39, 40, 41, 42, 43,  -44,
+                      48, 49,  50, 48,  49,  50,  -51, 52,  53, -54, 55,  56, 60, 61, 62,  60};
 
   initializeInput(Input, size);
   initializeExpected(Expected, Values, size);
@@ -99,44 +91,28 @@ static void runTestShflUp_2() {
   }
 }
 
-template <typename T>
-__global__ void shflUp_3(T* Input, T *Output) {
+template <typename T> __global__ void shflUp_3(T* Input, T* Output) {
   auto tid = threadIdx.x;
   auto mask = __match_any_sync(AllThreads, tid / 12);
   int srcLane = (tid % 12) < 3 ? 0 : 3;
   Output[tid] = __shfl_up_sync(mask, Input[tid], srcLane, 8);
 }
 
-template <typename T>
-static void runTestShflUp_3() {
+template <typename T> static void runTestShflUp_3() {
   const int size = 64;
   T Input[size];
   T Output[size];
   T Expected[size];
-  int Values[size] = {0, -1, 2,                           // cannot cross mod-12
-                      0, -1, 2, 3, 4,
-                      8, -9, 10,                      // cannot cross mod-8
-                      8,
-                      12, 13, -14,                    // cannot cross mod-12
-                      12,
-                      16, 17, -18,                    // cannot cross mod-8
+  int Values[size] = {0, -1, 2,                   // cannot cross mod-12
+                      0, -1, 2, 3, 4, 8, -9, 10,  // cannot cross mod-8
+                      8, 12, 13, -14,             // cannot cross mod-12
+                      12, 16, 17, -18,            // cannot cross mod-8
                       16, 17, -18, 19, 20,
                       // pattern repeats
-                      24, 25, 26,
-                      24, 25, 26, -27, 28,
-                      -32, 33, 34,
-                      -32,
-                      -36, 37, 38,
-                      -36,
-                      40, 41, 42,
-                      40, 41, 42, 43, -44,
+                      24, 25, 26, 24, 25, 26, -27, 28, -32, 33, 34, -32, -36, 37, 38, -36, 40, 41,
+                      42, 40, 41, 42, 43, -44,
                       // pattern repeats
-                      48, 49, 50,
-                      48, 49, 50, -51, 52,
-                      56, 57, -58,
-                      56,
-                      60, 61, 62,
-                      60};
+                      48, 49, 50, 48, 49, 50, -51, 52, 56, 57, -58, 56, 60, 61, 62, 60};
 
   initializeInput(Input, size);
   initializeExpected(Expected, Values, size);
@@ -157,9 +133,9 @@ static void runTestShflUp_3() {
   }
 }
 
-__global__ void shflUp_4(int *Input, int *Output) {
+__global__ void shflUp_4(int* Input, int* Output) {
   auto tid = threadIdx.x;
-  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+  unsigned long long masks[2] = {Every5thBut9th, Every9thBit};
 
   Output[tid] = -1;
   if (tid % 5 == 0 || tid % 9 == 0)
@@ -194,7 +170,8 @@ static void runTestShflUp_4() {
   HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
   hipLaunchKernelGGL(shflUp_4, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  HIP_CHECK(
+      hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
@@ -285,7 +262,5 @@ TEST_CASE("Unit_hipShflSync_Up") {
     runTestShflUp_2<__half2>();
     runTestShflUp_3<__half2>();
   }
-  SECTION("run divergent execution test") {
-    runTestShflUp_4();
-  }
+  SECTION("run divergent execution test") { runTestShflUp_4(); }
 }

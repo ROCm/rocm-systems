@@ -28,11 +28,11 @@
 namespace amd::pal {
 
 enum class PCIndexSelect : uint {
-  None = 0,                        ///< no index
-  Instance,                        ///< index by block instance -- (1 to 1 mapping with PAL)
-  ShaderEngine,                    ///< index by shader engine (sum = 1 value for all PAL Instances)
-  ShaderArray,                     ///< index by shader array (sum = 1 value for each shader array)
-  ComputeUnit,                     ///< index by compute unit
+  None = 0,      ///< no index
+  Instance,      ///< index by block instance -- (1 to 1 mapping with PAL)
+  ShaderEngine,  ///< index by shader engine (sum = 1 value for all PAL Instances)
+  ShaderArray,   ///< index by shader array (sum = 1 value for each shader array)
+  ComputeUnit,   ///< index by compute unit
 };
 
 class VirtualGPU;
@@ -99,9 +99,9 @@ class PerfCounter : public device::PerfCounter {
   //! Constructor for the GPU PerfCounter object
   PerfCounter(const Device& device,         //!< A GPU device object
               PalCounterReference* palRef,  //!< Counter Reference
-              uint32_t blockIndex,           //!< HW block index
-              uint32_t counterIndex,         //!< Counter index within the block
-              uint32_t eventIndex)           //!< Event index for profiling
+              uint32_t blockIndex,          //!< HW block index
+              uint32_t counterIndex,        //!< Counter index within the block
+              uint32_t eventIndex)          //!< Event index for profiling
       : gpuDevice_(device), palRef_(palRef) {
     info_.blockIndex_ = blockIndex;
     info_.counterIndex_ = counterIndex;
@@ -117,7 +117,7 @@ class PerfCounter : public device::PerfCounter {
 
   //! Returns the specific information about the counter
   uint64_t getInfo(uint64_t infoType  //!< The type of returned information
-                   ) const;
+  ) const;
 
   //! Returns the GPU device, associated with the current object
   const Device& dev() const { return gpuDevice_; }

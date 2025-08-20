@@ -27,8 +27,8 @@ THE SOFTWARE.
 
 class Memcpy2DToArrayBenchmark : public Benchmark<Memcpy2DToArrayBenchmark> {
  public:
-  void operator()(hipArray_t dst, const void* src, size_t src_pitch, size_t width,
-                  size_t height, hipMemcpyKind kind) {
+  void operator()(hipArray_t dst, const void* src, size_t src_pitch, size_t width, size_t height,
+                  hipMemcpyKind kind) {
     TIMED_SECTION(kTimerTypeCpu) {
       HIP_CHECK(hipMemcpy2DToArray(dst, 0, 0, src, src_pitch, width, height, kind));
     }
@@ -36,7 +36,7 @@ class Memcpy2DToArrayBenchmark : public Benchmark<Memcpy2DToArrayBenchmark> {
 };
 
 static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
-                         bool enable_peer_access=false) {
+                         bool enable_peer_access = false) {
   Memcpy2DToArrayBenchmark benchmark;
   benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
 
@@ -50,7 +50,9 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard2D<int> device_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));

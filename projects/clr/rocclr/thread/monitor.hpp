@@ -36,8 +36,8 @@ namespace amd {
 class Monitor {
  public:
   explicit Monitor(bool recursive = false) : recursive_(recursive) {
-    waits_.store(0); // 0 waiting thread initially
-    notifyState_.store(notifyState::notNotified); // initially not notified
+    waits_.store(0);                               // 0 waiting thread initially
+    notifyState_.store(notifyState::notNotified);  // initially not notified
     if (recursive) {
       mutex_.emplace<std::recursive_mutex>();
     } else {
@@ -47,20 +47,20 @@ class Monitor {
 
   //! Try to acquire the lock, return true if successful, false if failed.
   bool tryLock() {
-    return recursive_ ? std::get<std::recursive_mutex>(mutex_).try_lock() :
-                        std::get<std::mutex>(mutex_).try_lock();
+    return recursive_ ? std::get<std::recursive_mutex>(mutex_).try_lock()
+                      : std::get<std::mutex>(mutex_).try_lock();
   }
 
   //! Acquire the lock or suspend the calling thread.
   void lock() {
-    recursive_ ? std::get<std::recursive_mutex>(mutex_).lock() :
-                 std::get<std::mutex>(mutex_).lock();
+    recursive_ ? std::get<std::recursive_mutex>(mutex_).lock()
+               : std::get<std::mutex>(mutex_).lock();
   }
 
   //! Release the lock and wake a single waiting thread if any.
   void unlock() {
-    recursive_ ? std::get<std::recursive_mutex>(mutex_).unlock() :
-                 std::get<std::mutex>(mutex_).unlock();
+    recursive_ ? std::get<std::recursive_mutex>(mutex_).unlock()
+               : std::get<std::mutex>(mutex_).unlock();
   }
 
   /*! \brief Give up the lock and go to sleep.
@@ -97,7 +97,7 @@ class Monitor {
     // fast path
     c = 0;
     while (c < maxCount_ &&
-      (notifyState_.load(std::memory_order_acquire) == notifyState::notNotified)) {
+           (notifyState_.load(std::memory_order_acquire) == notifyState::notNotified)) {
       // First, be SMT friendly
       if (c < maxReadSpinIter_) {
         Os::spinPause();
@@ -116,17 +116,18 @@ class Monitor {
       // In case notify() is called between loop and here
       notifyState expextedNotifyState = notifyState::oneNotified;
       if (notifyState_.load(std::memory_order_acquire) != notifyState::allNotified &&
-        !notifyState_.compare_exchange_strong(expextedNotifyState,
-         notifyState::notNotified, std::memory_order_acq_rel, std::memory_order_acquire)) {
+          !notifyState_.compare_exchange_strong(expextedNotifyState, notifyState::notNotified,
+                                                std::memory_order_acq_rel,
+                                                std::memory_order_acquire)) {
         // Still not notified, so enter slow path
-        cv_.wait(lk); // slow path
+        cv_.wait(lk);  // slow path
         expextedNotifyState = notifyState::oneNotified;
         // To reset notifyState::oneNotified to notifyState::notNotified state if notifyState_ is
         // notifyState::oneNotified.
         // This will happen when notify() is called during cv_.wait(lk). Will do nothing
         // if notifyState_ is notifyState::notNoftifed or notifyState::allNotified.
         notifyState_.compare_exchange_strong(expextedNotifyState, notifyState::notNotified,
-          std::memory_order_acq_rel, std::memory_order_acquire);
+                                             std::memory_order_acq_rel, std::memory_order_acquire);
       }
     }
     // the mutex is locked again before exiting...
@@ -145,7 +146,7 @@ class Monitor {
     // If notifyState_ is notifyState::oneNotified or notifyState::allNotified, this will be
     // skipped.
     if (notifyState_.load(std::memory_order_acquire) == notifyState::notNotified &&
-        waits_.load(std::memory_order_acquire) > 0 ) {
+        waits_.load(std::memory_order_acquire) > 0) {
       notifyState_.store(notifyState::oneNotified, std::memory_order_release);
       cv_.notify_one();
     }
@@ -158,8 +159,8 @@ class Monitor {
   void notifyAll() {
     // If notifyState_ is notifyState::allNotified, this will be skipped.  So notifyAll()
     // can still be called if notify() is just called as notifyAll() covers notify()
-    if ( notifyState_.load(std::memory_order_acquire) != notifyState::allNotified &&
-         waits_.load(std::memory_order_acquire) > 0 ) {
+    if (notifyState_.load(std::memory_order_acquire) != notifyState::allNotified &&
+        waits_.load(std::memory_order_acquire) > 0) {
       // One notification is enough
       notifyState_.store(notifyState::allNotified, std::memory_order_release);
       cv_.notify_all();
@@ -167,20 +168,15 @@ class Monitor {
   }
 
  private:
-
   std::variant<std::monostate, std::mutex, std::recursive_mutex> mutex_;
 
-  enum class notifyState{
-    notNotified = 0,
-    oneNotified = 1,
-    allNotified = 2
-  };
-  std::condition_variable cv_; //!< The condition variable for sync on the mutex
-  const bool recursive_; //!< True if this is a recursive mutex, false otherwise.
+  enum class notifyState { notNotified = 0, oneNotified = 1, allNotified = 2 };
+  std::condition_variable cv_;  //!< The condition variable for sync on the mutex
+  const bool recursive_;        //!< True if this is a recursive mutex, false otherwise.
   std::atomic<int> waits_;
   std::atomic<notifyState> notifyState_;
-  const int maxCount_{ 55 }; //!< Max count of spins in wait()
-  const int maxReadSpinIter_{ 50 };
+  const int maxCount_{55};  //!< Max count of spins in wait()
+  const int maxReadSpinIter_{50};
 };
 
 class ScopedLock : StackObject {

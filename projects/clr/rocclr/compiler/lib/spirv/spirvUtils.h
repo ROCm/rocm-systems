@@ -23,7 +23,7 @@
 
 #include <cstddef>
 
-bool validateSPIRV(const void *image, size_t length);
+bool validateSPIRV(const void* image, size_t length);
 bool isSPIRVMagic(const void* image, size_t length);
 
 #endif

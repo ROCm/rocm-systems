@@ -48,14 +48,10 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
   cols = GENERATE(3, 4, 100);
   int *srcD, *srcH;
   int *dstD, *dstH;
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH),
-                      sizeof(int) * rows * cols));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH),
-                      sizeof(int) * rows * cols));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
+  HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcH), sizeof(int) * rows * cols));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstH), sizeof(int) * rows * cols));
 
   // initialise array with corresponding index values
   for (int i = 0; i < rows * cols; i++) {
@@ -65,7 +61,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
 
   hip_Memcpy2D pCopy;
 
-  SECTION("srcY(second argument) + non-zero WidthInBytes(15th argument)\
+  SECTION(
+      "srcY(second argument) + non-zero WidthInBytes(15th argument)\
            * Height(16th argument) points to unallocated memory") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = rows;
@@ -81,7 +78,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     pCopy.dstPitch = cols * sizeof(int);
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("srcHost(4th argument), srcDevice(5th argument), srcArray(6th\
+  SECTION(
+      "srcHost(4th argument), srcDevice(5th argument), srcArray(6th\
           argument) passed nullptr") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -103,11 +101,12 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     }
     SECTION("srcArray passed nullptr") {
       pCopy.srcMemoryType = hipMemoryTypeArray;
-      pCopy.srcArray =  nullptr;
+      pCopy.srcArray = nullptr;
     }
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("dstY(second argument) + non-zero WidthInBytes(15th argument)\
+  SECTION(
+      "dstY(second argument) + non-zero WidthInBytes(15th argument)\
            * Height(16th argument) points to unallocated memory") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -123,7 +122,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     pCopy.dstPitch = cols * sizeof(int);
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("dstHost(4th argument), dstDevice(5th argument), dstArray(6th\
+  SECTION(
+      "dstHost(4th argument), dstDevice(5th argument), dstArray(6th\
           argument) passed nullptr") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -145,11 +145,12 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
     }
     SECTION("dstArray passed nullptr") {
       pCopy.dstMemoryType = hipMemoryTypeArray;
-      pCopy.dstArray =  nullptr;
+      pCopy.dstArray = nullptr;
     }
     HIP_CHECK_ERROR(hipDrvMemcpy2DUnaligned(&pCopy), hipErrorInvalidValue);
   }
-  SECTION("WidthInBytes * Height greater than allocated memory(both src \
+  SECTION(
+      "WidthInBytes * Height greater than allocated memory(both src \
           and dst)") {
     pCopy.srcXInBytes = 0;
     pCopy.srcY = 0;
@@ -183,7 +184,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_NegTst") {
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
-  SECTION("Different types of memory transfers functional tests to check if\
+  SECTION(
+      "Different types of memory transfers functional tests to check if\
           copied array contains correct values") {
     // declare host and device arrays
     int rows, cols;
@@ -191,10 +193,8 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
     cols = GENERATE(3, 4, 100);
     int *srcD, *srcH;
     int *dstD, *dstH;
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD),
-                        sizeof(int) * rows * cols));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD),
-                        sizeof(int) * rows * cols));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&srcD), sizeof(int) * rows * cols));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dstD), sizeof(int) * rows * cols));
     srcH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
     dstH = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
 

@@ -36,7 +36,8 @@ class Memcpy2DAsyncBenchmark : public Benchmark<Memcpy2DAsyncBenchmark> {
   }
 };
 
-static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind, bool enable_peer_access=false) {
+static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
+                         bool enable_peer_access = false) {
   Memcpy2DAsyncBenchmark benchmark;
   benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
 
@@ -47,17 +48,15 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind, bool e
     LinearAllocGuard2D<int> device_allocation(width, height);
     LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc,
                                           device_allocation.width() * height);
-    benchmark.Run(host_allocation.ptr(), device_allocation.width(),
-                  device_allocation.ptr(), device_allocation.pitch(),
-                  device_allocation.width(), device_allocation.height(),
+    benchmark.Run(host_allocation.ptr(), device_allocation.width(), device_allocation.ptr(),
+                  device_allocation.pitch(), device_allocation.width(), device_allocation.height(),
                   hipMemcpyDeviceToHost, stream);
   } else if (kind == hipMemcpyHostToDevice) {
     LinearAllocGuard2D<int> device_allocation(width, height);
     LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc,
                                           device_allocation.width() * height);
-    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(),
-                  host_allocation.ptr(), device_allocation.width(),
-                  device_allocation.width(), device_allocation.height(),
+    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(), host_allocation.ptr(),
+                  device_allocation.width(), device_allocation.width(), device_allocation.height(),
                   hipMemcpyHostToDevice, stream);
   } else if (kind == hipMemcpyHostToHost) {
     LinearAllocGuard<int> src_allocation(LinearAllocs::hipHostMalloc, width * sizeof(int) * height);
@@ -68,16 +67,17 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind, bool e
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard2D<int> src_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
     LinearAllocGuard2D<int> dst_allocation(width, height);
 
     HIP_CHECK(hipSetDevice(src_device));
-    benchmark.Run(dst_allocation.ptr(), dst_allocation.pitch(),
-                  src_allocation.ptr(), src_allocation.pitch(),
-                  dst_allocation.width(), dst_allocation.height(),
+    benchmark.Run(dst_allocation.ptr(), dst_allocation.pitch(), src_allocation.ptr(),
+                  src_allocation.pitch(), dst_allocation.width(), dst_allocation.height(),
                   hipMemcpyDeviceToDevice, stream);
   }
 }

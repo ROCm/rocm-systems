@@ -63,21 +63,21 @@ static const AMDDeviceInfo DeviceInfo[] = {
     {"gfx1010", "gfx1010", 4, 32, 1, 256, 64 * Ki, 32, 10, 1},
     {"gfx1011", "gfx1011", 4, 32, 1, 256, 64 * Ki, 32, 10, 1},
     {"gfx1012", "gfx1012", 4, 32, 1, 256, 64 * Ki, 32, 10, 1},
-    {"gfx1030", "gfx1030", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1031", "gfx1031", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1032", "gfx1032", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1033", "gfx1033", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1034", "gfx1034", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1035", "gfx1035", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1036", "gfx1036", 4, 32, 1, 256, 64 * Ki, 32, 10, 3 },
-    {"gfx1100", "gfx1100", 4, 32, 1, 256, 64 * Ki, 32, 11, 0 },
-    {"gfx1101", "gfx1101", 4, 32, 1, 256, 64 * Ki, 32, 11, 0 },
-    {"gfx1102", "gfx1102", 4, 32, 1, 256, 64 * Ki, 32, 11, 0 },
-    {"gfx1103", "gfx1103", 4, 32, 1, 256, 64 * Ki, 32, 11, 0 },
-    {"gfx1150", "gfx1150", 4, 32, 1, 256, 64 * Ki, 32, 11, 5 },
-    {"gfx1151", "gfx1151", 4, 32, 1, 256, 64 * Ki, 32, 11, 5 },
-    {"gfx1200", "gfx1200", 4, 32, 1, 256, 64 * Ki, 32, 12, 0 },
-    {"gfx1201", "gfx1201", 4, 32, 1, 256, 64 * Ki, 32, 12, 0 },
+    {"gfx1030", "gfx1030", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1031", "gfx1031", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1032", "gfx1032", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1033", "gfx1033", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1034", "gfx1034", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1035", "gfx1035", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1036", "gfx1036", 4, 32, 1, 256, 64 * Ki, 32, 10, 3},
+    {"gfx1100", "gfx1100", 4, 32, 1, 256, 64 * Ki, 32, 11, 0},
+    {"gfx1101", "gfx1101", 4, 32, 1, 256, 64 * Ki, 32, 11, 0},
+    {"gfx1102", "gfx1102", 4, 32, 1, 256, 64 * Ki, 32, 11, 0},
+    {"gfx1103", "gfx1103", 4, 32, 1, 256, 64 * Ki, 32, 11, 0},
+    {"gfx1150", "gfx1150", 4, 32, 1, 256, 64 * Ki, 32, 11, 5},
+    {"gfx1151", "gfx1151", 4, 32, 1, 256, 64 * Ki, 32, 11, 5},
+    {"gfx1200", "gfx1200", 4, 32, 1, 256, 64 * Ki, 32, 12, 0},
+    {"gfx1201", "gfx1201", 4, 32, 1, 256, 64 * Ki, 32, 12, 0},
 };
 
 const int DeviceInfoSize = sizeof(DeviceInfo) / sizeof(AMDDeviceInfo);
@@ -103,8 +103,8 @@ void OCLDeviceQueries::open(unsigned int test, char* units, double& conversion,
   }
   cl_uint value;
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -113,16 +113,14 @@ void OCLDeviceQueries::open(unsigned int test, char* units, double& conversion,
     return;
   }
 
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 1024,
-                            name, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 1024, name, &size);
   if (!strstr(name, "cl_amd_device_attribute_query")) {
     printf("AMD device attribute  extension is required for this test!\n");
     failed_ = true;
     return;
   }
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_NAME,
-                                     sizeof(name), name, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_NAME, sizeof(name), name, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_NAME failed");
 
   std::string str = name;
@@ -138,93 +136,72 @@ void OCLDeviceQueries::open(unsigned int test, char* units, double& conversion,
 
   if (!deviceFound) {
     char msg[256];
-    SNPRINTF(msg, sizeof(msg), "Unsupported device(%s) for the test!\t",
-             name);
+    SNPRINTF(msg, sizeof(msg), "Unsupported device(%s) for the test!\t", name);
     testDescString = msg;
     return;
   }
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD,
                                      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD failed");
-  CHECK_RESULT((value != DeviceInfo[id].simdPerCU_),
-               "CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD failed");
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD failed");
+  CHECK_RESULT((value != DeviceInfo[id].simdPerCU_), "CL_DEVICE_SIMD_PER_COMPUTE_UNIT_AMD failed");
 
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_SIMD_WIDTH_AMD,
-                                sizeof(cl_uint), &value, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_SIMD_WIDTH_AMD, sizeof(cl_uint),
+                                     &value, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_SIMD_WIDTH_AMD failed");
-  CHECK_RESULT((value != DeviceInfo[id].simdWidth_),
-               "CL_DEVICE_SIMD_WIDTH_AMD failed");
+  CHECK_RESULT((value != DeviceInfo[id].simdWidth_), "CL_DEVICE_SIMD_WIDTH_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD,
                                      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD failed");
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD failed");
   CHECK_RESULT((value != DeviceInfo[id].simdInstructionWidth_),
                "CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[deviceId], CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD,
-      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD failed");
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD,
+                                sizeof(cl_uint), &value, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD failed");
   CHECK_RESULT((value != DeviceInfo[id].memChannelBankWidth_),
                "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[deviceId], CL_DEVICE_LOCAL_MEM_SIZE_PER_COMPUTE_UNIT_AMD,
-      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_LOCAL_MEM_SIZE_PER_COMPUTE_UNIT_AMD failed");
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_LOCAL_MEM_SIZE_PER_COMPUTE_UNIT_AMD,
+                                sizeof(cl_uint), &value, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_LOCAL_MEM_SIZE_PER_COMPUTE_UNIT_AMD failed");
   CHECK_RESULT((value != DeviceInfo[id].localMemSizePerCU_),
                "CL_DEVICE_LOCAL_MEM_SIZE_PER_COMPUTE_UNIT_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_LOCAL_MEM_BANKS_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_LOCAL_MEM_BANKS_AMD,
                                      sizeof(cl_uint), &value, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_LOCAL_MEM_BANKS_AMD failed");
-  CHECK_RESULT((value != DeviceInfo[id].localMemBanks_),
-               "CL_DEVICE_LOCAL_MEM_BANKS_AMD failed");
+  CHECK_RESULT((value != DeviceInfo[id].localMemBanks_), "CL_DEVICE_LOCAL_MEM_BANKS_AMD failed");
 
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GFXIP_MAJOR_AMD,
-                                sizeof(cl_uint), &value, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GFXIP_MAJOR_AMD, sizeof(cl_uint),
+                                     &value, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_GFXIP_MAJOR_AMD failed");
-  CHECK_RESULT((value != DeviceInfo[id].gfxipMajor_),
-               "CL_DEVICE_GFXIP_MAJOR_AMD failed");
+  CHECK_RESULT((value != DeviceInfo[id].gfxipMajor_), "CL_DEVICE_GFXIP_MAJOR_AMD failed");
 
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GFXIP_MINOR_AMD,
-                                sizeof(cl_uint), &value, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GFXIP_MINOR_AMD, sizeof(cl_uint),
+                                     &value, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_GFXIP_MINOR_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD,
                                      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD failed");
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD failed");
   CHECK_RESULT((value == 0), "CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_WAVEFRONT_WIDTH_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_WAVEFRONT_WIDTH_AMD,
                                      sizeof(cl_uint), &value, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_WAVEFRONT_WIDTH_AMD failed");
   CHECK_RESULT((value == 0), "CL_DEVICE_WAVEFRONT_WIDTH_AMD failed");
 
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId],
-                                     CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD,
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD,
                                      sizeof(cl_uint), &value, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD failed");
+  CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD failed");
   CHECK_RESULT((value == 0), "CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD failed");
 }
 
-static void CL_CALLBACK notify_callback(cl_event event,
-                                        cl_int event_command_exec_status,
+static void CL_CALLBACK notify_callback(cl_event event, cl_int event_command_exec_status,
                                         void* user_data) {}
 
 void OCLDeviceQueries::run(void) {

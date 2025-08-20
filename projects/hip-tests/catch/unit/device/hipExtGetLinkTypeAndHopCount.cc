@@ -27,8 +27,8 @@ THE SOFTWARE.
  * @addtogroup hipExtGetLinkTypeAndHopCount hipExtGetLinkTypeAndHopCount
  * @{
  * @ingroup DeviceTest
- * `hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype, uint32_t* hopcount)` -
- * Returns the link type and hop count between two devices.
+ * `hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype, uint32_t* hopcount)`
+ * - Returns the link type and hop count between two devices.
  */
 
 #if __linux__
@@ -56,8 +56,9 @@ TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic") {
   int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2));
   if (!can_access_peer) {
-    std::string msg = "Skipped as peer access is not supported between devices : " +
-        std::to_string(device1) + " " + std::to_string(device2);
+    std::string msg =
+        "Skipped as peer access is not supported between devices : " + std::to_string(device1) +
+        " " + std::to_string(device2);
     HipTest::HIP_SKIP_TEST(msg.c_str());
     return;
   }
@@ -163,6 +164,6 @@ TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Negative_Parameters") {
 #endif
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

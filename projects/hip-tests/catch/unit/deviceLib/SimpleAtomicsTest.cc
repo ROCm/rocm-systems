@@ -31,11 +31,9 @@ using namespace std;
 // Auto-Verification Code
 ////////////////////////////////////////////////////////////////////////////////
 
-bool verifyBitwise(...) {
-    return true;
-}
+bool verifyBitwise(...) { return true; }
 
-template<typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
+template <typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
 bool verifyBitwise(T* gpuData, int len) {
   // Atomic and
   T val = 0xff;
@@ -65,46 +63,38 @@ bool verifyBitwise(T* gpuData, int len) {
   return true;
 }
 
-bool verifySub(...) {
-  return true;
-}
+bool verifySub(...) { return true; }
 
-template<
-    typename T,
-    typename enable_if<
-        is_same<T, int>{} || is_same<T, unsigned int>{}>::type* = nullptr>
+template <typename T,
+          typename enable_if<is_same<T, int>{} || is_same<T, unsigned int>{}>::type* = nullptr>
 bool verifySub(T* gpuData, int len) {
   T val = 0;
 
   for (int i = 0; i < len; ++i) {
-      val -= 10;
+    val -= 10;
   }
 
   REQUIRE(val == gpuData[1]);
   return true;
 }
 
-bool verifyExch(...) {
-  return true;
-}
+bool verifyExch(...) { return true; }
 
-template<typename T, typename enable_if<!is_same<T, double> {}>::type* = nullptr> // NOLINT
+template <typename T, typename enable_if<!is_same<T, double>{}>::type* = nullptr>  // NOLINT
 bool computeExchExch(T* gpuData, int len) {
   T val = 0;
 
   for (T i = 0; i < len; ++i) {
-      if (i == gpuData[2]) {
-          return true;
-          break;
-      }
+    if (i == gpuData[2]) {
+      return true;
+      break;
+    }
   }
 }
 
-bool VerifyIntegral(...) {
-  return true;
-}
+bool VerifyIntegral(...) { return true; }
 
-template<typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
+template <typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
 bool VerifyIntegral(T* gpuData, int len) {
   // atomic Max
   T val = 0;
@@ -119,7 +109,7 @@ bool VerifyIntegral(T* gpuData, int len) {
   val = 1 << 8;
 
   for (int i = 0; i < len; ++i) {
-      val = min(val, static_cast<T>(i));
+    val = min(val, static_cast<T>(i));
   }
 
   REQUIRE(val == gpuData[4]);
@@ -129,7 +119,7 @@ bool VerifyIntegral(T* gpuData, int len) {
   val = 0;
 
   for (int i = 0; i < len; ++i) {
-      val = (val >= limit) ? 0 : val + 1;
+    val = (val >= limit) ? 0 : val + 1;
   }
 
   REQUIRE(val == gpuData[5]);
@@ -139,7 +129,7 @@ bool VerifyIntegral(T* gpuData, int len) {
   val = 0;
 
   for (int i = 0; i < len; ++i) {
-      val = ((val == 0) || (val > limit)) ? limit : val - 1;
+    val = ((val == 0) || (val > limit)) ? limit : val - 1;
   }
 
   REQUIRE(val == gpuData[6]);
@@ -155,23 +145,20 @@ bool VerifyIntegral(T* gpuData, int len) {
   return verifyBitwise(gpuData, len) && verifySub(gpuData, len);
 }
 
-template<typename T>
-bool verifyData(T* gpuData, int len) {
+template <typename T> bool verifyData(T* gpuData, int len) {
   T val = 0;
   for (int i = 0; i < len; ++i) {
-      val += 10;
+    val += 10;
   }
 
   REQUIRE(val == gpuData[0]);
   return VerifyIntegral(gpuData, len) && verifyExch(gpuData, len);
 }
 
-__device__
-void testKernelExch(...) {}
+__device__ void testKernelExch(...) {}
 
-template<typename T, typename enable_if<!is_same<T, double>{}>::type* = nullptr>
-__device__
-void testKernelExch(T* g_odata) {
+template <typename T, typename enable_if<!is_same<T, double>{}>::type* = nullptr>
+__device__ void testKernelExch(T* g_odata) {
   // access thread id
   const T tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -179,25 +166,19 @@ void testKernelExch(T* g_odata) {
   atomicExch(&g_odata[2], tid);
 }
 
-__device__
-void testKernelSub(...) {}
+__device__ void testKernelSub(...) {}
 
-template<
-    typename T,
-    typename enable_if<
-        is_same<T, int>{} || is_same<T, unsigned int>{}>::type* = nullptr>
-__device__
-void testKernelSub(T* g_odata) {
-    // Atomic subtraction (final should be 0)
-    atomicSub(&g_odata[1], 10);
+template <typename T,
+          typename enable_if<is_same<T, int>{} || is_same<T, unsigned int>{}>::type* = nullptr>
+__device__ void testKernelSub(T* g_odata) {
+  // Atomic subtraction (final should be 0)
+  atomicSub(&g_odata[1], 10);
 }
 
-__device__
-void testKernelIntegral(...) {}
+__device__ void testKernelIntegral(...) {}
 
-template<typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
-__device__
-void testKernelIntegral(T* g_odata) {
+template <typename T, typename enable_if<is_integral<T>{}>::type* = nullptr>
+__device__ void testKernelIntegral(T* g_odata) {
   // access thread id
   const T tid = blockDim.x * blockIdx.x + threadIdx.x;
 
@@ -230,16 +211,14 @@ void testKernelIntegral(T* g_odata) {
   testKernelSub(g_odata);
 }
 
-template<typename T>
-__global__ void testKernel(T* g_odata) {
-    // Atomic addition
-    atomicAdd(&g_odata[0], 10);
-    testKernelIntegral(g_odata);
-    testKernelExch(g_odata);
+template <typename T> __global__ void testKernel(T* g_odata) {
+  // Atomic addition
+  atomicAdd(&g_odata[0], 10);
+  testKernelIntegral(g_odata);
+  testKernelExch(g_odata);
 }
 
-template<typename T>
-static void runTest() {
+template <typename T> static void runTest() {
   bool testResult = true;
   unsigned int numThreads = 256;
   unsigned int numBlocks = 64;
@@ -263,8 +242,7 @@ static void runTest() {
   HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
 
   // execute the kernel
-  hipLaunchKernelGGL(
-      testKernel, dim3(numBlocks), dim3(numThreads), 0, 0, dOData);
+  hipLaunchKernelGGL(testKernel, dim3(numBlocks), dim3(numThreads), 0, 0, dOData);
 
   // Copy result from device to host
   HIP_CHECK(hipMemcpy(hOData, dOData, memSize, hipMemcpyDeviceToHost));
@@ -278,21 +256,11 @@ static void runTest() {
 }
 
 TEST_CASE("Unit_SimpleAtomicsTest") {
-  SECTION("test for int") {
-    runTest<int>();
-  }
-  SECTION("test for unsigned int") {
-    runTest<unsigned int>();
-  }
-  SECTION("test for float") {
-    runTest<float>();
-  }
-  #if HT_AMD
-  SECTION("test for unsigned long long") {
-    runTest<uint64_t>();
-  }
-  SECTION("test for double") {
-    runTest<double>();
-  }
-  #endif
+  SECTION("test for int") { runTest<int>(); }
+  SECTION("test for unsigned int") { runTest<unsigned int>(); }
+  SECTION("test for float") { runTest<float>(); }
+#if HT_AMD
+  SECTION("test for unsigned long long") { runTest<uint64_t>(); }
+  SECTION("test for double") { runTest<double>(); }
+#endif
 }

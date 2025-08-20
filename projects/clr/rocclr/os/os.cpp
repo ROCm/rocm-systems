@@ -39,11 +39,11 @@ namespace amd {
 
 // ================================================================================================
 bool Os::isValidFileDesc(const amd::Os::FileDesc& desc) {
-  #if IS_WINDOWS
-    return desc != nullptr;
-  #else
-    return desc > 0;
-  #endif
+#if IS_WINDOWS
+  return desc != nullptr;
+#else
+  return desc > 0;
+#endif
   return false;
 }
 

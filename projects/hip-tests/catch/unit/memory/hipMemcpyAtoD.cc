@@ -21,13 +21,13 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 
 /**
-* @addtogroup hipMemcpyAtoD hipMemcpyAtoD
-* @{
-* @ingroup MemoryTest
-* `hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
-*                           size_t srcOffset, size_t ByteCount)` -
-* Copies from one 1D array to device memory.
-*/
+ * @addtogroup hipMemcpyAtoD hipMemcpyAtoD
+ * @{
+ * @ingroup MemoryTest
+ * `hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray,
+ *                           size_t srcOffset, size_t ByteCount)` -
+ * Copies from one 1D array to device memory.
+ */
 
 /**
  * Test Description
@@ -52,13 +52,13 @@ TEST_CASE("Unit_hipMemcpyAtoD_Basic") {
   int row, col;
   row = 1;
   col = GENERATE(3, 4, 100);
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   for (int i = 0; i < (row * col); i++) {
     A_h[i] = i;
   }
   hipArray_t A_a;
-  int *A_d;
+  int* A_d;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   HIP_CHECK(hipMallocArray(&A_a, &desc, col, row, hipArrayDefault));
   HIP_CHECK(hipMalloc(&A_d, sizeof(int) * row * col));
@@ -85,6 +85,6 @@ TEST_CASE("Unit_hipMemcpyAtoD_Basic") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

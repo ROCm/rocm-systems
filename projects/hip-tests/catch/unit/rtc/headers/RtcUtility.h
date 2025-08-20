@@ -37,17 +37,13 @@ int check_positive_CO_present(std::string find_string);
 
 int check_negative_CO_present(std::string find_string);
 
-bool calling_resp_function(const std::string block_name,
-                           const char** Combination_CO,
-                           int Combination_CO_size, int max_thread_position,
-                           int fast_math_present);
+bool calling_resp_function(const std::string block_name, const char** Combination_CO,
+                           int Combination_CO_size, int max_thread_position, int fast_math_present);
 
 picojson::array getblock_fromconfig();
 
-std::string get_string_parameters(std::string para_name_to_retrieve,
-                                  std::string block_name);
+std::string get_string_parameters(std::string para_name_to_retrieve, std::string block_name);
 
-picojson::array get_array_parameters(std::string para_name_to_retrieve,
-                                     std::string block_name);
+picojson::array get_array_parameters(std::string para_name_to_retrieve, std::string block_name);
 
 #endif  // CATCH_UNIT_RTC_HEADERS_RTCUTILITY_H_

@@ -31,8 +31,7 @@ namespace amd::roc {
 
 class Kernel : public device::Kernel {
  public:
-  Kernel(std::string name, Program* prog)
-   : device::Kernel(prog->device(), name, *prog) {}
+  Kernel(std::string name, Program* prog) : device::Kernel(prog->device(), name, *prog) {}
 
   virtual ~Kernel() {
     if (program() != nullptr) {

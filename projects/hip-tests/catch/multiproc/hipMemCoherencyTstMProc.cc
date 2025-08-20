@@ -41,7 +41,7 @@
 #include <chrono>
 #include "../unit/memory/hipSVMCommon.h"
 
-__global__  void CoherentTst(int *ptr, volatile unsigned int *expired) {
+__global__ void CoherentTst(int* ptr, volatile unsigned int* expired) {
   // Incrementing the value by 1
   atomicAdd_system(ptr, 1);
   // The following while loop checks the value until expiration.
@@ -50,43 +50,42 @@ __global__  void CoherentTst(int *ptr, volatile unsigned int *expired) {
   }
 }
 
-__global__  void SquareKrnl(int *ptr) {
+__global__ void SquareKrnl(int* ptr) {
   // ptr value squared here
   *ptr = (*ptr) * (*ptr);
 }
 
 // The function tests the coherency of allocated memory
 // Return false on failure, true on success.
-bool static TstCoherency(int *Ptr, bool HmmMem) {
+bool static TstCoherency(int* Ptr, bool HmmMem) {
   using namespace std::chrono_literals;
-  int *Dptr = nullptr;
+  int* Dptr = nullptr;
   hipStream_t strm;
   HIP_CHECK(hipStreamCreate(&strm));
   // storing value 1 in the memory created above
   *Ptr = 1;
 
-  unsigned int *expired = nullptr;
-  HIP_CHECK(hipHostMalloc(&expired, sizeof(unsigned int))); // hipHostMallocCoherent by defaut
+  unsigned int* expired = nullptr;
+  HIP_CHECK(hipHostMalloc(&expired, sizeof(unsigned int)));  // hipHostMallocCoherent by defaut
   *expired = 0;
 
   if (!HmmMem) {
-    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void **>(&Dptr), Ptr, 0));
+    HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&Dptr), Ptr, 0));
     CoherentTst<<<1, 1, 0, strm>>>(Dptr, expired);
   } else {
     CoherentTst<<<1, 1, 0, strm>>>(Ptr, expired);
   }
   // looping until the value is 2 for 3 seconds
-  std::chrono::steady_clock::time_point start =
-               std::chrono::steady_clock::now();
-  while (std::chrono::duration_cast<std::chrono::seconds>(
-         std::chrono::steady_clock::now() - start).count() < 3) {
+  std::chrono::steady_clock::time_point start = std::chrono::steady_clock::now();
+  while (std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - start)
+             .count() < 3) {
     if (*Ptr == 2) {
       *Ptr += 1;
-      std::this_thread::sleep_for(200ms); // Make sure kernel gets updated Dptr
+      std::this_thread::sleep_for(200ms);  // Make sure kernel gets updated Dptr
       break;
     }
   }
-  *expired = 1; // Notify kernel loop to exit
+  *expired = 1;  // Notify kernel loop to exit
   HIP_CHECK(hipStreamSynchronize(strm));
   HIP_CHECK(hipStreamDestroy(strm));
   HIP_CHECK(hipHostFree(expired));
@@ -106,13 +105,12 @@ TEST_CASE("Unit_malloc_CoherentTst") {
   CHECK_PCIE_ATOMICS_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
+  char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     // Test Case execution begins from here
     int managed = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                    0));
+    HIPCHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
     if (managed == 1) {
       int *Ptr = nullptr, SIZE = sizeof(int);
       bool HmmMem = true;
@@ -122,7 +120,7 @@ TEST_CASE("Unit_malloc_CoherentTst") {
       auto ret = TstCoherency(Ptr, HmmMem);
       free(Ptr);
       REQUIRE(ret);
-    } 
+    }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
   }
@@ -137,12 +135,11 @@ TEST_CASE("Unit_malloc_CoherentTst") {
 TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
+  char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                    0));
+    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
     if (managed == 1) {
       int *Ptr = nullptr, SIZE = sizeof(int);
 
@@ -154,7 +151,7 @@ TEST_CASE("Unit_malloc_CoherentTstWthAdvise") {
       SquareKrnl<<<1, 1, 0, strm>>>(Ptr);
       HIP_CHECK(hipStreamSynchronize(strm));
       HIP_CHECK(hipStreamDestroy(strm));
-      REQUIRE (*Ptr == 16);
+      REQUIRE(*Ptr == 16);
     }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
@@ -170,17 +167,15 @@ TEST_CASE("Unit_mmap_CoherentTst") {
   CHECK_PCIE_ATOMICS_SUPPORT
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
+  char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                    0));
+    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
     if (managed == 1) {
       bool HmmMem = true;
-      int *Ptr = reinterpret_cast<int*>(mmap(NULL, sizeof(int),
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+      int* Ptr = reinterpret_cast<int*>(
+          mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
       if (Ptr == MAP_FAILED) {
         WARN("Mapping Failed\n");
         REQUIRE(false);
@@ -191,7 +186,7 @@ TEST_CASE("Unit_mmap_CoherentTst") {
         WARN("munmap failed\n");
       }
       REQUIRE(ret);
-    } 
+    }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
   }
@@ -205,17 +200,15 @@ TEST_CASE("Unit_mmap_CoherentTst") {
 TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
   hipDeviceProp_t prop;
   HIPCHECK(hipGetDeviceProperties(&prop, 0));
-  char *p = NULL;
+  char* p = NULL;
   p = strstr(prop.gcnArchName, "xnack+");
   if (p) {
     int managed = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                    0));
+    HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
     if (managed == 1) {
       int SIZE = sizeof(int);
-      int *Ptr = reinterpret_cast<int*>(mmap(NULL, SIZE,
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
+      int* Ptr = reinterpret_cast<int*>(
+          mmap(NULL, SIZE, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, 0, 0));
       if (Ptr == MAP_FAILED) {
         WARN("Mapping Failed\n");
         REQUIRE(false);
@@ -230,13 +223,13 @@ TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
       bool IfTstPassed = false;
       if (*Ptr == 81) {
         IfTstPassed = true;
-      } 
+      }
       int err = munmap(Ptr, SIZE);
       if (err != 0) {
         WARN("munmap failed\n");
       }
       REQUIRE(IfTstPassed);
-    } 
+    }
   } else {
     HipTest::HIP_SKIP_TEST("GPU is not xnack enabled hence skipping the test...\n");
   }
@@ -249,8 +242,8 @@ TEST_CASE("Unit_mmap_CoherentTstWthAdvise") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {
@@ -289,8 +282,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg1") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {
@@ -329,8 +322,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg2") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {
@@ -369,8 +362,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg3") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
   if ((setenv("HIP_HOST_COHERENT", "0", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {
@@ -410,8 +403,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv0Flg4") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {  // child process
@@ -439,8 +432,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {  // child process
@@ -467,8 +460,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg1") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {  // child process
@@ -495,8 +488,8 @@ TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg2") {
 #if HT_AMD
 TEST_CASE("Unit_hipHostMalloc_WthEnv1Flg3") {
   if ((setenv("HIP_HOST_COHERENT", "1", 1)) != 0) {
-      WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
-      REQUIRE(false);
+    WARN("Unable to turn on HIP_HOST_COHERENT, hence terminating the Test case!");
+    REQUIRE(false);
   }
   int stat = 0;
   if (fork() == 0) {  // child process
