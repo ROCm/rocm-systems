@@ -22,16 +22,16 @@ THE SOFTWARE.
 /**
  * This kernel allocates and deallocates memory in every thread.
  */
-extern "C" __global__ void ker_TestDynamicAllocInAllThreads_CodeObj(
-                        int *outputBuf, int test_type, int value,
-                        size_t perThreadSize) {
+extern "C" __global__ void ker_TestDynamicAllocInAllThreads_CodeObj(int* outputBuf, int test_type,
+                                                                    int value,
+                                                                    size_t perThreadSize) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   size_t size = 0;
   int* ptr = nullptr;
   if (test_type == TEST_MALLOC_FREE) {
     size = perThreadSize * sizeof(int);
-    ptr = reinterpret_cast<int*> (malloc(size));
+    ptr = reinterpret_cast<int*>(malloc(size));
   } else {
     size = perThreadSize;
     ptr = new int[perThreadSize];
@@ -46,7 +46,7 @@ extern "C" __global__ void ker_TestDynamicAllocInAllThreads_CodeObj(
   }
   // Copy to output buffer
   for (size_t idx = 0; idx < perThreadSize; idx++) {
-    outputBuf[myId*perThreadSize + idx] = ptr[idx];
+    outputBuf[myId * perThreadSize + idx] = ptr[idx];
   }
   // Free memory
   if (test_type == TEST_MALLOC_FREE) {

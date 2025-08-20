@@ -39,8 +39,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipGetProcAddress_VMM") {
   int value = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&value,
-            hipDeviceAttributeVirtualMemoryManagementSupported, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported, 0));
   if (value == 0) {
     HipTest::HIP_SKIP_TEST("Machine does not support VMM. Skipping Test..");
     return;
@@ -72,111 +71,75 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
   int currentHipVersion = 0;
   HIP_CHECK(hipRuntimeGetVersion(&currentHipVersion));
 
-  HIP_CHECK(hipGetProcAddress("hipMemGetAllocationGranularity",
-                              &hipMemGetAllocationGranularity_ptr,
+  HIP_CHECK(hipGetProcAddress("hipMemGetAllocationGranularity", &hipMemGetAllocationGranularity_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemCreate",
-                              &hipMemCreate_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemAddressReserve",
-                              &hipMemAddressReserve_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemMap",
-                              &hipMemMap_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemSetAccess",
-                              &hipMemSetAccess_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemUnmap",
-                              &hipMemUnmap_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemAddressFree",
-                              &hipMemAddressFree_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemRelease",
-                              &hipMemRelease_ptr,
-                              currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemGetAccess",
-                              &hipMemGetAccess_ptr,
-                              currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemCreate", &hipMemCreate_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemAddressReserve", &hipMemAddressReserve_ptr, currentHipVersion,
+                              0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemMap", &hipMemMap_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipMemSetAccess", &hipMemSetAccess_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemUnmap", &hipMemUnmap_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemAddressFree", &hipMemAddressFree_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemRelease", &hipMemRelease_ptr, currentHipVersion, 0, nullptr));
+  HIP_CHECK(
+      hipGetProcAddress("hipMemGetAccess", &hipMemGetAccess_ptr, currentHipVersion, 0, nullptr));
   HIP_CHECK(hipGetProcAddress("hipMemGetAllocationPropertiesFromHandle",
-                              &hipMemGetAllocationPropertiesFromHandle_ptr,
+                              &hipMemGetAllocationPropertiesFromHandle_ptr, currentHipVersion, 0,
+                              nullptr));
+  HIP_CHECK(hipGetProcAddress("hipMemRetainAllocationHandle", &hipMemRetainAllocationHandle_ptr,
                               currentHipVersion, 0, nullptr));
-  HIP_CHECK(hipGetProcAddress("hipMemRetainAllocationHandle",
-                              &hipMemRetainAllocationHandle_ptr,
-                              currentHipVersion, 0, nullptr));
 
-  hipError_t(*dyn_hipMemGetAllocationGranularity_ptr)(
-              size_t *, const hipMemAllocationProp *,
-              hipMemAllocationGranularity_flags) =
-    reinterpret_cast<hipError_t (*)(size_t *,
-              const hipMemAllocationProp *,
-              hipMemAllocationGranularity_flags)>
-             (hipMemGetAllocationGranularity_ptr);
+  hipError_t (*dyn_hipMemGetAllocationGranularity_ptr)(size_t*, const hipMemAllocationProp*,
+                                                       hipMemAllocationGranularity_flags) =
+      reinterpret_cast<hipError_t (*)(size_t*, const hipMemAllocationProp*,
+                                      hipMemAllocationGranularity_flags)>(
+          hipMemGetAllocationGranularity_ptr);
 
-  hipError_t(*dyn_hipMemCreate_ptr)(
-             hipMemGenericAllocationHandle_t *,
-             size_t, const hipMemAllocationProp *,
-             uint64_t) =
-    reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t *,
-                                    size_t, const hipMemAllocationProp *,
-                                    uint64_t)>
-                                    (hipMemCreate_ptr);
+  hipError_t (*dyn_hipMemCreate_ptr)(hipMemGenericAllocationHandle_t*, size_t,
+                                     const hipMemAllocationProp*, uint64_t) =
+      reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t*, size_t,
+                                      const hipMemAllocationProp*, uint64_t)>(hipMemCreate_ptr);
 
-  hipError_t(*dyn_hipMemAddressReserve_ptr)(
-             void **, size_t, size_t, void *, uint64_t) =
-    reinterpret_cast<hipError_t (*)(void **, size_t, size_t, void *,
-                                    uint64_t)>
-                                    (hipMemAddressReserve_ptr);
+  hipError_t (*dyn_hipMemAddressReserve_ptr)(void**, size_t, size_t, void*, uint64_t) =
+      reinterpret_cast<hipError_t (*)(void**, size_t, size_t, void*, uint64_t)>(
+          hipMemAddressReserve_ptr);
 
-  hipError_t(*dyn_hipMemMap_ptr)(
-             void *, size_t, size_t,
-             hipMemGenericAllocationHandle_t, uint64_t) =
-    reinterpret_cast<hipError_t (*)(void *, size_t, size_t,
-                                    hipMemGenericAllocationHandle_t,
-                                    uint64_t)>
-                                    (hipMemMap_ptr);
+  hipError_t (*dyn_hipMemMap_ptr)(void*, size_t, size_t, hipMemGenericAllocationHandle_t,
+                                  uint64_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, size_t, hipMemGenericAllocationHandle_t,
+                                      uint64_t)>(hipMemMap_ptr);
 
-  hipError_t(*dyn_hipMemSetAccess_ptr)(
-             void *, size_t, const hipMemAccessDesc *, size_t) =
-    reinterpret_cast<hipError_t (*)(void *, size_t,
-                                    const hipMemAccessDesc *, size_t)>
-                                    (hipMemSetAccess_ptr);
+  hipError_t (*dyn_hipMemSetAccess_ptr)(void*, size_t, const hipMemAccessDesc*, size_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t, const hipMemAccessDesc*, size_t)>(
+          hipMemSetAccess_ptr);
 
-  hipError_t(*dyn_hipMemUnmap_ptr)(
-             void *, size_t) =
-    reinterpret_cast<hipError_t (*)(void *, size_t)>
-    (hipMemUnmap_ptr);
+  hipError_t (*dyn_hipMemUnmap_ptr)(void*, size_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t)>(hipMemUnmap_ptr);
 
-  hipError_t(*dyn_hipMemAddressFree_ptr)(
-             void *, size_t) =
-    reinterpret_cast<hipError_t (*)(void *, size_t)>
-                                   (hipMemAddressFree_ptr);
+  hipError_t (*dyn_hipMemAddressFree_ptr)(void*, size_t) =
+      reinterpret_cast<hipError_t (*)(void*, size_t)>(hipMemAddressFree_ptr);
 
-  hipError_t(*dyn_hipMemRelease_ptr)(hipMemGenericAllocationHandle_t) =
-    reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t)>
-                                   (hipMemRelease_ptr);
+  hipError_t (*dyn_hipMemRelease_ptr)(hipMemGenericAllocationHandle_t) =
+      reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t)>(hipMemRelease_ptr);
 
-  hipError_t(*dyn_hipMemGetAccess_ptr)(
-             uint64_t *, const hipMemLocation *, void *) =
-    reinterpret_cast<hipError_t (*)(uint64_t *,
-                                    const hipMemLocation *, void *)>
-                                    (hipMemGetAccess_ptr);
+  hipError_t (*dyn_hipMemGetAccess_ptr)(uint64_t*, const hipMemLocation*, void*) =
+      reinterpret_cast<hipError_t (*)(uint64_t*, const hipMemLocation*, void*)>(
+          hipMemGetAccess_ptr);
 
-  hipError_t(*dyn_hipMemGetAllocationPropertiesFromHandle_ptr)(
-             hipMemAllocationProp *, hipMemGenericAllocationHandle_t) =
-    reinterpret_cast<hipError_t (*)(hipMemAllocationProp *,
-      hipMemGenericAllocationHandle_t)>
-     (hipMemGetAllocationPropertiesFromHandle_ptr);
+  hipError_t (*dyn_hipMemGetAllocationPropertiesFromHandle_ptr)(hipMemAllocationProp*,
+                                                                hipMemGenericAllocationHandle_t) =
+      reinterpret_cast<hipError_t (*)(hipMemAllocationProp*, hipMemGenericAllocationHandle_t)>(
+          hipMemGetAllocationPropertiesFromHandle_ptr);
 
-  hipError_t(*dyn_hipMemRetainAllocationHandle_ptr)(
-             hipMemGenericAllocationHandle_t *, void *) =
-    reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t *, void *)>
-     (hipMemRetainAllocationHandle_ptr);
+  hipError_t (*dyn_hipMemRetainAllocationHandle_ptr)(hipMemGenericAllocationHandle_t*, void*) =
+      reinterpret_cast<hipError_t (*)(hipMemGenericAllocationHandle_t*, void*)>(
+          hipMemRetainAllocationHandle_ptr);
 
   const int N = 10;
   const int Nbytes = 10 * sizeof(int);
-  int *hostMem = reinterpret_cast<int *>(malloc(Nbytes));
+  int* hostMem = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hostMem != nullptr);
   fillHostArray(hostMem, N, 10);
 
@@ -190,10 +153,10 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
   size_t granularity = 0;
   size_t granularityWithFuncPtr = 0;
 
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity,
-            &prop, hipMemAllocationGranularityMinimum));
-  HIP_CHECK(dyn_hipMemGetAllocationGranularity_ptr(&granularityWithFuncPtr,
-            &prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(
+      hipMemGetAllocationGranularity(&granularity, &prop, hipMemAllocationGranularityMinimum));
+  HIP_CHECK(dyn_hipMemGetAllocationGranularity_ptr(&granularityWithFuncPtr, &prop,
+                                                   hipMemAllocationGranularityMinimum));
 
   REQUIRE(granularity > 0);
   REQUIRE(granularityWithFuncPtr > 0);
@@ -223,7 +186,7 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
 
   // Performing some operations on ptr, to validate it
   HIP_CHECK(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice));
-  addOneKernel<<< 1, 1 >>>(reinterpret_cast<int *>(ptr), N);
+  addOneKernel<<<1, 1>>>(reinterpret_cast<int*>(ptr), N);
   HIP_CHECK(hipMemcpy(hostMem, ptr, Nbytes, hipMemcpyDeviceToHost));
   validateHostArray(hostMem, N, 11);
 
@@ -235,8 +198,7 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
 
   // Validating hipMemGetAllocationPropertiesFromHandle API
   hipMemAllocationProp requiredProp;
-  HIP_CHECK(dyn_hipMemGetAllocationPropertiesFromHandle_ptr(
-            &requiredProp, handle));
+  HIP_CHECK(dyn_hipMemGetAllocationPropertiesFromHandle_ptr(&requiredProp, handle));
   REQUIRE(requiredProp.type == hipMemAllocationTypePinned);
   REQUIRE(requiredProp.requestedHandleTypes == hipMemHandleTypeNone);
   REQUIRE(requiredProp.location.type == hipMemLocationTypeDevice);
@@ -254,8 +216,7 @@ TEST_CASE("Unit_hipGetProcAddress_VMM") {
 
   // Performing operation on ptr, to check it is invalidated or not
   if (!xnackEnabled) {
-    REQUIRE(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice)
-          == hipErrorInvalidValue);
+    REQUIRE(hipMemcpy(ptr, hostMem, Nbytes, hipMemcpyHostToDevice) == hipErrorInvalidValue);
   }
   free(hostMem);
 }

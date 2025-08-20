@@ -129,6 +129,6 @@ TEST_CASE("Unit_hipIpcCloseMemHandle_Negative_Close_In_Originating_Process") {
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

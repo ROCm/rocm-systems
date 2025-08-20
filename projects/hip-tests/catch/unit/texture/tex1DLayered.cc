@@ -82,7 +82,6 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeElementType", "", char, u
 
       const auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
       REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
-
     }
   }
 }
@@ -143,6 +142,6 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeNormalizedFloat", "", cha
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

@@ -23,14 +23,14 @@
 #include "hip_vm.hpp"
 namespace hip {
 
-static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtNone)
-              == static_cast<uint32_t>(amd::Device::VmmAccess::kNone),
+static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtNone) ==
+                  static_cast<uint32_t>(amd::Device::VmmAccess::kNone),
               "Mem Access Flag None mismatch with ROCclr!");
-static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtRead)
-              == static_cast<uint32_t>(amd::Device::VmmAccess::kReadOnly),
+static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtRead) ==
+                  static_cast<uint32_t>(amd::Device::VmmAccess::kReadOnly),
               "Mem Access Flag Read mismatch with ROCclr!");
-static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtReadWrite)
-              == static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite),
+static_assert(static_cast<uint32_t>(hipMemAccessFlagsProtReadWrite) ==
+                  static_cast<uint32_t>(amd::Device::VmmAccess::kReadWrite),
               "Mem Access Flag Read Write mismatch with ROCclr!");
 
 hipError_t hipMemAddressFree(void* devPtr, size_t size) {
@@ -60,8 +60,8 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
   }
 
   const auto& dev_info = g_devices[0]->devices()[0]->info();
-  if (size == 0 || ((size % dev_info.virtualMemAllocGranularity_) != 0)
-      || ((alignment & (alignment - 1)) != 0)) {
+  if (size == 0 || ((size % dev_info.virtualMemAllocGranularity_) != 0) ||
+      ((alignment & (alignment - 1)) != 0)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -98,8 +98,8 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
-  if (prop->requestedHandleTypes != hipMemHandleTypeNone
-      && prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor) {
+  if (prop->requestedHandleTypes != hipMemHandleTypeNone &&
+      prop->requestedHandleTypes != hipMemHandleTypePosixFileDescriptor) {
     HIP_RETURN(hipErrorNotSupported);
   }
 
@@ -125,19 +125,21 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
 
   // Handle out of memory cases,
   if (ptr == nullptr) {
-    size_t free = 0, total =0;
+    size_t free = 0, total = 0;
     hipError_t hip_error = hipMemGetInfo(&free, &total);
     if (hip_error == hipSuccess) {
-      LogPrintfError("Allocation failed : Device memory : required :%zu | free :%zu"
-                                                "| total :%zu", size, free, total);
+      LogPrintfError(
+          "Allocation failed : Device memory : required :%zu | free :%zu"
+          "| total :%zu",
+          size, free, total);
     }
     HIP_RETURN(hipErrorOutOfMemory);
   }
 
   // Add this to amd::Memory object, so this ptr is accesible for other hipmemory operations.
-  size_t offset = 0; //this is ignored
+  size_t offset = 0;  // this is ignored
   amd::Memory* phys_mem_obj = getMemoryObject(ptr, offset);
-  //saves the current device id so that it can be accessed later
+  // saves the current device id so that it can be accessed later
   phys_mem_obj->getUserData().deviceId = prop->location.id;
   phys_mem_obj->getUserData().data = new hip::GenericAllocation(*phys_mem_obj, size, *prop);
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(phys_mem_obj->getUserData().data);
@@ -167,12 +169,12 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
 
   if (ga->GetProperties().requestedHandleTypes != handleType) {
     LogPrintfError("HandleType mismatch memoryHandleType: %d, requestedHandleTypes: %d",
-                    ga->GetProperties().requestedHandleTypes, handleType);
+                   ga->GetProperties().requestedHandleTypes, handleType);
     HIP_RETURN(hipErrorInvalidValue);
   }
 
   if (!ga->asAmdMemory().getContext().devices()[0]->ExportShareableVMMHandle(
-        ga->asAmdMemory(), flags, shareableHandle)) {
+          ga->asAmdMemory(), flags, shareableHandle)) {
     LogPrintfError("Exporting Handle failed with flags: %d", flags);
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -183,8 +185,8 @@ hipError_t hipMemExportToShareableHandle(void* shareableHandle,
 hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* location, void* ptr) {
   HIP_INIT_API(hipMemGetAccess, flags, location, ptr);
 
-  if (flags == nullptr || location == nullptr || ptr == nullptr
-      || location->type != hipMemLocationTypeDevice || location->id >= g_devices.size()) {
+  if (flags == nullptr || location == nullptr || ptr == nullptr ||
+      location->type != hipMemLocationTypeDevice || location->id >= g_devices.size()) {
     HIP_RETURN(hipErrorInvalidValue)
   }
 
@@ -219,7 +221,8 @@ hipError_t hipMemGetAllocationGranularity(size_t* granularity, const hipMemAlloc
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle) {
+hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
+                                                   hipMemGenericAllocationHandle_t handle) {
   HIP_INIT_API(hipMemGetAllocationPropertiesFromHandle, prop, handle);
 
   if (handle == nullptr || prop == nullptr) {
@@ -247,7 +250,7 @@ hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* hand
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hipMemAllocationProp prop {};
+  hipMemAllocationProp prop{};
   prop.type = hipMemAllocationTypePinned;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = hip::getCurrentDevice()->deviceId();
@@ -287,7 +290,8 @@ hipError_t hipMemMap(void* ptr, size_t size, size_t offset, hipMemGenericAllocat
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int  count, hipStream_t stream) {
+hipError_t hipMemMapArrayAsync(hipArrayMapInfo* mapInfoList, unsigned int count,
+                               hipStream_t stream) {
   HIP_INIT_API(hipMemMapArrayAsync, mapInfoList, count, stream);
 
   if (mapInfoList == nullptr || count == 0) {
@@ -325,7 +329,7 @@ hipError_t hipMemRetainAllocationHandle(hipMemGenericAllocationHandle_t* handle,
   }
 
   *handle = reinterpret_cast<hipMemGenericAllocationHandle_t>(
-              mem->getUserData().phys_mem_obj->getUserData().data);
+      mem->getUserData().phys_mem_obj->getUserData().data);
 
   if (*handle == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);

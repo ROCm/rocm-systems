@@ -32,7 +32,8 @@ THE SOFTWARE.
 namespace cg = cooperative_groups;
 
 
-__global__ void kernel_any(uint64_t* const out, const uint64_t* const active_masks, uint64_t predicate) {
+__global__ void kernel_any(uint64_t* const out, const uint64_t* const active_masks,
+                           uint64_t predicate) {
   if (deactivate_thread(active_masks)) {
     return;
   }
@@ -110,16 +111,12 @@ TEST_CASE("Unit_Warp_Vote_Any_Positive_Basic") {
     return;
   }
 
-  SECTION("Warp Vote Any with specified active mask") {
-    WarpAny().run(false);
-  }
+  SECTION("Warp Vote Any with specified active mask") { WarpAny().run(false); }
 
-  SECTION("Warp Vote Any with random active mask") {
-    WarpAny().run(true);
-  }
+  SECTION("Warp Vote Any with random active mask") { WarpAny().run(true); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

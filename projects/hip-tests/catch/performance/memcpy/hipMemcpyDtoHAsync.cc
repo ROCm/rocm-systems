@@ -35,7 +35,8 @@ class MemcpyDtoHAsyncBenchmark : public Benchmark<MemcpyDtoHAsyncBenchmark> {
   }
 };
 
-static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type, size_t size) {
+static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type,
+                         size_t size) {
   MemcpyDtoHAsyncBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(GetAllocationSectionName(host_allocation_type));
@@ -44,8 +45,7 @@ static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_
   const hipStream_t stream = stream_guard.stream();
   LinearAllocGuard<int> device_allocation(device_allocation_type, size);
   LinearAllocGuard<int> host_allocation(host_allocation_type, size);
-  benchmark.Run(host_allocation.ptr(),
-                reinterpret_cast<hipDeviceptr_t>(device_allocation.ptr()),
+  benchmark.Run(host_allocation.ptr(), reinterpret_cast<hipDeviceptr_t>(device_allocation.ptr()),
                 size, stream);
 }
 

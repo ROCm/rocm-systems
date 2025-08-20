@@ -176,6 +176,6 @@ TEST_CASE("Unit_Kernel_Launch_bounds_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

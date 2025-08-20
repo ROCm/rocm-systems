@@ -597,6 +597,6 @@ TEST_CASE("Unit_Device___double_as_longlong_Negative_RTC") {
 }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

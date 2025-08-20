@@ -80,7 +80,6 @@ static void doMemsetTest(allocType mallocType, memType memset_type, MultiDData d
  */
 
 TEST_CASE("Unit_hipMemsetASyncMulti") {
-
   allocType mallocType = GENERATE(allocType::hostMalloc, allocType::deviceMalloc,
                                   allocType::hostRegisted, allocType::devRegistered);
   memType mem_type = memType::hipMemsetD8;

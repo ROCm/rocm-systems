@@ -18,23 +18,23 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_Complex_HeaderTst hiprtc_Complex_HeaderTst
-* @{
-* @ingroup hiprtcHeadersTest
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
-*                                  int numOptions,
-*                                  const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_Complex_HeaderTst hiprtc_Complex_HeaderTst
+ * @{
+ * @ingroup hiprtcHeadersTest
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
+ *                                  int numOptions,
+ *                                  const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 
-static constexpr auto hip_complex_basic_string {
-R"(
+static constexpr auto hip_complex_basic_string{
+    R"(
 extern "C"
 __global__ void hip_complex_basic_kernel(unsigned int *res) {
   hipFloatComplex a = make_hipFloatComplex(2.5, 3.5);
@@ -90,8 +90,8 @@ __global__ void hip_complex_basic_kernel(unsigned int *res) {
 }
 )"};
 
-static constexpr auto hip_complex_corner_float_string {
-R"(
+static constexpr auto hip_complex_corner_float_string{
+    R"(
 extern "C"
 __global__ void hip_complex_corner_float_kernel(int *res) {
    hipFloatComplex a = make_hipFloatComplex(0, 0);
@@ -116,8 +116,8 @@ __global__ void hip_complex_corner_float_kernel(int *res) {
 }
 )"};
 
-static constexpr auto hip_complex_corner_double_string {
-R"(
+static constexpr auto hip_complex_corner_double_string{
+    R"(
 extern "C"
 __global__ void hip_complex_corner_double_kernel(int *res) {
    hipDoubleComplex a = make_hipDoubleComplex(0, 0);
@@ -143,17 +143,17 @@ __global__ void hip_complex_corner_double_kernel(int *res) {
 )"};
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*  - To test working of "hip/hip_complex.h"  header inside kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hipRtcComplexHeader.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *  - To test working of "hip/hip_complex.h"  header inside kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hipRtcComplexHeader.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 TEST_CASE("Unit_Rtc_HipComplex_header") {
   int n = 0;
   hipDeviceProp_t prop;
@@ -169,23 +169,23 @@ TEST_CASE("Unit_Rtc_HipComplex_header") {
   SECTION("Test Case covering all Complex API's") {
     n = 25;
     kernel_name = "hip_complex_basic_kernel";
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_basic_string,
-                                   kernel_name.c_str(), 0, NULL, NULL));
+    HIPRTC_CHECK(
+        hiprtcCreateProgram(&prog, hip_complex_basic_string, kernel_name.c_str(), 0, NULL, NULL));
   }
   SECTION("Corner cases for Float type") {
     n = 6;
     kernel_name = "hip_complex_corner_float_kernel";
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_float_string,
-                                   kernel_name.c_str(), 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_float_string, kernel_name.c_str(), 0,
+                                     NULL, NULL));
   }
   SECTION("Corner cases for Double type") {
     n = 6;
     kernel_name = "hip_complex_corner_double_kernel";
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_double_string,
-                                   kernel_name.c_str(), 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, hip_complex_corner_double_string, kernel_name.c_str(),
+                                     0, NULL, NULL));
   }
-  unsigned int *result_h;
-  unsigned int *result_d;
+  unsigned int* result_h;
+  unsigned int* result_d;
   unsigned int Nbytes = n * sizeof(unsigned int);
   result_h = new unsigned int[n];
   for (int i = 0; i < n; i++) {
@@ -194,8 +194,7 @@ TEST_CASE("Unit_Rtc_HipComplex_header") {
   HIP_CHECK(hipMalloc(&result_d, Nbytes));
   HIP_CHECK(hipMemcpy(result_d, result_h, Nbytes, hipMemcpyHostToDevice));
   const char* kername = kernel_name.c_str();
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             1, &compiler_option)};
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -212,14 +211,12 @@ TEST_CASE("Unit_Rtc_HipComplex_header") {
   void* kernelParam[] = {result_d};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < n; i++) {
@@ -237,6 +234,6 @@ TEST_CASE("Unit_Rtc_HipComplex_header") {
 }
 
 /**
-* End doxygen group hiprtcHeadersTest.
-* @}
-*/
+ * End doxygen group hiprtcHeadersTest.
+ * @}
+ */

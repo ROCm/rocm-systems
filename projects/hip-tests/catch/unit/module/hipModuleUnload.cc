@@ -35,12 +35,12 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
   HIP_CHECK_ERROR(hipModuleUnload(module), hipErrorNotFound);
 }
 /**
-* @addtogroup hipModuleUnload
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipModuleUnload(hipModule_t module)` -
-* Frees the module
-*/
+ * @addtogroup hipModuleUnload
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleUnload(hipModule_t module)` -
+ * Frees the module
+ */
 
 /**
  * Test Description
@@ -52,11 +52,11 @@ TEST_CASE("Unit_hipModuleUnload_Negative_Double_Unload") {
  * Test requirements
  * ------------------------
  * - HIP_VERSION >= 5.6
-*/
+ */
 TEST_CASE("Unit_hipModuleLoad_basic") {
-    constexpr auto fileName = "vcpy_kernel.code";
-    hipModule_t module;
-    HIP_CHECK(hipModuleLoad(&module, fileName));
-    REQUIRE(module != nullptr);
-    HIP_CHECK(hipModuleUnload(module));
+  constexpr auto fileName = "vcpy_kernel.code";
+  hipModule_t module;
+  HIP_CHECK(hipModuleLoad(&module, fileName));
+  REQUIRE(module != nullptr);
+  HIP_CHECK(hipModuleUnload(module));
 }

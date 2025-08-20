@@ -22,7 +22,7 @@
 
 extern void run_test1();
 
-int main(){
+int main() {
   // Run test that generates static lib with -emit-static-lib
   run_test1();
 }

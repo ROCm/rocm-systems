@@ -165,7 +165,7 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
     case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
       *value = hip::getCurrentDevice()->devices()[0]->isa().versionMajor() * 10 +
-               hip::getCurrentDevice()->devices()[0]->isa().versionMinor();
+          hip::getCurrentDevice()->devices()[0]->isa().versionMinor();
       break;
     case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
       *value = 0;
@@ -194,7 +194,7 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
   HIP_INIT_API(hipFuncSetAttribute, func, attr, value);
 
-  if (func == nullptr)  {
+  if (func == nullptr) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
   if (attr < 0 || attr > hipFuncAttributeMax) {
@@ -221,19 +221,19 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
     HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
   device::Kernel* d_kernel =
-                 (device::Kernel*)(kernel->getDeviceKernel(
-                  *(hip::getCurrentDevice()->devices()[0])));
+      (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
 
   if (attr == hipFuncAttributeMaxDynamicSharedMemorySize) {
-    if ((value < 0) || (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
-                                 d_kernel->workGroupInfo()->localMemSize_))) {
+    if ((value < 0) ||
+        (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                  d_kernel->workGroupInfo()->localMemSize_))) {
       HIP_RETURN(hipErrorInvalidValue);
     }
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
   }
 
   if (attr == hipFuncAttributePreferredSharedMemoryCarveout) {
-    if (value < -1 || value > 100)  {
+    if (value < -1 || value > 100) {
       HIP_RETURN(hipErrorInvalidValue);
     }
   }
@@ -244,7 +244,9 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
   HIP_INIT_API(hipFuncSetCacheConfig, cacheConfig);
 
-  if (func == nullptr) { HIP_RETURN(hipErrorInvalidDeviceFunction); }
+  if (func == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
   if (cacheConfig != hipFuncCachePreferNone && cacheConfig != hipFuncCachePreferShared &&
       cacheConfig != hipFuncCachePreferL1 && cacheConfig != hipFuncCachePreferEqual) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -257,7 +259,9 @@ hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t cacheConfig) {
 hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config) {
   HIP_INIT_API(hipFuncSetSharedMemConfig, func, config);
 
-  if (func == nullptr) { HIP_RETURN(hipErrorInvalidDeviceFunction); }
+  if (func == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
   if (config != hipSharedMemBankSizeDefault && config != hipSharedMemBankSizeFourByte &&
       config != hipSharedMemBankSizeEightByte) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -281,19 +285,19 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
     return hipErrorInvalidValue;
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-                                     || launch_params.global_[2] == 0) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
     return hipErrorInvalidConfiguration;
   }
 
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
-                                    || launch_params.local_[2] == 0) {
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
+      launch_params.local_[2] == 0) {
     return hipErrorInvalidConfiguration;
   }
 
   const amd::Device* device = g_devices[deviceId]->devices()[0];
   const auto& info = device->info();
-  if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) { //sharedMemPerBlock
+  if (launch_params.sharedMemBytes_ > info.localMemSizePerCU_) {  // sharedMemPerBlock
     return hipErrorInvalidValue;
   }
   // Make sure dispatch doesn't exceed max workgroup size limit
@@ -304,7 +308,7 @@ hipError_t ihipLaunchKernel_validate(hipFunction_t f, const amd::LaunchParams& l
   amd::Kernel* kernel = function->kernel();
   const amd::KernelSignature& signature = kernel->signature();
   if ((signature.numParameters() > 0) && (kernelParams == nullptr) && (extra == nullptr)) {
-    LogPrintfError("%s","At least one of kernelParams or extra Params should be provided");
+    LogPrintfError("%s", "At least one of kernelParams or extra Params should be provided");
     return hipErrorInvalidValue;
   }
   if (!kernel->getDeviceKernel(*device)) {
@@ -368,9 +372,9 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
     params |= amd::NDRangeKernelCommand::AnyOrderLaunch;
   }
 
-  amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(*stream, waitList,
-    *kernel, ndrange, launch_params.sharedMemBytes_, params, gridId, numGrids, prevGridSum,
-    allGridSum, firstDevice, profileNDRange);
+  amd::NDRangeKernelCommand* kernelCommand = new amd::NDRangeKernelCommand(
+      *stream, waitList, *kernel, ndrange, launch_params.sharedMemBytes_, params, gridId, numGrids,
+      prevGridSum, allGridSum, firstDevice, profileNDRange);
   if (!kernelCommand) {
     return hipErrorOutOfMemory;
   }
@@ -403,8 +407,8 @@ hipError_t ihipLaunchKernelCommand(amd::Command*& command, hipFunction_t f,
   }
 
   if (DEBUG_HIP_KERNARG_COPY_OPT) {
-    if (CL_SUCCESS != kernelCommand->AllocCaptureSetValidate(kernelParams, kernargs,
-                                                             kernargs_size)) {
+    if (CL_SUCCESS !=
+        kernelCommand->AllocCaptureSetValidate(kernelParams, kernargs, kernargs_size)) {
       kernelCommand->release();
       return hipErrorOutOfMemory;
     }
@@ -459,10 +463,10 @@ hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_par
   }
   hip::DeviceFunc* function = hip::DeviceFunc::asFunction(f);
   amd::Kernel* kernel = function->kernel();
-  amd::ScopedLock lock (DEBUG_HIP_KERNARG_COPY_OPT ? nullptr : &function->dflock_);
+  amd::ScopedLock lock(DEBUG_HIP_KERNARG_COPY_OPT ? nullptr : &function->dflock_);
 
-  hipError_t status = ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId,
-                                                params);
+  hipError_t status =
+      ihipLaunchKernel_validate(f, launch_params, kernelParams, extra, deviceId, params);
   if (status != hipSuccess) {
     return status;
   }
@@ -554,7 +558,7 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
   amd::HIPLaunchParams launch_params(gridDimX, gridDimY, gridDimZ, blockDimX, blockDimY, blockDimZ,
                                      sharedMemBytes);
   if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -562,18 +566,18 @@ hipError_t hipModuleLaunchKernel(hipFunction_t f, uint32_t gridDimX, uint32_t gr
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-      || launch_params.global_[2] == 0) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
-                                    || launch_params.local_[2] == 0) {
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
+      launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr,
-                                    nullptr));
+  HIP_RETURN(
+      ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, nullptr, nullptr));
 }
 
 hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
@@ -594,9 +598,8 @@ hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
                  globalWorkSizeZ, localWorkSizeX, localWorkSizeY, localWorkSizeZ, sharedMemBytes,
                  kernelParams, extra, startEvent, stopEvent, flags);
 
-  amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ,
-                                  localWorkSizeX, localWorkSizeY, localWorkSizeZ,
-                                  sharedMemBytes);
+  amd::LaunchParams launch_params(globalWorkSizeX, globalWorkSizeY, globalWorkSizeZ, localWorkSizeX,
+                                  localWorkSizeY, localWorkSizeZ, sharedMemBytes);
 
   HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, hStream, kernelParams, extra, startEvent,
                                     stopEvent, flags));
@@ -641,7 +644,7 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
                                      sharedMemBytes);
 
   if (!launch_params.IsValidConfig() ||
-       launch_params.local_.product() > device->info().maxWorkGroupSize_) {
+      launch_params.local_.product() > device->info().maxWorkGroupSize_) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -649,13 +652,13 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-      || launch_params.global_[2] == 0) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0
-                                    || launch_params.local_[2] == 0) {
+  if (launch_params.local_[0] == 0 || launch_params.local_[1] == 0 ||
+      launch_params.local_[2] == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -664,9 +667,8 @@ hipError_t hipModuleLaunchCooperativeKernel(hipFunction_t f, unsigned int gridDi
 }
 
 hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
-                                                       unsigned int  numDevices,
-                                                       unsigned int  flags,
-                                                       uint32_t extFlags) {
+                                                        unsigned int numDevices, unsigned int flags,
+                                                        uint32_t extFlags) {
   int numActiveGPUs = 0;
   hipError_t result = hipSuccess;
   result = ihipDeviceGetCount(&numActiveGPUs);
@@ -675,8 +677,8 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
     return hipErrorInvalidValue;
   }
 
-  if (flags > (hipCooperativeLaunchMultiDeviceNoPostSync +
-               hipCooperativeLaunchMultiDeviceNoPreSync)) {
+  if (flags >
+      (hipCooperativeLaunchMultiDeviceNoPostSync + hipCooperativeLaunchMultiDeviceNoPreSync)) {
     return hipErrorInvalidValue;
   }
 
@@ -713,8 +715,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
   // Sync the execution streams on all devices
   if ((flags & hipCooperativeLaunchMultiDeviceNoPreSync) == 0) {
     for (int i = 0; i < numDevices; ++i) {
-      hip::Stream* hip_stream =
-          reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
+      hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
       hip_stream->finish();
     }
   }
@@ -759,10 +760,9 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
       return hipErrorInvalidConfiguration;
     }
 
-    result = ihipModuleLaunchKernel(
-        launch.function, launch_params, launch.hStream, launch.kernelParams,
-        nullptr, nullptr, nullptr, flags, extFlags,
-        i, numDevices, prevGridSize, allGridSize, firstDevice);
+    result = ihipModuleLaunchKernel(launch.function, launch_params, launch.hStream,
+                                    launch.kernelParams, nullptr, nullptr, nullptr, flags, extFlags,
+                                    i, numDevices, prevGridSize, allGridSize, firstDevice);
     if (result != hipSuccess) {
       break;
     }
@@ -772,8 +772,7 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
   // Sync the execution streams on all devices
   if ((flags & hipCooperativeLaunchMultiDeviceNoPostSync) == 0) {
     for (int i = 0; i < numDevices; ++i) {
-      hip::Stream* hip_stream =
-          reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
+      hip::Stream* hip_stream = reinterpret_cast<hip::Stream*>(launchParamsList[i].hStream);
       hip_stream->finish();
     }
   }
@@ -782,8 +781,8 @@ hipError_t ihipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams*
 }
 
 hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* launchParamsList,
-                                                       unsigned int  numDevices,
-                                                       unsigned int  flags) {
+                                                       unsigned int numDevices,
+                                                       unsigned int flags) {
   HIP_INIT_API(hipModuleLaunchCooperativeKernelMultiDevice, launchParamsList, numDevices, flags);
 
   if (launchParamsList == nullptr) {
@@ -798,19 +797,16 @@ hipError_t hipModuleLaunchCooperativeKernelMultiDevice(hipFunctionLaunchParams* 
   }
 
   HIP_RETURN(ihipModuleLaunchCooperativeKernelMultiDevice(
-      launchParamsList,
-      numDevices,
-      flags,
+      launchParamsList, numDevices, flags,
       (amd::NDRangeKernelCommand::CooperativeGroups |
-      amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
-
+       amd::NDRangeKernelCommand::CooperativeMultiDeviceGroups)));
 }
 
 hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr) {
   HIP_INIT_API(hipGetFuncBySymbol, functionPtr, symbolPtr);
 
-  hipError_t hip_error = PlatformState::instance().getStatFunc(functionPtr,
-                         symbolPtr, ihipGetDevice());
+  hipError_t hip_error =
+      PlatformState::instance().getStatFunc(functionPtr, symbolPtr, ihipGetDevice());
 
   if ((hip_error != hipSuccess) || (functionPtr == nullptr)) {
     HIP_RETURN(hipErrorInvalidDeviceFunction);
@@ -819,31 +815,31 @@ hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr)
 }
 
 hipError_t hipLaunchKernel_common(const void* hostFunction, dim3 gridDim, dim3 blockDim,
-                                             void** args, size_t sharedMemBytes,
-                                             hipStream_t stream) {
+                                  void** args, size_t sharedMemBytes, hipStream_t stream) {
   STREAM_CAPTURE(hipLaunchKernel, stream, hostFunction, gridDim, blockDim, args, sharedMemBytes);
   return ihipLaunchKernel(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream, nullptr,
                           nullptr, 0);
 }
 
-hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim,
-                                      void** args, size_t sharedMemBytes, hipStream_t stream) {
+hipError_t hipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
+                           size_t sharedMemBytes, hipStream_t stream) {
   HIP_INIT_API(hipLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream);
-  HIP_RETURN_DURATION(hipLaunchKernel_common(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream));
+  HIP_RETURN_DURATION(
+      hipLaunchKernel_common(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream));
 }
 
-hipError_t hipLaunchKernel_spt(const void* hostFunction, dim3 gridDim, dim3 blockDim,
-                                          void** args, size_t sharedMemBytes, hipStream_t stream) {
+hipError_t hipLaunchKernel_spt(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
+                               size_t sharedMemBytes, hipStream_t stream) {
   HIP_INIT_API(hipLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream);
   PER_THREAD_DEFAULT_STREAM(stream);
   HIP_RETURN(hipLaunchKernel_common(hostFunction, gridDim, blockDim, args, sharedMemBytes, stream));
 }
 
-hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim,
-                                         void** args, size_t sharedMemBytes, hipStream_t stream,
-                                         hipEvent_t startEvent, hipEvent_t stopEvent, int flags) {
-  HIP_INIT_API(hipExtLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes,
-               stream, startEvent, stopEvent, flags);
+hipError_t hipExtLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDim, void** args,
+                              size_t sharedMemBytes, hipStream_t stream, hipEvent_t startEvent,
+                              hipEvent_t stopEvent, int flags) {
+  HIP_INIT_API(hipExtLaunchKernel, hostFunction, gridDim, blockDim, args, sharedMemBytes, stream,
+               startEvent, stopEvent, flags);
 
   if (!hip::isValid(startEvent) || !hip::isValid(stopEvent)) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -889,13 +885,13 @@ hipError_t hipLaunchCooperativeKernel_common(const void* f, dim3 gridDim, dim3 b
     return hipErrorCooperativeLaunchTooLarge;
   }
 
-  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0
-      || launch_params.global_[2] == 0) {
+  if (launch_params.global_[0] == 0 || launch_params.global_[1] == 0 ||
+      launch_params.global_[2] == 0) {
     return hipErrorInvalidConfiguration;
   }
 
-  return ihipModuleLaunchKernel(func, launch_params, hStream, kernelParams, nullptr,
-                                nullptr, nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups);
+  return ihipModuleLaunchKernel(func, launch_params, hStream, kernelParams, nullptr, nullptr,
+                                nullptr, 0, amd::NDRangeKernelCommand::CooperativeGroups);
 }
 
 hipError_t hipLaunchCooperativeKernel(const void* f, dim3 gridDim, dim3 blockDim,
@@ -975,10 +971,8 @@ hipError_t ihipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsL
     functionLaunchParamsList[i].kernelParams = launch.args;
   }
 
-  return ihipModuleLaunchCooperativeKernelMultiDevice(functionLaunchParamsList.data(),
-                                                      functionLaunchParamsList.size(),
-                                                      flags,
-                                                      extFlags);
+  return ihipModuleLaunchCooperativeKernelMultiDevice(
+      functionLaunchParamsList.data(), functionLaunchParamsList.size(), flags, extFlags);
 }
 
 hipError_t hipLaunchCooperativeKernelMultiDevice(hipLaunchParams* launchParamsList, int numDevices,
@@ -1039,8 +1033,8 @@ hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const
 hipError_t hipLinkAddData(hipLinkState_t hip_link_state, hipJitInputType input_type, void* image,
                           size_t image_size, const char* name, unsigned int num_options,
                           hipJitOption* options_ptr, void** option_values) {
-
-  HIP_INIT_API(hipLinkAddData, hip_link_state, image, image_size, name, num_options, options_ptr, option_values);
+  HIP_INIT_API(hipLinkAddData, hip_link_state, image, image_size, name, num_options, options_ptr,
+               option_values);
 
   if (image == nullptr || image_size <= 0) {
     HIP_RETURN(hipErrorInvalidImage);
@@ -1048,9 +1042,9 @@ hipError_t hipLinkAddData(hipLinkState_t hip_link_state, hipJitInputType input_t
 
   if (input_type == hipJitInputCubin || input_type == hipJitInputPtx ||
       input_type == hipJitInputFatBinary || input_type == hipJitInputObject ||
-      input_type ==  hipJitInputLibrary || input_type == hipJitInputNvvm ||
+      input_type == hipJitInputLibrary || input_type == hipJitInputNvvm ||
       input_type == hipJitInputLLVMBitcode || input_type == hipJitInputLLVMBundledBitcode ||
-      input_type == hipJitInputLLVMArchivesOfBundledBitcode ) {
+      input_type == hipJitInputLLVMArchivesOfBundledBitcode) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
@@ -1059,8 +1053,7 @@ hipError_t hipLinkAddData(hipLinkState_t hip_link_state, hipJitInputType input_t
     input_name = name;
   }
 
-  LinkProgram* hip_link_prog_ptr =
-      reinterpret_cast<LinkProgram*>(hip_link_state);
+  LinkProgram* hip_link_prog_ptr = reinterpret_cast<LinkProgram*>(hip_link_state);
 
   if (!LinkProgram::isLinkerValid(hip_link_prog_ptr)) {
     HIP_RETURN(hipErrorInvalidHandle);
@@ -1073,9 +1066,11 @@ hipError_t hipLinkAddData(hipLinkState_t hip_link_state, hipJitInputType input_t
   HIP_RETURN(hipSuccess);
 }
 
-hipError_t hipLinkAddFile(hipLinkState_t hip_link_state, hipJitInputType input_type, const char* file_path,
-                          unsigned int num_options, hipJitOption* options_ptr, void** option_values) {
-  HIP_INIT_API(hipLinkAddFile, hip_link_state, input_type, file_path, num_options, options_ptr, option_values);
+hipError_t hipLinkAddFile(hipLinkState_t hip_link_state, hipJitInputType input_type,
+                          const char* file_path, unsigned int num_options,
+                          hipJitOption* options_ptr, void** option_values) {
+  HIP_INIT_API(hipLinkAddFile, hip_link_state, input_type, file_path, num_options, options_ptr,
+               option_values);
 
   if (hip_link_state == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
@@ -1083,14 +1078,13 @@ hipError_t hipLinkAddFile(hipLinkState_t hip_link_state, hipJitInputType input_t
 
   if (input_type == hipJitInputCubin || input_type == hipJitInputPtx ||
       input_type == hipJitInputFatBinary || input_type == hipJitInputObject ||
-      input_type ==  hipJitInputLibrary || input_type == hipJitInputNvvm ||
+      input_type == hipJitInputLibrary || input_type == hipJitInputNvvm ||
       input_type == hipJitInputLLVMBitcode || input_type == hipJitInputLLVMBundledBitcode ||
-      input_type == hipJitInputLLVMArchivesOfBundledBitcode ) {
+      input_type == hipJitInputLLVMArchivesOfBundledBitcode) {
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  LinkProgram* hip_link_prog_ptr =
-      reinterpret_cast<LinkProgram*>(hip_link_state);
+  LinkProgram* hip_link_prog_ptr = reinterpret_cast<LinkProgram*>(hip_link_state);
 
   if (!LinkProgram::isLinkerValid(hip_link_prog_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -1104,7 +1098,7 @@ hipError_t hipLinkAddFile(hipLinkState_t hip_link_state, hipJitInputType input_t
 }
 
 hipError_t hipLinkCreate(unsigned int num_options, hipJitOption* options_ptr,
-                              void** options_vals_pptr, hipLinkState_t* hip_link_state_ptr) {
+                         void** options_vals_pptr, hipLinkState_t* hip_link_state_ptr) {
   HIP_INIT_API(hipLinkCreate, num_options, options_ptr, options_vals_pptr, hip_link_state_ptr);
 
   if (hip_link_state_ptr == nullptr) {
@@ -1175,8 +1169,7 @@ hipError_t hipLinkComplete(hipLinkState_t hip_link_state, void** bin_out, size_t
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  LinkProgram* hip_link_prog_ptr =
-      reinterpret_cast<LinkProgram*>(hip_link_state);
+  LinkProgram* hip_link_prog_ptr = reinterpret_cast<LinkProgram*>(hip_link_state);
 
   if (!LinkProgram::isLinkerValid(hip_link_prog_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -1192,8 +1185,7 @@ hipError_t hipLinkComplete(hipLinkState_t hip_link_state, void** bin_out, size_t
 hipError_t hipLinkDestroy(hipLinkState_t hip_link_state) {
   HIP_INIT_API(hipLinkDestroy, hip_link_state);
 
-  LinkProgram* hip_link_prog_ptr =
-      reinterpret_cast<LinkProgram*>(hip_link_state);
+  LinkProgram* hip_link_prog_ptr = reinterpret_cast<LinkProgram*>(hip_link_state);
 
   if (!LinkProgram::isLinkerValid(hip_link_prog_ptr)) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -1215,7 +1207,7 @@ hipError_t hipLaunchKernelExC(const hipLaunchConfig_t* config, const void* fPtr,
 
   if (config->numAttrs == 0) {
     HIP_RETURN_DURATION(hipLaunchKernel_common(fPtr, config->gridDim, config->blockDim, args,
-      config->dynamicSmemBytes, config->stream));
+                                               config->dynamicSmemBytes, config->stream));
   }
 
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
@@ -1263,8 +1255,7 @@ hipError_t hipDrvLaunchKernelEx(const HIP_LAUNCH_CONFIG* config, hipFunction_t f
   for (size_t attr_idx = 0; attr_idx < config->numAttrs; ++attr_idx) {
     hipLaunchAttribute& attr = config->attrs[attr_idx];
     switch (attr.id) {
-      case hipLaunchAttributeCooperative:
-      {
+      case hipLaunchAttributeCooperative: {
         if (attr.value.cooperative != 0) {
           HIP_RETURN(ihipModuleLaunchKernel(f, launch_params, config->hStream, kernelParams,
                                             nullptr, nullptr, nullptr, 0,
