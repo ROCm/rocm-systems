@@ -31,7 +31,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --scratch-memory-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data -o out --output-format rocpd json
-        --runtime-trace --kernel-rename --output-config -- $<TARGET_FILE:scratch-memory>)
+        --kernel-trace -- $<TARGET_FILE:scratch-memory>)
 
 set_tests_properties(
     rocprofv3-test-rocpd-scratch-execute
@@ -55,7 +55,7 @@ set_tests_properties(
 add_test(
     NAME rocprofv3-test-rocpd-scratch-perfetto-generation
     COMMAND
-        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace --kernel-rename -d
+        ${Python3_EXECUTABLE} -m rocpd convert -f pftrace -d
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-output-data -i
         ${CMAKE_CURRENT_BINARY_DIR}/rocpd-input-data/out_results.db)
 
