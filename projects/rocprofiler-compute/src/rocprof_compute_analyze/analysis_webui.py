@@ -23,9 +23,7 @@
 
 ##############################################################################
 
-
 import copy
-import os
 import random
 from pathlib import Path
 
@@ -50,7 +48,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch = None
 
-        self.__hidden_sections = ["Memory Chart", "Roofline"]
+        self.__hidden_sections = ["Memory Chart"]
         self.__hidden_columns = HIDDEN_COLUMNS
         # define different types of bar charts
         self.__barchart_elements = {
@@ -153,7 +151,7 @@ class webui_analysis(OmniAnalyze_Base):
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
                 temp = {}
-                keep = [1, 2, 101, 201, 301, 401]
+                keep = [1, 2, 101, 201, 301, 401, 402]
                 for key in base_data[base_run].dfs:
                     if keep.count(key) != 0:
                         temp[key] = base_data[base_run].dfs[key]
@@ -221,14 +219,16 @@ class webui_analysis(OmniAnalyze_Base):
                     .lower()
                 )
                 html_section = []
-
                 if panel["title"] not in self.__hidden_sections:
                     # Iterate over each table per section
                     for data_source in panel["data source"]:
                         for t_type, table_config in data_source.items():
                             original_df = base_data[base_run].dfs[table_config["id"]]
                             # The sys info table need to add index back
-                            if t_type == "raw_csv_table" and "Info" in original_df.keys():
+                            if (
+                                t_type == "raw_csv_table"
+                                and "Info" in original_df.keys()
+                            ):
                                 original_df.reset_index(inplace=True)
 
                             content = determine_chart_type(
@@ -279,7 +279,13 @@ class webui_analysis(OmniAnalyze_Base):
                         id="popup",
                         children=[
                             html.Div(
-                                children="To dive deeper, use the top drop down menus to isolate particular kernel(s) or dispatch(s). You will then see the web page update with additional low-level metrics specific to the filter you've applied.",
+                                children=(
+                                    "To dive deeper, use the top drop down menus to "
+                                    "isolate particular kernel(s) or dispatch(s). "
+                                    "You will then see the web page update with "
+                                    "additional low-level metrics specific to the "
+                                    "filter you've applied."
+                                ),
                             ),
                         ],
                     )
@@ -308,7 +314,9 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
             if self.get_args().spatial_multiplexing:
-                self._runs[self.dest_dir].raw_pmc = self.spatial_multiplex_merge_counters(
+                self._runs[
+                    self.dest_dir
+                ].raw_pmc = self.spatial_multiplex_merge_counters(
                     self._runs[self.dest_dir].raw_pmc
                 )
 
@@ -386,8 +394,7 @@ def determine_chart_type(
         d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
         # Smaller formatting if barchart yeilds several graphs
         if (
-            len(d_figs)
-            > 2
+            len(d_figs) > 2
             # and not table_config["id"]
             # in barchart_elements["l2_cache_per_chan"]
         ):

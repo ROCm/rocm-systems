@@ -6508,7 +6508,7 @@ rocprofiler-sdk:
     - architectures:
       - gfx908
       block: TCC
-      event: 43
+      event: 102
     - architectures:
       - gfx940
       - gfx941
@@ -7896,6 +7896,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942
@@ -7910,6 +7912,8 @@ rocprofiler-sdk:
     properties: []
     definitions:
     - architectures:
+      - gfx90a
+      - gfx908
       - gfx940
       - gfx941
       - gfx942

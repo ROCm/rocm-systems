@@ -5,7 +5,7 @@ set-user-defaults()
     : ${USER:=$(whoami)}
     : ${ROCM_VERSIONS:="6.3"}
     : ${DISTRO:=ubuntu}
-    : ${VERSIONS:=20.04}
+    : ${VERSIONS:=22.04}
     : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12 13"}
     : ${BUILD_CI:=""}
     : ${PUSH:=0}
@@ -26,15 +26,15 @@ declare -a MATRIX_ROCM_VERSIONS=()
 
 load-matrix()
 {
-    local workflow_file=".github/workflows/containers.yml"
-    if [ ! -f "${workflow_file}" ]; then
-        echo -e "\n Error: Cannot find ${workflow_file}"
+    local container_file="$(realpath "${SCRIPT_DIR}/containers.yml")"
+    if [ ! -f "${container_file}" ]; then
+        echo -e "\n Error: Cannot find ${container_file}"
         exit 1
     fi
 
     # In form os-distro;os-version;rocm-version
     local matrix_data=$(awk '
-    /rocprofiler-systems-release:/, /steps:/ {
+    /matrix:/, /steps:/ {
         if (/- os-distro:/) {
             gsub(/[[:space:]]*- os-distro:[[:space:]]*"/, "")
             gsub(/"/, "")
@@ -52,7 +52,7 @@ load-matrix()
             printf "%s;%s;%s\n", distro, version, rocm
         }
     }
-    ' "${workflow_file}")
+    ' "${container_file}")
 
     while IFS=';' read -r os_distro os_version rocm_version; do
         MATRIX_DISTROS+=("$os_distro")
@@ -335,9 +335,6 @@ do
                     ;;
                 22.04)
                     ROCM_REPO_DIST="jammy"
-                    ;;
-                20.04)
-                    ROCM_REPO_DIST="focal"
                     ;;
                 *)
                     ;;

@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from pathlib import Path
 
 import config
@@ -49,9 +48,12 @@ class gfx90a_soc(OmniSoC_Base):
                     )
                 )
             )
-        self.set_compatible_profilers(
-            ["rocprofv1", "rocprofv2", "rocprofv3", "rocprofiler-sdk"]
-        )
+        self.set_compatible_profilers([
+            "rocprofv1",
+            "rocprofv2",
+            "rocprofv3",
+            "rocprofiler-sdk",
+        ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx90a"))
         # Create roofline object if mode is provided; skip for --specs

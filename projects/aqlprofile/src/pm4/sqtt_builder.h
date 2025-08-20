@@ -37,13 +37,22 @@ namespace pm4_builder {
 class CmdBuffer;
 class CmdBuilder;
 
-constexpr size_t ATT_CODEOBJ_OPCODE = 4;
+enum ATT_OPCODES {
+  ATT_CODEOBJ_OPCODE = 4,
+  ATT_TIMESTAMP_OPCODE,
+  ATT_AGENT_INFO_OPCODE,
+};
 
-union att_decoder_codeobj_header_t {
+enum ATT_AGENT_INFO_TYPE {
+  ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ = 0,
+  ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY,
+};
+
+union att_decoder_packet_header_t {
   struct {
     unsigned int opcode : 8;
     unsigned int type : 4;
-    unsigned int reserved : 20;
+    unsigned int data20 : 20;
   };
   unsigned int u32All;
 };
@@ -102,11 +111,14 @@ class XCC_Packet_Lock {
 // Thread traces status register indices to determine
 // status of thread trace run
 
-struct TraceControl {
-  uint32_t status;
-  uint32_t cntr;
-  uint32_t wptr;
-  uint32_t _reserved;
+struct TraceControl
+{
+  uint32_t status{0};
+  uint32_t cntr{0};
+  uint32_t wptr{0};
+  uint32_t _reserved{0};
+  uint64_t gpu_clock_cnt_start{0};
+  uint64_t gpu_clock_cnt_end{0};
 };
 
 // Encapsulates the various Api and structures that are used to enable
@@ -126,7 +138,9 @@ class SqttBuilder {
   virtual void End(CmdBuffer* cmd_buffer, TraceConfig* config) = 0;
   // Builds Pm4 command stream to program hardware registers that
   // inserts "data" into the SQTT buffer as USERDATA_2 (data_lo) and USERDATA_3 (data_hi)
-  virtual hsa_status_t InsertMarker(CmdBuffer* cmd_buffer, uint32_t data, unsigned channel) = 0;
+  virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data, unsigned channel) = 0;
+
+  virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) {};
 
   // Returns TT_CONTROL_UTC_ERR_MASK
   virtual size_t GetUTCErrorMask() const = 0;
@@ -154,7 +168,9 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
   explicit GpuSqttBuilder(const AgentInfo* agent_info)
       : builder(acquire_ip_offset_table(agent_info)),
         xcc_number_(agent_info->xcc_num),
-        se_number_total(agent_info->se_num) {}
+        se_number_total(agent_info->se_num),
+        timestamp_freq(agent_info->timestamp_freq),
+        cu_per_se(agent_info->cu_num / agent_info->se_num) {}
 
   // Returns TT_CONTROL_UTC_ERR_MASK
   virtual size_t GetUTCErrorMask() const override { return Primitives::TT_CONTROL_UTC_ERR_MASK; };
@@ -326,8 +342,6 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
                                           Primitives::sqtt_mode_on_value());
           base_addr += base_step;
       }
-      // Reset the GRBM to broadcast mode
-      SetGRBMToBroadcast(cmd_buffer);
     } else {
       SetGRBMToBroadcast(cmd_buffer);
       builder.BuildWritePConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_STATUS_ADDR, 0);
@@ -401,6 +415,35 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
 
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, header.u32All);
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 524801);
+
+    att_decoder_packet_header_t packet{};
+    packet.opcode = ATT_AGENT_INFO_OPCODE;
+
+    if (config->enable_rt_timestamp)
+    {
+      packet.type = ATT_AGENT_INFO_TYPE_RT_FREQUENCY_KHZ;
+      packet.data20 = this->timestamp_freq / 1000;
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+    }
+    if (Primitives::GFXIP_LEVEL == 9 && config->perfcounters.size())
+    {
+      packet.type = ATT_AGENT_INFO_TYPE_COUNTER_FREQUENCY;
+      packet.data20 = (1 + cu_per_se) * ((config->perfcounters.size() + 3) & ~3) * config->perfPeriod;
+      builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, packet.u32All);
+    }
+    if (Primitives::GFXIP_LEVEL == 9 && config->enable_rt_timestamp)
+    {
+      for (size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+      {
+        bool some_se_enabled = false;
+        for (int se = 0; se < se_number_xcc; se++) some_se_enabled |=config->target_cu_per_se.at(se + xcc*se_number_xcc) >= 0;
+        if (!some_se_enabled) continue;
+
+        XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+        auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
+        InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_start);
+      }
+    }
   }
 
   void End(CmdBuffer* cmd_buffer, TraceConfig* config) override {
@@ -408,8 +451,24 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     // Issue a CSPartialFlush cmd including cache flush
     builder.BuildWriteWaitIdlePacket(cmd_buffer);
 
-    if (Primitives::GFXIP_LEVEL == 9) {
+    if (Primitives::GFXIP_LEVEL == 9)
+    {
       const uint32_t se_number_xcc = se_number_total / std::max(1u, GetXCCNumber());
+
+      if (config->enable_rt_timestamp)
+      {
+        for (size_t xcc = 0; xcc < GetXCCNumber(); xcc++)
+        {
+          bool some_se_enabled = false;
+          for (int se = 0; se < se_number_xcc; se++) some_se_enabled |=config->target_cu_per_se.at(se + xcc*se_number_xcc) >= 0;
+          if (!some_se_enabled) continue;
+
+          XCC_Packet_Lock<Builder> lock(builder, cmd_buffer, GetXCCNumber(), xcc);
+          auto& control = reinterpret_cast<TraceControl*>(config->control_buffer_ptr)[xcc];
+          InsertTimestampMarker(cmd_buffer, &control.gpu_clock_cnt_end);
+        }
+        builder.BuildWriteWaitIdlePacket(cmd_buffer);
+      }
 
       // Program the thread trace mode register to disable thread trace
       builder.BuildWriteUConfigRegPacket(cmd_buffer, Primitives::SQ_THREAD_TRACE_MODE_ADDR,
@@ -527,18 +586,29 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
     return uint64_t(buffer_per_se) & ~((1 << Primitives::TT_BUFF_ALIGN_SHIFT) - 1);
   }
 
-  virtual hsa_status_t InsertMarker(CmdBuffer* cmd_buffer, uint32_t data,
+  virtual hsa_status_t InsertCodeobjMarker(CmdBuffer* cmd_buffer, uint32_t data,
                                     unsigned channel) override {
-    att_decoder_codeobj_header_t header{};
+    att_decoder_packet_header_t header{};
     header.opcode = ATT_CODEOBJ_OPCODE;
     header.type = channel;
-    header.reserved = 0;
+    header.data20 = 0;
     auto userdata_channel = Primitives::SQ_THREAD_TRACE_USERDATA_2;
 
     SetGRBMToBroadcast(cmd_buffer);
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, 4 | (channel << 8));
     builder.BuildWriteUConfigRegPacket(cmd_buffer, userdata_channel, data);
     return HSA_STATUS_SUCCESS;
+  }
+  
+  virtual void InsertTimestampMarker(CmdBuffer* cmd_buffer, uint64_t* addr) override
+  {
+    att_decoder_packet_header_t header{};
+    header.opcode = ATT_TIMESTAMP_OPCODE;
+    header.type = 0;
+    header.data20 = 0;
+
+    SetGRBMToBroadcast(cmd_buffer);
+    builder.BuildGPUClockPacket(cmd_buffer, addr, Primitives::SQ_THREAD_TRACE_USERDATA_3, header.u32All);
   }
 
   template <typename T>
@@ -549,8 +619,10 @@ class GpuSqttBuilder : public SqttBuilder, protected Primitives {
       builder.BuildWritePConfigRegPacket(cmdbuf, reg, value);
   }
 
-  size_t se_number_total;
-  size_t xcc_number_;
+  size_t se_number_total{};
+  size_t xcc_number_{};
+  uint32_t timestamp_freq{};
+  uint32_t cu_per_se{};
 };
 
 }  // namespace pm4_builder

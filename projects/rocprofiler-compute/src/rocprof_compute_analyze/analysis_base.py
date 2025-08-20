@@ -23,17 +23,23 @@
 
 ##############################################################################
 
-
 import copy
-import os
 import sys
 import textwrap
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
+import pandas as pd
+
 from utils import file_io, parser, schema
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
@@ -78,7 +84,9 @@ class OmniAnalyze_Base:
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info)
+        parser.build_dfs(
+            archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+        )
         self._arch_configs[arch] = ac
         return self._arch_configs
 
@@ -189,10 +197,27 @@ class OmniAnalyze_Base:
                 else file_io.find_1st_sub_dir(d[0])
             )
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+
+            if not getattr(self.get_args(), "no_roof", False):
+                try:
+                    roofline_path = sysinfo_path.joinpath("roofline.csv")
+                    roofline_df = pd.read_csv(roofline_path)
+
+                    # use original column names from roofline.csv directly
+                    w.roofline_peaks = roofline_df
+
+                except FileNotFoundError:
+                    console_warning("roofline.csv not found.")
+                    w.roofline_peaks = pd.DataFrame()
+            else:
+                w.roofline_peaks = pd.DataFrame()
+
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:
-                w.sys_info = parser.correct_sys_info(mspec, self.__args.specs_correction)
+                w.sys_info = parser.correct_sys_info(
+                    mspec, self.__args.specs_correction
+                )
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
@@ -222,7 +247,7 @@ class OmniAnalyze_Base:
 
             # Todo: more err check
             if not (
-                self.__args.nodes != None
+                self.__args.nodes is not None
                 or self.__args.list_nodes
                 or self.__args.spatial_multiplexing
             ):
@@ -266,7 +291,9 @@ class OmniAnalyze_Base:
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
         self._output = (
-            open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
+            open(self.__args.output_file, "w+")
+            if self.__args.output_file
+            else sys.stdout
         )
 
         # Read profiling config

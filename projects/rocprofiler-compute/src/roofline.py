@@ -23,11 +23,10 @@
 
 ##############################################################################
 
-
 import os
 import textwrap
 import time
-from abc import ABC, abstractmethod
+from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
@@ -49,7 +48,8 @@ from utils.roofline_calc import (
     MFMA_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
-    calc_ai,
+    calc_ai_analyze,
+    calc_ai_profile,
     constuct_roof,
 )
 from utils.utils import mibench
@@ -77,7 +77,8 @@ class Roofline:
             run_parameters
             if run_parameters
             else {
-                "workload_dir": None,  # in some cases (i.e. --specs) path will not be given
+                "workload_dir": None,  # in some cases (i.e. --specs),
+                # path will not be given
                 "device_id": 0,
                 "sort_type": "kernels",
                 "mem_level": "ALL",
@@ -92,7 +93,7 @@ class Roofline:
         # Set roofline run parameters from args
         if hasattr(self.__args, "path") and not run_parameters:
             self.__run_parameters["workload_dir"] = self.__args.path
-        if hasattr(self.__args, "no_roof") and self.__args.no_roof == False:
+        if hasattr(self.__args, "no_roof") and not self.__args.no_roof:
             self.__run_parameters["is_standalone"] = True
         if hasattr(self.__args, "kernel_names") and self.__args.kernel_names:
             self.__run_parameters["include_kernel_names"] = True
@@ -122,7 +123,8 @@ class Roofline:
         if isinstance(workload_dir_val, list):
             if not workload_dir_val or not workload_dir_val[0]:
                 console_error(
-                    "Workload directory list is empty or invalid. Cannot perform setup.",
+                    "Workload directory list is empty or invalid. "
+                    "Cannot perform setup.",
                     exit=False,
                 )
                 return
@@ -139,7 +141,6 @@ class Roofline:
         base_path = Path(base_dir)
 
         if base_path.name == "workloads" and base_path.parent == Path(os.getcwd()):
-
             app_name = getattr(self.__args, "name", "default_app_name")
             gpu_model_name = getattr(self.__mspec, "gpu_model", "default_gpu_model")
 
@@ -169,18 +170,22 @@ class Roofline:
         self,
         ret_df,
     ):
-        """Generate a set of empirical roofline plots given a directory containing required profiling and benchmarking data"""
+        """
+        Generate a set of empirical roofline plots given a directory containing
+        required profiling and benchmarking data.
+        """
         if (
             not isinstance(self.__run_parameters["workload_dir"], list)
             and self.__run_parameters["workload_dir"] != None
         ):
             self.roof_setup()
 
-        console_debug("roofline", "Path: %s" % self.__run_parameters.get("workload_dir"))
-        self.__ai_data = calc_ai(
+        console_debug(
+            "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
+        )
+        self.__ai_data = calc_ai_profile(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
-
         msg = "AI at each mem level:"
         for i in self.__ai_data:
             msg += "\n\t%s -> %s" % (i, self.__ai_data[i])
@@ -197,8 +202,11 @@ class Roofline:
                 or str(dt) not in SUPPORTED_DATATYPES[gpu_arch]
             ):
                 console_error(
-                    "{} is not a supported datatype for roofline profiling on {} (arch: {})".format(
-                        str(dt), getattr(self.__mspec, "gpu_model", "N/A"), gpu_arch
+                    "{} is not a supported datatype for roofline profiling on {} "
+                    "(arch: {})".format(
+                        str(dt),
+                        getattr(self.__mspec, "gpu_model", "N/A"),
+                        gpu_arch,
                     ),
                     exit=False,
                 )
@@ -230,7 +238,8 @@ class Roofline:
         if self.__run_parameters.get("include_kernel_names", False):
             if self.__ai_data is None:
                 console_error(
-                    "Roofline Error: self.__ai_data is not populated. Cannot generate kernel names info.",
+                    "Roofline Error: self.__ai_data is not populated. "
+                    "Cannot generate kernel names info.",
                     exit=False,
                 )
                 original_kernel_names = []
@@ -245,7 +254,8 @@ class Roofline:
             if num_kernels == 0:
                 console_log(
                     "roofline",
-                    "No kernel names found to generate 'Kernel Names and Markers' info.",
+                    "No kernel names found to generate "
+                    "'Kernel Names and Markers' info.",
                 )
                 self.__figure.add_annotation(
                     text="No kernel names to display.",
@@ -356,7 +366,8 @@ class Roofline:
                 )
 
         # Output will be different depending on interaction type:
-        # Save PDFs if we're in "standalone roofline" mode, otherwise return HTML to be used in GUI output
+        # Save PDFs if we're in "standalone roofline" mode,
+        # otherwise return HTML to be used in GUI output
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
 
@@ -497,7 +508,8 @@ class Roofline:
             )
             console_debug(
                 "roofline",
-                "Roofline analysis only supports AI for floating point calculations at this time",
+                "Roofline analysis only supports AI for "
+                "floating point calculations at this time",
             )
 
         #######################
@@ -515,15 +527,17 @@ class Roofline:
 
         # Plot peak BW ceiling(s)
         for cache_level in cache_hierarchy:
-
             if (
                 not self.__ceiling_data
                 or cache_level.lower() not in self.__ceiling_data
-                or not isinstance(self.__ceiling_data[cache_level.lower()], (list, tuple))
+                or not isinstance(
+                    self.__ceiling_data[cache_level.lower()], (list, tuple)
+                )
                 or len(self.__ceiling_data[cache_level.lower()]) < 3
             ):
                 console_error(
-                    f"Ceiling data for {cache_level} is missing or malformed for dtype {dtype}.",
+                    f"Ceiling data for {cache_level} is missing "
+                    f"or malformed for dtype {dtype}.",
                     exit=False,
                 )
                 continue
@@ -606,13 +620,14 @@ class Roofline:
 
         return fig
 
-    def cli_generate_plot(self, dtype):
+    def cli_generate_plot(self, dtype, workload=None, config=None, arch_config=None):
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
         :param dtype: The datatype to be profiled
         :type method: str
-        :return: Build the current figure using plot.build(), or None if datatype is not valid for the architecture
+        :return: Build the current figure using plot.build(),
+        or None if datatype is not valid for the architecture
         :rtype: str or None
         """
         console_debug("roofline", "Generating roofline plot for CLI")
@@ -635,7 +650,8 @@ class Roofline:
             )
             return
 
-        # Extract base directory path regardless of whether workload_dir is list or string
+        # Extract base directory path regardless of-
+        # whether workload_dir is list or string
         if isinstance(workload_dir, list):
             if not workload_dir or not workload_dir[0]:
                 console_error(
@@ -652,10 +668,42 @@ class Roofline:
         else:
             # workload_dir is a string
             base_dir = workload_dir
-        self.roof_setup()
-
         # Convert to Path object for easier manipulation
         base_path = Path(base_dir)
+
+        roofline_csv = base_path / "roofline.csv"
+        if not roofline_csv.is_file():
+            console_log("roofline", "{} does not exist".format(roofline_csv))
+            return
+
+        # if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
+        if workload is not None:
+            self.__ai_data = calc_ai_analyze(
+                workload=workload,
+                mspec=self.__mspec,
+                sort_type=self.__run_parameters.get("sort_type"),
+                config=config,
+                arch_config=arch_config,
+            )
+
+        else:
+            pmc_perf_csv = base_path / "pmc_perf.csv"
+            if not pmc_perf_csv.is_file():
+                console_error("roofline", "{} does not exist".format(pmc_perf_csv))
+            t_df = OrderedDict()
+            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
+
+            self.__ai_data = calc_ai_profile(
+                self.__mspec, self.__run_parameters["sort_type"], t_df
+            )
+
+        self.__ceiling_data = constuct_roof(
+            roofline_parameters=self.__run_parameters, dtype=dtype
+        )
+        console_debug(f"AI data: {self.__ai_data}")
+        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
+
+        self.roof_setup()
 
         # Check proper datatype input - takes single str
         if not isinstance(dtype, str):
@@ -666,16 +714,6 @@ class Roofline:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        roofline_csv = base_path / "roofline.csv"
-        if not roofline_csv.is_file():
-            console_log("roofline", "{} does not exist".format(roofline_csv))
-            return
-
-        pmc_perf_csv = base_path / "pmc_perf.csv"
-        if not pmc_perf_csv.is_file():
-            console_error("roofline", "{} does not exist".format(pmc_perf_csv))
-        t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
         profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
         if profiling_config.get("format_rocprof_output") == "rocpd":
             t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
@@ -697,12 +735,6 @@ class Roofline:
             4: "at",
             5: "atom",
         }
-
-        self.__ceiling_data = constuct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-        )
-        self.__ai_data = calc_ai(self.__mspec, self.__run_parameters["sort_type"], t_df)
 
         plt.clf()
         plt.plotsize(plt.tw(), plt.th())
@@ -893,17 +925,20 @@ class Roofline:
                 if not self.__args.remaining:
                     console_error(
                         "profiling"
-                        "An <app_cmd> is required to run.\rrocprof-compute profile -n test -- <app_cmd>"
+                        "An <app_cmd> is required to run.\r"
+                        "rocprof-compute profile -n test -- <app_cmd>"
                     )
-                # TODO: Add an equivelent of characterize_app() to run profiling directly out of this module
+                # TODO: Add an equivelent of characterize_app() to run profiling
+                # directly out of this module
 
         elif self.__args.no_roof:
             console_log("roofline", "Skipping roofline.")
         else:
             mibench(self.__args, self.__mspec)
 
-    # NB: Currently the post_prossesing() method is the only one being used by rocprofiler-compute,
-    # we include pre_processing() and profile() methods for those who wish to borrow the roofline module
+    # NB: Currently the post_prossesing() method is the only one being used by
+    # rocprofiler-compute, we include pre_processing() and profile() methods for
+    # those who wish to borrow the roofline module
     @abstractmethod
     def post_processing(self):
         if self.__run_parameters["is_standalone"]:
