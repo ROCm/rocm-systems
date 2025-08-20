@@ -1,0 +1,3 @@
+EXPORTS
+vdiAgent_OnLoad
+vdiAgent_OnUnload

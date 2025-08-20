@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 #
 # Define all common data storage classes,
 # predifned dict and global functions.
@@ -31,7 +30,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Dict, Generator, List, Mapping
+from typing import Dict, List
 
 import pandas as pd
 
@@ -84,6 +83,7 @@ supported_field = [
     "Avg",
     "Pct of Peak",
     "Peak",
+    "Peak (Empirical)",
     "Count",
     "Mean",
     "Pct",

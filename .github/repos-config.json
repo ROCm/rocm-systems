@@ -5,40 +5,72 @@
       "url": "ROCm/aqlprofile",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
+    },
+    {
+      "name": "clr",
+      "url": "ROCm/clr",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
+    },
+    {
+      "name": "hip",
+      "url": "ROCm/hip",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
+    },
+    {
+      "name": "hipother",
+      "url": "ROCm/hipother",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
+    },
+    {
+      "name": "hip-tests",
+      "url": "ROCm/hip-tests",
+      "branch": "develop",
+      "category": "projects",
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rdc",
       "url": "ROCm/rdc",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocm-core",
       "url": "ROCm/rocm-core",
-      "branch": "master",
+      "branch": "amd-mainline",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocminfo",
       "url": "ROCm/rocminfo",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocm-smi-lib",
       "url": "ROCm/rocm_smi_lib",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler",
@@ -53,8 +85,8 @@
       "url": "ROCm/rocprofiler-compute",
       "branch": "develop",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler-register",
@@ -69,24 +101,24 @@
       "url": "ROCm/rocprofiler-sdk",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocprofiler-systems",
       "url": "ROCm/rocprofiler-systems",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "rocr-runtime",
       "url": "ROCm/ROCR-Runtime",
       "branch": "amd-staging",
       "category": "projects",
-      "auto_subtree_pull": true,
-      "auto_subtree_push": false
+      "auto_subtree_pull": false,
+      "auto_subtree_push": true
     },
     {
       "name": "roctracer",

@@ -41,6 +41,7 @@ struct TraceConfig {
   // PERF
   uint32_t perfMASK = ~0u;
   uint32_t perfCTRL = 0;
+  uint32_t perfPeriod = 0;
   std::vector<std::pair<size_t, size_t>> perfcounters{};
   // GC configurations used by both TT and SPM
   uint32_t se_number = 0;
@@ -65,6 +66,8 @@ struct TraceConfig {
   uint64_t capacity_per_disabled_se = 0x1000;
   std::unordered_map<int, int> target_cu_per_se{};
   std::unordered_map<int, uint64_t> se_base_addresses{};
+
+  bool enable_rt_timestamp{false};
 
   int GetTargetCU(int SE) const { return target_cu_per_se.at(SE); };
   uint64_t GetSEmask() const { return se_mask; };

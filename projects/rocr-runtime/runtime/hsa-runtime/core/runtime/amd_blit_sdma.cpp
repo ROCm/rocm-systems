@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -71,7 +71,7 @@ inline uint32_t ptrhigh32(const void* p) {
 #endif
 }
 
-const size_t BlitSdmaBase::kQueueSize = 1024 * 1024;
+const size_t BlitSdmaBase::kQueueSize = 1024 * 1024 * 8;
 const size_t BlitSdmaBase::kCopyPacketSize = sizeof(SDMA_PKT_COPY_LINEAR);
 const size_t BlitSdmaBase::kMaxSingleCopySize = SDMA_PKT_COPY_LINEAR::kMaxSize_;
 const size_t BlitSdmaBase::kMaxSingleFillSize = SDMA_PKT_CONSTANT_FILL::kMaxSize_;
@@ -186,6 +186,8 @@ hsa_status_t BlitSdma<useGCR>::Initialize(const core::Agent& agent, bool use_xgm
   if (agent_->driver().CreateQueue(agent_->node_id(), kQueueType_, 100, HSA_QUEUE_PRIORITY_MAXIMUM,
                                    rec_eng, queue_start_addr_, kQueueSize, nullptr,
                                    queue_resource_) != HSA_STATUS_SUCCESS) {
+    LogPrint(HSA_AMD_LOG_FLAG_INFO, "Failed to create queue, size=%d, type=%d,"
+       " priority=%d, engine_id=%d", kQueueSize, kQueueType_, HSA_QUEUE_PRIORITY_MAXIMUM, rec_eng);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
 
