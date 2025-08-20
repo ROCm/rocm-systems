@@ -100,6 +100,7 @@ class RocProfCompute_Base:
                 out = self.__args.path + "/pmc_perf.csv"
             files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
             files.extend(glob.glob(self.__args.path + "/" + "SQ_*.csv"))
+            files.extend(glob.glob(self.__args.path + "/" + "SQC_*.csv"))
 
             if self.get_args().hip_trace:
                 # remove hip api trace ouputs from this list
@@ -285,7 +286,7 @@ class RocProfCompute_Base:
             if not self.__args.verbose:
                 for file in files:
                     # Do not remove accumulate counter files
-                    if "SQ_" not in file:
+                    if "SQ_" not in file or "SQC_" not in file:
                         os.remove(file)
         else:
             return df
