@@ -455,7 +455,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipGetDriverEntryPoint = 435,
   HIP_API_ID_hipMemPrefetchAsync_v2 = 436,
   HIP_API_ID_hipMemAdvise_v2 = 437,
-  HIP_API_ID_LAST = 437,
+  HIP_API_ID_hipMipmappedArrayGetMemoryRequirements = 438,
+  HIP_API_ID_LAST = 438,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -839,6 +840,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipMipmappedArrayCreate: return "hipMipmappedArrayCreate";
     case HIP_API_ID_hipMipmappedArrayDestroy: return "hipMipmappedArrayDestroy";
     case HIP_API_ID_hipMipmappedArrayGetLevel: return "hipMipmappedArrayGetLevel";
+    case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements: return "hipMipmappedArrayGetMemoryRequirements";
     case HIP_API_ID_hipModuleGetFunction: return "hipModuleGetFunction";
     case HIP_API_ID_hipModuleGetGlobal: return "hipModuleGetGlobal";
     case HIP_API_ID_hipModuleGetTexRef: return "hipModuleGetTexRef";
@@ -1271,6 +1273,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipMipmappedArrayCreate", name) == 0) return HIP_API_ID_hipMipmappedArrayCreate;
   if (strcmp("hipMipmappedArrayDestroy", name) == 0) return HIP_API_ID_hipMipmappedArrayDestroy;
   if (strcmp("hipMipmappedArrayGetLevel", name) == 0) return HIP_API_ID_hipMipmappedArrayGetLevel;
+  if (strcmp("hipMipmappedArrayGetMemoryRequirements", name) == 0) return HIP_API_ID_hipMipmappedArrayGetMemoryRequirements;
   if (strcmp("hipModuleGetFunction", name) == 0) return HIP_API_ID_hipModuleGetFunction;
   if (strcmp("hipModuleGetGlobal", name) == 0) return HIP_API_ID_hipModuleGetGlobal;
   if (strcmp("hipModuleGetTexRef", name) == 0) return HIP_API_ID_hipModuleGetTexRef;
@@ -3436,6 +3439,11 @@ typedef struct hip_api_data_s {
       hipMipmappedArray_t hMipMappedArray;
       unsigned int level;
     } hipMipmappedArrayGetLevel;
+    struct {
+      hipArrayMemoryRequirements* memoryRequirements;
+      hipMipmappedArray_t mipmap;
+      hipDevice_t device;
+    } hipMipmappedArrayGetMemoryRequirements;
     struct {
       hipFunction_t* function;
       hipFunction_t function__val;
@@ -6050,6 +6058,12 @@ typedef struct hip_api_data_s {
   cb_data.args.hipMipmappedArrayGetLevel.hMipMappedArray = (hipMipmappedArray_t)mipmapped_array_ptr; \
   cb_data.args.hipMipmappedArrayGetLevel.level = (unsigned int)mip_level; \
 };
+// hipMipmappedArrayGetMemoryRequirements[('hipArrayMemoryRequirements*', 'memoryRequirements'), ('hipMipmappedArray_t', 'mipmap'), ('hipDevice_t', 'device')]
+#define INIT_hipMipmappedArrayGetMemoryRequirements_CB_ARGS_DATA(cb_data) { \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements = (hipArrayMemoryRequirements*)memoryRequirements; \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.mipmap = (hipMipmappedArray_t)mipmap; \
+  cb_data.args.hipMipmappedArrayGetMemoryRequirements.device = (hipDevice_t)device; \
+};
 // hipModuleGetFunction[('hipFunction_t*', 'function'), ('hipModule_t', 'module'), ('const char*', 'kname')]
 #define INIT_hipModuleGetFunction_CB_ARGS_DATA(cb_data) { \
   cb_data.args.hipModuleGetFunction.function = (hipFunction_t*)hfunc; \
@@ -7935,6 +7949,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
 // hipMipmappedArrayGetLevel[('hipArray_t*', 'pLevelArray'), ('hipMipmappedArray_t', 'hMipMappedArray'), ('unsigned int', 'level')]
     case HIP_API_ID_hipMipmappedArrayGetLevel:
       if (data->args.hipMipmappedArrayGetLevel.pLevelArray) data->args.hipMipmappedArrayGetLevel.pLevelArray__val = *(data->args.hipMipmappedArrayGetLevel.pLevelArray);
+      break;
+// hipMipmappedArrayGetMemoryRequirements[('hipArrayMemoryRequirements*', 'memoryRequirements'), ('hipMipmappedArray', 'mipmap'), ('hipDevice_t', 'device')]
+    case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements:
+      if (data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements) data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements__val = *(data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements);
       break;
 // hipModuleGetFunction[('hipFunction_t*', 'function'), ('hipModule_t', 'module'), ('const char*', 'kname')]
     case HIP_API_ID_hipModuleGetFunction:
@@ -11056,6 +11074,14 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
       else { oss << "pLevelArray="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetLevel.pLevelArray__val); }
       oss << ", hMipMappedArray="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetLevel.hMipMappedArray);
       oss << ", level="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetLevel.level);
+      oss << ")";
+    break;
+    case HIP_API_ID_hipMipmappedArrayGetMemoryRequirements:
+      oss << "hipMipmappedArrayGetMemoryRequirements(";
+      if (data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements == NULL) oss << "memoryRequirements=NULL";
+      else { oss << "memoryRequirements="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.memoryRequirements__val); }
+      oss << ", mipmap="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.mipmap);
+      oss << ", device="; roctracer::hip_support::detail::operator<<(oss, data->args.hipMipmappedArrayGetMemoryRequirements.device);
       oss << ")";
     break;
     case HIP_API_ID_hipModuleGetFunction:

@@ -1057,4 +1057,11 @@ hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DPeerParms& desc) {
   params.kind = hipMemcpyDeviceToDevice;
   return params;
 }
+
+inline
+hipArrayMemoryRequirements getArrayMemoryRequirements(const hipArrayMemoryRequirements& desc) {
+  hipArrayMemoryRequirements requirements;
+  requirements.alignment = desc.alignment;
+  requirements.size = desc.size;
+}
 };

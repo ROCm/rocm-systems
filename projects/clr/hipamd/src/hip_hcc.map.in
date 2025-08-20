@@ -629,3 +629,10 @@ global:
 local:
     *;
 } hip_6.5;
+
+hip_7.2 {
+global:
+    hipMipmappedArrayGetMemoryRequirements;
+local:
+    *;
+} hip_7.1;

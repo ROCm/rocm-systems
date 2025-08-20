@@ -1085,6 +1085,10 @@ typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** fu
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
 
+typedef hipError_t (*t_hipMipmappedArrayGetMemoryRequirements) (hipArrayMemoryRequirements* memoryRequirements,
+                                                                hipMipmappedArray_t mipmap,
+                                                                hipDevice_t device);
+
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
   // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -1645,6 +1649,7 @@ struct HipDispatchTable {
   t_hipGetDriverEntryPoint_spt hipGetDriverEntryPoint_spt_fn;
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
+  t_hipMipmappedArrayGetMemoryRequirements hipMipmappedArrayGetMemoryRequirements_fn;
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
   // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
 
