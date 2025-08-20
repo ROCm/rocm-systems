@@ -23,6 +23,7 @@
 #include "storage_parser.hpp"
 #include "debug.hpp"
 #include "trace_cache/sample_type.hpp"
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <sstream>
@@ -200,6 +201,17 @@ storage_parser::consume_storage()
                     _pmc_event_with_sample.pmc_info_name, _pmc_event_with_sample.value);
                 invoke_callbacks(header.type, _pmc_event_with_sample);
                 break;
+            }
+            case entry_type::amd_smi_sample:
+            {
+                amd_smi_sample _amd_smi_sample;
+                parse_data(sample.data(), _amd_smi_sample.settings,
+                           _amd_smi_sample.device_id, _amd_smi_sample.timestamp,
+                           _amd_smi_sample.gfx_activity, _amd_smi_sample.umc_activity,
+                           _amd_smi_sample.mm_activity, _amd_smi_sample.power,
+                           _amd_smi_sample.temperature, _amd_smi_sample.mem_usage,
+                           _amd_smi_sample.xcp_activity);
+                invoke_callbacks(header.type, _amd_smi_sample);
             }
             default: break;
         }

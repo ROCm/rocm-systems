@@ -375,6 +375,106 @@ rocpd_post_processing::get_pmc_event_with_sample_callback() const
     };
 }
 
+postprocessing_callback
+rocpd_post_processing::get_amd_smi_sample_callback() const
+{
+    struct xcp_metrics_t
+    {
+        std::vector<uint16_t> vcn_busy;
+        std::vector<uint16_t> jpeg_busy;
+    };
+
+    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& buffer) {
+        std::vector<xcp_metrics_t> metrics_vec;
+        size_t                     offset = 0;
+
+        auto read_size_t = [&](size_t& out) {
+            std::memcpy(&out, buffer.data() + offset, sizeof(size_t));
+            offset += sizeof(size_t);
+        };
+
+        auto read_uint16_t = [&](uint16_t& out) {
+            std::memcpy(&out, buffer.data() + offset, sizeof(uint16_t));
+            offset += sizeof(uint16_t);
+        };
+
+        size_t root_size = 0;
+        read_size_t(root_size);
+
+        for(size_t i = 0; i < root_size; ++i)
+        {
+            xcp_metrics_t metrics;
+
+            size_t vcn_size = 0;
+            read_size_t(vcn_size);
+            metrics.vcn_busy.resize(vcn_size);
+            for(size_t j = 0; j < vcn_size; ++j)
+                read_uint16_t(metrics.vcn_busy[j]);
+
+            size_t jpeg_size = 0;
+            read_size_t(jpeg_size);
+            metrics.jpeg_busy.resize(jpeg_size);
+            for(size_t j = 0; j < jpeg_size; ++j)
+                read_uint16_t(metrics.jpeg_busy[j]);
+
+            metrics_vec.push_back(std::move(metrics));
+        }
+
+        return metrics_vec;
+    };
+
+    return [&](const storage_parsed_type_base& parsed) {
+        auto _amd_smi = static_cast<const struct amd_smi_sample&>(parsed);
+
+        auto& data_processor = get_data_processor();
+
+        const auto* _name            = trait::name<category::amd_smi>::value;
+        auto        name_primary_key = data_processor.insert_string(_name);
+        auto        event_id = data_processor.insert_event(name_primary_key, 0, 0, 0);
+
+        auto& _agent_manager = agent_manager::get_instance();
+        auto  base_id =
+            _agent_manager.get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU)
+                .base_id;
+
+        auto insert_event_and_sample = [&](bool enabled, const char* name, double value) {
+            if(!enabled) return;
+            data_processor.insert_pmc_event(event_id, base_id, name, value);
+            data_processor.insert_sample(name, _amd_smi.timestamp, event_id);
+        };
+
+        using pos = trace_cache::amd_smi_sample::settings_positions;
+        std::bitset<8> settings_bits(_amd_smi.settings);
+        bool           is_busy_enabled = settings_bits.test(static_cast<int>(pos::busy));
+        bool           is_temp_enabled = settings_bits.test(static_cast<int>(pos::temp));
+        bool is_power_enabled          = settings_bits.test(static_cast<int>(pos::power));
+        bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
+        bool is_vnc_jpeg_enabled =
+            settings_bits.test(static_cast<int>(pos::vcn_activity)) ||
+            settings_bits.test(static_cast<int>(pos::jpeg_activity));
+
+        insert_event_and_sample(is_busy_enabled,
+                                trait::name<category::amd_smi_gfx_busy>::value,
+                                _amd_smi.gfx_activity);
+        insert_event_and_sample(is_busy_enabled,
+                                trait::name<category::amd_smi_umc_busy>::value,
+                                _amd_smi.umc_activity);
+        insert_event_and_sample(is_busy_enabled,
+                                trait::name<category::amd_smi_mm_busy>::value,
+                                _amd_smi.mm_activity);
+        insert_event_and_sample(is_temp_enabled,
+                                trait::name<category::amd_smi_temp>::value,
+                                _amd_smi.temperature);
+
+        insert_event_and_sample(is_power_enabled,
+                                trait::name<category::amd_smi_power>::value,
+                                _amd_smi.power);
+        insert_event_and_sample(is_mem_usage_enabled,
+                                trait::name<category::amd_smi_memory_usage>::value,
+                                _amd_smi.mem_usage);
+    };
+}
+
 rocpd_post_processing::rocpd_post_processing(metadata_registry& md)
 : m_metadata(md)
 {}
@@ -399,6 +499,8 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_in_time_sample_callback());
     parser.register_type_callback(entry_type::pmc_event_with_sample,
                                   get_pmc_event_with_sample_callback());
+    parser.register_type_callback(entry_type::amd_smi_sample,
+                                  get_amd_smi_sample_callback());
     ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
 #endif
 }
