@@ -228,7 +228,8 @@ Examples:
         "--set",
         default=None,
         dest="set_selected",
-        help="\t\t\tProfile a set of metrics of topic of interest by collecting counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+        help="\t\t\tProfile a set of metrics of topic of interest by collecting "
+        "counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
     )
 
     profile_group.add_argument(

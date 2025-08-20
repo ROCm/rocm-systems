@@ -167,7 +167,8 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         and workload.roofline_metrics
                     ):
                         print(
-                            "\n(4.1) Per-Kernel Roofline Metrics and (4.2) AI Plot Points",
+                            "\n(4.1) Per-Kernel Roofline Metrics and "
+                            "(4.2) AI Plot Points",
                             file=output,
                         )
                         print("-" * 80, file=output)
@@ -201,7 +202,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                                 else kernel_name
                             )
                             print(
-                                f"\nKernel {kernel_id}: {display_name} ({kernel_pct:.1f}%)",
+                                f"\nKernel {kernel_id}: "
+                                f"{display_name} "
+                                f"({kernel_pct:.1f}%)",
                                 file=output,
                             )
 

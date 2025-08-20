@@ -30,7 +30,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from utils.logger import console_debug
+from utils.logger import console_debug, console_warning
 from utils.parser import apply_filters, eval_metric
 
 ################################################
@@ -158,7 +158,8 @@ def get_color(catagory):
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
 def calc_ceilings(roofline_parameters, dtype, benchmark_data):
-    """Given benchmarking data, calculate ceilings (or peak performance) for empirical roofline"""
+    """Given benchmarking data, calculate ceilings (or peak performance) for
+    empirical roofline"""
     # TODO: This is where filtering by memory level will need to occur for standalone
     graphPoints = {"hbm": [], "l2": [], "l1": [], "lds": [], "valu": [], "mfma": []}
 
@@ -189,7 +190,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 
         if dtype in PEAK_OPS_DATATYPES:
             x2 = peakOps / peakBw
-            y2 = peakOps
+            y2 = peakOps  # noqa
 
             # Plot MFMA lines (NOTE: Assuming MI200 soc)
             x1_mfma = peakOps / peakBw
@@ -223,9 +224,9 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         graphPoints[cacheHierarchy[i].lower()].append([y1, peakY])
         graphPoints[cacheHierarchy[i].lower()].append(peakBw)
 
-    # -------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------------
     #                                     Plot computing roof
-    # -------------------------------------------------------------------------------------
+    # ----------------------------------------------------------------------------------
     if dtype in PEAK_OPS_DATATYPES:
         # Plot FMA roof
         x0 = XMAX
@@ -356,7 +357,11 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
 
         console_debug(
             "roofline",
-            f"Kernel {kernel_id}: AI_HBM={ai_hbm:.2f}, AI_L2={ai_l2:.2f}, AI_L1={ai_l1:.2f}, Performance={performance:.2e} GFLOP/s",
+            f"Kernel {kernel_id}: "
+            f"AI_HBM={ai_hbm:.2f}, "
+            f"AI_L2={ai_l2:.2f}, "
+            f"AI_L1={ai_l1:.2f}, "
+            f"Performance={performance:.2e} GFLOP/s",
         )
 
         # add to plot points if we have valid data
@@ -393,11 +398,11 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
 
 
 def calc_ai_profile(mspec, sort_type, ret_df):
-    """Given counter data, calculate arithmetic intensity for each kernel in the application.
-    Leverage hard-coded equations to calculate AI values.
+    """Given counter data, calculate arithmetic intensity for each kernel
+    in the application. Leverage hard-coded equations to calculate AI values.
 
-    Used during profiling stage to generate roofline PDF, since Roofline yamls are not available
-    in the profiling stage."""
+    Used during profiling stage to generate roofline PDF, since Roofline yamls
+    are not available in the profiling stage."""
 
     console_debug(
         "calc_ai_profile: Starting legacy roofline calculation (from roofline_calc)"
@@ -608,9 +613,7 @@ def calc_ai_profile(mspec, sort_type, ret_df):
 
         calls += 1
 
-        if sort_type == "kernels" and (
-            at_end == True or (kernelName != next_kernelName)
-        ):
+        if sort_type == "kernels" and (at_end or (kernelName != next_kernelName)):
             myList.append(
                 AI_Data(
                     kernelName,
@@ -685,9 +688,8 @@ def calc_ai_profile(mspec, sort_type, ret_df):
     while i < TOP_N and i != len(myList):
         if myList[i].total_flops == 0:
             console_debug(
-                "No flops counted for {}, arithmetic intensities will not display on plots.".format(
-                    myList[i].KernelName
-                )
+                f"No flops counted for {myList[i].KernelName}, "
+                "arithmetic intensities will not display on plots."
             )
 
         kernelNames.append(myList[i].KernelName)
@@ -696,28 +698,28 @@ def calc_ai_profile(mspec, sort_type, ret_df):
             if myList[i].L1cache_data
             else intensities["ai_l1"].append(0)
         )
-        # print("cur_ai_L1", myList[i].total_flops/myList[i].L1cache_data) if myList[i].L1cache_data else print("null")
+        # print("cur_ai_L1", myList[i].total_flops/myList[i].L1cache_data) if myList[i].L1cache_data else print("null") #noqa
         # print()
         (
             intensities["ai_l2"].append(myList[i].total_flops / myList[i].L2cache_data)
             if myList[i].L2cache_data
             else intensities["ai_l2"].append(0)
         )
-        # print("cur_ai_L2", myList[i].total_flops/myList[i].L2cache_data) if myList[i].L2cache_data else print("null")
+        # print("cur_ai_L2", myList[i].total_flops/myList[i].L2cache_data) if myList[i].L2cache_data else print("null") #noqa
         # print()
         (
             intensities["ai_hbm"].append(myList[i].total_flops / myList[i].hbm_data)
             if myList[i].hbm_data
             else intensities["ai_hbm"].append(0)
         )
-        # print("cur_ai_hbm", myList[i].total_flops/myList[i].hbm_data) if myList[i].hbm_data else print("null")
+        # print("cur_ai_hbm", myList[i].total_flops/myList[i].hbm_data) if myList[i].hbm_data else print("null") #noqa
         # print()
         (
             curr_perf.append(myList[i].total_flops / myList[i].avgDuration)
             if myList[i].avgDuration
             else curr_perf.append(0)
         )
-        # print("cur_perf", myList[i].total_flops/myList[i].avgDuration) if myList[i].avgDuration else print("null")
+        # print("cur_perf", myList[i].total_flops/myList[i].avgDuration) if myList[i].avgDuration else print("null") #noqa
 
         i += 1
 
@@ -726,7 +728,7 @@ def calc_ai_profile(mspec, sort_type, ret_df):
     for i in intensities:
         values = intensities[i]
 
-        color = get_color(i)
+        color = get_color(i)  # noqa
         x = []
         y = []
         for entryIndx in range(0, len(values)):
@@ -758,7 +760,8 @@ def constuct_roof(roofline_parameters, dtype):
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------
-    benchmark_data = {}  # TODO: consider changing this to an ordered dict for consistency over py versions
+    # TODO: consider changing this to an ordered dict for consistency over py versions
+    benchmark_data = {}
     headers = []
     try:
         with open(benchmark_results, "r") as csvfile:
@@ -776,7 +779,7 @@ def constuct_roof(roofline_parameters, dtype):
 
                 rowCount += 1
         csvfile.close()
-    except:
+    except Exception:
         graphPoints = {
             "hbm": [None, None, None],
             "l2": [None, None, None],

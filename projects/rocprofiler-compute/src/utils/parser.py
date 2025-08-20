@@ -879,24 +879,6 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
         for metric_name in empirical_peaks_df.columns:
             var_name = f"ammolite__{metric_name}_empirical_peak"
             locals()[var_name] = peak_data_row[metric_name]
-    else:
-        default_peaks = [
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "HBMBw",
-            "L2Bw",
-            "L1Bw",
-            "LDSBw",
-            "MFMA_FLOPs_F6F4",
-        ]
-        # set values to 0 if no no empirical peaks from roofline.csv are provided
-        for peak_name in default_peaks:
-            var_name = f"ammolite__{peak_name}_empirical_peak"
-            exec(f"{var_name} = 0", globals(), locals())
 
     # TODO: fix all $normUnit in Unit column or title
 
@@ -996,7 +978,8 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                     except TypeError:
                                         console_warning(
                                             "Skipping entry. Encountered a missing "
-                                            "counter\n{} has been assigned to None\n{}".format(
+                                            "counter\n"
+                                            "{} has been assigned to None\n{}".format(
                                                 expr,
                                                 np.nan,
                                             )
@@ -1024,11 +1007,10 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                 except (TypeError, NameError) as e:
                                     if "empirical_peak" in str(e):
                                         console_warning(
-                                            f"Missing empirical peak data: {e}. Using empty value."
+                                            f"Missing empirical peak data: {e}. "
+                                            "Using empty value."
                                         )
-                                        row[expr] = ""
-                                    else:
-                                        row[expr] = ""
+                                    row[expr] = ""
                                 except AttributeError as ae:
                                     if (
                                         str(ae)
@@ -1086,7 +1068,8 @@ def apply_filters(workload, dir, is_gui, debug):
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
-                        "{} is an invalid kernel id. Please enter an id between 0-{}".format(
+                        "{} is an invalid kernel id. "
+                        "Please enter an id between 0-{}".format(
                             kernel_id,
                             len(kernels_df["Kernel_Name"]) - 1,
                         )

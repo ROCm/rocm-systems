@@ -676,7 +676,8 @@ class Roofline:
             console_log("roofline", "{} does not exist".format(roofline_csv))
             return
 
-        # if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
+        # if workload is detected, utilize Roofline yamls.
+        # If not, fallback to legacy calc_ai
         if workload is not None:
             self.__ai_data = calc_ai_analyze(
                 workload=workload,
