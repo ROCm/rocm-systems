@@ -320,9 +320,6 @@ hipError_t capturehipModuleLaunchKernel(hipStream_t& stream, hipFunction_t& f, u
                                         void**& extra) {
   ClPrint(amd::LOG_INFO, amd::LOG_API,
           "[hipGraph] Current capture node ModuleLaunchKernel on stream : %p", stream);
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   hipKernelNodeParams nodeParams;
   nodeParams.func = f;
@@ -724,9 +721,6 @@ hipError_t capturehipMemcpyHtoAAsync(hipStream_t& stream, hipArray_t& dstArray, 
 
 hipError_t capturehipMemcpy(hipStream_t stream, void* dst, const void* src, size_t sizeBytes,
                             hipMemcpyKind kind) {
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
   std::vector<hip::GraphNode*> pDependencies = s->GetLastCapturedNodes();
   size_t numDependencies = s->GetLastCapturedNodes().size();
@@ -748,9 +742,6 @@ hipError_t capturehipMemcpyAsync(hipStream_t& stream, void*& dst, const void*& s
                                  size_t& sizeBytes, hipMemcpyKind& kind) {
   ClPrint(amd::LOG_INFO, amd::LOG_API, "[hipGraph] Current capture node Memcpy1D on stream : %p",
           stream);
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
   return capturehipMemcpy(stream, dst, src, sizeBytes, kind);
 }
 
@@ -769,9 +760,6 @@ hipError_t capturehipMemcpyDtoDAsync(hipStream_t& stream, hipDeviceptr_t& dstDev
                                      hipMemcpyKind& kind) {
   ClPrint(amd::LOG_INFO, amd::LOG_API,
           "[hipGraph] Current capture node hipMemcpyDtoD on stream : %p", stream);
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
   return capturehipMemcpy(stream, dstDevice, srcDevice, ByteCount, kind);
 }
 
@@ -779,9 +767,6 @@ hipError_t capturehipMemcpyDtoHAsync(hipStream_t& stream, void*& dstHost, hipDev
                                      size_t& ByteCount, hipMemcpyKind& kind) {
   ClPrint(amd::LOG_INFO, amd::LOG_API,
           "[hipGraph] Current capture node hipMemcpyDtoH on stream : %p", stream);
-  if (!hip::isValid(stream)) {
-    return hipErrorContextIsDestroyed;
-  }
   return capturehipMemcpy(stream, dstHost, srcDevice, ByteCount, kind);
 }
 

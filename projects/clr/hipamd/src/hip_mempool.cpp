@@ -19,6 +19,8 @@
  THE SOFTWARE. */
 
 #include "hip_mempool_impl.hpp"
+#include "hip_internal.hpp"
+
 
 namespace hip {
 /**
@@ -105,7 +107,10 @@ hipError_t hipMallocAsync(void** dev_ptr, size_t size, hipStream_t stream) {
     }
   }
 
-  STREAM_CAPTURE(hipMallocAsync, stream, reinterpret_cast<hipMemPool_t>(mem_pool), size, dev_ptr);
+
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMallocAsync, stream, reinterpret_cast<hipMemPool_t>(mem_pool), size, dev_ptr);
+  }
 
   *dev_ptr = mem_pool->AllocateMemory(size, hip_stream);
   if (*dev_ptr == nullptr) {
@@ -165,7 +170,9 @@ hipError_t hipFreeAsync(void* dev_ptr, hipStream_t stream) {
     HIP_RETURN(hipSuccess);
   }
 
-  STREAM_CAPTURE(hipFreeAsync, stream, dev_ptr);
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipFreeAsync, stream, dev_ptr);
+  }
 
   hip::Event* event = nullptr;
   bool graph_in_use = false;
@@ -372,16 +379,18 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
     HIP_RETURN(hipErrorInvalidValue);
   }
   getStreamPerThread(stream);
+  auto hip_stream = (stream == nullptr || stream == hipStreamLegacy) ?
+  hip::getCurrentDevice()->NullStream() : reinterpret_cast<hip::Stream*>(stream);
+
   if (size == 0) {
     *dev_ptr = nullptr;
     HIP_RETURN(hipSuccess);
   }
-  STREAM_CAPTURE(hipMallocAsync, stream, mem_pool, size, dev_ptr);
-
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMallocAsync, stream, mem_pool, size, dev_ptr);
+  }
+  
   auto mpool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
-  auto hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-      ? hip::getCurrentDevice()->NullStream()
-      : reinterpret_cast<hip::Stream*>(stream);
   *dev_ptr = mpool->AllocateMemory(size, hip_stream);
   if (*dev_ptr == nullptr) {
     HIP_RETURN(hipErrorOutOfMemory);
