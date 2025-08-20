@@ -32,7 +32,7 @@ THE SOFTWARE.
 #define ENABLE_DEBUG 1
 
 #define NUM_SIZES 9
-//  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10, 128 MB, 512 MB.
+//  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10, 128 MB, 512 MB
 static const unsigned int Sizes[NUM_SIZES] = {4096,     8192,          65536,     1048576,  4194304,
                                               16777216, 16777216 + 10, 134217728, 536870912};
 static const unsigned int Iterations[2] = {1, 1000};
