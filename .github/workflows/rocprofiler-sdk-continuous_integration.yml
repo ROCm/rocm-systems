@@ -356,6 +356,7 @@ jobs:
         rm -rf /etc/yum.repos.d/redhat-partner.repo
         dnf clean all
         dnf install -y perl-ExtUtils-MakeMaker
+        export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
         make prefix=/usr all -j 32
         make prefix=/usr install
 
@@ -388,6 +389,7 @@ jobs:
         dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm
         sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
         sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
+        rm -rf /etc/yum.repos.d/RHEL-partners.repo
         dnf clean all
         dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
