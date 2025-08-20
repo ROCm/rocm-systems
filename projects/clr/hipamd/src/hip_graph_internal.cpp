@@ -219,8 +219,8 @@ void Graph::ScheduleNodes() {
     if (node->stream_id_ == -1) {
       ScheduleOneNode(node, stream_id);
       // Find the root nodes
-      if ((node->GetDependencies().size() == 0) && (node->stream_id_ != 0)) {
-        // Fill in only the first in the sequence
+      if (node->GetDependencies().size() == 0) {
+        // Fill all the root nodes to handle dependencies for the child graph node
         if (roots_[node->stream_id_] == nullptr) {
           roots_[node->stream_id_] = node;
         }
@@ -520,7 +520,9 @@ bool Graph::RunOneNode(Node node, bool wait) {
       // Process only the nodes that have been submitted
       if (depNode->launch_id_ != -1) {
         // If it's the same stream then skip the signal, since it's in order
-        if (depNode->stream_id_ != node->stream_id_) {
+        // If it is a child Graph node, add dependency even if on the same stream, because a
+        // child graph can have multiple root nodes and may require explicit synchronization.
+        if (depNode->stream_id_ != node->stream_id_ || node->GetType() == hipGraphNodeTypeGraph) {
           // If there is no wait node on the stream, then assign one
           if ((wait_order_[depNode->stream_id_] == nullptr) ||
           // If another node executed on the same stream, then use the latest launch only,
@@ -539,11 +541,8 @@ bool Graph::RunOneNode(Node node, bool wait) {
     // Create a wait list from the last launches of all dependencies
     for (auto dep : wait_order_) {
       if (dep != nullptr) {
-        // Add all commands in the wait list
-        if (dep->GetType() != hipGraphNodeTypeGraph) {
-          for (auto command : dep->GetCommands()) {
-            waitList.push_back(command);
-          }
+        for (auto command : dep->GetCommands()) {
+          waitList.push_back(command);
         }
       }
     }
@@ -551,6 +550,19 @@ bool Graph::RunOneNode(Node node, bool wait) {
       // Process child graph separately, since, there is no connection
       auto child = reinterpret_cast<hip::ChildGraphNode*>(node)->GetChildGraph();
       if (!reinterpret_cast<hip::ChildGraphNode*>(node)->GetGraphCaptureStatus()) {
+        // Debug print for waitList before running child graph
+        if (!waitList.empty()) {
+          ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                  "[hipGraph] WaitList for child graph node %d stream id %d:", node->GetID(),
+                  node->stream_id_);
+          for (auto dep : wait_order_) {
+            if (dep != nullptr) {
+              ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+                      "[hipGraph] WaitList dep node %d %s streamid %d:", dep->GetID(),
+                      GetGraphNodeTypeString(dep->GetType()), dep->stream_id_);
+            }
+          }
+        }
         child->RunNodes(node->stream_id_, &streams_, &waitList);
       }
     } else {
@@ -607,16 +619,13 @@ bool Graph::RunNodes(
   if (parallel_streams != nullptr) {
     streams_ = *parallel_streams;
   }
-
+  amd::Command::EventWaitList wait_list;
   // childgraph node has dependencies on parent graph nodes from other streams
   if (parent_waitlist != nullptr) {
-    auto start_marker = new amd::Marker(*streams_[base_stream], true, *parent_waitlist);
-    if (start_marker != nullptr) {
-      start_marker->enqueue();
-      start_marker->release();
+    for (auto* cmd : *parent_waitlist) {
+      wait_list.push_back(cmd);
     }
   }
-  amd::Command::EventWaitList wait_list;
   current_id_ = 0;
   memset(&leafs_[0], 0, sizeof(Node) * leafs_.size());
 
@@ -630,6 +639,7 @@ bool Graph::RunNodes(
     for (uint32_t i = 0; i < DEBUG_HIP_FORCE_GRAPH_QUEUES; ++i) {
       if ((base_stream != i) && (roots_[i] != nullptr)) {
         // Wait for the app's queue
+        ClPrint(amd::LOG_INFO, amd::LOG_CODE, "[hipGraph] Start marker enqueued on stream: %d", i);
         auto start_marker = new amd::Marker(*streams_[i], true, wait_list);
         if (start_marker != nullptr) {
           start_marker->enqueue();
