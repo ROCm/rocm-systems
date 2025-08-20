@@ -22,13 +22,13 @@ For using profiling options for PC sampling the configuration needed are:
 **Sample command:**
 
 .. code-block:: shell
-   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV ----attach-pid <process id of workload>
+   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV --attach-pid <process id of workload>
 
-   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV ----attach-pid <process id of workload>
+   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload>
 
-   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV ----attach-pid <process id of workload> --attach-duration-msec <time before detach>
+   $ rocprof-compute profile -n try_live_attach_detach -b 3.1.1 4.1.1 5.1.1 --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
-   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV ----attach-pid <process id of workload> --attach-duration-msec <time before detach>
+   $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
 -----------------------
 Analysis options
