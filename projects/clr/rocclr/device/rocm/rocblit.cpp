@@ -2691,8 +2691,9 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
 
   amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
 
-  device::Kernel* devKernel =
-      const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
+  device::Kernel* devKernel = const_cast<device::Kernel*>(
+    kernels_[Scheduler]->getDeviceKernel(dev()));
+
   Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 
   auto* sp =
@@ -2710,8 +2711,12 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
     sp->eng_clk = (1000 * 1024) / dev().info().maxEngineClockFrequency_;
   }
 
-  // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
-  sp->write_index = hsa_queue_load_write_index_relaxed(schedulerQueue);
+  if (!dev().info().pcie_atomics_) {
+    // Use a device side global atomics to workaround the reliance of PCIe 3 atomics
+    sp->write_index = hsa_queue_load_write_index_relaxed(schedulerQueue);
+  } else {
+    sp->write_index = static_cast<uint64_t>(-1ULL);
+  }
 
   constexpr bool kDirectVa = true;
   setArgument(kernels_[Scheduler], 0, sizeof(cl_mem), sp, 0, nullptr, kDirectVa);
@@ -2725,14 +2730,17 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
   releaseArguments(parameters);
   // Wait for the scheduler to finish all operations
   gpu().WaitCompleteSignal(sp->complete_signal);
-  // @note: A wait shouldn't be really necessary, but the queue write_index may not get a proper
-  // value without the wait for all previous commands (see the PCIE3 atomics workaround above).
-  // The scheduler can enqueue extra commands, but the real queue write index didn't have any
-  // progress. That leads to hangs and requires blocking. Then the wait causes problems in DD mode
-  // with device enqueue and user events, because device enqueue is blocking below
-  if (!WaitForSignal(sp->complete_signal)) {
-    LogWarning("Failed schedulerSignal wait");
-    return false;
+
+  if (!dev().info().pcie_atomics_) {
+    // @note: A wait shouldn't be really necessary, but the queue write_index may not get a proper
+    // value without the wait for all previous commands (see the PCIE3 atomics workaround above).
+    // The scheduler can enqueue extra commands, but the real queue write index didn't have any
+    // progress. That leads to hangs and requires blocking. Then the wait causes problems
+    // in DD mode with device enqueue and user events, because device enqueue is blocking below
+    if (!WaitForSignal(sp->complete_signal)) {
+      LogWarning("Failed schedulerSignal wait");
+      return false;
+    }
   }
   return true;
 }
