@@ -176,7 +176,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
             run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False)
         )
     # Handle multiple JSON arrays output in amd-smi == 25.5.1 && ROCm == 6.4.2
-    except json.JSONDecodeError as e:
+    except json.JSONDecodeError:
         # Use gpu_data fallback (amd-smi < 26.0.0)
         partition_data = {}
 
