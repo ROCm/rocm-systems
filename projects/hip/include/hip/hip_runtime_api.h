@@ -5783,7 +5783,6 @@ hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream __dp
  */
 hipError_t hipMipmappedArrayGetMemoryRequirements(hipArrayMemoryRequirements* memoryRequirements,
                                                   hipMipmappedArray_t mipmap, hipDevice_t device);
-
 // doxygen end Memory
 /**
  * @}
