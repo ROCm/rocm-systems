@@ -123,8 +123,7 @@ hipError_t hipDeviceGetPCIBusId(char* pciBusId, int len, int device);
 hipError_t hipDeviceGetSharedMemConfig(hipSharedMemConfig* pConfig);
 hipError_t hipDeviceGetStreamPriorityRange(int* leastPriority, int* greatestPriority);
 hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
-                                               const hipChannelFormatDesc* fmtDesc,
-                                               int device);
+                                               const hipChannelFormatDesc* fmtDesc, int device);
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t device);
 hipError_t hipDeviceGraphMemTrim(int device);
 hipError_t hipDevicePrimaryCtxGetState(hipDevice_t dev, unsigned int* flags, int* active);
@@ -247,9 +246,9 @@ hipError_t hipGraphAddMemcpyNodeToSymbol(hipGraphNode_t* pGraphNode, hipGraph_t 
 hipError_t hipGraphAddMemsetNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
                                  const hipGraphNode_t* pDependencies, size_t numDependencies,
                                  const hipMemsetParams* pMemsetParams);
-hipError_t hipGraphAddNode(hipGraphNode_t *pGraphNode, hipGraph_t graph,
-                           const hipGraphNode_t *pDependencies, size_t numDependencies,
-                           hipGraphNodeParams *nodeParams);
+hipError_t hipGraphAddNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                           const hipGraphNode_t* pDependencies, size_t numDependencies,
+                           hipGraphNodeParams* nodeParams);
 hipError_t hipGraphChildGraphNodeGetGraph(hipGraphNode_t node, hipGraph_t* pGraph);
 hipError_t hipGraphClone(hipGraph_t* pGraphClone, hipGraph_t originalGraph);
 hipError_t hipGraphCreate(hipGraph_t* pGraph, unsigned int flags);
@@ -362,8 +361,8 @@ hipError_t hipImportExternalMemory(hipExternalMemory_t* extMem_out,
 hipError_t hipImportExternalSemaphore(hipExternalSemaphore_t* extSem_out,
                                       const hipExternalSemaphoreHandleDesc* semHandleDesc);
 hipError_t hipDrvGraphAddMemsetNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
-                                 const hipGraphNode_t* dependencies, size_t numDependencies,
-                                 const hipMemsetParams* memsetParams, hipCtx_t ctx);
+                                    const hipGraphNode_t* dependencies, size_t numDependencies,
+                                    const hipMemsetParams* memsetParams, hipCtx_t ctx);
 hipError_t hipInit(unsigned int flags);
 hipError_t hipIpcCloseMemHandle(void* devPtr);
 hipError_t hipIpcGetEventHandle(hipIpcEventHandle_t* handle, hipEvent_t event);
@@ -549,13 +548,13 @@ hipError_t hipModuleLoadData(hipModule_t* module, const void* image);
 hipError_t hipModuleLoadDataEx(hipModule_t* module, const void* image, unsigned int numOptions,
                                hipJitOption* options, void** optionValues);
 hipError_t hipLinkAddData(hipLinkState_t state, hipJitInputType type, void* data, size_t size,
-                                const char* name, unsigned int numOptions, hipJitOption* options,
-                                void** optionValues);
-hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path, unsigned int numOptions,
-                            hipJitOption* options, void** optionValues);
+                          const char* name, unsigned int numOptions, hipJitOption* options,
+                          void** optionValues);
+hipError_t hipLinkAddFile(hipLinkState_t state, hipJitInputType type, const char* path,
+                          unsigned int numOptions, hipJitOption* options, void** optionValues);
 hipError_t hipLinkComplete(hipLinkState_t state, void** hipBinOut, size_t* sizeOut);
-hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options,
-                            void** optionValues, hipLinkState_t* stateOut);
+hipError_t hipLinkCreate(unsigned int numOptions, hipJitOption* options, void** optionValues,
+                         hipLinkState_t* stateOut);
 hipError_t hipLinkDestroy(hipLinkState_t state);
 hipError_t hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(int* numBlocks, hipFunction_t f,
                                                               int blockSize,
@@ -677,17 +676,17 @@ hipError_t hipWaitExternalSemaphoresAsync(const hipExternalSemaphore_t* extSemAr
 hipChannelFormatDesc hipCreateChannelDesc(int x, int y, int z, int w, hipChannelFormatKind f);
 hipError_t hipCreateSurfaceObject(hipSurfaceObject_t* pSurfObject, const hipResourceDesc* pResDesc);
 hipError_t hipExtModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                      uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                      uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                      uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                      hipStream_t hStream, void** kernelParams, void** extra,
-                                      hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flag);
+                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                    hipStream_t hStream, void** kernelParams, void** extra,
+                                    hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flag);
 hipError_t hipHccModuleLaunchKernel(hipFunction_t f, uint32_t globalWorkSizeX,
-                                      uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
-                                      uint32_t localWorkSizeX, uint32_t localWorkSizeY,
-                                      uint32_t localWorkSizeZ, size_t sharedMemBytes,
-                                      hipStream_t hStream, void** kernelParams, void** extra,
-                                      hipEvent_t startEvent, hipEvent_t stopEvent);
+                                    uint32_t globalWorkSizeY, uint32_t globalWorkSizeZ,
+                                    uint32_t localWorkSizeX, uint32_t localWorkSizeY,
+                                    uint32_t localWorkSizeZ, size_t sharedMemBytes,
+                                    hipStream_t hStream, void** kernelParams, void** extra,
+                                    hipEvent_t startEvent, hipEvent_t stopEvent);
 hipError_t hipMemcpy_spt(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind);
 hipError_t hipMemcpyToSymbol_spt(const void* symbol, const void* src, size_t sizeBytes,
                                  size_t offset, hipMemcpyKind kind);
@@ -795,12 +794,12 @@ hipError_t hipStreamBeginCaptureToGraph(hipStream_t stream, hipGraph_t graph,
                                         size_t numDependencies, hipStreamCaptureMode mode);
 hipError_t hipGetFuncBySymbol(hipFunction_t* functionPtr, const void* symbolPtr);
 hipError_t hipDrvGraphAddMemFreeNode(hipGraphNode_t* phGraphNode, hipGraph_t hGraph,
-                                  const hipGraphNode_t* dependencies, size_t numDependencies,
-                                  hipDeviceptr_t dptr);
+                                     const hipGraphNode_t* dependencies, size_t numDependencies,
+                                     hipDeviceptr_t dptr);
 hipError_t hipDrvGraphExecMemcpyNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
-                                   const HIP_MEMCPY3D* copyParams, hipCtx_t ctx);
+                                              const HIP_MEMCPY3D* copyParams, hipCtx_t ctx);
 hipError_t hipDrvGraphExecMemsetNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t hNode,
-                                   const hipMemsetParams* memsetParams, hipCtx_t ctx);
+                                              const hipMemsetParams* memsetParams, hipCtx_t ctx);
 hipError_t hipSetValidDevices(int* device_arr, int len);
 hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t srcOffset,
                          size_t ByteCount);
@@ -816,9 +815,9 @@ hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetDst, size_t hOf
                                    hipArray_const_t src, size_t wOffsetSrc, size_t hOffsetSrc,
                                    size_t width, size_t height, hipMemcpyKind kind);
 hipError_t hipGraphExecGetFlags(hipGraphExec_t graphExec, unsigned long long* flags);
-hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams *nodeParams);
+hipError_t hipGraphNodeSetParams(hipGraphNode_t node, hipGraphNodeParams* nodeParams);
 hipError_t hipGraphExecNodeSetParams(hipGraphExec_t graphExec, hipGraphNode_t node,
-                        hipGraphNodeParams* nodeParams);
+                                     hipGraphNodeParams* nodeParams);
 hipError_t hipExternalMemoryGetMappedMipmappedArray(
     hipMipmappedArray_t* mipmap, hipExternalMemory_t extMem,
     const hipExternalMemoryMipmappedArrayDesc* mipmapDesc);
@@ -842,8 +841,8 @@ hipError_t hipMemGetHandleForAddressRange(void* handle, hipDeviceptr_t dptr, siz
                                           unsigned long long flags);
 hipError_t hipMemsetD2D8(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
                          size_t height);
-hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char value, size_t width,
-                              size_t height, hipStream_t stream);
+hipError_t hipMemsetD2D8Async(hipDeviceptr_t dst, size_t dstPitch, unsigned char value,
+                              size_t width, size_t height, hipStream_t stream);
 hipError_t hipMemsetD2D16(hipDeviceptr_t dst, size_t dstPitch, unsigned short value, size_t width,
                           size_t height);
 hipError_t hipMemsetD2D16Async(hipDeviceptr_t dst, size_t dstPitch, unsigned short value,
@@ -853,16 +852,16 @@ hipError_t hipMemsetD2D32(hipDeviceptr_t dst, size_t dstPitch, unsigned int valu
 hipError_t hipMemsetD2D32Async(hipDeviceptr_t dst, size_t dstPitch, unsigned int value,
                                size_t width, size_t height, hipStream_t stream);
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
-                                 hipStreamAttrValue *value);
+                                 hipStreamAttrValue* value);
 hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
-                                 const hipStreamAttrValue *value);
-hipError_t hipMemcpyBatchAsync(void **dsts, void **srcs, size_t *sizes, size_t count,
-                               hipMemcpyAttributes *attrs, size_t *attrsIdxs, size_t numAttrs,
-                               size_t *failIdx, hipStream_t stream);
-hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp *opList, size_t *failIdx,
+                                 const hipStreamAttrValue* value);
+hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count,
+                               hipMemcpyAttributes* attrs, size_t* attrsIdxs, size_t numAttrs,
+                               size_t* failIdx, hipStream_t stream);
+hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opList, size_t* failIdx,
                                  unsigned long long flags, hipStream_t stream);
-hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms *p);
-hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms *p, hipStream_t stream);
+hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
+hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream);
 }  // namespace hip
 
 namespace hip {
@@ -940,7 +939,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipDeviceGetPCIBusId_fn = hip::hipDeviceGetPCIBusId;
   ptrDispatchTable->hipDeviceGetSharedMemConfig_fn = hip::hipDeviceGetSharedMemConfig;
   ptrDispatchTable->hipDeviceGetStreamPriorityRange_fn = hip::hipDeviceGetStreamPriorityRange;
-  ptrDispatchTable->hipDeviceGetTexture1DLinearMaxWidth_fn = hip::hipDeviceGetTexture1DLinearMaxWidth;
+  ptrDispatchTable->hipDeviceGetTexture1DLinearMaxWidth_fn =
+      hip::hipDeviceGetTexture1DLinearMaxWidth;
   ptrDispatchTable->hipDeviceGetUuid_fn = hip::hipDeviceGetUuid;
   ptrDispatchTable->hipDeviceGraphMemTrim_fn = hip::hipDeviceGraphMemTrim;
   ptrDispatchTable->hipDevicePrimaryCtxGetState_fn = hip::hipDevicePrimaryCtxGetState;
@@ -1353,7 +1353,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGetDriverEntryPoint_fn = hip::hipGetDriverEntryPoint;
   ptrDispatchTable->hipGetDriverEntryPoint_spt_fn = hip::hipGetDriverEntryPoint_spt;
   ptrDispatchTable->hipExtGetLastError_fn = hip::hipExtGetLastError;
-  ptrDispatchTable->hipTexRefGetBorderColor_fn =  hip::hipTexRefGetBorderColor;
+  ptrDispatchTable->hipTexRefGetBorderColor_fn = hip::hipTexRefGetBorderColor;
   ptrDispatchTable->hipTexRefGetArray_fn = hip::hipTexRefGetArray;
   ptrDispatchTable->hipGetProcAddress_fn = hip::hipGetProcAddress;
   ptrDispatchTable->hipStreamBeginCaptureToGraph_fn = hip::hipStreamBeginCaptureToGraph;
@@ -1464,8 +1464,7 @@ NO_VECTORIZE const HipDispatchTable* GetHipDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipDispatchTable>();
   return _v;
 }
-NO_VECTORIZE const HipCompilerDispatchTable*
-GetHipCompilerDispatchTable() {
+NO_VECTORIZE const HipCompilerDispatchTable* GetHipCompilerDispatchTable() {
   static auto* _v = &GetDispatchTableImpl<HipCompilerDispatchTable>();
   return _v;
 }
@@ -1485,7 +1484,8 @@ constexpr auto ComputeTableOffset(size_t num_funcs) {
 // update the table versioning value before changing the value in HIP_ENFORCE_ABI_VERSIONING to make
 // this static assert pass.
 //
-// HIP_ENFORCE_ABI will cause a compiler error if the order of the members in the API table change. Do not reorder member variables and change existing HIP_ENFORCE_ABI values -- always
+// HIP_ENFORCE_ABI will cause a compiler error if the order of the members in the API table change.
+// Do not reorder member variables and change existing HIP_ENFORCE_ABI values -- always
 //
 // Please note: rocprofiler will do very strict compile time checks to make
 // sure these versioning values are appropriately updated -- so commenting out this check, only
@@ -1502,7 +1502,7 @@ constexpr auto ComputeTableOffset(size_t num_funcs) {
 #define HIP_ENFORCE_ABI(TABLE, ENTRY, NUM)                                                         \
   static_assert(offsetof(TABLE, ENTRY) == ComputeTableOffset(NUM),                                 \
                 "ABI break for " #TABLE "." #ENTRY                                                 \
-                ". Only add new function pointers to end of struct and do not rearrange them " );
+                ". Only add new function pointers to end of struct and do not rearrange them ");
 
 // These ensure that function pointers are not re-ordered
 // HIP_COMPILER_API_TABLE_STEP_VERSION == 0
@@ -2026,11 +2026,11 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGraphBatchMemOpNodeGetParams_fn, 465);
 HIP_ENFORCE_ABI(HipDispatchTable, hipGraphBatchMemOpNodeSetParams_fn, 466);
 HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecBatchMemOpNodeSetParams_fn, 467);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 9
-HIP_ENFORCE_ABI(HipDispatchTable, hipLinkAddData_fn , 468)
-HIP_ENFORCE_ABI(HipDispatchTable, hipLinkAddFile_fn , 469)
-HIP_ENFORCE_ABI(HipDispatchTable, hipLinkComplete_fn , 470)
-HIP_ENFORCE_ABI(HipDispatchTable, hipLinkCreate_fn , 471)
-HIP_ENFORCE_ABI(HipDispatchTable, hipLinkDestroy_fn , 472)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLinkAddData_fn, 468)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLinkAddFile_fn, 469)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLinkComplete_fn, 470)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLinkCreate_fn, 471)
+HIP_ENFORCE_ABI(HipDispatchTable, hipLinkDestroy_fn, 472)
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 10
 HIP_ENFORCE_ABI(HipDispatchTable, hipEventRecordWithFlags_fn, 473)
 

@@ -36,7 +36,7 @@
 /**
  * Fetches Gpu device count
  */
-static void getDeviceCount(int *pdevCnt) {
+static void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
 
@@ -82,8 +82,7 @@ static void getDeviceCount(int *pdevCnt) {
 
 
 // Pass either -1 in deviceNumber or invalid device number
-static void testInvalidDevice(int numDevices, bool useRocrEnv,
-                                                   int deviceNumber) {
+static void testInvalidDevice(int numDevices, bool useRocrEnv, int deviceNumber) {
   bool testResult = true;
   int device;
   int tempCount = 0;
@@ -117,24 +116,24 @@ static void testInvalidDevice(int numDevices, bool useRocrEnv,
     for (int i = 0; i < numDevices; i++) {
       err = hipSetDevice(i);
       if (err != hipSuccess) {
-        setDeviceErrorCheck+= 1;
+        setDeviceErrorCheck += 1;
       }
 
       err = hipGetDevice(&device);
       if (err != hipSuccess) {
-        getDeviceErrorCheck+= 1;
+        getDeviceErrorCheck += 1;
       }
     }
 
-    if ((getDeviceCountErrorCheck == 1) && (setDeviceErrorCheck == numDevices)
-        && (getDeviceErrorCheck == numDevices)) {
+    if ((getDeviceCountErrorCheck == 1) && (setDeviceErrorCheck == numDevices) &&
+        (getDeviceErrorCheck == numDevices)) {
       testResult = true;
 
     } else {
-      printf("Test failed for invalid device, getDeviceCountErrorCheck %d,"
-             "setDeviceErrorCheck %d, getDeviceErrorCheck %d\n",
-             getDeviceCountErrorCheck, setDeviceErrorCheck,
-             getDeviceErrorCheck);
+      printf(
+          "Test failed for invalid device, getDeviceCountErrorCheck %d,"
+          "setDeviceErrorCheck %d, getDeviceErrorCheck %d\n",
+          getDeviceCountErrorCheck, setDeviceErrorCheck, getDeviceErrorCheck);
 
       testResult = false;
     }
@@ -159,19 +158,18 @@ static void testInvalidDevice(int numDevices, bool useRocrEnv,
 }
 
 
-static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
-    int deviceListLength) {
+static void testValidDevices(int numDevices, bool useRocrEnv, int* deviceList,
+                             int deviceListLength) {
   bool testResult = true;
   int tempCount = 0;
   int device;
   int setDeviceErrorCheck = 0;
   int getDeviceErrorCheck = 0;
   int getDeviceCountErrorCheck = 0;
-  int *deviceListPtr = deviceList;
+  int* deviceListPtr = deviceList;
   std::string visibleDeviceString;
 
-  if ((NULL == deviceList) || ((deviceListLength < 1) ||
-        deviceListLength > numDevices)) {
+  if ((NULL == deviceList) || ((deviceListLength < 1) || deviceListLength > numDevices)) {
     INFO("Invalid argument for number of devices. Skipping current test");
     REQUIRE(false);
   }
@@ -213,17 +211,17 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
     for (int i = 0; i < numDevices; i++) {
       err = hipSetDevice(i);
       if (err != hipSuccess) {
-        setDeviceErrorCheck+= 1;
+        setDeviceErrorCheck += 1;
       }
 
       err = hipGetDevice(&device);
       if (err != hipSuccess) {
-        getDeviceErrorCheck+= 1;
+        getDeviceErrorCheck += 1;
       }
     }
 
-    if ((getDeviceCountErrorCheck == 1) && (setDeviceErrorCheck ==
-          (numDevices-deviceListLength)) && (getDeviceErrorCheck == 0)) {
+    if ((getDeviceCountErrorCheck == 1) &&
+        (setDeviceErrorCheck == (numDevices - deviceListLength)) && (getDeviceErrorCheck == 0)) {
       testResult = true;
 
     } else {
@@ -251,19 +249,19 @@ static void testValidDevices(int numDevices, bool useRocrEnv, int *deviceList,
 }
 
 
-static void Initialize(int *deviceList, int numDevices, int count,
-    std::string& min_visibleDeviceString, std::string& max_visibleDeviceString) {
-  int *deviceListPtr = deviceList;
-  for (int i =0; i < count; i++) {
-    if (i == count-1) {
+static void Initialize(int* deviceList, int numDevices, int count,
+                       std::string& min_visibleDeviceString, std::string& max_visibleDeviceString) {
+  int* deviceListPtr = deviceList;
+  for (int i = 0; i < count; i++) {
+    if (i == count - 1) {
       min_visibleDeviceString.append(std::to_string(*deviceListPtr++));
     } else {
       min_visibleDeviceString.append(std::to_string(*deviceListPtr++) + ",");
     }
   }
 
-  for (int i =0; i < numDevices; i++) {
-    if (i == numDevices-1) {
+  for (int i = 0; i < numDevices; i++) {
+    if (i == numDevices - 1) {
       max_visibleDeviceString.append(std::to_string(i));
     } else {
       max_visibleDeviceString.append(std::to_string(i) + ",");
@@ -271,7 +269,7 @@ static void Initialize(int *deviceList, int numDevices, int count,
   }
 }
 
-static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
+static void testMaxRvdMinHvd(int numDevices, int* deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
@@ -282,8 +280,7 @@ static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
   pid_t cPid;
   cPid = fork();
   if (cPid == 0) {  // child
-    Initialize(deviceList, numDevices,
-        count, min_visibleDeviceString, max_visibleDeviceString);
+    Initialize(deviceList, numDevices, count, min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
@@ -293,7 +290,7 @@ static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
       HIP_CHECK(hipSetDevice(i));
       HIP_CHECK(hipGetDevice(&device));
       if (device == i) {
-         validateCount+= 1;
+        validateCount += 1;
       }
     }
     if (count != validateCount) {
@@ -312,19 +309,19 @@ static void testMaxRvdMinHvd(int numDevices, int *deviceList, int count) {
   REQUIRE(testResult == true);
 }
 
-static void testRvdCvd(int numDevices, int *deviceList, int count) {
+static void testRvdCvd(int numDevices, int* deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
   std::string min_visibleDeviceString;
-  std::string max_visibleDeviceString;;
+  std::string max_visibleDeviceString;
+  ;
   int fd[2];
   pipe(fd);
   pid_t cPid;
   cPid = fork();
   if (cPid == 0) {  // child
-    Initialize(deviceList, numDevices, count,
-              min_visibleDeviceString, max_visibleDeviceString);
+    Initialize(deviceList, numDevices, count, min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", max_visibleDeviceString.c_str(), 1);
@@ -334,7 +331,7 @@ static void testRvdCvd(int numDevices, int *deviceList, int count) {
       HIP_CHECK(hipSetDevice(i));
       HIP_CHECK(hipGetDevice(&device));
       if (device == i) {
-        validateCount+= 1;
+        validateCount += 1;
       }
     }
     if (count != validateCount) {
@@ -353,7 +350,7 @@ static void testRvdCvd(int numDevices, int *deviceList, int count) {
   REQUIRE(testResult == true);
 }
 
-static void testMinRvdMaxHvd(int numDevices, int *deviceList, int count) {
+static void testMinRvdMaxHvd(int numDevices, int* deviceList, int count) {
   bool testResult = true;
   int device;
   int validateCount = 0;
@@ -364,8 +361,7 @@ static void testMinRvdMaxHvd(int numDevices, int *deviceList, int count) {
   pid_t cPid;
   cPid = fork();
   if (cPid == 0) {  // child
-    Initialize(deviceList, numDevices, count,
-              min_visibleDeviceString, max_visibleDeviceString);
+    Initialize(deviceList, numDevices, count, min_visibleDeviceString, max_visibleDeviceString);
     unsetenv("ROCR_VISIBLE_DEVICES");
     unsetenv("HIP_VISIBLE_DEVICES");
     setenv("ROCR_VISIBLE_DEVICES", min_visibleDeviceString.c_str(), 1);
@@ -375,7 +371,7 @@ static void testMinRvdMaxHvd(int numDevices, int *deviceList, int count) {
       HIP_CHECK(hipSetDevice(i));
       HIP_CHECK(hipGetDevice(&device));
       if (device == i) {
-         validateCount+= 1;
+        validateCount += 1;
       }
     }
     if (count != validateCount) {
@@ -407,17 +403,13 @@ TEST_CASE("Unit_hipSetDevice_InvalidVisibleDeviceList") {
   getDeviceCount(&numDevices);
   REQUIRE(numDevices != 0);
 
-  SECTION("Test setting -1 to HIP_VISIBLE_DEVICES") {
-    testInvalidDevice(numDevices, false, -1);
-  }
+  SECTION("Test setting -1 to HIP_VISIBLE_DEVICES") { testInvalidDevice(numDevices, false, -1); }
 
   SECTION("Test setting invalid device to HIP_VISIBLE_DEVICES") {
     testInvalidDevice(numDevices, false, numDevices);
   }
 #ifndef __HIP_PLATFORM_NVIDIA__
-  SECTION("Test setting -1 to ROCR_VISIBLE_DEVICES") {
-    testInvalidDevice(numDevices, true, -1);
-  }
+  SECTION("Test setting -1 to ROCR_VISIBLE_DEVICES") { testInvalidDevice(numDevices, true, -1); }
 
   SECTION("Test setting invalid device to ROCR_VISIBLE_DEVICES") {
     testInvalidDevice(numDevices, true, numDevices);
@@ -462,16 +454,14 @@ TEST_CASE("Unit_hipSetDevice_SubsetOfAvailableDevices") {
   REQUIRE(numDevices != 0);
 
   // Test for subset of available gpus
-  for (int i=0; i < deviceListLength; i++) {
-    deviceList[i] = deviceListLength-1-i;
+  for (int i = 0; i < deviceListLength; i++) {
+    deviceList[i] = deviceListLength - 1 - i;
   }
 
 #ifndef __HIP_PLATFORM_NVIDIA__
-  testValidDevices(numDevices, true, deviceList,
-        deviceListLength);
+  testValidDevices(numDevices, true, deviceList, deviceListLength);
 #endif
-  testValidDevices(numDevices, false, deviceList,
-        deviceListLength);
+  testValidDevices(numDevices, false, deviceList, deviceListLength);
 }
 
 #ifndef __HIP_PLATFORM_NVIDIA__
@@ -494,8 +484,8 @@ TEST_CASE("Unit_hipSetDevice_MinRvdMaxHvdDevicesList") {
     deviceList.push_back(0);
     count = 1;
   } else {
-    for (int i=0; i < numDevices; i++) {
-      if (i%2 == 0) {
+    for (int i = 0; i < numDevices; i++) {
+      if (i % 2 == 0) {
         deviceList.push_back(i);
         count++;
       }
@@ -520,8 +510,8 @@ TEST_CASE("Unit_hipSetDevice_MaxRvdMinHvdDevicesList") {
   if (numDevices == 1) {
     deviceList.push_back(0);
   } else {
-    for (int i=0; i < numDevices; i++) {
-      if (i%2 == 0) {
+    for (int i = 0; i < numDevices; i++) {
+      if (i % 2 == 0) {
         deviceList.push_back(i);
       }
     }
@@ -546,8 +536,8 @@ TEST_CASE("Unit_hipSetDevice_RvdCvdDevicesList") {
     deviceList[0] = 0;
     count = 1;
   } else {
-    for (int i=0; i < numDevices; i++) {
-      if (i%2 == 0) {
+    for (int i = 0; i < numDevices; i++) {
+      if (i % 2 == 0) {
         deviceList[count] = i;
         count++;
       }

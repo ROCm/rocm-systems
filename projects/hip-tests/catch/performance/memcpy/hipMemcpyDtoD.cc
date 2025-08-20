@@ -28,19 +28,19 @@ THE SOFTWARE.
 class MemcpyDtoDBenchmark : public Benchmark<MemcpyDtoDBenchmark> {
  public:
   void operator()(hipDeviceptr_t& dst, const hipDeviceptr_t& src, size_t size) {
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpyDtoD(dst, src, size));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyDtoD(dst, src, size)); }
   }
 };
 
-static void RunBenchmark(size_t size, bool enable_peer_access=false) {
+static void RunBenchmark(size_t size, bool enable_peer_access = false) {
   MemcpyDtoDBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
 
   int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
   int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-  if (src_device == -1 && dst_device == -1) { return; }
+  if (src_device == -1 && dst_device == -1) {
+    return;
+  }
 
   LinearAllocGuard<int> src_allocation(LinearAllocs::hipMalloc, size);
   HIP_CHECK(hipSetDevice(dst_device));

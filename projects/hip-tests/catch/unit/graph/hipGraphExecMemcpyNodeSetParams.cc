@@ -235,18 +235,18 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Directi
   HIP_CHECK(hipHostMalloc(&host, sizeof(int)));
   HIP_CHECK(hipMalloc(&dev, sizeof(int)));
 
-  const auto [dir, src, dst] =
-      GENERATE_REF(std::make_tuple(hipMemcpyHostToHost, host, host),
-                   std::make_tuple(hipMemcpyHostToDevice, host, dev),
-                   std::make_tuple(hipMemcpyDeviceToHost, dev, host),
-                   std::make_tuple(hipMemcpyDeviceToDevice, dev, dev));
+  const auto [dir, src, dst] = GENERATE_REF(std::make_tuple(hipMemcpyHostToHost, host, host),
+                                            std::make_tuple(hipMemcpyHostToDevice, host, dev),
+                                            std::make_tuple(hipMemcpyDeviceToHost, dev, host),
+                                            std::make_tuple(hipMemcpyDeviceToDevice, dev, dev));
 
   hipGraph_t graph = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  auto params = GetMemcpy3DParms(make_hipPitchedPtr(dst, sizeof(int), sizeof(int), 0), make_hipPos(0, 0, 0),
-                                 make_hipPitchedPtr(src, sizeof(int), sizeof(int), 0), make_hipPos(0, 0, 0),
-                                 make_hipExtent(sizeof(int), 1, 1), dir);
+  auto params =
+      GetMemcpy3DParms(make_hipPitchedPtr(dst, sizeof(int), sizeof(int), 0), make_hipPos(0, 0, 0),
+                       make_hipPitchedPtr(src, sizeof(int), sizeof(int), 0), make_hipPos(0, 0, 0),
+                       make_hipExtent(sizeof(int), 1, 1), dir);
 
   hipGraphNode_t node = nullptr;
   HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
@@ -254,7 +254,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Directi
   hipGraphExec_t graph_exec = nullptr;
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
 
-  const auto set_dir =  GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice, hipMemcpyDeviceToHost,
+  const auto set_dir = GENERATE(hipMemcpyHostToHost, hipMemcpyHostToDevice, hipMemcpyDeviceToHost,
                                 hipMemcpyDeviceToDevice, hipMemcpyDefault);
   if (dir == set_dir) {
     HIP_CHECK(hipGraphExecDestroy(graph_exec));
@@ -271,6 +271,6 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative_Changing_Memcpy_Directi
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

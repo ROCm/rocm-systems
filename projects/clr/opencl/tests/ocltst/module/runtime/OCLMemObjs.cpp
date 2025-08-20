@@ -31,16 +31,14 @@
 
 const char* OCLMemObjs::kernel_src = "";
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 OCLMemObjs::OCLMemObjs() { _numSubTests = 1; }
 
 OCLMemObjs::~OCLMemObjs() {}
 
-void OCLMemObjs::open(unsigned int test, char* units, double& conversion,
-                      unsigned int deviceId) {
+void OCLMemObjs::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   _crcword = 0;
   conversion = 1.0f;
   _deviceId = deviceId;
@@ -55,8 +53,8 @@ int OCLMemObjs::test(void) {
     std::cerr << "Platform::get() failed \n";
     return EXIT_FAILURE;
   }
-  cl_context_properties properties[] = {
-      CL_CONTEXT_PLATFORM, (cl_context_properties)(platforms[0])(), 0};
+  cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
+                                        (cl_context_properties)(platforms[0])(), 0};
   cl::Context context(CL_DEVICE_TYPE_ALL, properties, NULL, NULL, &err);
   if (err != CL_SUCCESS) {
     std::cerr << "Context::Context() failed (" << err << ")\n";
@@ -132,8 +130,6 @@ int OCLMemObjs::test(void) {
   return EXIT_SUCCESS;
 }
 
-void OCLMemObjs::run(void) {
-  CHECK_RESULT((test() != EXIT_SUCCESS), "test failed");
-}
+void OCLMemObjs::run(void) { CHECK_RESULT((test() != EXIT_SUCCESS), "test failed"); }
 
 unsigned int OCLMemObjs::close(void) { return _crcword; }

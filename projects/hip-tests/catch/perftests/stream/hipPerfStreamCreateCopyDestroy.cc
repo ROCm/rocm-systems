@@ -48,7 +48,7 @@ class hipPerfStreamCreateCopyDestroy {
         numStreams_(0),
         totalStreams_{1, 2, 4, 8},
         totalBuffers_{1, 100, 1000, 5000} {};
-  ~hipPerfStreamCreateCopyDestroy(){};
+  ~hipPerfStreamCreateCopyDestroy() {};
   bool open(int deviceID);
   bool run(unsigned int testNumber);
 };

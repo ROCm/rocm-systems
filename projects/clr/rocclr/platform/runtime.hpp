@@ -55,9 +55,7 @@ class Runtime : AllStatic {
   static bool isLibraryDetached() { return LibraryDetached; }
 
   //! Set the library has been detached.
-  static void setLibraryDetached() {
-    LibraryDetached = true;
-  }
+  static void setLibraryDetached() { LibraryDetached = true; }
 };
 
 /*@}*/
@@ -65,7 +63,7 @@ class Runtime : AllStatic {
 class RuntimeTearDown : public HeapObject {
   static std::vector<ReferenceCountedObject*> external_;
 
-public:
+ public:
   RuntimeTearDown() {}
   ~RuntimeTearDown();
 

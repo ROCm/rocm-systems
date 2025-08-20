@@ -20,7 +20,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
- 
+
 #include <hip/math_functions.h>
 
 #pragma clang diagnostic ignored "-Wunused-variable"
@@ -43,11 +43,10 @@ __device__ __forceinline__ int sum1_forceinline(int a) { return a + 1; }
 
 __device__ __host__ float PlusOne(float x) { return x + 1.0; }
 
-__global__ void MyKernel(const float* a, const float* b, float* c,
-                         unsigned N) {
+__global__ void MyKernel(const float* a, const float* b, float* c, unsigned N) {
   unsigned gid = threadIdx.x;
   if (gid < N) {
-      c[gid] = a[gid] + PlusOne(b[gid]);
+    c[gid] = a[gid] + PlusOne(b[gid]);
   }
 }
 
@@ -55,18 +54,16 @@ void callMyKernel() {
   float *a, *b, *c;
   const unsigned blockSize = 256;
   unsigned N = blockSize;
-  hipLaunchKernelGGL(MyKernel, dim3(N / blockSize), dim3(blockSize),
-                     0, 0, a, b, c, N);
+  hipLaunchKernelGGL(MyKernel, dim3(N / blockSize), dim3(blockSize), 0, 0, a, b, c, N);
 }
 
-template <typename T>
-__global__ void vectorADD(T __restrict__* A_d, T* B_d, T* C_d, size_t N) {
+template <typename T> __global__ void vectorADD(T __restrict__* A_d, T* B_d, T* C_d, size_t N) {
 #ifdef NOT_YET
   int a = __shfl_up(x, 1);
 #endif
   float x = 1.0;
 #ifdef NOT_YET
-    float fastZ = __sin(x);
+  float fastZ = __sin(x);
 #endif
   __syncthreads();
 
@@ -74,7 +71,7 @@ __global__ void vectorADD(T __restrict__* A_d, T* B_d, T* C_d, size_t N) {
   size_t stride = blockDim.x * gridDim.x;
 
   for (size_t i = offset; i < N; i += stride) {
-      C_d[i] = A_d[i] + B_d[i];
+    C_d[i] = A_d[i] + B_d[i];
   }
 }
 
@@ -101,11 +98,9 @@ __global__ void vectorADD(T __restrict__* A_d, T* B_d, T* C_d, size_t N) {
  *    - HIP_VERSION >= 5.5
  */
 
-TEST_CASE("Unit_hipLanguageExtensions") {
-  REQUIRE(true);
-}
+TEST_CASE("Unit_hipLanguageExtensions") { REQUIRE(true); }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

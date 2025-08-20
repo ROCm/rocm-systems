@@ -62,8 +62,7 @@ static void hipTestWithGraph() {
 
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
   for (int ikrnl = 0; ikrnl < NKERNEL; ikrnl++) {
-    simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1),
-                                             0, stream>>>(out_d, in_d);
+    simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1), 0, stream>>>(out_d, in_d);
   }
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipGraphInstantiate(&instance, graph, nullptr, nullptr, 0));
@@ -78,10 +77,10 @@ static void hipTestWithGraph() {
   auto withoutInit = std::chrono::duration<double, std::milli>(stop - start1);
 
   INFO("Time taken for graph with Init: "
-  << std::chrono::duration_cast<std::chrono::milliseconds>(withInit).count()
-  << " milliseconds without Init:"
-  << std::chrono::duration_cast<std::chrono::milliseconds>(withoutInit).count()
-  << " milliseconds ");
+       << std::chrono::duration_cast<std::chrono::milliseconds>(withInit).count()
+       << " milliseconds without Init:"
+       << std::chrono::duration_cast<std::chrono::milliseconds>(withoutInit).count()
+       << " milliseconds ");
 
   HIP_CHECK(hipMemcpy(out_h, out_d, N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < N; i++) {
@@ -124,16 +123,14 @@ static void hipTestWithoutGraph() {
   auto start = std::chrono::high_resolution_clock::now();
   for (int istep = 0; istep < NSTEP; istep++) {
     for (int ikrnl = 0; ikrnl < NKERNEL; ikrnl++) {
-      simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1),
-                                                   0, stream>>>(out_d, in_d);
+      simpleKernel<<<dim3(N / 512, 1, 1), dim3(512, 1, 1), 0, stream>>>(out_d, in_d);
     }
     HIP_CHECK(hipStreamSynchronize(stream));
   }
   auto stop = std::chrono::high_resolution_clock::now();
   auto result = std::chrono::duration<double, std::milli>(stop - start);
   INFO("Time taken for test without graph: "
-       << std::chrono::duration_cast<std::chrono::milliseconds>(result).count()
-       << " millisecs ");
+       << std::chrono::duration_cast<std::chrono::milliseconds>(result).count() << " millisecs ");
   HIP_CHECK(hipMemcpy(out_h, out_d, N * sizeof(float), hipMemcpyDeviceToHost));
   for (int i = 0; i < N; i++) {
     if (static_cast<float>(in_h[i] * CONSTANT) != out_h[i]) {
@@ -153,11 +150,7 @@ static void hipTestWithoutGraph() {
  */
 TEST_CASE("Unit_hipGraph_SimpleGraphWithKernel") {
   // Sections run test with and without graph.
-  SECTION("Run Test Without Graph") {
-    hipTestWithoutGraph();
-  }
+  SECTION("Run Test Without Graph") { hipTestWithoutGraph(); }
 
-  SECTION("Run Test With Graph") {
-    hipTestWithGraph();
-  }
+  SECTION("Run Test With Graph") { hipTestWithGraph(); }
 }

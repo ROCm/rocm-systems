@@ -115,14 +115,16 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Positive_Basic") {
           [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
             return hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst),
                                       reinterpret_cast<hipDeviceptr_t>(src), count, stream);
-          }, stream_guard.stream());
+          },
+          stream_guard.stream());
     }
     SECTION("Peer access disabled") {
       MemcpyDeviceToDeviceShell<true, false>(
           [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
             return hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst),
                                       reinterpret_cast<hipDeviceptr_t>(src), count, stream);
-          }, stream_guard.stream());
+          },
+          stream_guard.stream());
     }
   }
 }
@@ -150,25 +152,25 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Negative_Parameters") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic functional testcase to trigger capturehipMemcpyDtoHAsync internal api
-*  to improve code coverage.
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpyAsync_derivatives.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase to trigger capturehipMemcpyDtoHAsync internal api
+ *  to improve code coverage.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyAsync_derivatives.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_hipMemcpyDtoHAsync_capturehipMemcpyDtoHAsync") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int *A_d;
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
+  int* A_d;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int) * kPageSize));
   for (int i = 0; i < kPageSize; i++) {
     B_h[i] = i;
@@ -185,7 +187,7 @@ TEST_CASE("Unit_hipMemcpyDtoHAsync_capturehipMemcpyDtoHAsync") {
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   for (int i = 0; i < kPageSize; i++) {
-    REQUIRE(A_h[i] ==  B_h[i]);
+    REQUIRE(A_h[i] == B_h[i]);
   }
   HIP_CHECK(hipGraphExecDestroy(graphExec))
   HIP_CHECK(hipGraphDestroy(graph));
@@ -196,25 +198,25 @@ TEST_CASE("Unit_hipMemcpyDtoHAsync_capturehipMemcpyDtoHAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic functional testcase to trigger capturehipMemcpyHtoDAsync internal api
-*  to improve code coverage.
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpyAsync_derivatives.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase to trigger capturehipMemcpyHtoDAsync internal api
+ *  to improve code coverage.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpyAsync_derivatives.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_hipMemcpyHtoDAsync_capturehipMemcpyHtoDAsync") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
-  int *A_d;
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * kPageSize));
+  int* A_d;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int) * kPageSize));
   for (int i = 0; i < kPageSize; i++) {
     B_h[i] = i;

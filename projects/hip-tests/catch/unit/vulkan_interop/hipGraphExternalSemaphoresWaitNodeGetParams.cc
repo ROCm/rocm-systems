@@ -96,6 +96,6 @@ TEST_CASE("Unit_hipGraphExternalSemaphoresWaitNodeGetParams_Negative_Parameters"
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

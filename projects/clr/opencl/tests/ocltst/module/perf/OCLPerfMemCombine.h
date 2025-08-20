@@ -33,8 +33,7 @@ class OCLPerfMemCombine : public OCLTestImp {
   virtual ~OCLPerfMemCombine();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -49,8 +48,7 @@ class OCLPerfMemCombine : public OCLTestImp {
  private:
   void createKernel(const char* type, int numCombine);
   void setData(cl_mem buffer, unsigned int bufSize, unsigned char val);
-  void checkData(cl_mem buffer, unsigned int bufSize, unsigned int limit,
-                 unsigned char defVal);
+  void checkData(cl_mem buffer, unsigned int bufSize, unsigned int limit, unsigned char defVal);
 };
 
 #endif  // _OCL_MemCombine_H_

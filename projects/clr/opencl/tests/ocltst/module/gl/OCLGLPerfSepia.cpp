@@ -37,7 +37,7 @@
 
 #define MAX(a, b) (a > b ? a : b)
 
-const char *sepiaVertexProgram =
+const char* sepiaVertexProgram =
     "!!ARBvp1.0\n"
     "\n"
     "\n"
@@ -59,7 +59,7 @@ const char *sepiaVertexProgram =
     "\n"
     "END\n";
 
-const char *sepiaFragmentProgram =
+const char* sepiaFragmentProgram =
     "!!ARBfp1.0\n"
     "\n"
     "\n"
@@ -97,7 +97,7 @@ const char *sepiaFragmentProgram =
     "\n"
     "END\n";
 
-const static char *strKernel =
+const static char* strKernel =
     "\n"
     "__kernel void program(write_only image2d_t dest, int flipped, int4 dim, "
     "float2 st_origin, float4 st_delta, float4 l0, float4 l1, float4 l2, "
@@ -162,8 +162,8 @@ OCLGLPerfSepia::OCLGLPerfSepia() { _numSubTests = 2; }
 
 OCLGLPerfSepia::~OCLGLPerfSepia() {}
 
-void OCLGLPerfSepia::open(unsigned int test, char *units, double &conversion,
-                        unsigned int deviceId) {
+void OCLGLPerfSepia::open(unsigned int test, char* units, double& conversion,
+                          unsigned int deviceId) {
   bVerify_ = false;
   silentFailure_ = false;
   iterations_ = 50000;
@@ -191,27 +191,21 @@ void OCLGLPerfSepia::open(unsigned int test, char *units, double &conversion,
   if (_errorFlag) return;
   if (test == 0) {
     // Build the kernel
-    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel,
-                                                   NULL, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "clCreateProgramWithSource()  failed (%d)", error_);
-    const char *optionsGPU = "-cl-denorms-are-zero -cl-mad-enable";
-    error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                      optionsGPU, NULL, NULL);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
+    const char* optionsGPU = "-cl-denorms-are-zero -cl-mad-enable";
+    error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], optionsGPU, NULL, NULL);
     if (error_ != CL_SUCCESS) {
       char programLog[1024];
-      _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                      CL_PROGRAM_BUILD_LOG, 1024, programLog,
-                                      0);
+      _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                      programLog, 0);
       printf("\n%s\n", programLog);
       fflush(stdout);
     }
-    CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram() failed (%d)",
-                 error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram() failed (%d)", error_);
 
     kernel_ = _wrapper->clCreateKernel(program_, "program", &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed (%d)",
-                 error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed (%d)", error_);
   }
 }
 
@@ -219,7 +213,7 @@ void OCLGLPerfSepia::populateData(void) {
   width_ = WIDTH;
   height_ = HEIGHT;
   bpr_ = 4 * width_;
-  data_ = (cl_uchar *)malloc(height_ * bpr_);
+  data_ = (cl_uchar*)malloc(height_ * bpr_);
   for (unsigned int n = 0; n < (height_ * bpr_); n++) {
     data_[n] = (n & 3) ? (rand() % 256) : 0xFF;
   }
@@ -247,8 +241,8 @@ void OCLGLPerfSepia::runGL(void) {
 
   // have GL alloc memory for us for our destination texture which we will be
   // rendering into
-  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0,
-               GL_BGRA /*RGBA*/, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0, GL_BGRA /*RGBA*/,
+               GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
 
@@ -263,19 +257,15 @@ void OCLGLPerfSepia::runGL(void) {
   glPixelStorei(GL_UNPACK_ALIGNMENT, 8);
 
   // XXX Alex -- use optimal texture upload format.
-  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0,
-               GL_BGRA, /* GL_RGBA,*/
-               format_.image_channel_order == CL_RGBA
-                   ? GL_UNSIGNED_INT_8_8_8_8
-                   : GL_UNSIGNED_INT_8_8_8_8_REV,
+  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0, GL_BGRA, /* GL_RGBA,*/
+               format_.image_channel_order == CL_RGBA ? GL_UNSIGNED_INT_8_8_8_8
+                                                      : GL_UNSIGNED_INT_8_8_8_8_REV,
                data_);
 
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S,
-                  GL_CLAMP_TO_EDGE);
-  glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T,
-                  GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_RECTANGLE_ARB, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   glPixelStorei(GL_UNPACK_SWAP_BYTES, 0);
   glPixelStorei(GL_UNPACK_LSB_FIRST, 0);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
@@ -297,8 +287,7 @@ void OCLGLPerfSepia::runGL(void) {
 
   glBindProgramARB(GL_FRAGMENT_PROGRAM_ARB, fragmentProgram);
   glProgramStringARB(GL_FRAGMENT_PROGRAM_ARB, GL_PROGRAM_FORMAT_ASCII_ARB,
-                     (GLsizei)strlen(sepiaFragmentProgram),
-                     sepiaFragmentProgram);
+                     (GLsizei)strlen(sepiaFragmentProgram), sepiaFragmentProgram);
 
   GLfloat l0[] = {1.0f, 0.99f, 0.92f, 1.0f};
   GLfloat l1[] = {0.5, 0, 0, 0};
@@ -321,8 +310,8 @@ void OCLGLPerfSepia::runGL(void) {
 
   glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, fbo);
 
-  glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT,
-                            GL_TEXTURE_RECTANGLE_ARB, texId, 0);
+  glFramebufferTexture2DEXT(GL_FRAMEBUFFER_EXT, GL_COLOR_ATTACHMENT0_EXT, GL_TEXTURE_RECTANGLE_ARB,
+                            texId, 0);
   glViewport(0, 0, width_, height_);
   glMatrixMode(GL_PROJECTION);
   glLoadIdentity();
@@ -378,10 +367,9 @@ void OCLGLPerfSepia::runGL(void) {
   glDisable(GL_FRAGMENT_PROGRAM_ARB);
 
   // now let's read back the pixels
-  result_ = (cl_uchar *)malloc(width_ * height_ * 4);
+  result_ = (cl_uchar*)malloc(width_ * height_ * 4);
 
-  glReadPixels(0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV,
-               result_);
+  glReadPixels(0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_INT_8_8_8_8_REV, result_);
 
   // bind back default frame buffer
   glBindFramebufferEXT(GL_FRAMEBUFFER_EXT, 0);
@@ -400,19 +388,17 @@ void OCLGLPerfSepia::runCL(void) {
   glGenTextures(1, &texId);
   glBindTexture(GL_TEXTURE_RECTANGLE_EXT, texId);
   // XXX Alex: have GL alloc memory for us ...
-  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0,
-               GL_RGBA /*BGRA*/, GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
+  glTexImage2D(GL_TEXTURE_RECTANGLE_EXT, 0, GL_RGBA, width_, height_, 0, GL_RGBA /*BGRA*/,
+               GL_UNSIGNED_INT_8_8_8_8_REV, NULL);
 
-  dst = _wrapper->clCreateFromGLTexture2D(
-      context_, CL_MEM_READ_WRITE, GL_TEXTURE_RECTANGLE_EXT, 0, texId, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateFromGLTexture2D error (%d)",
-               error_);
-  nearestZero = _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_CLAMP,
-                                          CL_FILTER_NEAREST, &error_);
+  dst = _wrapper->clCreateFromGLTexture2D(context_, CL_MEM_READ_WRITE, GL_TEXTURE_RECTANGLE_EXT, 0,
+                                          texId, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateFromGLTexture2D error (%d)", error_);
+  nearestZero =
+      _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_CLAMP, CL_FILTER_NEAREST, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateSampler error (%d)", error_);
-  src = _wrapper->clCreateImage2D(
-      context_, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, &format_, width_,
-      height_, bpr_, data_, &error_);
+  src = _wrapper->clCreateImage2D(context_, CL_MEM_READ_ONLY | CL_MEM_COPY_HOST_PTR, &format_,
+                                  width_, height_, bpr_, data_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateImage2D error (%d)", error_);
 
   int numArgs = 0;
@@ -448,34 +434,30 @@ void OCLGLPerfSepia::runCL(void) {
                            &l3);  // arg is a float4 named "l3"
   _wrapper->clSetKernelArg(kernel_, numArgs++, sizeof(cl_mem),
                            &src);  // arg is a image2D named "t0"
-  _wrapper->clSetKernelArg(
-      kernel_, numArgs++, sizeof(cl_sampler),
-      &nearestZero);  // arg is a sampler named "t_sampler0"
+  _wrapper->clSetKernelArg(kernel_, numArgs++, sizeof(cl_sampler),
+                           &nearestZero);  // arg is a sampler named "t_sampler0"
 
   size_t execution_threads[2];
   size_t execution_local[2];
   cl_uint work_dim = 2;
-  error_ = _wrapper->clGetKernelWorkGroupInfo(
-      kernel_, devices_[_deviceId], CL_KERNEL_WORK_GROUP_SIZE,
-      sizeof(execution_local[0]), &execution_local[0], 0);
-  CHECK_RESULT((error_ != CL_SUCCESS), "clGetKernelWorkGroupInfo error (%d)",
-               error_);
+  error_ =
+      _wrapper->clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId], CL_KERNEL_WORK_GROUP_SIZE,
+                                         sizeof(execution_local[0]), &execution_local[0], 0);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clGetKernelWorkGroupInfo error (%d)", error_);
   execution_local[1] = 1;
   work_dim = 2;
-  GetKernelExecDimsForImage((unsigned int)execution_local[0], dim[0], dim[1],
-                            execution_threads, execution_local);
-  result_ = (cl_uchar *)malloc(height_ * bpr_);
+  GetKernelExecDimsForImage((unsigned int)execution_local[0], dim[0], dim[1], execution_threads,
+                            execution_local);
+  result_ = (cl_uchar*)malloc(height_ * bpr_);
 
   const size_t origin[] = {0, 0, 0};
   const size_t region[] = {width_, height_, 1};
 
   // warm up
   for (unsigned int k = 0; k < (iterations_ / 10); k++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_,
-                                              work_dim, NULL, execution_threads,
-                                              execution_local, 0, NULL, NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel error (%d)",
-                 error_);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, work_dim, NULL,
+                                              execution_threads, execution_local, 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel error (%d)", error_);
     error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
     CHECK_RESULT((error_ != CL_SUCCESS), "clFinish error (%d)", error_);
   }
@@ -486,20 +468,17 @@ void OCLGLPerfSepia::runCL(void) {
       timer_.Reset();
       timer_.Start();
     }
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_,
-                                              work_dim, NULL, execution_threads,
-                                              execution_local, 0, NULL, NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel error (%d)",
-                 error_);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, work_dim, NULL,
+                                              execution_threads, execution_local, 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel error (%d)", error_);
   }
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clFinish error (%d)", error_);
 
   timer_.Stop();
 
-  error_ =
-      _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], dst, true, origin,
-                                   region, bpr_, 0, result_, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueReadImage(cmdQueues_[_deviceId], dst, true, origin, region, bpr_, 0,
+                                        result_, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadImage error (%d)", error_);
   _wrapper->clFinish(cmdQueues_[_deviceId]);
 
@@ -508,17 +487,15 @@ void OCLGLPerfSepia::runCL(void) {
   _wrapper->clReleaseMemObject(dst), dst = NULL;
 }
 
-void OCLGLPerfSepia::GetKernelExecDimsForImage(unsigned int work_group_size,
-                                             unsigned int w, unsigned int h,
-                                             size_t *global, size_t *local) {
+void OCLGLPerfSepia::GetKernelExecDimsForImage(unsigned int work_group_size, unsigned int w,
+                                               unsigned int h, size_t* global, size_t* local) {
   unsigned int a, b;
   static const unsigned int tile_size = 16;
 
   // local[0] and local[1] must be at least 1
   local[0] = tile_size < work_group_size ? tile_size : work_group_size;
-  local[1] = work_group_size / tile_size > tile_size
-                 ? tile_size
-                 : MAX(work_group_size / tile_size, 1);
+  local[1] =
+      work_group_size / tile_size > tile_size ? tile_size : MAX(work_group_size / tile_size, 1);
 
   a = w;
   b = (unsigned int)local[0];
@@ -547,8 +524,7 @@ void OCLGLPerfSepia::run(void) {
     verifyResult();
   }
   char buf[100];
-  SNPRINTF(buf, sizeof(buf), "%s iterations# %d",
-           (_openTest == 0) ? "CL" : "GL", iterations_);
+  SNPRINTF(buf, sizeof(buf), "%s iterations# %d", (_openTest == 0) ? "CL" : "GL", iterations_);
   testDescString = buf;
   _perfInfo = (float)timer_.GetElapsedTime();
 }
@@ -561,8 +537,7 @@ void OCLGLPerfSepia::verifyResult(void) {
     g = g + result_[k + 2];
     b = b + result_[k + 3];
   }
-  d = abs(r - 152797810) + abs(g - 125868080) + abs(b - 76147833) +
-      abs(a - 267386880);
+  d = abs(r - 152797810) + abs(g - 125868080) + abs(b - 76147833) + abs(a - 267386880);
   CHECK_RESULT(d > 20000, "wrong result");
 }
 unsigned int OCLGLPerfSepia::close(void) {

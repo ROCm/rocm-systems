@@ -33,10 +33,8 @@ class StreamGetFlagsBenchmark : public Benchmark<StreamGetFlagsBenchmark> {
     hipStream_t stream;
 
     HIP_CHECK(hipStreamCreateWithFlags(&stream, expected_flag));
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipStreamGetFlags(stream, &returned_flags))
-    }
-    HIP_CHECK(hipStreamDestroy(stream));
+    TIMED_SECTION(kTimerTypeCpu){HIP_CHECK(hipStreamGetFlags(stream, &returned_flags))} HIP_CHECK(
+        hipStreamDestroy(stream));
   }
 };
 
@@ -75,6 +73,6 @@ TEST_CASE("Performance_hipStreamGetFlags") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

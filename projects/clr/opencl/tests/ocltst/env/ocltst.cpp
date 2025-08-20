@@ -75,10 +75,10 @@ void serviceStubCall();
 
 #define MAX_DEVICES 16
 #undef CHECK_RESULT
-#define CHECK_RESULT(test, msg) \
-  if ((test)) {                 \
-    printf("\n%s\n", msg);      \
-    exit(1);                    \
+#define CHECK_RESULT(test, msg)                                                                    \
+  if ((test)) {                                                                                    \
+    printf("\n%s\n", msg);                                                                         \
+    exit(1);                                                                                       \
   }
 
 //! Declaration of a function that find devices of a specific type for the
@@ -159,18 +159,16 @@ class App {
 
   //! Function used to create a worker object corresponding to a subtest in a
   //! module
-  void SetWorker(unsigned int index, OCLWrapper* wrapper, Module* module,
-                 TestMethod run, unsigned int id, unsigned int subtest,
-                 unsigned int test, bool dump, bool view, bool useCPU,
-                 void* window, unsigned int x, unsigned int y, bool perflab,
+  void SetWorker(unsigned int index, OCLWrapper* wrapper, Module* module, TestMethod run,
+                 unsigned int id, unsigned int subtest, unsigned int test, bool dump, bool view,
+                 bool useCPU, void* window, unsigned int x, unsigned int y, bool perflab,
                  unsigned int deviceId, unsigned int platform) {
     if (index >= 256) return;
 
     if (m_workers[index]) delete m_workers[index];
 
-    m_workers[index] =
-        new Worker(wrapper, module, run, id, subtest, test, dump, view, useCPU,
-                   window, x, y, perflab, deviceId, platform);
+    m_workers[index] = new Worker(wrapper, module, run, id, subtest, test, dump, view, useCPU,
+                                  window, x, y, perflab, deviceId, platform);
 
     assert(m_workers[index] != 0);
     // oclTestLog(OCLTEST_LOG_ALWAYS, "Worker Device Id = %d\n",
@@ -225,8 +223,8 @@ class App {
   //! @param subtest = the subtest number to run
   //! @param usage = whether to use threads or not
   //! @param test = The test in the module to be executed
-  void AddWorkerThread(unsigned int index, unsigned int subtest,
-                       unsigned int test, unsigned int usage, TestMethod run) {
+  void AddWorkerThread(unsigned int index, unsigned int subtest, unsigned int test,
+                       unsigned int usage, TestMethod run) {
     if (m_spawned > m_threads) {
       WaitAllThreads();
     }
@@ -254,9 +252,8 @@ class App {
             }
 #else
     for (unsigned int i = 0; i < 1; i++) {
-      SetWorker(i, m_wrapper, &m_modules[index], run, m_spawned, subtest, test,
-                m_dump, !m_console, m_useCPU, m_window, m_width, m_height,
-                m_perflab, m_deviceId, m_platform);
+      SetWorker(i, m_wrapper, &m_modules[index], run, m_spawned, subtest, test, m_dump, !m_console,
+                m_useCPU, m_window, m_width, m_height, m_perflab, m_deviceId, m_platform);
     }
 #endif
 
@@ -327,8 +324,7 @@ class App {
   //! Functions used to find the range of the tests to be run
   void GetTestIndexList(TestIndexList& testIndices, StringList& testList,
                         const char* szModuleTestname, int maxIndex);
-  void PruneTestIndexList(TestIndexList& testIndices,
-                          TestIndexList& avoidIndices,
+  void PruneTestIndexList(TestIndexList& testIndices, TestIndexList& avoidIndices,
                           TestIndexList& erasedIndices);
 
   StringList m_paths;
@@ -402,8 +398,7 @@ void App::SetTestRunOrder(int mod_index) {
     std::string szTestName = m_tests[i];
 
     // order of execution is set based on base name so get the base name
-    if (nFirstBracket != std::string::npos)
-      szTestName = szTestName.substr(0, nFirstBracket);
+    if (nFirstBracket != std::string::npos) szTestName = szTestName.substr(0, nFirstBracket);
 
     bool bTestExists = false;
     for (unsigned int j = 0; j < uniqueTests.size(); ++j) {
@@ -453,8 +448,8 @@ void App::SetTestRunOrder(int mod_index) {
 // adapter, false otherwise
 static bool procDevString(const char* devString) {
   // Search for the string "Radeon" inside the device string
-  if (strstr(devString, "Radeon") || strstr(devString, "R600") ||
-      strstr(devString, "RV630") || strstr(devString, "RV670") ||
+  if (strstr(devString, "Radeon") || strstr(devString, "R600") || strstr(devString, "RV630") ||
+      strstr(devString, "RV670") ||
       (strstr(devString, "Stream") && strstr(devString, "Processor"))) {
     // Ignore if the device is a secondary device, i.e., not an adapter
     if (strstr(devString, "Secondary")) {
@@ -470,8 +465,7 @@ static bool procDevString(const char* devString) {
 //!
 //! Function to find the total number of adapters on the system
 //!
-int findAdapters(unsigned int platformIdx, bool useCPU,
-                 cl_platform_id* mpform) {
+int findAdapters(unsigned int platformIdx, bool useCPU, cl_platform_id* mpform) {
   unsigned int numOfAdapters = 0;
   cl_int error = 0;
   cl_uint numPlatforms = 0;
@@ -547,9 +541,8 @@ double run(OCLTest* test, int passes) {
 
 //! Function to display the result after a test is finished
 //! It also stores the result in a TestResult object
-void report(Worker* w, const char* testname, int testnum, unsigned int crc,
-            const char* errorMsg, float timer, TestResult* tr,
-            const char* testDesc) {
+void report(Worker* w, const char* testname, int testnum, unsigned int crc, const char* errorMsg,
+            float timer, TestResult* tr, const char* testDesc) {
   unsigned int thread = w->getId();
   bool perflab = w->getPerflab();
   unsigned int deviceId = w->getDeviceId();
@@ -566,16 +559,13 @@ void report(Worker* w, const char* testname, int testnum, unsigned int crc,
     // ((tr->passed) ? passedOrFailed[1] : passedOrFailed[0]));
     // If crc is not 0 or errorMsg is not empty, print the full stats
     if ((crc != 0) || (errorMsg && (errorMsg[0] != '\0'))) {
-      sprintf(tmpUnits,
-              "%s %s: %s[%d] T[%1d] [%3d], %10.3f %-20s (chksum 0x%08x)\n",
-              testDesc, ((tr->passed) ? passedOrFailed[1] : passedOrFailed[0]),
-              w->isCPUEnabled() ? "CPU" : "GPU", deviceId, thread, testnum,
-              timer, errorMsg, crc);
+      sprintf(tmpUnits, "%s %s: %s[%d] T[%1d] [%3d], %10.3f %-20s (chksum 0x%08x)\n", testDesc,
+              ((tr->passed) ? passedOrFailed[1] : passedOrFailed[0]),
+              w->isCPUEnabled() ? "CPU" : "GPU", deviceId, thread, testnum, timer, errorMsg, crc);
     } else {
       sprintf(tmpUnits, "%s %s: %s[%d] T[%1d] [%3d], %10.3f\n", testDesc,
               ((tr->passed) ? passedOrFailed[1] : passedOrFailed[0]),
-              w->isCPUEnabled() ? "CPU" : "GPU", deviceId, thread, testnum,
-              timer);
+              w->isCPUEnabled() ? "CPU" : "GPU", deviceId, thread, testnum, timer);
     }
 
     oclTestLog(OCLTEST_LOG_ALWAYS, tmpUnits);
@@ -610,8 +600,8 @@ void report(Worker* w, const char* testname, int testnum, unsigned int crc,
 
       oclTestLog(OCLTEST_LOG_ALWAYS,
                  "##%s[testFailed name='%s.%s.%d' message='FAILED' "
-                 "details='%s']\n", App::m_svcMsg,
-                 w->getModule()->get_libname(), testname, testnum, escaped);
+                 "details='%s']\n",
+                 App::m_svcMsg, w->getModule()->get_libname(), testname, testnum, escaped);
     }
   }
 }
@@ -662,8 +652,8 @@ RERUN_TEST:
   if (App::m_svcMsg) {
     oclTestLog(OCLTEST_LOG_ALWAYS,
                "##%s[testStarted name='%s.%s.%d' "
-               "captureStandardOutput='true']\n", App::m_svcMsg,
-               m->get_libname(), subtestName.c_str(), test);
+               "captureStandardOutput='true']\n",
+               App::m_svcMsg, m->get_libname(), subtestName.c_str(), test);
   }
   // setting the type to CPU.
   if (w->isCPUEnabled()) {
@@ -682,8 +672,8 @@ RERUN_TEST:
 
   if (pt->hasErrorOccured()) {
     result->passed = false;
-    report(w, subtestName.c_str(), test, crc, pt->getErrorMsg(),
-           pt->getPerfInfo(), result, pt->testDescString.c_str());
+    report(w, subtestName.c_str(), test, crc, pt->getErrorMsg(), pt->getPerfInfo(), result,
+           pt->testDescString.c_str());
   } else {
     unsigned int n = calibrate(pt);
     double timer = run(pt, n);
@@ -708,11 +698,11 @@ RERUN_TEST:
     result->passed = !pt->hasErrorOccured();
     /// print conditional pass if it is passes the second time.
     if (second_run && result->passed) {
-      report(w, subtestName.c_str(), test, crc, "Conditional PASS",
-             pt->getPerfInfo(), result, pt->testDescString.c_str());
+      report(w, subtestName.c_str(), test, crc, "Conditional PASS", pt->getPerfInfo(), result,
+             pt->testDescString.c_str());
     } else {
-      report(w, subtestName.c_str(), test, crc, pt->getErrorMsg(),
-             pt->getPerfInfo(), result, pt->testDescString.c_str());
+      report(w, subtestName.c_str(), test, crc, pt->getErrorMsg(), pt->getPerfInfo(), result,
+             pt->testDescString.c_str());
     }
   }
   if (App::m_svcMsg) {
@@ -733,13 +723,11 @@ RERUN_TEST:
 }
 
 void App::PrintTestOrder(int mod_index) {
-  oclTestLog(OCLTEST_LOG_ALWAYS, "Module: %s (%d tests)\n",
-             m_modules[mod_index].name.c_str(),
+  oclTestLog(OCLTEST_LOG_ALWAYS, "Module: %s (%d tests)\n", m_modules[mod_index].name.c_str(),
              m_modules[mod_index].get_count());
 
   for (unsigned int j = 0; j < m_modules[mod_index].get_count(); j++) {
-    oclTestLog(OCLTEST_LOG_ALWAYS, "%s\n",
-               m_modules[mod_index].get_name(mp_testOrder[j]));
+    oclTestLog(OCLTEST_LOG_ALWAYS, "%s\n", m_modules[mod_index].get_name(mp_testOrder[j]));
   }
 }
 
@@ -769,16 +757,14 @@ void App::RunAllTests() {
   //  Run each test
   //
   for (unsigned int i = 0; i < m_modules.size(); i++) {
-    oclTestLog(OCLTEST_LOG_ALWAYS,
-               "\n-------------------------------------------------\n");
-    oclTestLog(OCLTEST_LOG_ALWAYS,
-               "The OpenCL Testing Module %s Version = %d \n",
+    oclTestLog(OCLTEST_LOG_ALWAYS, "\n-------------------------------------------------\n");
+    oclTestLog(OCLTEST_LOG_ALWAYS, "The OpenCL Testing Module %s Version = %d \n",
                m_modules[i].get_libname(), m_modules[i].get_version());
     oclTestLog(OCLTEST_LOG_ALWAYS, "-------------------------------------------------\n");
 
     if (App::m_svcMsg) {
-        oclTestLog(OCLTEST_LOG_ALWAYS, "##%s[testSuiteStarted name='ocltst %s']\n",
-                   App::m_svcMsg, m_modules[i].get_libname());
+      oclTestLog(OCLTEST_LOG_ALWAYS, "##%s[testSuiteStarted name='ocltst %s']\n", App::m_svcMsg,
+                 m_modules[i].get_libname());
     }
 
     // array to keep track of order of test execution.
@@ -797,8 +783,7 @@ void App::RunAllTests() {
       // return;
     }
 
-    for (unsigned int itr_var = 0; itr_var < m_modules[i].get_count();
-         itr_var++) {
+    for (unsigned int itr_var = 0; itr_var < m_modules[i].get_count(); itr_var++) {
       // done for random order generation
       unsigned int subtest = mp_testOrder[itr_var];
 
@@ -835,10 +820,9 @@ void App::RunAllTests() {
           WaitAllThreads();
           AddWorkerThread(i, subtest, test, pt->getThreadUsage(), runSubtest);
 
-          for (unsigned int thread = 1;
-               (thread < m_threads) && (thread < m_modules.size()); thread++) {
-            AddWorkerThread(thread, subtest, test, pt->getThreadUsage(),
-                            dummyThread);
+          for (unsigned int thread = 1; (thread < m_threads) && (thread < m_modules.size());
+               thread++) {
+            AddWorkerThread(thread, subtest, test, pt->getThreadUsage(), dummyThread);
           }
 
           numTestsRun++;
@@ -858,8 +842,7 @@ void App::RunAllTests() {
         }
         if (App::m_svcMsg) {
           for (unsigned int j = 0; j < erasedIndices.size(); j++) {
-            oclTestLog(OCLTEST_LOG_ALWAYS,
-                       "##%s[testIgnored name='%s.%s.%d']\n", App::m_svcMsg,
+            oclTestLog(OCLTEST_LOG_ALWAYS, "##%s[testIgnored name='%s.%s.%d']\n", App::m_svcMsg,
                        m_modules[i].get_libname(), name, erasedIndices[j]);
           }
         }
@@ -877,8 +860,8 @@ void App::RunAllTests() {
     }
 
     if (App::m_svcMsg) {
-        oclTestLog(OCLTEST_LOG_ALWAYS, "##%s[testSuiteFinished name='ocltst %s']\n",
-                   App::m_svcMsg, m_modules[i].get_libname());
+      oclTestLog(OCLTEST_LOG_ALWAYS, "##%s[testSuiteFinished name='ocltst %s']\n", App::m_svcMsg,
+                 m_modules[i].get_libname());
     }
 
     // print the order in which the test are executed if they are
@@ -908,13 +891,13 @@ void App::RunAllTests() {
 
   oclTestLog(OCLTEST_LOG_ALWAYS, "\n\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "----------------------------------------\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Passed Tests:  %8d (%6.2f%s)\n",
-             num_passes, percent_passed, "%");
-  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Failed Tests:  %8d (%6.2f%s)\n",
-             num_failures, percent_failed, "%");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Passed Tests:  %8d (%6.2f%s)\n", num_passes, percent_passed,
+             "%");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Failed Tests:  %8d (%6.2f%s)\n", num_failures,
+             percent_failed, "%");
   oclTestLog(OCLTEST_LOG_ALWAYS, "----------------------------------------\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Run Tests:     %8d (%6.2f%s)\n",
-             (int)total_tests, percent_total, "%");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "Total Run Tests:     %8d (%6.2f%s)\n", (int)total_tests,
+             percent_total, "%");
   oclTestLog(OCLTEST_LOG_ALWAYS, "\n\n");
 }
 
@@ -955,23 +938,16 @@ static void Help(const char* name) {
   oclTestLog(OCLTEST_LOG_ALWAYS, "   -w            : enable window mode\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "   -V            : enable TeamCity service messages\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "   -J            : enable Jenkins service messages\n");
-  oclTestLog(
-      OCLTEST_LOG_ALWAYS,
-      "   -d            : dump test output to portable float map (pfm)\n");
   oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -m <module>   : specify a DLL module with tests\n");
-  oclTestLog(
-      OCLTEST_LOG_ALWAYS,
-      "   -M <filename> : specify a text file with one DLL module per line\n");
+             "   -d            : dump test output to portable float map (pfm)\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -m <module>   : specify a DLL module with tests\n");
   oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -l            : list test names in DLL modules and exit\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -s <count>    : number of threads to spawn\n");
+             "   -M <filename> : specify a text file with one DLL module per line\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -l            : list test names in DLL modules and exit\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -s <count>    : number of threads to spawn\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "   -t <testname> : run test\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -T <filename> : specify a text file with one test per line\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -a <testname> : specify a test to avoid\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -T <filename> : specify a text file with one test per line\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -a <testname> : specify a test to avoid\n");
   oclTestLog(OCLTEST_LOG_ALWAYS,
              "   -A <filename> : specify a text file of tests to avoid with "
              "one test per line\n");
@@ -979,12 +955,10 @@ static void Help(const char* name) {
              "   -p <platform> : specify a platform to run on, 'amd','nvidia' "
              ",'intel' or 'ms'\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "   -h            : this help text\n");
-  oclTestLog(
-      OCLTEST_LOG_ALWAYS,
-      "   -x            : x dimension for debug output image (and window)\n");
-  oclTestLog(
-      OCLTEST_LOG_ALWAYS,
-      "   -y            : y dimension for debug output image (and window)\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS,
+             "   -x            : x dimension for debug output image (and window)\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS,
+             "   -y            : y dimension for debug output image (and window)\n");
   oclTestLog(OCLTEST_LOG_ALWAYS,
              "   -P            : Perflab mode (just print the result without "
              "any supplementary information)\n");
@@ -997,21 +971,16 @@ static void Help(const char* name) {
   oclTestLog(OCLTEST_LOG_ALWAYS,
              "   -R            : Option to ReRun failed tests for conditional "
              "pass.\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -i            : Don't print system information\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -g <GPUid>    : GPUid to run the tests on\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -o <filename> : dump the output to a specified file\n");
-  oclTestLog(OCLTEST_LOG_ALWAYS,
-             "   -c            : Run the test on the CPU device.\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -i            : Don't print system information\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -g <GPUid>    : GPUid to run the tests on\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -o <filename> : dump the output to a specified file\n");
+  oclTestLog(OCLTEST_LOG_ALWAYS, "   -c            : Run the test on the CPU device.\n");
   oclTestLog(OCLTEST_LOG_ALWAYS, "                 : \n");
   oclTestLog(OCLTEST_LOG_ALWAYS,
              "                 : To run only one subtest of a test, append the "
              "subtest to\n");
-  oclTestLog(
-      OCLTEST_LOG_ALWAYS,
-      "                 : the end of the test name in brackets. i.e. test[1]");
+  oclTestLog(OCLTEST_LOG_ALWAYS,
+             "                 : the end of the test name in brackets. i.e. test[1]");
   oclTestLog(OCLTEST_LOG_ALWAYS, "\n");
 
   exit(0);
@@ -1051,8 +1020,7 @@ unsigned int getPlatformID(const char* str) {
     unsigned int i;
     for (i = 0; i < numPlatforms; ++i) {
       char buff[200];
-      status = clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR, sizeof(buff),
-                                 buff, NULL);
+      status = clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR, sizeof(buff), buff, NULL);
       if (status != CL_SUCCESS) {
         break;
       }
@@ -1073,8 +1041,7 @@ unsigned int parseCommandLineForPlatform(unsigned int argc, char** argv) {
   int c;
   unsigned int platform = 0;
 
-  while ((c = getopt(argc, argv, supported_options)) !=
-         -1) {
+  while ((c = getopt(argc, argv, supported_options)) != -1) {
     switch (c) {
       case 'p':
         platform = getPlatformID(optarg);
@@ -1095,8 +1062,7 @@ void App::CommandLine(unsigned int argc, char** argv) {
   m_deviceId = 0;
   int tmp;
 
-  while ((c = getopt(argc, argv, supported_options)) !=
-         -1) {
+  while ((c = getopt(argc, argv, supported_options)) != -1) {
     switch (c) {
       case 'c':
         m_useCPU = true;
@@ -1262,8 +1228,7 @@ bool App::TestInList(StringList& strlist, const char* szModuleTestname) {
     if (szTestName.find("[") != std::string::npos) {
       size_t nFirstBracket = szTestName.find("[");
       size_t nLastBracket = szTestName.find("]");
-      if ((nFirstBracket != std::string::npos) &&
-          (nLastBracket != std::string::npos) &&
+      if ((nFirstBracket != std::string::npos) && (nLastBracket != std::string::npos) &&
           (nLastBracket > nFirstBracket)) {
         szTestName = szTestName.substr(0, nFirstBracket);
       }
@@ -1287,8 +1252,7 @@ void App::GetTestIndexList(TestIndexList& testIndices, StringList& testList,
     if (szTestName.find("[") != std::string::npos) {
       size_t nFirstBracket = szTestName.find("[");
       size_t nLastBracket = szTestName.find("]");
-      if ((nFirstBracket != std::string::npos) &&
-          (nLastBracket != std::string::npos) &&
+      if ((nFirstBracket != std::string::npos) && (nLastBracket != std::string::npos) &&
           (nLastBracket > nFirstBracket)) {
         // Getting the string between the brackets '[' and ']'
         // The values can be one of the following:-
@@ -1297,20 +1261,17 @@ void App::GetTestIndexList(TestIndexList& testIndices, StringList& testList,
         // [-b] - Run tests from subtest 0 to subtest b
         // a and b are indices of the tests to run
 
-        std::string nIndexString = szTestName.substr(
-            nFirstBracket + 1, nLastBracket - nFirstBracket - 1);
+        std::string nIndexString =
+            szTestName.substr(nFirstBracket + 1, nLastBracket - nFirstBracket - 1);
         size_t nIntermediateHyphen = szTestName.find("-");
-        if ((nIntermediateHyphen != std::string::npos) &&
-            (nIntermediateHyphen < nLastBracket) &&
+        if ((nIntermediateHyphen != std::string::npos) && (nIntermediateHyphen < nLastBracket) &&
             (nIntermediateHyphen > nFirstBracket)) {
           // Getting the start index
           if ((nIntermediateHyphen - 1) == nFirstBracket) {
             nIndex.startIndex = 0;
           } else {
             nIndex.startIndex =
-                atoi(szTestName
-                         .substr(nFirstBracket + 1,
-                                 nIntermediateHyphen - nFirstBracket - 1)
+                atoi(szTestName.substr(nFirstBracket + 1, nIntermediateHyphen - nFirstBracket - 1)
                          .c_str());
           }
 
@@ -1318,17 +1279,13 @@ void App::GetTestIndexList(TestIndexList& testIndices, StringList& testList,
           if ((nIntermediateHyphen + 1) == nLastBracket) {
             nIndex.endIndex = maxIndex;
           } else {
-            nIndex.endIndex =
-                atoi(szTestName
-                         .substr(nIntermediateHyphen + 1,
-                                 nLastBracket - nIntermediateHyphen - 1)
-                         .c_str());
+            nIndex.endIndex = atoi(
+                szTestName.substr(nIntermediateHyphen + 1, nLastBracket - nIntermediateHyphen - 1)
+                    .c_str());
           }
         } else {
-          nIndex.startIndex = atoi(
-              szTestName
-                  .substr(nFirstBracket + 1, nLastBracket - nFirstBracket - 1)
-                  .c_str());
+          nIndex.startIndex =
+              atoi(szTestName.substr(nFirstBracket + 1, nLastBracket - nFirstBracket - 1).c_str());
           nIndex.endIndex = nIndex.startIndex;
         }
       }
@@ -1349,8 +1306,7 @@ void App::GetTestIndexList(TestIndexList& testIndices, StringList& testList,
         if (i <= maxIndex) {
           testIndices.push_back(i);
         } else {
-          oclTestLog(OCLTEST_LOG_ALWAYS,
-                     "Error: Invalid test index for subtest: %s!\n",
+          oclTestLog(OCLTEST_LOG_ALWAYS, "Error: Invalid test index for subtest: %s!\n",
                      szModuleTestname);
         }
       }
@@ -1362,14 +1318,11 @@ void App::GetTestIndexList(TestIndexList& testIndices, StringList& testList,
   }
 }
 
-void App::PruneTestIndexList(TestIndexList& testIndices,
-                             TestIndexList& avoidIndices,
+void App::PruneTestIndexList(TestIndexList& testIndices, TestIndexList& avoidIndices,
                              TestIndexList& erasedIndices) {
-  for (TestIndexList::iterator it = testIndices.begin();
-       it != testIndices.end();) {
+  for (TestIndexList::iterator it = testIndices.begin(); it != testIndices.end();) {
     unsigned int index = *it;
-    TestIndexList::iterator result =
-        std::find(avoidIndices.begin(), avoidIndices.end(), index);
+    TestIndexList::iterator result = std::find(avoidIndices.begin(), avoidIndices.end(), index);
     if (result != avoidIndices.end()) {
       it = testIndices.erase(it);
       erasedIndices.push_back(index);
@@ -1405,32 +1358,21 @@ void App::ScanForTests() {
       mod.name = m_paths[i];
 
 #ifdef _WIN32
-      mod.get_count = (TestCountFuncPtr)GetProcAddress(mod.hmodule,
-                                                       "OCLTestList_TestCount");
-      mod.get_name =
-          (TestNameFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_TestName");
-      mod.create_test = (CreateTestFuncPtr)GetProcAddress(
-          mod.hmodule, "OCLTestList_CreateTest");
-      mod.destroy_test = (DestroyTestFuncPtr)GetProcAddress(
-          mod.hmodule, "OCLTestList_DestroyTest");
-      mod.get_version = (TestVersionFuncPtr)GetProcAddress(
-          mod.hmodule, "OCLTestList_TestLibVersion");
-      mod.get_libname = (TestLibNameFuncPtr)GetProcAddress(
-          mod.hmodule, "OCLTestList_TestLibName");
+      mod.get_count = (TestCountFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_TestCount");
+      mod.get_name = (TestNameFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_TestName");
+      mod.create_test = (CreateTestFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_CreateTest");
+      mod.destroy_test = (DestroyTestFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_DestroyTest");
+      mod.get_version =
+          (TestVersionFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_TestLibVersion");
+      mod.get_libname = (TestLibNameFuncPtr)GetProcAddress(mod.hmodule, "OCLTestList_TestLibName");
 #endif
 #ifdef __linux__
-      mod.get_count =
-          (TestCountFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestCount");
-      mod.get_name =
-          (TestNameFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestName");
-      mod.create_test =
-          (CreateTestFuncPtr)dlsym(mod.hmodule, "OCLTestList_CreateTest");
-      mod.destroy_test =
-          (DestroyTestFuncPtr)dlsym(mod.hmodule, "OCLTestList_DestroyTest");
-      mod.get_version =
-          (TestVersionFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestLibVersion");
-      mod.get_libname =
-          (TestLibNameFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestLibName");
+      mod.get_count = (TestCountFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestCount");
+      mod.get_name = (TestNameFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestName");
+      mod.create_test = (CreateTestFuncPtr)dlsym(mod.hmodule, "OCLTestList_CreateTest");
+      mod.destroy_test = (DestroyTestFuncPtr)dlsym(mod.hmodule, "OCLTestList_DestroyTest");
+      mod.get_version = (TestVersionFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestLibVersion");
+      mod.get_libname = (TestLibNameFuncPtr)dlsym(mod.hmodule, "OCLTestList_TestLibName");
 #endif
       mod.cached_test = new OCLTest*[mod.get_count()];
       for (int x = 0, y = mod.get_count(); x < y; ++x) {
@@ -1554,9 +1496,8 @@ static void dumpTraceBack(CONTEXT& context) {
 
   if (SymInitialize(process, NULL, true)) {
     while ((depth < MAX_DEPTH_PER_NODE) &&
-           StackWalk64(IMAGE_FILE_MACHINE_I386, process, GetCurrentThread(),
-                       &stackframe, &context, NULL, SymFunctionTableAccess64,
-                       SymGetModuleBase64, NULL)) {
+           StackWalk64(IMAGE_FILE_MACHINE_I386, process, GetCurrentThread(), &stackframe, &context,
+                       NULL, SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
       if (stackframe.AddrPC.Offset != 0) {
         //
         //  we don't want to evaluate the names/lines yet
@@ -1599,9 +1540,8 @@ static void dumpTraceBack(CONTEXT& context) {
 
   int j = 0;
   while (j < MAX_DEPTH_PER_NODE && info.stack[j].addr != 0) {
-    oclTestLog(OCLTEST_LOG_ALWAYS, "        %s()+%d (0x%.8x)  %s:%d\n",
-               info.stack[j].symbol, info.stack[j].disp, info.stack[j].addr,
-               info.stack[j].file, info.stack[j].line);
+    oclTestLog(OCLTEST_LOG_ALWAYS, "        %s()+%d (0x%.8x)  %s:%d\n", info.stack[j].symbol,
+               info.stack[j].disp, info.stack[j].addr, info.stack[j].file, info.stack[j].line);
 
     j++;
   }

@@ -39,8 +39,7 @@ enum oclLoggingLevel {
   OCLTEST_LOG_VERBOSE,
 };
 
-extern DLLIMPORT void oclTestLog(oclLoggingLevel logLevel, const char* fmt,
-                                 ...);
+extern DLLIMPORT void oclTestLog(oclLoggingLevel logLevel, const char* fmt, ...);
 extern DLLIMPORT void oclTestSetLogLevel(int level);
 extern DLLIMPORT void oclTestEnableLogToFile(const char* filename);
 

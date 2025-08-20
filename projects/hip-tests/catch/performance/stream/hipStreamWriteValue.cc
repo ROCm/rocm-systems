@@ -123,6 +123,6 @@ TEST_CASE("Performance_hipStreamWriteValue64") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

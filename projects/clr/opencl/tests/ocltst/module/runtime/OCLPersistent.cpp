@@ -44,16 +44,14 @@ void OCLPersistent::open(unsigned int test, char* units, double& conversion,
   if (_errorFlag) return;
 
   // Build the kernel
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed!");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -71,9 +69,8 @@ void OCLPersistent::open(unsigned int test, char* units, double& conversion,
   desc.image_depth = 1;
   desc.image_array_size = 1;
   // CL_MEM_USE_PERSISTENT_MEM_AMD
-  clImage_ =
-      clCreateImage(context_, CL_MEM_USE_PERSISTENT_MEM_AMD | CL_MEM_WRITE_ONLY,
-                    &format, &desc, NULL, &error_);
+  clImage_ = clCreateImage(context_, CL_MEM_USE_PERSISTENT_MEM_AMD | CL_MEM_WRITE_ONLY, &format,
+                           &desc, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateImage() failed");
 }
 
@@ -86,31 +83,29 @@ void OCLPersistent::run(void) {
   size_t region[] = {c_dimSize, c_dimSize, 1};
   size_t pitch, slice;
   cl_event event;
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmdQueues_[_deviceId], kernel_, 2, NULL, dimSizes, NULL, 0, NULL, NULL);
-  error_ = _wrapper->clEnqueueMarkerWithWaitList(cmdQueues_[_deviceId], 0, NULL,
-                                                 &event);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, dimSizes, NULL,
+                                            0, NULL, NULL);
+  error_ = _wrapper->clEnqueueMarkerWithWaitList(cmdQueues_[_deviceId], 0, NULL, &event);
 
   _wrapper->clFlush(cmdQueues_[_deviceId]);
 
   cl_uint status;
-  _wrapper->clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS,
-                           sizeof(cl_uint), &status, NULL);
+  _wrapper->clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(cl_uint), &status,
+                           NULL);
   while (status != CL_COMPLETE) {
-    _wrapper->clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS,
-                             sizeof(cl_uint), &status, NULL);
+    _wrapper->clGetEventInfo(event, CL_EVENT_COMMAND_EXECUTION_STATUS, sizeof(cl_uint), &status,
+                             NULL);
   }
 
   unsigned int* image = (unsigned int*)_wrapper->clEnqueueMapImage(
-      cmdQueues_[_deviceId], clImage_, CL_TRUE, CL_MAP_READ, origin, region,
-      &pitch, &slice, 0, NULL, NULL, &error_);
+      cmdQueues_[_deviceId], clImage_, CL_TRUE, CL_MAP_READ, origin, region, &pitch, &slice, 0,
+      NULL, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapImage() failed");
 
   bool result = validateImage(image, pitch, c_dimSize);
   CHECK_RESULT(!result, "Validation failed!");
 
-  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], clImage_, image, 0,
-                                    NULL, NULL);
+  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], clImage_, image, 0, NULL, NULL);
 }
 
 unsigned int OCLPersistent::close(void) {
@@ -119,15 +114,14 @@ unsigned int OCLPersistent::close(void) {
   return OCLTestImp::close();
 }
 
-bool OCLPersistent::validateImage(unsigned int* image, size_t pitch,
-                                  unsigned int dimSize) {
+bool OCLPersistent::validateImage(unsigned int* image, size_t pitch, unsigned int dimSize) {
   unsigned int x, y;
   int idx = 0;
   for (y = 0; y < dimSize; y++) {
     for (x = 0; x < dimSize; x++) {
       if ((image[idx] != x) || (image[idx + 1] != y)) {
-        printf("Failed at coordinate (%5d, %5d) - R:%d, G:%d value\n", x, y,
-               image[idx], image[idx + 1]);
+        printf("Failed at coordinate (%5d, %5d) - R:%d, G:%d value\n", x, y, image[idx],
+               image[idx + 1]);
         return false;
       }
       idx += 2;

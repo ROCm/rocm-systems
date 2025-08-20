@@ -30,22 +30,20 @@ THE SOFTWARE.
  * returns the name of passed function pointer on desired stream
  */
 
-__global__ void test_kernel() {
-  return;
-}
+__global__ void test_kernel() { return; }
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Creates new stream and a function pointer
  *  - Verifies that valid API name is returned
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipKernelNameRefByPtr.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
- *  - Platform specific (AMD) 
+ *  - Platform specific (AMD)
  */
 TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
   const void* kernel_ptr{reinterpret_cast<const void*>(&test_kernel)};
@@ -56,14 +54,14 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Positive_Basic") {
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Passes `nullptr` stream while function pointer is valid
  *  - Verifies that the returned value is not `nullptr`
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipKernelNameRefByPtr.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
@@ -76,17 +74,17 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_StreamNullptr") {
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Performs validation when the function pointer is `nullptr`
  *    -# When stream is `nullptr`
  *      - Expected output: return `nullptr`
  *    -# When stream is valid
  *      - Expected output: return `nullptr`
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipKernelNameRefByPtr.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
@@ -105,6 +103,6 @@ TEST_CASE("Unit_hipKernelNameRefByPtr_Negative_KernelNullptr") {
 }
 
 /**
-* End doxygen group CallbackTest.
-* @}
-*/
+ * End doxygen group CallbackTest.
+ * @}
+ */

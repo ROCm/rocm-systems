@@ -52,7 +52,7 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeElementType", "", char, unsigned
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
 #if HT_NVIDIA
-  (void)hipGetLastError(); // Prevent negative tests affecting this
+  (void)hipGetLastError();  // Prevent negative tests affecting this
 #endif
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 4, 2);
@@ -188,6 +188,6 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeNormalizedFloat", "", char, unsi
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */
