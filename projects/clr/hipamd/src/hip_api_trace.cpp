@@ -527,6 +527,7 @@ hipError_t hipMipmappedArrayGetLevel(hipArray_t* pLevelArray, hipMipmappedArray_
                                      unsigned int level);
 hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, const char* kname);
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+hipError_t hipModuleGetLoadingMode(hipModuleLoadingMode_t* mode);
 hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod,
                               const char* name);
 hipError_t hipModuleGetTexRef(textureReference** texRef, hipModule_t hmod, const char* name);
@@ -1222,6 +1223,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMipmappedArrayGetLevel_fn = hip::hipMipmappedArrayGetLevel;
   ptrDispatchTable->hipModuleGetFunction_fn = hip::hipModuleGetFunction;
   ptrDispatchTable->hipModuleGetFunctionCount_fn = hip::hipModuleGetFunctionCount;
+  ptrDispatchTable->hipModuleGetLoadingMode_fn = hip::hipModuleGetLoadingMode;
   ptrDispatchTable->hipModuleGetGlobal_fn = hip::hipModuleGetGlobal;
   ptrDispatchTable->hipModuleGetTexRef_fn = hip::hipModuleGetTexRef;
   ptrDispatchTable->hipModuleLaunchCooperativeKernel_fn = hip::hipModuleLaunchCooperativeKernel;
@@ -2088,13 +2090,15 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 16
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamCopyAttributes_fn, 501);
+HIP_ENFORCE_ABI(HipDispatchTable, hipModuleGetLoadingMode_fn, 502);
+
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 502)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 503)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 16,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "

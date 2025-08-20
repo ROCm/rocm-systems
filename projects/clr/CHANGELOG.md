@@ -40,6 +40,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipLibraryUnload`        Unload library
     - `hipLibraryGetKernel`     Get a kernel from library
     - `hipLibraryGetKernelCount` Get kernel count in library
+    - `hipModuleGetLoadingMode` returns the module loading mode - HIP_MODULE_EAGER_LOADING or HIP_MODULE_LAZY_LOADING.
 * Changed HIP APIs
     - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
     - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from

@@ -28,6 +28,7 @@
 
 #include <unordered_map>
 #include <mutex>
+#include <string.h>
 
 namespace hip {
 constexpr unsigned __hipFatMAGIC2 = 0x48495046;  // "HIPF"
@@ -1058,6 +1059,17 @@ void* PlatformState::getDynamicLibraryHandle() {
 void PlatformState::setDynamicLibraryHandle(void* handle) {
   amd::ScopedLock lock(lock_);
   dynamicLibraryHandle_ = handle;
+}
+
+void PlatformState::getLoadingMode(hipModuleLoadingMode_t* mode) {
+  *mode = HIP_MODULE_LAZY_LOADING;
+  std::string mod_loading_mode;
+  if (!flagIsDefault(HIP_MODULE_LOADING)) {
+      mod_loading_mode = HIP_MODULE_LOADING;
+  }
+  if (mod_loading_mode == "EAGER" || mod_loading_mode == "eager") {
+    *mode = HIP_MODULE_EAGER_LOADING;
+  }
 }
 
 }  // namespace hip

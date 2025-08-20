@@ -627,6 +627,7 @@ global:
     hipMemPrefetchAsync_v2;
     hipMemAdvise_v2;
     hipStreamGetId;
+    hipModuleGetLoadingMode;
 local:
     *;
 } hip_6.5;

@@ -112,6 +112,7 @@ class PlatformState {
   bool CloseUniqueFileHandle(const std::shared_ptr<UniqueFD>& ufd);
 
   size_t UfdMapSize() const { return ufd_map_.size(); }
+  void getLoadingMode(hipModuleLoadingMode_t* mode);
 
   inline bool RegisterLibraryFunction(const hipKernel_t f) {
     amd::ScopedLock lock(lock_);
