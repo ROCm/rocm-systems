@@ -21,43 +21,25 @@
 // SOFTWARE.
 
 #pragma once
-
-#include <cstddef>
-#include <cstdint>
+#include "sample_type.hpp"
+#include <array>
 #include <string>
-
-#if ROCPROFSYS_USE_ROCM > 0
-#    include <amd_smi/amdsmi.h>
-#    include <rocprofiler-sdk/agent.h>
-#endif
+#include <timemory/units.hpp>
+#include <unistd.h>
 
 namespace rocprofsys
 {
-
-enum class agent_type : uint8_t
+namespace trace_cache
 {
-    CPU,  ///< Agent type is a CPU
-    GPU   ///< Agent type is a GPU
-};
+constexpr size_t buffer_size     = 100 * tim::units::megabyte;
+constexpr size_t flush_threshold = 80 * tim::units::megabyte;
+const auto       filename = "/tmp/buffered_storage_" + std::to_string(getpid()) + ".bin";
 
-struct agent
-{
-    agent_type  type;
-    uint64_t    handle;
-    uint64_t    device_id;
-    uint32_t    node_id;
-    int32_t     logical_node_id;
-    int32_t     logical_node_type_id;
-    std::string name;
-    std::string model_name;
-    std::string vendor_name;
-    std::string product_name;
+constexpr size_t minimal_fragmented_memory_size = sizeof(entry_type) + sizeof(size_t);
+using buffer_array_t                            = std::array<uint8_t, buffer_size>;
 
-    size_t device_type_index{ 0 };
-    size_t base_id{ 0 };
-#if ROCPROFSYS_USE_ROCM > 0
-    amdsmi_processor_handle smi_handle = nullptr;
-#endif
-};
+constexpr auto ABSOLUTE   = "ABS";
+constexpr auto PERCENTAGE = "%";
 
+}  // namespace trace_cache
 }  // namespace rocprofsys
