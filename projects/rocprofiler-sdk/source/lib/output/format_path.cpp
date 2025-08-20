@@ -52,6 +52,8 @@
 #include <string_view>
 #include <vector>
 
+#include <regex>
+
 namespace rocprofiler
 {
 namespace tool
@@ -60,8 +62,8 @@ namespace
 {
 const auto env_regexes =
     new std::array<std::string, 3>{std::string{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                  std::string{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
-                                  std::string{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+                                   std::string{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
+                                   std::string{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
 // env regex examples:
 //  - %env{USER}%       Consistent with other output key formats (start+end with %)
 //  - $ENV{USER}        Similar to CMake
@@ -123,6 +125,8 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
                 auto _beg        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1");
                 auto _end        = rocprofiler::common::regex::regex_replace(_fpath, _re, "$4");
                 _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
+                std::cout << "DEBUG: FPATH-1: " << _fpath << "\n\tVAR: " << _var << "\n\tVAL: "
+                          << _val << "\n\tBEG: " << _beg << "\n\tEND: " << _end << "\n";
             }
         }
     } catch(std::exception& _e)
@@ -134,9 +138,12 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     // remove %arg<N>% where N >= argc
     try
     {
-        auto _re = std::string{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
+        auto   _re = std::string{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
         while(rocprofiler::common::regex::regex_search(_fpath, _re))
+        {
             _fpath = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1$6");
+            std::cout << "DEBUG: FPATH-2: " << _fpath << "\n";
+        }
     } catch(std::exception& _e)
     {
         ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()

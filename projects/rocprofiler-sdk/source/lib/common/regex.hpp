@@ -28,31 +28,27 @@
  *
  * Namespace: rocprofiler::common::regex
  *
- * Implements:
- *   - regex_match   (whole string must match)
- *   - regex_search  (find first substring match)
- *   - regex_replace (replace matches with replacement text)
+ * Implemented APIs:
+ *   bool        regex_match(std::string_view text, std::string_view pattern)
+ *   bool        regex_search(std::string_view text, std::string_view pattern)
+ *   bool        regex_search(std::string_view text, std::string_view pattern,
+ *                            size_t& begin, size_t& end)
+ *   std::string regex_replace(std::string_view text, std::string_view pattern,
+ *                             std::string_view replacement)
  *
- * ## Supported Regex Syntax
+ * Supported regex syntax:
+ *   Literals/escapes (\n \t \\), ., ^, $, (), |,
+ *   character classes [..], ranges, [^..], \d \D \w \W \s \S,
+ *   quantifiers *, +, ?, {m}, {m,}, {m,n} with lazy forms (*? +? ?? {m,n}?).
  *
- * - Literals, escapes (\n, \t, \\)
- * - Character classes: [abc], ranges [a-z], negation [^], shorthands \d \D \w \W \s \S
- * - Dot (.)
- * - Anchors ^ and $
- * - Grouping ( … )
- * - Alternation |
- * - Quantifiers: *, +, ?, {m}, {m,}, {m,n}, with greedy/lazy variants (*?, +?, ??, {m,n}?)
- *
- * ## regex_replace Replacement Tokens
- *
- * - `$&` : whole match
- * - ``$`` : text before the match
- * - `$'` : text after the match
- * - (captures not supported yet; can be added later)
+ * Replacement tokens in regex_replace:
+ *   $0 or $& : whole match
+ *   $1..$99  : capture groups
+ *   $`       : prefix (text before the match)
+ *   $'       : suffix (text after the match)
  */
 
 #pragma once
-#include <cassert>
 #include <cctype>
 #include <functional>
 #include <limits>
@@ -62,6 +58,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace rocprofiler
@@ -71,9 +68,7 @@ namespace common
 namespace regex
 {
 
-// ================================================================
-// AST for regex
-// ================================================================
+// =============================== AST ===============================
 
 struct Node
 {
@@ -86,7 +81,8 @@ struct Node
         ANCHOR_EOL,
         SEQ,
         ALT,
-        QUANT
+        QUANT,
+        CAP
     } kind;
     char ch = 0;
 
@@ -94,9 +90,9 @@ struct Node
     {
         std::function<bool(unsigned char)> pred;
     };
-    std::optional<Class> cls;
+    std::optional<Class> cls;  // for CLASS
 
-    std::vector<Node> children;
+    std::vector<Node> children;  // for SEQ/ALT
 
     struct Quant
     {
@@ -104,25 +100,24 @@ struct Node
         size_t                min = 0, max = std::numeric_limits<size_t>::max();
         bool                  greedy = true;
     };
-    std::unique_ptr<Quant> quant;
+    std::unique_ptr<Quant> quant;  // for QUANT
 
-    Node(Kind k)
+    int                   cap_index = -1;  // for CAP (1..N)
+    std::unique_ptr<Node> cap_sub;         // for CAP
+
+    // Ctors / simple factories
+    explicit Node(Kind k)
     : kind(k)
     {}
-    Node(char c)
+    explicit Node(char c)
     : kind(LITERAL)
     , ch(c)
     {}
+
     static Node dot() { return Node(DOT); }
-    // renamed from 'cls' to avoid clash with data member 'cls'
-    static Node make_class(std::function<bool(unsigned char)> p)
-    {
-        Node n(CLASS);
-        n.cls = Class{std::move(p)};
-        return n;
-    }
     static Node bol() { return Node(ANCHOR_BOL); }
     static Node eol() { return Node(ANCHOR_EOL); }
+
     static Node seq(std::vector<Node> v)
     {
         Node n(SEQ);
@@ -135,7 +130,14 @@ struct Node
         n.children = std::move(v);
         return n;
     }
-    // renamed from 'quant' to avoid clash with data member 'quant'
+
+    // renamed to avoid member name collisions
+    static Node make_class(std::function<bool(unsigned char)> p)
+    {
+        Node n(CLASS);
+        n.cls = Class{std::move(p)};
+        return n;
+    }
     static Node make_quant(Node sub, size_t mi, size_t ma, bool greedy)
     {
         Node n(QUANT);
@@ -146,16 +148,23 @@ struct Node
         n.quant->greedy = greedy;
         return n;
     }
+    static Node make_cap(int idx, Node sub)
+    {
+        Node n(CAP);
+        n.cap_index = idx;
+        n.cap_sub   = std::make_unique<Node>(std::move(sub));
+        return n;
+    }
 };
 
-// ================================================================
-// Parser
-// ================================================================
+// ============================= Parser ==============================
 
 struct Parser
 {
     std::string_view pat;
-    size_t           i = 0;
+    size_t           i              = 0;
+    int              next_cap_index = 1;
+
     explicit Parser(std::string_view p)
     : pat(p)
     {}
@@ -181,17 +190,16 @@ struct Parser
         get();
         char e = get();
         if(e == '\0') return Node('\\');
-        auto make_class = [&](auto p) { return Node::make_class(std::move(p)); };
+        auto make_cls = [&](auto p) { return Node::make_class(std::move(p)); };
         switch(e)
         {
-            case 'd': return make_class([](unsigned char x) { return std::isdigit(x) != 0; });
-            case 'D': return make_class([](unsigned char x) { return std::isdigit(x) == 0; });
-            case 'w':
-                return make_class([](unsigned char x) { return std::isalnum(x) || x == '_'; });
+            case 'd': return make_cls([](unsigned char x) { return std::isdigit(x) != 0; });
+            case 'D': return make_cls([](unsigned char x) { return std::isdigit(x) == 0; });
+            case 'w': return make_cls([](unsigned char x) { return std::isalnum(x) || x == '_'; });
             case 'W':
-                return make_class([](unsigned char x) { return !(std::isalnum(x) || x == '_'); });
-            case 's': return make_class([](unsigned char x) { return std::isspace(x) != 0; });
-            case 'S': return make_class([](unsigned char x) { return std::isspace(x) == 0; });
+                return make_cls([](unsigned char x) { return !(std::isalnum(x) || x == '_'); });
+            case 's': return make_cls([](unsigned char x) { return std::isspace(x) != 0; });
+            case 'S': return make_cls([](unsigned char x) { return std::isspace(x) == 0; });
             case 'n': return Node('\n');
             case 't': return Node('\t');
             case 'r': return Node('\r');
@@ -263,6 +271,7 @@ struct Parser
         }
         if(has_prev) add_char(prev);
         if(!eat(']')) throw std::runtime_error("Unterminated character class");
+
         auto rs       = std::move(ranges);
         auto ss       = std::move(singles);
         auto specials = std::move(special_preds);
@@ -377,9 +386,9 @@ struct Parser
         if(c == '(')
         {
             get();
-            Node n = parse_alt();
+            Node inner = parse_alt();
             if(!eat(')')) throw std::runtime_error("Unmatched '('");
-            return n;
+            return Node::make_cap(next_cap_index++, std::move(inner));
         }
         if(c == '\\') return parse_escape_in_atom();
         get();
@@ -397,13 +406,15 @@ struct Parser
         {
             if(eat('*'))
             {
-                Node q = Node::make_quant(std::move(atom), 0, std::numeric_limits<size_t>::max(), true);
+                Node q =
+                    Node::make_quant(std::move(atom), 0, std::numeric_limits<size_t>::max(), true);
                 apply_lazy(q);
                 return q;
             }
             if(eat('+'))
             {
-                Node q = Node::make_quant(std::move(atom), 1, std::numeric_limits<size_t>::max(), true);
+                Node q =
+                    Node::make_quant(std::move(atom), 1, std::numeric_limits<size_t>::max(), true);
                 apply_lazy(q);
                 return q;
             }
@@ -431,9 +442,9 @@ struct Parser
         {
             char c = peek();
             if(c == ')' || c == '|') break;
-            v.push_back(parse_atom_with_quant());
+            v.push_back(parse_atom_with_quant());  // move from temporary
         }
-        if(v.empty()) return Node::seq(std::vector<Node>{});
+        if(v.empty()) return Node::seq(std::move(v));
         if(v.size() == 1) return std::move(v[0]);
         return Node::seq(std::move(v));
     }
@@ -456,14 +467,13 @@ struct Parser
     }
 };
 
-// ================================================================
-// Matcher
-// ================================================================
+// ============================= Matchers ============================
 
-struct Matcher
+struct FastMatcher
 {
     const Node&      root;
     std::string_view s;
+
     struct Key
     {
         const Node* node;
@@ -479,7 +489,7 @@ struct Matcher
     };
     std::unordered_map<Key, std::optional<size_t>, KeyHash> memo;
 
-    Matcher(const Node& r, std::string_view sv)
+    FastMatcher(const Node& r, std::string_view sv)
     : root(r)
     , s(sv)
     {}
@@ -491,6 +501,102 @@ struct Matcher
         auto r = match_impl(n, i);
         memo.emplace(k, r);
         return r;
+    }
+
+    // Try to match a sequence of nodes starting at index 'k' in 'children' from position 'pos'.
+    // Returns end position on success.
+    std::optional<size_t> match_seq_from(const std::vector<Node>& children, size_t k, size_t pos)
+    {
+        if(k == children.size()) return pos;
+
+        const Node& ch = children[k];
+
+        if(ch.kind != Node::QUANT)
+        {
+            // Special handling: CAP whose sub is a QUANT => backtrack across CAP boundary
+            if(ch.kind == Node::CAP && ch.cap_sub && ch.cap_sub->kind == Node::QUANT)
+            {
+                const auto& q = *ch.cap_sub->quant;
+
+                // Precompute repetition endpoints of the quantified subpattern
+                std::vector<size_t> ends;
+                ends.push_back(pos);  // 0 reps -> pos
+                size_t cur = pos, count = 0;
+                while(count < q.max)
+                {
+                    auto r = match(q.sub.get(), cur);
+                    if(!r) break;
+                    if(*r == cur) break;  // zero-length guard
+                    cur = *r;
+                    ++count;
+                    ends.push_back(cur);
+                    if(cur > s.size()) break;
+                }
+
+                if(q.greedy)
+                {
+                    for(size_t used = ends.size(); used-- > 0;)
+                    {
+                        if(used < q.min) continue;
+                        auto tail = match_seq_from(children, k + 1, ends[used]);
+                        if(tail) return tail;
+                    }
+                }
+                else
+                {
+                    for(size_t used = 0; used < ends.size(); ++used)
+                    {
+                        if(used < q.min) continue;
+                        auto tail = match_seq_from(children, k + 1, ends[used]);
+                        if(tail) return tail;
+                    }
+                }
+                return std::nullopt;
+            }
+
+            // Default (non-QUANT, non-CAP-with-QUANT) handling
+            auto r = match(&ch, pos);
+            if(!r) return std::nullopt;
+            return match_seq_from(children, k + 1, *r);
+        }
+
+        // QUANT with backtracking into the remainder of the SEQ
+        const auto& q = *ch.quant;
+
+        // Precompute repetition endpoints of the quantified subpattern
+        std::vector<size_t> ends;
+        ends.push_back(pos);  // 0 reps -> pos
+        size_t cur = pos, count = 0;
+        while(count < q.max)
+        {
+            auto r = match(q.sub.get(), cur);
+            if(!r) break;
+            if(*r == cur) break;  // zero-length guard
+            cur = *r;
+            ++count;
+            ends.push_back(cur);
+            if(cur > s.size()) break;
+        }
+
+        if(q.greedy)
+        {
+            for(size_t used = ends.size(); used-- > 0;)
+            {
+                if(used < q.min) continue;
+                auto tail = match_seq_from(children, k + 1, ends[used]);
+                if(tail) return tail;
+            }
+        }
+        else
+        {
+            for(size_t used = 0; used < ends.size(); ++used)
+            {
+                if(used < q.min) continue;
+                auto tail = match_seq_from(children, k + 1, ends[used]);
+                if(tail) return tail;
+            }
+        }
+        return std::nullopt;
     }
 
     std::optional<size_t> match_impl(const Node* n, size_t i)
@@ -524,14 +630,7 @@ struct Matcher
             }
             case Node::SEQ:
             {
-                size_t pos = i;
-                for(const auto& ch : n->children)
-                {
-                    auto r = match(&ch, pos);
-                    if(!r) return std::nullopt;
-                    pos = *r;
-                }
-                return pos;
+                return match_seq_from(n->children, 0, i);
             }
             case Node::ALT:
             {
@@ -544,9 +643,10 @@ struct Matcher
             }
             case Node::QUANT:
             {
+                // A bare QUANT (not inside a SEQ): return an acceptable end index.
                 const auto&         q = *n->quant;
                 std::vector<size_t> ends;
-                ends.push_back(i);
+                ends.push_back(i);  // 0 reps
                 size_t pos = i, count = 0;
                 while(count < q.max)
                 {
@@ -558,23 +658,25 @@ struct Matcher
                     ends.push_back(pos);
                     if(pos > s.size()) break;
                 }
+
+                // If no repetition count satisfies min, fail
+                if(ends.size() - 1 < q.min) return std::nullopt;
+
                 if(q.greedy)
                 {
-                    for(size_t k = ends.size(); k-- > 0;)
-                    {
-                        if(k < q.min) continue;
-                        return ends[k];
-                    }
+                    // choose the largest count that satisfies min..max
+                    return ends.back();
                 }
                 else
                 {
-                    for(size_t used = 0; used < ends.size(); ++used)
-                    {
-                        if(used < q.min) continue;
-                        return ends[used];
-                    }
+                    // choose the smallest count that satisfies min..max
+                    // ends is non-empty; ends.front() is 0 reps. Ensure min is satisfied.
+                    return ends[q.min];
                 }
-                return std::nullopt;
+            }
+            case Node::CAP:
+            {
+                return match(n->cap_sub.get(), i);  // fast path ignores recording
             }
         }
         return std::nullopt;
@@ -597,31 +699,311 @@ struct Matcher
     }
 };
 
-// ================================================================
-// Public APIs
-// ================================================================
+struct CaptureMatcher
+{
+    const Node&                            root;
+    std::string_view                       s;
+    std::vector<std::pair<size_t, size_t>> groups;  // [0]=whole
+
+    CaptureMatcher(const Node& r, std::string_view sv, int num_caps)
+    : root(r)
+    , s(sv)
+    , groups(static_cast<size_t>(num_caps) + 1, {std::string::npos, std::string::npos})
+    {}
+
+    bool run_from(size_t start)
+    {
+        auto end = match_node(&root, start);
+        if(!end) return false;
+        groups[0] = {start, *end};
+        return true;
+    }
+
+    std::optional<size_t> match_seq_from(const std::vector<Node>& children, size_t k, size_t pos)
+    {
+        if(k == children.size()) return pos;
+
+        const Node& ch = children[k];
+
+        if(ch.kind != Node::QUANT)
+        {
+            // CAP whose sub is a QUANT: backtrack across CAP and set the group span
+            if(ch.kind == Node::CAP && ch.cap_sub && ch.cap_sub->kind == Node::QUANT)
+            {
+                const auto& q = *ch.cap_sub->quant;
+
+                // Build repetition end ladder + capture snapshots for inner (nested) captures
+                std::vector<size_t> ends;
+                ends.push_back(pos);
+                std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
+                snaps.push_back(groups);
+
+                size_t cur = pos, count = 0;
+                while(count < q.max)
+                {
+                    auto saved = groups;
+                    auto r     = match_node(q.sub.get(), cur);
+                    if(!r)
+                    {
+                        groups = std::move(saved);
+                        break;
+                    }
+                    if(*r == cur)
+                    {
+                        groups = std::move(saved);
+                        break;
+                    }  // zero-length guard
+                    cur = *r;
+                    ++count;
+                    ends.push_back(cur);
+                    snaps.push_back(groups);
+                    if(cur > s.size()) break;
+                }
+
+                if(q.greedy)
+                {
+                    for(size_t used = ends.size(); used-- > 0;)
+                    {
+                        if(used < q.min) continue;
+                        groups               = snaps[used];        // restore inner captures
+                        groups[ch.cap_index] = {pos, ends[used]};  // set the CAP group span
+                        auto tail            = match_seq_from(children, k + 1, ends[used]);
+                        if(tail) return tail;
+                    }
+                }
+                else
+                {
+                    for(size_t used = 0; used < ends.size(); ++used)
+                    {
+                        if(used < q.min) continue;
+                        groups               = snaps[used];
+                        groups[ch.cap_index] = {pos, ends[used]};
+                        auto tail            = match_seq_from(children, k + 1, ends[used]);
+                        if(tail) return tail;
+                    }
+                }
+                return std::nullopt;
+            }
+
+            // Default handling
+            auto r = match_node(&ch, pos);
+            if(!r) return std::nullopt;
+            return match_seq_from(children, k + 1, *r);
+        }
+
+        const auto& q = *ch.quant;
+
+        // Build ladder of repetition end positions + capture snapshots
+        std::vector<size_t> ends;
+        ends.push_back(pos);
+        std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
+        snaps.push_back(groups);
+
+        size_t cur = pos, count = 0;
+        while(count < q.max)
+        {
+            auto saved = groups;
+            auto r     = match_node(q.sub.get(), cur);
+            if(!r)
+            {
+                groups = std::move(saved);
+                break;
+            }
+            if(*r == cur)
+            {
+                groups = std::move(saved);
+                break;
+            }  // zero-length guard
+            cur = *r;
+            ++count;
+            ends.push_back(cur);
+            snaps.push_back(groups);
+            if(cur > s.size()) break;
+        }
+
+        if(q.greedy)
+        {
+            for(size_t used = ends.size(); used-- > 0;)
+            {
+                if(used < q.min) continue;
+                groups    = snaps[used];
+                auto tail = match_seq_from(children, k + 1, ends[used]);
+                if(tail) return tail;
+            }
+        }
+        else
+        {
+            for(size_t used = 0; used < ends.size(); ++used)
+            {
+                if(used < q.min) continue;
+                groups    = snaps[used];
+                auto tail = match_seq_from(children, k + 1, ends[used]);
+                if(tail) return tail;
+            }
+        }
+        return std::nullopt;
+    }
+
+    std::optional<size_t> match_node(const Node* n, size_t i)
+    {
+        switch(n->kind)
+        {
+            case Node::LITERAL:
+            {
+                if(i < s.size() && (unsigned char) s[i] == (unsigned char) n->ch) return i + 1;
+                return std::nullopt;
+            }
+            case Node::DOT:
+            {
+                if(i < s.size()) return i + 1;
+                return std::nullopt;
+            }
+            case Node::CLASS:
+            {
+                if(i < s.size() && n->cls && n->cls->pred((unsigned char) s[i])) return i + 1;
+                return std::nullopt;
+            }
+            case Node::ANCHOR_BOL:
+            {
+                if(i == 0) return i;
+                return std::nullopt;
+            }
+            case Node::ANCHOR_EOL:
+            {
+                if(i == s.size()) return i;
+                return std::nullopt;
+            }
+            case Node::SEQ:
+            {
+                return match_seq_from(n->children, 0, i);
+            }
+            case Node::ALT:
+            {
+                for(const auto& br : n->children)
+                {
+                    auto saved = groups;
+                    auto r     = match_node(&br, i);
+                    if(r)
+                    {
+                        return r;
+                    }
+                    groups = std::move(saved);
+                }
+                return std::nullopt;
+            }
+            case Node::QUANT:
+                // Bare QUANT: pick an acceptable repetition count and return that end.
+                {
+                    const auto&         q = *n->quant;
+                    std::vector<size_t> ends;
+                    ends.push_back(i);
+                    std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
+                    snaps.push_back(groups);
+
+                    size_t pos = i, count = 0;
+                    while(count < q.max)
+                    {
+                        auto saved = groups;
+                        auto r     = match_node(q.sub.get(), pos);
+                        if(!r)
+                        {
+                            groups = std::move(saved);
+                            break;
+                        }
+                        if(*r == pos)
+                        {
+                            groups = std::move(saved);
+                            break;
+                        }
+                        pos = *r;
+                        ++count;
+                        ends.push_back(pos);
+                        snaps.push_back(groups);
+                        if(pos > s.size()) break;
+                    }
+
+                    if(q.greedy)
+                    {
+                        for(size_t k = ends.size(); k-- > 0;)
+                        {
+                            if(k < q.min) continue;
+                            groups = snaps[k];
+                            return ends[k];
+                        }
+                    }
+                    else
+                    {
+                        for(size_t used = 0; used < ends.size(); ++used)
+                        {
+                            if(used < q.min) continue;
+                            groups = snaps[used];
+                            return ends[used];
+                        }
+                    }
+                    return std::nullopt;
+                }
+            case Node::CAP:
+            {
+                size_t start_i = i;
+                auto   saved   = groups;
+                auto   r       = match_node(n->cap_sub.get(), i);
+                if(!r)
+                {
+                    groups = std::move(saved);
+                    return std::nullopt;
+                }
+                groups[n->cap_index] = {start_i, *r};
+                return r;
+            }
+        }
+        return std::nullopt;
+    }
+};
+
+static int
+count_captures(const Node& n)
+{
+    switch(n.kind)
+    {
+        case Node::CAP: return std::max(n.cap_index, count_captures(*n.cap_sub));
+        case Node::SEQ:
+        case Node::ALT:
+        {
+            int m = 0;
+            for(const auto& c : n.children)
+                m = std::max(m, count_captures(c));
+            return m;
+        }
+        case Node::QUANT: return count_captures(*n.quant->sub);
+        default: return 0;
+    }
+}
+
+// ============================ Public API ===========================
 
 inline bool
 regex_match(std::string_view text, std::string_view pattern)
 {
-    Parser  P(pattern);
-    Node    ast     = P.parse_all();
-    // Avoid initializer_list to prevent copying non-copyable Node
-    std::vector<Node> wrap_children;
-    wrap_children.push_back(Node::bol());
-    wrap_children.push_back(std::move(ast));
-    wrap_children.push_back(Node::eol());
-    Node    wrapped = Node::seq(std::move(wrap_children));
-    Matcher M(wrapped, text);
+    Parser P(pattern);
+    Node   ast = P.parse_all();
+
+    // Build ^ (ast) $
+    std::vector<Node> seq_nodes;
+    seq_nodes.emplace_back(Node::bol());
+    seq_nodes.emplace_back(std::move(ast));
+    seq_nodes.emplace_back(Node::eol());
+    Node wrapped = Node::seq(std::move(seq_nodes));
+
+    FastMatcher M(wrapped, text);
     return M.full_match();
 }
 
 inline bool
 regex_search(std::string_view text, std::string_view pattern)
 {
-    Parser  P(pattern);
-    Node    ast = P.parse_all();
-    Matcher M(ast, text);
+    Parser      P(pattern);
+    Node        ast = P.parse_all();
+    FastMatcher M(ast, text);
     return M.find_first().has_value();
 }
 
@@ -631,9 +1013,9 @@ regex_search(std::string_view text,
              size_t&          match_begin,
              size_t&          match_end)
 {
-    Parser  P(pattern);
-    Node    ast = P.parse_all();
-    Matcher M(ast, text);
+    Parser      P(pattern);
+    Node        ast = P.parse_all();
+    FastMatcher M(ast, text);
     if(auto r = M.find_first())
     {
         match_begin = r->first;
@@ -643,17 +1025,71 @@ regex_search(std::string_view text,
     return false;
 }
 
-/**
- * @brief Replace occurrences of pattern in text with replacement.
- *
- * Supports:
- *   - `$&` : whole match
- *   - ``$`` : prefix before the match
- *   - `$'` : suffix after the match
- *
- * Example:
- *   regex_replace("abc123xyz", "\\d+", "[$&]") -> "abc[123]xyz"
- */
+static std::string
+expand_replacement(std::string_view                              text,
+                   const std::vector<std::pair<size_t, size_t>>& groups,
+                   size_t                                        b,
+                   size_t                                        e,
+                   std::string_view                              repl)
+{
+    std::string out;
+    for(size_t i = 0; i < repl.size(); ++i)
+    {
+        char c = repl[i];
+        if(c == '$' && i + 1 < repl.size())
+        {
+            char n1 = repl[i + 1];
+
+            if(n1 == '`')
+            {
+                out.append(text.substr(0, b));
+                ++i;
+                continue;
+            }
+            if(n1 == '\'')
+            {
+                out.append(text.substr(e));
+                ++i;
+                continue;
+            }
+            if(n1 == '&')
+            {
+                out.append(text.substr(b, e - b));
+                ++i;
+                continue;
+            }
+            if(n1 == '0')
+            {
+                out.append(text.substr(b, e - b));
+                ++i;
+                continue;
+            }
+
+            if(std::isdigit(static_cast<unsigned char>(n1)))
+            {
+                int    idx = n1 - '0';
+                size_t j   = i + 2;
+                if(j < repl.size() && std::isdigit(static_cast<unsigned char>(repl[j])))
+                {
+                    idx = idx * 10 + (repl[j] - '0');
+                    ++j;
+                    if(idx > 99) idx = 99;
+                }
+                if(idx < static_cast<int>(groups.size()))
+                {
+                    auto [gb, ge] = groups[idx];
+                    if(gb != std::string::npos && ge != std::string::npos && ge >= gb)
+                        out.append(text.substr(gb, ge - gb));
+                }
+                i = (j - 1);
+                continue;
+            }
+        }
+        out.push_back(c);
+    }
+    return out;
+}
+
 inline std::string
 regex_replace(std::string_view text, std::string_view pattern, std::string_view replacement)
 {
@@ -662,53 +1098,36 @@ regex_replace(std::string_view text, std::string_view pattern, std::string_view 
 
     std::string result;
     size_t      search_start = 0;
+    int         num_caps     = count_captures(ast);
+
     while(search_start <= text.size())
     {
-        Matcher M(ast, text.substr(search_start));
-        if(auto r = M.find_first())
-        {
-            size_t b = search_start + r->first;
-            size_t e = search_start + r->second;
-
-            // append prefix
-            result.append(text.substr(search_start, b - search_start));
-
-            // expand replacement
-            for(size_t i = 0; i < replacement.size(); ++i)
-            {
-                if(replacement[i] == '$' && i + 1 < replacement.size())
-                {
-                    char nxt = replacement[i + 1];
-                    if(nxt == '&')
-                    {
-                        result.append(text.substr(b, e - b));
-                        ++i;
-                        continue;
-                    }
-                    if(nxt == '`')
-                    {
-                        result.append(text.substr(0, b));
-                        ++i;
-                        continue;
-                    }
-                    if(nxt == '\'')
-                    {
-                        result.append(text.substr(e));
-                        ++i;
-                        continue;
-                    }
-                }
-                result.push_back(replacement[i]);
-            }
-
-            search_start = e;
-        }
-        else
+        FastMatcher fast(ast, text.substr(search_start));
+        auto        found = fast.find_first();
+        if(!found)
         {
             result.append(text.substr(search_start));
             break;
         }
+        size_t b = search_start + found->first;
+        size_t e = search_start + found->second;
+
+        CaptureMatcher cap(ast, text, num_caps);
+        bool           ok = cap.run_from(b);
+
+        result.append(text.substr(search_start, b - search_start));
+        if(ok && !cap.groups.empty() && cap.groups[0].first == b)
+        {
+            result += expand_replacement(text, cap.groups, b, e, replacement);
+        }
+        else
+        {
+            std::vector<std::pair<size_t, size_t>> dummy(1, {b, e});
+            result += expand_replacement(text, dummy, b, e, replacement);
+        }
+        search_start = e;
     }
+
     return result;
 }
 
