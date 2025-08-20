@@ -27,6 +27,7 @@ set(common_headers
     logging.hpp
     md5sum.hpp
     mpl.hpp
+    regex.hpp
     scope_destructor.hpp
     sha256.hpp
     simple_timer.hpp
