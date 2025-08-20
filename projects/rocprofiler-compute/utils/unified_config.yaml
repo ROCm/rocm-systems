@@ -1258,29 +1258,29 @@ panels:
             pop: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($max_sclk / 1000) * 64) * TO_INT($total_l2_chan)))
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBandwidth
-            pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum -
-              TCC_EA_RDREQ_32B_sum) * 64)) / (End_Timestamp - Start_Timestamp))))
+            pop: ((100 * AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum -
+              TCC_EA0_RDREQ_32B_sum) * 64)) / (End_Timestamp - Start_Timestamp))))
               / $hbmBandwidth)
           L2-Fabric Write BW:
-            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBandwidth
-            pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum -
-              TCC_EA_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp))))
+            pop: ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum -
+              TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp))))
               / $hbmBandwidth)
           L2-Fabric Read Latency:
-            value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            value: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
             pop: None
           L2-Fabric Write Latency:
-            value: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            value: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: Cycles
             peak: None
@@ -1728,6 +1728,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -1865,6 +1866,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -1998,6 +2000,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -2131,6 +2134,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -2266,6 +2270,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -2403,6 +2408,7 @@ panels:
           IL1 Lat:
             value: ROUND((AVG(((SQ_ACCUM_PREV_HIRES / SQC_ICACHE_REQ) if (SQC_ICACHE_REQ
               != 0) else None)) * 100), 0)
+            coll_level: SQC_ICACHE_INFLIGHT_LEVEL
           IL1_L2 Rd:
             value: ROUND(AVG((SQC_TC_INST_REQ / $denom)), 0)
           L2 Rd:
@@ -2423,24 +2429,24 @@ panels:
               + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) if ((TCP_TCC_WRITE_REQ_sum +
               TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum) != 0) else None)), 0)
           Fabric_L2 Rd:
-            value: ROUND(AVG((TCC_EA_RDREQ_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
           Fabric_L2 Wr:
-            value: ROUND(AVG((TCC_EA_WRREQ_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_WRREQ_sum / $denom)), 0)
           Fabric_L2 Atomic:
-            value: ROUND(AVG((TCC_EA_ATOMIC_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_ATOMIC_sum / $denom)), 0)
           Fabric Rd Lat:
-            value: ROUND(AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            value: ROUND(AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else  0)), 0)
           Fabric Wr Lat:
-            value: ROUND(AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            value: ROUND(AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else  0)), 0)
           Fabric Atomic Lat:
-            value: ROUND(AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            value: ROUND(AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else  0)), 0)
           HBM Rd:
-            value: ROUND(AVG((TCC_EA_RDREQ_DRAM_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_RDREQ_DRAM_sum / $denom)), 0)
           HBM Wr:
-            value: ROUND(AVG((TCC_EA_WRREQ_DRAM_sum / $denom)), 0)
+            value: ROUND(AVG((TCC_EA0_WRREQ_DRAM_sum / $denom)), 0)
       comparable: false
       cli_style: mem_chart
       tui_style: mem_chart
@@ -2795,9 +2801,963 @@ panels:
 - id: 400
   title: Roofline
   data source:
-  - None:
+  - metric_table:
       id: 401
-      title: Roofline
+      title: Roofline Performance Rates
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+        peak: Peak (Empirical)
+      metric:
+        gfx90a:
+          VALU FLOPs:
+            value: AVG((($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_EA_RDREQ_32B_sum * 32) +
+              ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) +
+              (TCC_EA_WRREQ_64B_sum * 64) +
+              ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32)
+              ) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+        gfx908:
+          VALU FLOPs:
+            value: AVG((($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_BUBBLE_sum * 128) +
+              (TCC_EA0_RDREQ_32B_sum * 32) +
+              ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+              ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+              (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+        gfx940:
+          VALU FLOPs:
+            value: AVG(($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              ) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA FLOPs (F8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF8Flops_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_BUBBLE_sum * 128) +
+              (TCC_EA0_RDREQ_32B_sum * 32) +
+              ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+              ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+              (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+        gfx941:
+          VALU FLOPs:
+            value: AVG(($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              ) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA FLOPs (F8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF8Flops_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_BUBBLE_sum * 128) +
+              (TCC_EA0_RDREQ_32B_sum * 32) +
+              ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+              ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+              (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+        gfx942:
+          VALU FLOPs:
+            value: AVG((($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA FLOPs (F8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF8Flops_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_BUBBLE_sum * 128) +
+              (TCC_EA0_RDREQ_32B_sum * 32) +
+              ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+              ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+              (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+        gfx950:
+          VALU FLOPs:
+            value: AVG((($wave_size * (
+              (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+              (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+              (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+              )) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: (((($max_sclk * $cu_per_gpu) * 64) * 2) / 1000)
+          MFMA FLOPs (F64):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF64Flops_empirical_peak
+          MFMA FLOPs (F32):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF32Flops_empirical_peak
+          MFMA FLOPs (F16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF16Flops_empirical_peak
+          MFMA FLOPs (BF16):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMABF16Flops_empirical_peak
+          MFMA FLOPs (F8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMAF8Flops_empirical_peak
+          MFMA FLOPs (F6F4):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GFLOP/s
+            peak: $MFMA_FLOPs_F6F4_empirical_peak
+          MFMA IOPs (Int8):
+            value: AVG((((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GIOP/s
+            peak: $MFMAI8Ops_empirical_peak
+          HBM Bandwidth:
+            value: AVG(((
+              (TCC_BUBBLE_sum * 128) +
+              (TCC_EA0_RDREQ_32B_sum * 32) +
+              ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+              ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+              (TCC_EA0_WRREQ_64B_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $HBMBw_empirical_peak
+          L2 Cache Bandwidth:
+            value: AVG(((((TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) *
+              64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L2Bw_empirical_peak
+          L1 Cache Bandwidth:
+            value: AVG((((TCP_TOTAL_CACHE_ACCESSES_sum * 64)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $L1Bw_empirical_peak
+          LDS Bandwidth:
+            value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) *
+              4 * $lds_banks_per_cu)) / ((End_Timestamp - Start_Timestamp) / 1e9)) / 1e9)
+            unit: GB/s
+            peak: $LDSBw_empirical_peak
+  - metric_table:
+      id: 402
+      title: Roofline Plot Points
+      cli_style: Roofline
+      tui_style: Roofline
+      header:
+        metric: Metric
+        value: Value
+        unit: Unit
+      metric:
+        gfx90a:
+          AI HBM:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(
+                (TCC_EA_RDREQ_32B_sum * 32) +
+                ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) +
+                (TCC_EA_WRREQ_64B_sum * 64) +
+                ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32)
+              )
+              )
+            unit: FLOPs/Byte
+          AI L2:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(
+                (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+                TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64
+              )
+              )
+            unit: FLOPs/Byte
+          AI L1:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
+              )
+            unit: FLOPs/Byte
+          Performance GFLOPs:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+              ) / 1e9
+            unit: GFLOP/s
+        gfx908:
+          AI HBM:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(
+                (TCC_BUBBLE_sum * 128) +
+                (TCC_EA0_RDREQ_32B_sum * 32) +
+                ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+                ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+                (TCC_EA0_WRREQ_64B_sum * 64)
+              )
+              )
+            unit: FLOPs/Byte
+          AI L2:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(
+                (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+                TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64
+              )
+              )
+            unit: FLOPs/Byte
+          AI L1:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
+              )
+            unit: FLOPs/Byte
+          Performance GFLOPs:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512)
+              ) /
+              (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+              ) / 1e9
+            unit: GFLOP/s
+        gfx940:
+          AI HBM:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              SUM(
+                (TCC_BUBBLE_sum * 128) +
+                (TCC_EA0_RDREQ_32B_sum * 32) +
+                ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+                ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+                (TCC_EA0_WRREQ_64B_sum * 64)
+              )
+              )
+            unit: FLOPs/Byte
+          AI L2:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+              ) /
+              SUM(
+                (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+                TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64
+              )
+              )
+            unit: FLOPs/Byte
+          AI L1:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+              ) /
+              SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
+              )
+            unit: FLOPs/Byte
+          Performance GFLOPs:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+              ) / 1e9
+            unit: GFLOP/s
+        gfx941:
+          AI HBM:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              SUM(
+                (TCC_BUBBLE_sum * 128) +
+                (TCC_EA0_RDREQ_32B_sum * 32) +
+                ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+                ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+                (TCC_EA0_WRREQ_64B_sum * 64)
+              )
+              )
+            unit: FLOPs/Byte
+          AI L2:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              SUM(
+                (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+                TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64
+              )
+              )
+            unit: FLOPs/Byte
+          AI L1:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
+              )
+            unit: FLOPs/Byte
+          Performance GFLOPs:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512)
+              ) /
+              (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+              ) / 1e9
+            unit: GFLOP/s        
+        gfx942:
+          AI HBM:
+            value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+              + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+              + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+              + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+              + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+              (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+              512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
+              * 512) ) / SUM( (TCC_BUBBLE_sum * 128) + (TCC_EA0_RDREQ_32B_sum * 32)
+              + ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64)
+              + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) + (TCC_EA0_WRREQ_64B_sum
+              * 64) ) )
+            unit: FLOPs/Byte
+          AI L2:
+            value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+              + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+              + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+              + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+              + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+              (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+              512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
+              * 512) ) / SUM( (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+              TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64 ) )
+            unit: FLOPs/Byte
+          AI L1:
+            value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+              + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+              + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+              + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+              + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+              (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+              512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
+              * 512) ) / SUM( TCP_TOTAL_CACHE_ACCESSES_sum * 64 ) )
+            unit: FLOPs/Byte
+          Performance (GFLOPs):
+            value: ( SUM( ($wave_size * ( (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16
+              + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) + (SQ_INSTS_VALU_ADD_F32
+              + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32)
+              + (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64)
+              + SQ_INSTS_VALU_TRANS_F64) )) + (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+              (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F32 *
+              512) + (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) + (SQ_INSTS_VALU_MFMA_MOPS_F8
+              * 512) ) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) ) / 1e9
+            unit: GFLOP/s
+        gfx950:
+          AI HBM:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)
+              ) /
+              SUM(
+                (TCC_BUBBLE_sum * 128) +
+                (TCC_EA0_RDREQ_32B_sum * 32) +
+                ((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) * 64) +
+                ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) * 32) +
+                (TCC_EA0_WRREQ_64B_sum * 64)
+              )
+              )
+            unit: FLOPs/Byte
+          AI L2:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)
+              ) /
+              SUM(
+                (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum + 
+                TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum + TCP_TCC_READ_REQ_sum) * 64
+              )
+              )
+            unit: FLOPs/Byte
+          AI L1:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)
+              ) /
+              SUM(TCP_TOTAL_CACHE_ACCESSES_sum * 64)
+              )
+            unit: FLOPs/Byte
+          Performance GFLOPs:
+            value: (
+              SUM(
+                ($wave_size * (
+                  (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + (2 * SQ_INSTS_VALU_FMA_F16) + SQ_INSTS_VALU_TRANS_F16) +
+                  (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + (2 * SQ_INSTS_VALU_FMA_F32) + SQ_INSTS_VALU_TRANS_F32) +
+                  (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + (2 * SQ_INSTS_VALU_FMA_F64) + SQ_INSTS_VALU_TRANS_F64)
+                )) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F8 * 512) +
+                (SQ_INSTS_VALU_MFMA_MOPS_F6F4 * 512)
+              ) /
+              (SUM(End_Timestamp - Start_Timestamp) / 1e9)
+              ) / 1e9
+            unit: GFLOP/s
+  metrics_description:
+      VALU FLOPs:
+        plain: 'The total floating-point operations executed per second on the VALU.
+          This is also presented as a percent of the peak theoretical FLOPs achievable
+          on the specific accelerator. Note: this does not include any floating-point
+          operations from MFMA instructions.'
+        rst: 'The total floating-point operations executed per second on the :ref:`VALU
+          <desc-valu>`. This is also presented as a percent of the peak theoretical
+          FLOPs achievable on the specific accelerator. Note: this does not include
+          any floating-point operations from :ref:`MFMA <desc-mfma>` instructions.'
+        unit: GFLOPs
+      MFMA FLOPs (F8):
+        plain: The total number of 8-bit brain floating point MFMA operations executed
+          per second. This does not include any 16-bit brain floating point operations
+          from VALU instructions. The peak empirically measured F8 MFMA operations
+          achievable on the specific accelerator is displayed alongside for comparison.
+          It is supported on AMD Instinct MI300 series and later only.
+        rst: 'The total number of 8-bit brain floating point :ref:`MFMA <desc-mfma>`
+          operations executed per second. Note: this does not include any 16-bit brain
+          floating point operations from :ref:`VALU <desc-valu>` instructions. The
+          peak empirically measured F8 MFMA operations achievable on the specific
+          accelerator is displayed alongside for comparison. It is supported on AMD
+          Instinct MI300 series and later only.'
+        unit: GFLOPs
+      MFMA FLOPs (BF16):
+        plain: 'The total number of 16-bit brain floating point MFMA operations executed
+          per second. Note: this does not include any 16-bit brain floating point
+          operations from VALU instructions. The peak empirically measured BF16 MFMA
+          operations achievable on the specific accelerator is displayed alongside
+          for comparison.'
+        rst: 'The total number of 16-bit brain floating point :ref:`MFMA <desc-mfma>`
+          operations executed per second. Note: this does not include any 16-bit brain
+          floating point operations from :ref:`VALU <desc-valu>` instructions. The
+          peak empirically measured BF16 MFMA operations achievable on the specific
+          accelerator is displayed alongside for comparison.'
+        unit: GFLOPs
+      MFMA FLOPs (F16):
+        plain: 'The total number of 16-bit floating point MFMA operations executed per
+          second. Note: this does not include any 16-bit floating point operations from
+          VALU instructions. The peak empirically measured F16 MFMA operations
+          achievable on the specific accelerator is displayed alongside for comparison.'
+        rst: 'The total number of 16-bit floating point :ref:`MFMA <desc-mfma>` operations
+          executed per second. Note: this does not include any 16-bit floating point
+          operations from :ref:`VALU <desc-valu>` instructions. The peak empirically
+          measured F16 MFMA operations achievable on the specific accelerator is
+          displayed alongside for comparison.'
+        unit: GFLOPs
+      MFMA FLOPs (F32):
+        plain: 'The total number of 32-bit floating point MFMA operations executed per
+          second. Note: this does not include any 32-bit floating point operations from
+          VALU instructions. The peak empirically measured F32 MFMA operations
+          achievable on the specific accelerator is displayed alongside for comparison.'
+        rst: 'The total number of 32-bit floating point :ref:`MFMA <desc-mfma>` operations
+          executed per second. Note: this does not include any 32-bit floating point
+          operations from :ref:`VALU <desc-valu>` instructions. The peak empirically
+          measured F32 MFMA operations achievable on the specific accelerator is
+          displayed alongside for comparison.'
+        unit: GFLOPs
+      MFMA FLOPs (F64):
+        plain: 'The total number of 64-bit floating point MFMA operations executed per
+          second. Note: this does not include any 64-bit floating point operations from
+          VALU instructions. The peak empirically measured F64 MFMA operations
+          achievable on the specific accelerator is displayed alongside for comparison.'
+        rst: 'The total number of 64-bit floating point :ref:`MFMA <desc-mfma>` operations
+          executed per second. Note: this does not include any 64-bit floating point
+          operations from :ref:`VALU <desc-valu>` instructions. The peak empirically
+          measured F64 MFMA operations achievable on the specific accelerator is
+          displayed alongside for comparison.'
+        unit: GFLOPs
+      MFMA IOPs (Int8):
+        plain: 'The total number of 8-bit integer MFMA operations executed per second.
+          Note: this does not include any 8-bit integer operations from VALU instructions.
+          The peak empirically measured INT8 MFMA operations achievable on the specific
+          accelerator is displayed alongside for comparison.'
+        rst: 'The total number of 8-bit integer :ref:`MFMA <desc-mfma>` operations executed
+          per second. Note: this does not include any 8-bit integer operations from
+          :ref:`VALU <desc-valu>` instructions. The peak empirically measured INT8 MFMA
+          operations achievable on the specific accelerator is displayed alongside
+          for comparison.'
+        unit: GIOPs
+      HBM Bandwidth:
+        plain: 'The total number of bytes read from and written to High-Bandwidth
+            Memory (HBM) per second. The peak empirically measured bandwidth achievable
+            on the specific accelerator is displayed alongside for comparison.'
+        rst: 'The total number of bytes read from and written to High-Bandwidth
+            Memory (HBM) per second. The peak empirically measured bandwidth achievable
+            on the specific accelerator is displayed alongside for comparison.'
+        unit: GB/s
+      L2 Cache Bandwidth:
+        plain: The number of bytes looked up in the L2 cache per unit time. The number
+          of bytes is calculated as the number of cache lines requested multiplied by
+          the cache line size. This value does not consider partial requests, so e.g.,
+          if only a single value is requested in a cache line, the data movement will
+          still be counted as a full cache line. The peak empirically measured bandwidth
+          achievable on the specific accelerator is displayed alongside for comparison.
+        rst: The number of bytes looked up in the L2 cache per unit time. The number of
+          bytes is calculated as the number of cache lines requested multiplied by
+          the cache line size. This value does not consider partial requests, so e.g.,
+          if only a single value is requested in a cache line, the data movement will
+          still be counted as a full cache line. The peak empirically measured
+          bandwidth achievable on the specific accelerator is displayed alongside
+          for comparison.
+        unit: GB/s
+      L1 Cache Bandwidth:
+        plain: The number of bytes looked up in the vL1D cache as a result of VMEM
+          instructions per unit time. The number of bytes is calculated as the number
+          of cache lines requested multiplied by the cache line size. This value does
+          not consider partial requests, so e.g., if only a single value is requested
+          in a cache line, the data movement will still be counted as a full cache line.
+          The peak empirically measured bandwidth achievable on the specific accelerator
+          is displayed alongside for comparison.
+        rst: The number of bytes looked up in the vL1D cache as a result of :ref:`VMEM
+          <desc-vmem>` instructions per unit time. The number of bytes is calculated
+          as the number of cache lines requested multiplied by the cache line size.
+          This value does not consider partial requests, so e.g., if only a single
+          value is requested in a cache line, the data movement will still be counted
+          as a full cache line. The peak empirically measured bandwidth achievable on
+          the specific accelerator is displayed alongside for comparison.
+        unit: GB/s
+      LDS Bandwidth:
+        plain: Indicates the maximum amount of bytes that could have been loaded from,
+          stored to, or atomically updated in the LDS per unit time (see LDS Bandwidth
+          example for more detail). The peak empirically measured LDS bandwidth
+          achievable on the specific accelerator is displayed alongside for comparison.
+        rst: Indicates the maximum amount of bytes that could have been loaded from,
+          stored to, or atomically updated in the LDS per unit time (see :ref:`LDS
+          Bandwidth <lds-bandwidth>` example for more detail). The peak empirically
+          measured LDS bandwidth achievable on the specific accelerator is displayed
+          alongside for comparison.
+        unit: GB/s
+      AI L1:
+        plain: 'The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio
+          of total floating-point operations (FLOPs) to total bytes transferred between
+          the L1 cache and the processing units. This value is used as the x-coordinate
+          for the L1 roofline.'
+        rst: 'The Arithmetic Intensity (AI) relative to the L1 Cache. It is the ratio
+          of total floating-point operations (FLOPs) to total bytes transferred between
+          the L1 cache and the processing units. This value is used as the x-coordinate
+          for the L1 roofline.'
+        unit: FLOPs/Byte
+      AI L2:
+        plain: 'The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio
+          of total floating-point operations (FLOPs) to total bytes transferred between
+          the L2 cache and the L1 cache. This value is used as the x-coordinate for
+          the L2 roofline.'
+        rst: 'The Arithmetic Intensity (AI) relative to the L2 Cache. It is the ratio
+          of total floating-point operations (FLOPs) to total bytes transferred between
+          the L2 cache and the L1 cache. This value is used as the x-coordinate for
+          the L2 roofline.'
+        unit: FLOPs/Byte
+      AI HBM:
+        plain: 'The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM).
+          It is the ratio of total floating-point operations (FLOPs) to total bytes
+          transferred between HBM and the L2 cache. This value is used as the x-coordinate
+          for the HBM roofline.'
+        rst: 'The Arithmetic Intensity (AI) relative to High-Bandwidth Memory (HBM).
+          It is the ratio of total floating-point operations (FLOPs) to total bytes
+          transferred between HBM and the L2 cache. This value is used as the x-coordinate
+          for the HBM roofline.'
+        unit: FLOPs/Byte
+      Performance (GFLOPs):
+        plain: 'The overall achieved performance, measured in GigaFLOPs
+          per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
+          operations divided by the total execution time. This value is used as the y-coordinate
+          for the kernel''s point on the Roofline plot.'
+        rst: 'The overall achieved performance, measured in GigaFLOPs
+          per second (GFLOP/s). This is calculated as the sum of all VALU and MFMA floating-point
+          operations divided by the total execution time. This value is used as the y-coordinate
+          for the kernel''s point on the Roofline plot.'
+        unit: GFLOP/s
 - id: 500
   title: Command Processor (CPC/CPF)
   data source:
@@ -13064,11 +14024,11 @@ panels:
               + TCC_MISS_sum) != 0) else 0))
             unit: pct
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
+            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
               * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
           L2-Fabric Write and Atomic BW:
-            value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
+            value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
               * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
           HBM Bandwidth:
@@ -13118,13 +14078,13 @@ panels:
               != 0) else None))
             unit: pct
           Write and Atomic BW:
-            avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            unit: Gbps
+            avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            unit: (Bytes  + $normUnit)
           HBM Write and Atomic Traffic:
             avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
               != 0) else None))
@@ -13590,99 +14550,99 @@ panels:
             unit: pct
         gfx908:
           Read BW:
-            avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))
-            min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))
-            max: MAX((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))
-            unit: Gbps
+            avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
+              * 64)) / $denom))
+            unit: (Bytes  + $normUnit)
           HBM Read Traffic:
-            avg: AVG((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_RDREQ_DRAM_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX((100 * (TCC_EA0_RDREQ_DRAM_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: pct
           Remote Read Traffic:
-            avg: AVG((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / TCC_EA_RDREQ_sum)
-              if (TCC_EA_RDREQ_sum != 0) else None))
+            avg: AVG((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum)
+              if (TCC_EA0_RDREQ_sum != 0) else None))
             unit: pct
           Uncached Read Traffic:
-            avg: AVG((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX((100 * (TCC_EA0_RD_UNCACHED_32B_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: pct
           Write and Atomic BW:
-            avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            max: MAX((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (End_Timestamp - Start_Timestamp)))
-            unit: Gbps
+            avg: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            min: MIN((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            max: MAX((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+              * 32)) / $denom))
+            unit: (Bytes  + $normUnit)
           HBM Write and Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_WRREQ_DRAM_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_WRREQ_DRAM_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Remote Write and Atomic Traffic:
-            avg: AVG((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / TCC_EA_WRREQ_sum)
-              if (TCC_EA_WRREQ_sum != 0) else None))
+            avg: AVG((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
+            min: MIN((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
+            max: MAX((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum)
+              if (TCC_EA0_WRREQ_sum != 0) else None))
             unit: pct
           Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_ATOMIC_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_ATOMIC_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Uncached Write and Atomic Traffic:
-            avg: AVG((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX((100 * (TCC_EA_WR_UNCACHED_32B_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX((100 * (TCC_EA0_WR_UNCACHED_32B_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: pct
           Read Latency:
-            avg: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            avg: AVG(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            min: MIN(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            min: MIN(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
-            max: MAX(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
+            max: MAX(((TCC_EA0_RDREQ_LEVEL_sum / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum
               != 0) else None))
             unit: Cycles
           Write and Atomic Latency:
-            avg: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            avg: AVG(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            min: MIN(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
-            max: MAX(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum
+            max: MAX(((TCC_EA0_WRREQ_LEVEL_sum / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum
               != 0) else None))
             unit: Cycles
           Atomic Latency:
-            avg: AVG(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            avg: AVG(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
-            min: MIN(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            min: MIN(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
-            max: MAX(((TCC_EA_ATOMIC_LEVEL_sum / TCC_EA_ATOMIC_sum) if (TCC_EA_ATOMIC_sum
+            max: MAX(((TCC_EA0_ATOMIC_LEVEL_sum / TCC_EA0_ATOMIC_sum) if (TCC_EA0_ATOMIC_sum
               != 0) else None))
             unit: Cycles
   - metric_table:
@@ -14840,59 +15800,59 @@ panels:
             unit: Gbps
         gfx908:
           Read (32B):
-            avg: AVG((TCC_EA_RDREQ_32B_sum / $denom))
-            min: MIN((TCC_EA_RDREQ_32B_sum / $denom))
-            max: MAX((TCC_EA_RDREQ_32B_sum / $denom))
+            avg: AVG((TCC_EA0_RDREQ_32B_sum / $denom))
+            min: MIN((TCC_EA0_RDREQ_32B_sum / $denom))
+            max: MAX((TCC_EA0_RDREQ_32B_sum / $denom))
             unit: (Req  + $normUnit)
           Read (64B):
-            avg: AVG(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-            min: MIN(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
-            max: MAX(((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / $denom))
+            avg: AVG(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            min: MIN(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            max: MAX(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
             unit: (Req  + $normUnit)
           Read (Uncached):
-            avg: AVG((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-            min: MIN((TCC_EA_RD_UNCACHED_32B_sum / $denom))
-            max: MAX((TCC_EA_RD_UNCACHED_32B_sum / $denom))
+            avg: AVG((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA0_RD_UNCACHED_32B_sum / $denom))
             unit: (Req  + $normUnit)
           HBM Read:
-            avg: AVG((TCC_EA_RDREQ_DRAM_sum / $denom))
-            min: MIN((TCC_EA_RDREQ_DRAM_sum / $denom))
-            max: MAX((TCC_EA_RDREQ_DRAM_sum / $denom))
+            avg: AVG((TCC_EA0_RDREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA0_RDREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA0_RDREQ_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
           Remote Read:
-            avg: AVG((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-            min: MIN((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
-            max: MAX((MAX((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum), 0) / $denom))
+            avg: AVG((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (32B):
-            avg: AVG(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-            min: MIN(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
-            max: MAX(((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom))
+            avg: AVG(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+            min: MIN(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
+            max: MAX(((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum) / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (Uncached):
-            avg: AVG((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-            min: MIN((TCC_EA_WR_UNCACHED_32B_sum / $denom))
-            max: MAX((TCC_EA_WR_UNCACHED_32B_sum / $denom))
+            avg: AVG((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+            min: MIN((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
+            max: MAX((TCC_EA0_WR_UNCACHED_32B_sum / $denom))
             unit: (Req  + $normUnit)
           Write and Atomic (64B):
-            avg: AVG((TCC_EA_WRREQ_64B_sum / $denom))
-            min: MIN((TCC_EA_WRREQ_64B_sum / $denom))
-            max: MAX((TCC_EA_WRREQ_64B_sum / $denom))
+            avg: AVG((TCC_EA0_WRREQ_64B_sum / $denom))
+            min: MIN((TCC_EA0_WRREQ_64B_sum / $denom))
+            max: MAX((TCC_EA0_WRREQ_64B_sum / $denom))
             unit: (Req  + $normUnit)
           HBM Write and Atomic:
-            avg: AVG((TCC_EA_WRREQ_DRAM_sum / $denom))
-            min: MIN((TCC_EA_WRREQ_DRAM_sum / $denom))
-            max: MAX((TCC_EA_WRREQ_DRAM_sum / $denom))
+            avg: AVG((TCC_EA0_WRREQ_DRAM_sum / $denom))
+            min: MIN((TCC_EA0_WRREQ_DRAM_sum / $denom))
+            max: MAX((TCC_EA0_WRREQ_DRAM_sum / $denom))
             unit: (Req  + $normUnit)
           Remote Write and Atomic:
-            avg: AVG((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-            min: MIN((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
-            max: MAX((MAX((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum), 0) / $denom))
+            avg: AVG((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+            min: MIN((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
+            max: MAX((MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum), 0) / $denom))
             unit: (Req  + $normUnit)
           Atomic:
-            avg: AVG((TCC_EA_ATOMIC_sum / $denom))
-            min: MIN((TCC_EA_ATOMIC_sum / $denom))
-            max: MAX((TCC_EA_ATOMIC_sum / $denom))
+            avg: AVG((TCC_EA0_ATOMIC_sum / $denom))
+            min: MIN((TCC_EA0_ATOMIC_sum / $denom))
+            max: MAX((TCC_EA0_ATOMIC_sum / $denom))
             unit: (Req  + $normUnit)
   metrics_description:
     Utilization:
@@ -16268,9 +17228,9 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            read req: AVG((TO_INT(TCC_EA_RDREQ[::_1]) / $denom))
-            write req: AVG((TO_INT(TCC_EA_WRREQ[::_1]) / $denom))
-            atomic req: AVG((TO_INT(TCC_EA_ATOMIC[::_1]) / $denom))
+            read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
+            write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
+            atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
           placeholder_range:
             ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -16314,7 +17274,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_RDREQ_LEVEL[::_1] / TCC_EA_RDREQ[::_1]) if (TCC_EA_RDREQ[::_1]
+            expr: ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
               != 0) else None)
           placeholder_range:
             ::_1: $total_l2_chan
@@ -16359,7 +17319,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_WRREQ_LEVEL[::_1] / TCC_EA_WRREQ[::_1]) if (TCC_EA_WRREQ[::_1]
+            expr: ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
               != 0) else None)
           placeholder_range:
             ::_1: $total_l2_chan
@@ -16404,7 +17364,7 @@ panels:
             ::_1: $total_l2_chan
         gfx908:
           ::_1:
-            expr: ((TCC_EA_ATOMIC_LEVEL[::_1] / TCC_EA_ATOMIC[::_1]) if (TCC_EA_ATOMIC[::_1]
+            expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if (TCC_EA0_ATOMIC[::_1]
               != 0) else 0)
           placeholder_range:
             ::_1: $total_l2_chan

@@ -4,10 +4,13 @@ run-name: formatting
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-systems/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
 
 concurrency:
@@ -16,9 +19,52 @@ concurrency:
 
 jobs:
 
-  call-workflow-passing-data:
-    name: Documentation
-    uses: ROCm/rocm-docs-core/.github/workflows/linting.yml@develop
+  lint-md:
+    name: "Markdown"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Fetch config
+        shell: sh
+        working-directory: projects/rocprofiler-systems/
+        run: |
+          test -f .markdownlint.yaml && echo "Using local config file" || curl --silent --show-error --fail --location https://raw.github.com/ROCm/rocm-docs-core/develop/.markdownlint.yaml -O
+
+      - name: Use markdownlint-cli2
+        uses: DavidAnson/markdownlint-cli2-action@v10.0.1
+        with:
+          globs: "projects/rocprofiler-systems/**/*.md"
+
+  spelling:
+    name: "Spelling"
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: projects/rocprofiler-systems
+
+      - name: Fetch config
+        working-directory:
+        shell: sh
+        run: |
+          cp projects/rocprofiler-systems/.wordlist.txt .
+          curl --silent --show-error --fail --location https://raw.github.com/ROCm/rocm-docs-core/develop/.spellcheck.yaml -o .spellcheck.yaml
+          curl --silent --show-error --fail --location https://raw.github.com/ROCm/rocm-docs-core/develop/.wordlist.txt >> .wordlist.txt
+
+          sed -i "s|docs/\*\*/\*.md|projects/rocprofiler-systems/docs/**/*.md|g" .spellcheck.yaml
+
+      - name: Run spellcheck
+        uses: rojopolis/spellcheck-github-actions@0.46.0
+
+      - name: On fail
+        if: failure()
+        run: |
+          echo "Please check for spelling mistakes or add them to '.wordlist.txt' in either the root of this project or in rocm-docs-core."
 
   python:
     runs-on: ubuntu-22.04
@@ -61,6 +107,7 @@ jobs:
         sudo apt-get install -y python3-pip
         python3 -m pip install gersemi
     - name: gersemi
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         gersemi -i $(find . -type f ! -path '*/external/*' | grep -E 'CMakeLists.txt|\.cmake$')
@@ -87,6 +134,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y software-properties-common wget curl clang-format-18
     - name: clang-format
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
@@ -107,6 +155,7 @@ jobs:
       with:
         sparse-checkout: projects/rocprofiler-systems
     - name: check-includes
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         FILES=$(find source examples -type f | egrep '\.(hpp|cpp)(|\.in)$')

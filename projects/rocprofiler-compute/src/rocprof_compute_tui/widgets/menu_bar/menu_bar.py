@@ -1,4 +1,4 @@
-from textual import on, work
+from textual import on
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.reactive import reactive
@@ -74,7 +74,7 @@ class MenuBar(Container):
         def on_recent_selected(selected_dir: str) -> None:
             if selected_dir:
                 self.parent_main_view.selected_path = selected_dir
-                dropdown = self.query_one(f"#file-dropdown", DropdownMenu)
+                dropdown = self.query_one("#file-dropdown", DropdownMenu)
                 dropdown.add_class("hidden")
                 self.parent_main_view.run_analysis()
 
