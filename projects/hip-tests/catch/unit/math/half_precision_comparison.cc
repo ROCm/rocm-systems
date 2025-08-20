@@ -847,6 +847,6 @@ MATH_BINARY_HP_KERNEL_DEF(__hmin_nan)
 MATH_BINARY_HP_TEST_DEF_IMPL(__hmin_nan, __hmin_nan_ref, EqValidatorBuilderFactory<float>())
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

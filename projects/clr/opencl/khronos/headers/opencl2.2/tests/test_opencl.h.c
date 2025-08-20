@@ -18,8 +18,7 @@
 
 #include "CL/opencl.h"
 
-int main( void )
-{
+int main(void) {
   printf("opencl.h standalone test PASSED.\n");
   return 0;
 }

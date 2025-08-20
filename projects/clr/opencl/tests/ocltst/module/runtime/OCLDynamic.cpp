@@ -36,9 +36,7 @@ static cl_uint hostArray[TotalElements];
 
 const static char* strKernel[] = {
     KERNEL_CODE(
-    \n void block_fn(int tid, int mul, __global uint* res) {
-      res[tid] = mul * 7 - 21;
-    }
+    \n void block_fn(int tid, int mul, __global uint* res) { res[tid] = mul * 7 - 21; }
 
         __kernel void dynamic(__global uint* res) {
           int multiplier = 3;
@@ -53,8 +51,7 @@ const static char* strKernel[] = {
           ndrange_t ndrange = ndrange_1D(1);
           int enq_res;
           do {
-            enq_res = enqueue_kernel(def_q, CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange,
-                                     kernelBlock);
+            enq_res = enqueue_kernel(def_q, CLK_ENQUEUE_FLAGS_NO_WAIT, ndrange, kernelBlock);
             if (enq_res != 0 /*CL_SUCCESS*/) {
               res[tid] = -2;
             }
@@ -62,9 +59,7 @@ const static char* strKernel[] = {
         }
     \n),
     KERNEL_CODE(
-    \n void block_fn(int tid, int mul, __global uint* res) {
-      res[tid] = mul * 7 - 21;
-    }
+    \n void block_fn(int tid, int mul, __global uint* res) { res[tid] = mul * 7 - 21; }
 
         __kernel void dynamic(__global uint* res, queue_t def_q) {
           int multiplier = 3;
@@ -77,8 +72,7 @@ const static char* strKernel[] = {
           res[tid] = -1;
           ndrange_t ndrange = ndrange_1D(1);
           // if (tid == 0) {
-          int enq_res = enqueue_kernel(def_q, CLK_ENQUEUE_FLAGS_WAIT_KERNEL,
-                                       ndrange, kernelBlock);
+          int enq_res = enqueue_kernel(def_q, CLK_ENQUEUE_FLAGS_WAIT_KERNEL, ndrange, kernelBlock);
           if (enq_res != 0 /*CL_SUCCESS*/) {
             res[tid] = -2;
             return;
@@ -95,8 +89,7 @@ OCLDynamic::OCLDynamic() {
 
 OCLDynamic::~OCLDynamic() {}
 
-void OCLDynamic::open(unsigned int test, char* units, double& conversion,
-                      unsigned int deviceId) {
+void OCLDynamic::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   // FIXME: Re-enable CPU test once bug 10143 is fixed.
   if (type_ == CL_DEVICE_TYPE_CPU) {
     return;
@@ -108,12 +101,11 @@ void OCLDynamic::open(unsigned int test, char* units, double& conversion,
 
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION,
-                                     param_size, strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -122,16 +114,14 @@ void OCLDynamic::open(unsigned int test, char* units, double& conversion,
   delete strVersion;
 
   char dbuffer[1024] = {0};
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test],
-                                                 NULL, &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test], NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -142,9 +132,8 @@ void OCLDynamic::open(unsigned int test, char* units, double& conversion,
 
   cl_mem buffer;
   memset(hostArray, 0xee, sizeof(hostArray));
-  buffer = _wrapper->clCreateBuffer(
-      context_, CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR, sizeof(hostArray),
-      &hostArray, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_ALLOC_HOST_PTR | CL_MEM_COPY_HOST_PTR,
+                                    sizeof(hostArray), &hostArray, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 #if EMU_ENV
@@ -156,18 +145,15 @@ void OCLDynamic::open(unsigned int test, char* units, double& conversion,
   const cl_queue_properties cprops[] = {
       CL_QUEUE_PROPERTIES,
       static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-                                       CL_QUEUE_ON_DEVICE_DEFAULT |
-                                       CL_QUEUE_ON_DEVICE),
+                                       CL_QUEUE_ON_DEVICE_DEFAULT | CL_QUEUE_ON_DEVICE),
       CL_QUEUE_SIZE, queueSize, 0};
-  deviceQueue_ = _wrapper->clCreateCommandQueueWithProperties(
-      context_, devices_[deviceId], cprops, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateCommandQueueWithProperties() failed");
+  deviceQueue_ =
+      _wrapper->clCreateCommandQueueWithProperties(context_, devices_[deviceId], cprops, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLDynamic::run(void) {
@@ -186,8 +172,7 @@ void OCLDynamic::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   if (testID_ == 1) {
-    error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_command_queue),
-                                      &deviceQueue_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_command_queue), &deviceQueue_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
   }
 
@@ -195,8 +180,8 @@ void OCLDynamic::run(void) {
   size_t region = TotalElements * sizeof(cl_uint);
 
   cl_uint* host = reinterpret_cast<cl_uint*>(_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[_deviceId], buffer, CL_TRUE, (CL_MAP_READ | CL_MAP_WRITE),
-      offset, region, 0, NULL, NULL, &error_));
+      cmdQueues_[_deviceId], buffer, CL_TRUE, (CL_MAP_READ | CL_MAP_WRITE), offset, region, 0, NULL,
+      NULL, &error_));
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMapBuffer() failed");
 
   error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
@@ -215,8 +200,7 @@ void OCLDynamic::run(void) {
       CHECK_RESULT(true, "Incorrect result for dependency!\n");
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer,
-                                             host, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], buffer, host, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueUnmapBuffer() failed");
 
   _wrapper->clFinish(cmdQueues_[_deviceId]);

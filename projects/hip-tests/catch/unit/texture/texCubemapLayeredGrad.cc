@@ -206,6 +206,6 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLayeredGrad_Positive_ReadModeNormalizedFloat"
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

@@ -108,6 +108,6 @@ TEST_CASE("Unit_hipPointerSetAttribute_Negative_Parameters") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

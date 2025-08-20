@@ -144,8 +144,8 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
                                     nullptr, max, nullptr),
                     hipErrorInvalidValue);
   }
-  
-  #if HT_AMD
+
+#if HT_AMD
   SECTION("Invalid stream") {
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
@@ -154,5 +154,5 @@ TEST_CASE("Unit_hipLaunchKernel_Negative_Parameters") {
                                     nullptr, 0, stream),
                     hipErrorInvalidValue);
   }
-  #endif
+#endif
 }

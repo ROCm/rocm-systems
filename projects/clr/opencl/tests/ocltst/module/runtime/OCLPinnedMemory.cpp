@@ -60,8 +60,8 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
   cl_int status;
 
   cl_bool is_apu;
-  status = clGetDeviceInfo(devices_[deviceId], CL_DEVICE_HOST_UNIFIED_MEMORY,
-                           sizeof(cl_bool), &is_apu, nullptr);
+  status = clGetDeviceInfo(devices_[deviceId], CL_DEVICE_HOST_UNIFIED_MEMORY, sizeof(cl_bool),
+                           &is_apu, nullptr);
   CHECK_ERROR(status, "clGetDeviceInfo failed.");
   if (is_apu) {
     printf("Test not supported for apus, skipping...\n");
@@ -70,8 +70,8 @@ void OCLPinnedMemory::open(unsigned int test, char* units, double& conversion,
   }
 
   cl_uint address_bits;
-  status = clGetDeviceInfo(devices_[deviceId], CL_DEVICE_ADDRESS_BITS,
-                           sizeof(cl_uint), &address_bits, nullptr);
+  status = clGetDeviceInfo(devices_[deviceId], CL_DEVICE_ADDRESS_BITS, sizeof(cl_uint),
+                           &address_bits, nullptr);
   CHECK_ERROR(status, "clGetDeviceInfo failed.");
   if (address_bits < 64u) {
     printf("GPU VA range size below 4GB, skipping...\n");
@@ -105,11 +105,11 @@ void OCLPinnedMemory::runNoPrepinnedMemory() {
   std::iota(tmp, tmp + row_size_, 0);
   std::fill_n(host_memory_, pin_size_, 0);
 
-  cl_mem tmp_buffer = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR,
-                                     row_size_ * row_data_size_, tmp, &status);
+  cl_mem tmp_buffer =
+      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, row_size_ * row_data_size_, tmp, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
-  cl_mem buffer = clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                 row_size_ * row_data_size_, nullptr, &status);
+  cl_mem buffer =
+      clCreateBuffer(context_, CL_MEM_READ_WRITE, row_size_ * row_data_size_, nullptr, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
   status = clEnqueueCopyBuffer(cmdQueues_[_deviceId], tmp_buffer, buffer, 0, 0,
@@ -121,9 +121,9 @@ void OCLPinnedMemory::runNoPrepinnedMemory() {
   size_t host_offset[3] = {0, 0, 0};
   size_t region[3] = {row_data_size_, row_size_, 1};
 
-  status = clEnqueueReadBufferRect(
-      cmdQueues_[_deviceId], buffer, CL_TRUE, buffer_offset, host_offset,
-      region, 0, 0, row_size_, 0, host_memory_, 0, nullptr, nullptr);
+  status =
+      clEnqueueReadBufferRect(cmdQueues_[_deviceId], buffer, CL_TRUE, buffer_offset, host_offset,
+                              region, 0, 0, row_size_, 0, host_memory_, 0, nullptr, nullptr);
   CHECK_ERROR(status, "clEnqueueReadBufferRect failed.");
   status = clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(status, "clFinish failed.");
@@ -151,34 +151,32 @@ void OCLPinnedMemory::runPrepinnedMemory() {
   std::iota(tmp, tmp + row_size_, 0);
   std::fill_n(host_memory_, pin_size_, 0);
 
-  cl_mem tmp_buffer = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR,
-                                     row_size_ * row_data_size_, tmp, &status);
+  cl_mem tmp_buffer =
+      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, row_size_ * row_data_size_, tmp, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
-  cl_mem buffer = clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                 row_size_ * row_data_size_, nullptr, &status);
+  cl_mem buffer =
+      clCreateBuffer(context_, CL_MEM_READ_WRITE, row_size_ * row_data_size_, nullptr, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
   status = clEnqueueCopyBuffer(cmdQueues_[_deviceId], tmp_buffer, buffer, 0, 0,
                                row_size_ * row_data_size_, 0, nullptr, nullptr);
   CHECK_ERROR(status, "clEnqueueCopyBuffer failed.");
 
-  cl_mem pinned_buffer =
-      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, pin_size_ * row_data_size_,
-                     host_memory_, &status);
+  cl_mem pinned_buffer = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, pin_size_ * row_data_size_,
+                                        host_memory_, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
-  clEnqueueMapBuffer(cmdQueues_[_deviceId], pinned_buffer, CL_TRUE,
-                     CL_MAP_READ | CL_MAP_WRITE, 0, pin_size_ * row_data_size_,
-                     0, nullptr, nullptr, &status);
+  clEnqueueMapBuffer(cmdQueues_[_deviceId], pinned_buffer, CL_TRUE, CL_MAP_READ | CL_MAP_WRITE, 0,
+                     pin_size_ * row_data_size_, 0, nullptr, nullptr, &status);
   CHECK_ERROR(status, "clEnqueueMapBuffer failed.");
 
   size_t buffer_offset[3] = {0, 0, 0};
   size_t host_offset[3] = {0, 0, 0};
   size_t region[3] = {row_data_size_, row_size_, 1};
 
-  status = clEnqueueReadBufferRect(
-      cmdQueues_[_deviceId], buffer, CL_TRUE, buffer_offset, host_offset,
-      region, 0, 0, row_size_, 0, host_memory_, 0, nullptr, nullptr);
+  status =
+      clEnqueueReadBufferRect(cmdQueues_[_deviceId], buffer, CL_TRUE, buffer_offset, host_offset,
+                              region, 0, 0, row_size_, 0, host_memory_, 0, nullptr, nullptr);
   CHECK_ERROR(status, "clEnqueueReadBufferRect failed.");
 
   for (uint64_t i = 0; i < row_size_; i++) {
@@ -190,8 +188,8 @@ void OCLPinnedMemory::runPrepinnedMemory() {
 
   CHECK_RESULT(status == -1, "Error when reading data.");
 
-  status = clEnqueueUnmapMemObject(cmdQueues_[_deviceId], pinned_buffer,
-                                   host_memory_, 0, nullptr, nullptr);
+  status = clEnqueueUnmapMemObject(cmdQueues_[_deviceId], pinned_buffer, host_memory_, 0, nullptr,
+                                   nullptr);
   CHECK_ERROR(status, "clEnqueueUnmap failed.")
   status = clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(status, "clFinish failed.");

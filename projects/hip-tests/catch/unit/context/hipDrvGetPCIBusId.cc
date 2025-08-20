@@ -26,4 +26,3 @@ TEST_CASE("Unit_hipDeviceGetPCIBusId_Functional") {
   HIP_CHECK(hipDeviceGetPCIBusId(pciBusId, 13, device));
   REQUIRE(pciBusId[0] != '\0');
 }
-

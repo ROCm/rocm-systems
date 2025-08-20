@@ -25,9 +25,9 @@ THE SOFTWARE.
 #ifndef checkHipErrors
 #define checkHipErrors(err) __checkHipErrors(err, __FILE__, __LINE__)
 
-inline void __checkHipErrors(hipError_t err, const char *file, const int line) {
+inline void __checkHipErrors(hipError_t err, const char* file, const int line) {
   if (HIP_SUCCESS != err) {
-    const char *errorStr = hipGetErrorString(err);
+    const char* errorStr = hipGetErrorString(err);
     fprintf(stderr,
             "checkHipErrors() HIP API error = %04d \"%s\" from file <%s>, "
             "line %i.\n",

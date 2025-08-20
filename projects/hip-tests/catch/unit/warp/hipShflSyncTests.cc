@@ -20,8 +20,7 @@ THE SOFTWARE.
 #include "warp_common.hh"
 #include <hip_test_common.hh>
 
-template <typename T>
-__global__ void shfl_1(T *Input, T *Output) {
+template <typename T> __global__ void shfl_1(T* Input, T* Output) {
   int tid = threadIdx.x;
   // Creates groups consisting of every fourth thread.
   auto mask = __match_any_sync(AllThreads, tid % 4);
@@ -31,20 +30,14 @@ __global__ void shfl_1(T *Input, T *Output) {
   Output[tid] = __shfl_sync(mask, Input[tid], srcLane);
 }
 
-template <typename T>
-static void runTestShfl_1() {
+template <typename T> static void runTestShfl_1() {
   const int size = 64;
   T Input[size];
   T Output[size];
   T Expected[size];
-  int Values[size] = {0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3,
-                      0, -1, 2, 3, 0, -1, 2, 3};
+  int Values[size] = {0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1,
+                      2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,
+                      0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3,  0, -1, 2, 3};
 
   initializeInput(Input, size);
   initializeExpected(Expected, Values, size);
@@ -65,8 +58,7 @@ static void runTestShfl_1() {
   }
 }
 
-template <typename T>
-__global__ void shfl_2(T *Input, T *Output) {
+template <typename T> __global__ void shfl_2(T* Input, T* Output) {
   int tid = threadIdx.x;
   auto mask = __match_any_sync(AllThreads, tid % 4);
   int srcLane = tid % 4;
@@ -76,20 +68,15 @@ __global__ void shfl_2(T *Input, T *Output) {
   Output[tid] = __shfl_sync(mask, Input[tid], srcLane, 8);
 }
 
-template <typename T>
-static void runTestShfl_2() {
+template <typename T> static void runTestShfl_2() {
   const int size = 64;
   T Input[size];
   T Output[size];
   T Expected[size];
-  int Values[size] = {0, -1, 2, 3, 0, -1, 2, 3,
-                      8, -9, 10, 11, 8, -9, 10, 11,
-                      16, 17, -18, 19, 16, 17, -18, 19,
-                      24, 25, 26, -27, 24, 25, 26, -27,
-                      -32, 33, 34, 35, -32, 33, 34, 35,
-                      40, 41, 42, 43, 40, 41, 42, 43,
-                      48, 49, 50, -51, 48, 49, 50, -51,
-                      56, 57, -58, 59, 56, 57, -58, 59};
+  int Values[size] = {0,   -1, 2,   3,   0,   -1, 2,   3,   8,  -9, 10,  11,  8,  -9, 10,  11,
+                      16,  17, -18, 19,  16,  17, -18, 19,  24, 25, 26,  -27, 24, 25, 26,  -27,
+                      -32, 33, 34,  35,  -32, 33, 34,  35,  40, 41, 42,  43,  40, 41, 42,  43,
+                      48,  49, 50,  -51, 48,  49, 50,  -51, 56, 57, -58, 59,  56, 57, -58, 59};
 
   initializeInput(Input, size);
   initializeExpected(Expected, Values, size);
@@ -110,13 +97,12 @@ static void runTestShfl_2() {
   }
 }
 
-__global__ void shfl_3(int *Input, int *Output) {
+__global__ void shfl_3(int* Input, int* Output) {
   auto tid = threadIdx.x;
-  unsigned long long masks[2] = { Every5thBut9th, Every9thBit };
+  unsigned long long masks[2] = {Every5thBut9th, Every9thBit};
 
   Output[tid] = -1;
-  if (tid % 5 == 0 || tid % 9 == 0)
-    Output[tid] = __shfl_sync(masks[tid % 9 == 0], Input[tid], tid);
+  if (tid % 5 == 0 || tid % 9 == 0) Output[tid] = __shfl_sync(masks[tid % 9 == 0], Input[tid], tid);
 }
 
 static void runTestShfl_3() {
@@ -147,7 +133,8 @@ static void runTestShfl_3() {
   HIP_CHECK(hipMemcpy(d_Input, Input.data(), Input.size() * sizeof(Input[0]), hipMemcpyDefault));
   hipLaunchKernelGGL(shfl_3, 1, warpSize, 0, 0, d_Input, d_Output);
 
-  HIP_CHECK(hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
+  HIP_CHECK(
+      hipMemcpy(Output.data(), d_Output, Output.size() * sizeof(Output[0]), hipMemcpyDefault));
   for (size_t i = 0; i < Output.size(); i++) {
     REQUIRE(Output[i] == Expected[i]);
   }
@@ -218,7 +205,5 @@ TEST_CASE("Unit_hipShflSync") {
     runTestShfl_1<double>();
     runTestShfl_2<double>();
   }
-  SECTION("divergent execution test") {
-    runTestShfl_3();
-  }
+  SECTION("divergent execution test") { runTestShfl_3(); }
 }

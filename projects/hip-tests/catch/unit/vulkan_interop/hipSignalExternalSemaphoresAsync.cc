@@ -33,7 +33,7 @@ TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Timeline_Semaph
 }
 
 TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Positive_Multiple_Semaphores") {
-   SignalExternalMultipleSemaphoresCommon(hipSignalExternalSemaphoresAsync);
+  SignalExternalMultipleSemaphoresCommon(hipSignalExternalSemaphoresAsync);
 }
 #endif
 
@@ -68,8 +68,8 @@ TEST_CASE("Unit_hipSignalExternalSemaphoresAsync_Vulkan_Negative_Parameters") {
     hipStream_t stream = nullptr;
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipStreamDestroy(stream));
-    HIP_CHECK_ERROR(hipSignalExternalSemaphoresAsync(&hip_ext_semaphore, &signal_params, 1,
-        stream), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipSignalExternalSemaphoresAsync(&hip_ext_semaphore, &signal_params, 1, stream),
+                    hipErrorInvalidValue);
     HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
   }
 }

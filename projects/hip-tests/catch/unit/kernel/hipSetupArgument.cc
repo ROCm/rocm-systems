@@ -41,8 +41,8 @@ TEST_CASE("Unit_hipSetupArgument_Simple") {
  * Test Description
  * ------------------------
  *  - Verifies that arguments sent to the kernel with hipSetupArgument are correct by executing
- *    kernel that calculates sum of two vectors, doing the same calculation on CPU and checking if the
- *    results are the same, which proves that the arguments used in kernel are the proper ones
+ *    kernel that calculates sum of two vectors, doing the same calculation on CPU and checking if
+ * the results are the same, which proves that the arguments used in kernel are the proper ones
  *
  * Test source
  * ------------------------

@@ -58,40 +58,34 @@ void OCLGLMultiContext::open(unsigned int test, char* units, double& conversion,
     getCLContextPropertiesFromGLContext(contextData_[i].glContext, properties);
 
     // Create new CL context from GL context
-    contextData_[i].clContext = _wrapper->clCreateContext(
-        properties, 1, &devices_[_deviceId], NULL, NULL, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateContext() failed (%d)",
-                 error_);
+    contextData_[i].clContext =
+        _wrapper->clCreateContext(properties, 1, &devices_[_deviceId], NULL, NULL, &error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateContext() failed (%d)", error_);
 
     // Create command queue for new context
-    contextData_[i].clCmdQueue = _wrapper->clCreateCommandQueue(
-        contextData_[i].clContext, devices_[_deviceId], 0, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed (%d)",
-                 error_);
+    contextData_[i].clCmdQueue =
+        _wrapper->clCreateCommandQueue(contextData_[i].clContext, devices_[_deviceId], 0, &error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed (%d)", error_);
 
     // Build the kernel
-    contextData_[i].clProgram = _wrapper->clCreateProgramWithSource(
-        contextData_[i].clContext, 1, &strKernel, NULL, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "clCreateProgramWithSource()  failed (%d)", error_);
+    contextData_[i].clProgram = _wrapper->clCreateProgramWithSource(contextData_[i].clContext, 1,
+                                                                    &strKernel, NULL, &error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-    error_ = _wrapper->clBuildProgram(contextData_[i].clProgram, 1,
-                                      &devices_[deviceId], NULL, NULL, NULL);
+    error_ = _wrapper->clBuildProgram(contextData_[i].clProgram, 1, &devices_[deviceId], NULL, NULL,
+                                      NULL);
     if (error_ != CL_SUCCESS) {
       char programLog[1024];
-      _wrapper->clGetProgramBuildInfo(contextData_[i].clProgram,
-                                      devices_[deviceId], CL_PROGRAM_BUILD_LOG,
-                                      1024, programLog, 0);
+      _wrapper->clGetProgramBuildInfo(contextData_[i].clProgram, devices_[deviceId],
+                                      CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
       printf("\n%s\n", programLog);
       fflush(stdout);
     }
-    CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram() failed (%d)",
-                 error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram() failed (%d)", error_);
 
-    contextData_[i].clKernel = _wrapper->clCreateKernel(
-        contextData_[i].clProgram, "glmulticontext_test", &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed (%d)",
-                 error_);
+    contextData_[i].clKernel =
+        _wrapper->clCreateKernel(contextData_[i].clProgram, "glmulticontext_test", &error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed (%d)", error_);
   }
 }
 
@@ -120,12 +114,10 @@ void OCLGLMultiContext::run() {
     glGenBuffers(1, &outGLBuffer);
 
     glBindBuffer(GL_ARRAY_BUFFER, inGLBuffer);
-    glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), inOutData,
-                 GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), inOutData, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, outGLBuffer);
-    glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), NULL,
-                 GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), NULL, GL_STATIC_DRAW);
 
     glBindBuffer(GL_ARRAY_BUFFER, 0);
     glFinish();
@@ -133,57 +125,41 @@ void OCLGLMultiContext::run() {
     // Create input buffer from GL input buffer
     contextData_[i].inputBuffer = _wrapper->clCreateFromGLBuffer(
         contextData_[i].clContext, CL_MEM_READ_ONLY, inGLBuffer, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "Unable to create input GL buffer (%d)", error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create input GL buffer (%d)", error_);
 
     // Create output buffer from GL output buffer
     contextData_[i].outputBuffer = _wrapper->clCreateFromGLBuffer(
         contextData_[i].clContext, CL_MEM_WRITE_ONLY, outGLBuffer, &error_);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "Unable to create output GL buffer (%d)", error_);
+    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create output GL buffer (%d)", error_);
 
-    error_ =
-        _wrapper->clSetKernelArg(contextData_[i].clKernel, 0, sizeof(cl_mem),
-                                 &(contextData_[i].inputBuffer));
-    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)",
-                 error_);
+    error_ = _wrapper->clSetKernelArg(contextData_[i].clKernel, 0, sizeof(cl_mem),
+                                      &(contextData_[i].inputBuffer));
+    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)", error_);
 
-    error_ =
-        _wrapper->clSetKernelArg(contextData_[i].clKernel, 1, sizeof(cl_mem),
-                                 &(contextData_[i].outputBuffer));
-    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)",
-                 error_);
+    error_ = _wrapper->clSetKernelArg(contextData_[i].clKernel, 1, sizeof(cl_mem),
+                                      &(contextData_[i].outputBuffer));
+    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)", error_);
 
     error_ = _wrapper->clEnqueueAcquireGLObjects(contextData_[i].clCmdQueue, 1,
-                                                 &(contextData_[i].inputBuffer),
-                                                 0, NULL, NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)",
-                 error_);
+                                                 &(contextData_[i].inputBuffer), 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)", error_);
 
-    error_ = _wrapper->clEnqueueAcquireGLObjects(
-        contextData_[i].clCmdQueue, 1, &(contextData_[i].outputBuffer), 0, NULL,
-        NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)",
-                 error_);
+    error_ = _wrapper->clEnqueueAcquireGLObjects(contextData_[i].clCmdQueue, 1,
+                                                 &(contextData_[i].outputBuffer), 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)", error_);
 
     size_t gws[1] = {c_numOfElements};
-    error_ = _wrapper->clEnqueueNDRangeKernel(contextData_[i].clCmdQueue,
-                                              contextData_[i].clKernel, 1, NULL,
-                                              gws, NULL, 0, NULL, NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed (%d)",
-                 error_);
+    error_ = _wrapper->clEnqueueNDRangeKernel(contextData_[i].clCmdQueue, contextData_[i].clKernel,
+                                              1, NULL, gws, NULL, 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed (%d)", error_);
 
     error_ = _wrapper->clEnqueueReleaseGLObjects(contextData_[i].clCmdQueue, 1,
-                                                 &(contextData_[i].inputBuffer),
-                                                 0, NULL, NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "clEnqueueReleaseGLObjects failed (%d)", error_);
+                                                 &(contextData_[i].inputBuffer), 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReleaseGLObjects failed (%d)", error_);
 
-    error_ = _wrapper->clEnqueueReleaseGLObjects(
-        contextData_[i].clCmdQueue, 1, &(contextData_[i].outputBuffer), 0, NULL,
-        NULL);
-    CHECK_RESULT((error_ != CL_SUCCESS),
-                 "clEnqueueReleaseGLObjects failed (%d)", error_);
+    error_ = _wrapper->clEnqueueReleaseGLObjects(contextData_[i].clCmdQueue, 1,
+                                                 &(contextData_[i].outputBuffer), 0, NULL, NULL);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReleaseGLObjects failed (%d)", error_);
 
     error_ = _wrapper->clFinish(contextData_[i].clCmdQueue);
     CHECK_RESULT((error_ != CL_SUCCESS), "clFinish() failed (%d)", error_);
@@ -210,9 +186,8 @@ void OCLGLMultiContext::run() {
       CHECK_RESULT((inOutData[i].s[j] != expectedData[i].s[j]),
                    "Element %d is incorrect!\n\t \
                                                                        expected:{%d, %d, %d, %d} differs from actual:{%d, %d, %d, %d}",
-                   i, expectedData[i].s[0], expectedData[i].s[1],
-                   expectedData[i].s[2], expectedData[i].s[3],
-                   inOutData[i].s[0], inOutData[i].s[1], inOutData[i].s[2],
+                   i, expectedData[i].s[0], expectedData[i].s[1], expectedData[i].s[2],
+                   expectedData[i].s[3], inOutData[i].s[0], inOutData[i].s[1], inOutData[i].s[2],
                    inOutData[i].s[3]);
     }
   }

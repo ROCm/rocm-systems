@@ -67,10 +67,9 @@ class Worker {
     // EMPTY!
   }
 
-  Worker(OCLWrapper* wrapper, Module* module, TestMethod run, unsigned int id,
-         unsigned int subtest, unsigned int testindex, bool dump, bool view,
-         bool useCPU, void* window, unsigned int x, unsigned int y,
-         bool perflab, unsigned int deviceId = 0, unsigned int platform = 0)
+  Worker(OCLWrapper* wrapper, Module* module, TestMethod run, unsigned int id, unsigned int subtest,
+         unsigned int testindex, bool dump, bool view, bool useCPU, void* window, unsigned int x,
+         unsigned int y, bool perflab, unsigned int deviceId = 0, unsigned int platform = 0)
       : m_wrapper(wrapper),
         m_module(module),
         m_run(run),

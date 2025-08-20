@@ -377,7 +377,7 @@ TEST_CASE("Unit_hipMemSetAccess_FuncTstOnMultDev") {
       A_h[idx] = idx;
     }
     HIP_CHECK(hipMemcpyHtoD(ptrA, A_h.data(), buffer_size));
-        // Set the A_h to verify with square kernel.
+    // Set the A_h to verify with square kernel.
     for (int idx = 0; idx < N; idx++) {
       A_h[idx] = idx * idx;
     }
@@ -1131,7 +1131,8 @@ TEST_CASE("Unit_hipMemSetAccess_GrowVMM") {
   REQUIRE(ptrB_h != nullptr);
   unsigned long long uiptr = reinterpret_cast<unsigned long long>(ptr);
   uiptr = uiptr + buffer_size;
-  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(uiptr), ptrA_h, (buffer_size_new - buffer_size)));
+  HIP_CHECK(hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(uiptr), ptrA_h,
+                          (buffer_size_new - buffer_size)));
   HIP_CHECK(hipMemcpyDtoH(ptrB_h, ptr, buffer_size_new));
   bool bPassed = true;
   for (int idx = 0; idx < Nnew; idx++) {
@@ -1320,6 +1321,6 @@ TEST_CASE("Unit_hipMemSetAccess_negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

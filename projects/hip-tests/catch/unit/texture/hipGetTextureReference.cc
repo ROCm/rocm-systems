@@ -29,7 +29,7 @@ texture<float, 2, hipReadModeElementType> tex;
 TEST_CASE("Unit_hipGetTextureReference_Positive") {
   CHECK_IMAGE_SUPPORT
 
-  const textureReference *tex_ref = nullptr;
+  const textureReference* tex_ref = nullptr;
   HIP_CHECK(hipGetTextureReference(&tex_ref, &tex));
   REQUIRE(tex_ref != nullptr);
 }
@@ -37,7 +37,7 @@ TEST_CASE("Unit_hipGetTextureReference_Positive") {
 TEST_CASE("Unit_hipGetTextureReference_Negative") {
   CHECK_IMAGE_SUPPORT
 
-  const textureReference *tex_ref = nullptr;
+  const textureReference* tex_ref = nullptr;
 
   // Cuda crashes with SIGSEGV
 #if HT_AMD

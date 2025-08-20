@@ -28,14 +28,14 @@ This testfile verifies Built fmin API scenarios
 6. Builtin fmin with RTC and memory type as flat
 */
 
-#include<hip_test_checkers.hh>
-#include<hip_test_common.hh>
+#include <hip_test_checkers.hh>
+#include <hip_test_common.hh>
 #include <hip/hiprtc.h>
 
 #define INITIAL_VAL 5
 
 static constexpr auto fminFlatMem{
-R"(
+    R"(
 extern "C"
 __global__ void unsafeAtomicMin_FlatMem(double* addr, double* result) {
   __shared__ double int_val;
@@ -47,7 +47,7 @@ __global__ void unsafeAtomicMin_FlatMem(double* addr, double* result) {
 )"};
 
 static constexpr auto fminGlobalMem{
-R"(
+    R"(
 extern "C"
 __global__ void unsafeAtomicMin_GlobalMem(double* addr, double* result) {
   double comp = 10;
@@ -64,7 +64,7 @@ __global__ void unsafeAtomicMin_FlatMem(double* addr, double* result) {
 }
 __global__ void unsafeAtomicMin_GlobalMem(double* addr, double* result) {
   double comp = 10;
-  *result = unsafeAtomicMin(addr, comp);   
+  *result = unsafeAtomicMin(addr, comp);
 }
 
 /*
@@ -85,18 +85,17 @@ TEST_CASE("Unit_BuiltinAtomics_fminCoherentGlobalMem") {
       SUCCEED("Does not support HostPinned Memory");
     } else {
       double *A_h, *B_h;
-      double *A_d;
-      double *result;
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double),
-                              hipHostMallocCoherent));
+      double* A_d;
+      double* result;
+      HIP_CHECK(
+          hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double), hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d),
-                                        A_h, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
       B_h = reinterpret_cast<double*>(malloc(sizeof(double)));
       HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&result), sizeof(double)));
-      hipLaunchKernelGGL(unsafeAtomicMin_GlobalMem, dim3(1), dim3(1),
-                         0, 0, static_cast<double* >(A_d), result);
-      HIP_CHECK(hipGetLastError()); 
+      hipLaunchKernelGGL(unsafeAtomicMin_GlobalMem, dim3(1), dim3(1), 0, 0,
+                         static_cast<double*>(A_d), result);
+      HIP_CHECK(hipGetLastError());
       HIP_CHECK(hipDeviceSynchronize());
       HIP_CHECK(hipMemcpy(B_h, result, sizeof(double), hipMemcpyDeviceToHost));
       REQUIRE(*B_h == 0);
@@ -106,8 +105,10 @@ TEST_CASE("Unit_BuiltinAtomics_fminCoherentGlobalMem") {
       free(B_h);
     }
   } else {
-      SUCCEED("Memory model feature is only supported for gfx90a, Hence"
-              "skipping the testcase for this GPU " << device);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, Hence"
+        "skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -132,23 +133,22 @@ TEST_CASE("Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem") {
       SUCCEED("Does not support HostPinned Memory");
     } else {
       double *A_h, *B_h;
-      double *A_d;
-      double *result;
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double),
-            hipHostMallocNonCoherent));
+      double* A_d;
+      double* result;
+      HIP_CHECK(
+          hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double), hipHostMallocNonCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d),
-            A_h, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
       B_h = reinterpret_cast<double*>(malloc(sizeof(double)));
       HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&result), sizeof(double)));
       if (mem_type) {
-        hipLaunchKernelGGL(unsafeAtomicMin_GlobalMem, dim3(1), dim3(1),
-                           0, 0, static_cast<double* >(A_d), result);
-        HIP_CHECK(hipGetLastError()); 
+        hipLaunchKernelGGL(unsafeAtomicMin_GlobalMem, dim3(1), dim3(1), 0, 0,
+                           static_cast<double*>(A_d), result);
+        HIP_CHECK(hipGetLastError());
       } else {
-        hipLaunchKernelGGL(unsafeAtomicMin_FlatMem, dim3(1), dim3(1),
-                           0, 0, static_cast<double* >(A_d), result);
-        HIP_CHECK(hipGetLastError()); 
+        hipLaunchKernelGGL(unsafeAtomicMin_FlatMem, dim3(1), dim3(1), 0, 0,
+                           static_cast<double*>(A_d), result);
+        HIP_CHECK(hipGetLastError());
       }
       HIP_CHECK(hipDeviceSynchronize());
       HIP_CHECK(hipMemcpy(B_h, result, sizeof(double), hipMemcpyDeviceToHost));
@@ -159,8 +159,10 @@ TEST_CASE("Unit_BuiltinAtomics_fminNonCoherentGlobalFlatMem") {
       free(B_h);
     }
   } else {
-      SUCCEED("Memory model feature is only supported for gfx90a, Hence"
-               "skipping the testcase for this GPU " << device);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, Hence"
+        "skipping the testcase for this GPU "
+        << device);
   }
 }
 /*
@@ -182,10 +184,10 @@ TEST_CASE("Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem") {
       SUCCEED("Does not support HostPinned Memory");
     } else {
       hiprtcProgram prog;
-      hiprtcCreateProgram(&prog,        // prog
-          fminGlobalMem,       // buffer
-          "kernel.cu",  // name
-          0, nullptr, nullptr);
+      hiprtcCreateProgram(&prog,          // prog
+                          fminGlobalMem,  // buffer
+                          "kernel.cu",    // name
+                          0, nullptr, nullptr);
       std::string sarg = std::string("--gpu-architecture=") + prop.gcnArchName;
       const char* options[] = {sarg.c_str()};
       hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
@@ -209,17 +211,15 @@ TEST_CASE("Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem") {
       hipModule_t module;
       hipFunction_t fmaxkernel;
       HIP_CHECK(hipModuleLoadData(&module, code.data()));
-      HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module,
-                                     "unsafeAtomicMin_GlobalMem"));
+      HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module, "unsafeAtomicMin_GlobalMem"));
 
       double *A_h, *B_h;
-      double *A_d;
-      double *result;
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double),
-            hipHostMallocCoherent));
+      double* A_d;
+      double* result;
+      HIP_CHECK(
+          hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double), hipHostMallocCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d),
-            A_h, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
       B_h = reinterpret_cast<double*>(malloc(sizeof(double)));
       HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&result), sizeof(double)));
       struct {
@@ -227,11 +227,9 @@ TEST_CASE("Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem") {
         double* res;
       } args_f{A_d, result};
       auto size = sizeof(args_f);
-      void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f,
-        HIP_LAUNCH_PARAM_BUFFER_SIZE,
-        &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(fmaxkernel, 1, 1, 1, 1, 1, 1, 0,
-                nullptr, nullptr, config_d));
+      void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                          &size, HIP_LAUNCH_PARAM_END};
+      HIP_CHECK(hipModuleLaunchKernel(fmaxkernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
       HIP_CHECK(hipDeviceSynchronize());
       HIP_CHECK(hipMemcpy(B_h, result, sizeof(double), hipMemcpyDeviceToHost));
       REQUIRE(*B_h == 0);
@@ -241,8 +239,10 @@ TEST_CASE("Unit_BuiltinAtomicsRTC__fminCoherentGlobalMem") {
       free(B_h);
     }
   } else {
-      SUCCEED("Memory model feature is only supported for gfx90a, Hence"
-              "skipping the testcase for this GPU " << device);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, Hence"
+        "skipping the testcase for this GPU "
+        << device);
   }
 }
 
@@ -268,15 +268,15 @@ TEST_CASE("Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem") {
     } else {
       hiprtcProgram prog;
       if (mem_type) {
-        hiprtcCreateProgram(&prog,        // prog
-            fminGlobalMem,       // buffer
-            "kernel.cu",  // name
-            0, nullptr, nullptr);
+        hiprtcCreateProgram(&prog,          // prog
+                            fminGlobalMem,  // buffer
+                            "kernel.cu",    // name
+                            0, nullptr, nullptr);
       } else {
         hiprtcCreateProgram(&prog,        // prog
-            fminFlatMem,       // buffer
-            "kernel.cu",  // name
-            0, nullptr, nullptr);
+                            fminFlatMem,  // buffer
+                            "kernel.cu",  // name
+                            0, nullptr, nullptr);
       }
       std::string sarg = std::string("--gpu-architecture=") + prop.gcnArchName;
       const char* options[] = {sarg.c_str()};
@@ -302,21 +302,18 @@ TEST_CASE("Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem") {
       hipFunction_t fmaxkernel;
       HIP_CHECK(hipModuleLoadData(&module, code.data()));
       if (mem_type) {
-        HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module,
-                                       "unsafeAtomicMin_GlobalMem"));
+        HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module, "unsafeAtomicMin_GlobalMem"));
       } else {
-        HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module,
-                                       "unsafeAtomicMin_FlatMem"));
+        HIP_CHECK(hipModuleGetFunction(&fmaxkernel, module, "unsafeAtomicMin_FlatMem"));
       }
 
       double *A_h, *B_h;
-      double *A_d;
-      double *result;
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double),
-            hipHostMallocNonCoherent));
+      double* A_d;
+      double* result;
+      HIP_CHECK(
+          hipHostMalloc(reinterpret_cast<void**>(&A_h), sizeof(double), hipHostMallocNonCoherent));
       A_h[0] = INITIAL_VAL;
-      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d),
-            A_h, 0));
+      HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&A_d), A_h, 0));
       B_h = reinterpret_cast<double*>(malloc(sizeof(double)));
       HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&result), sizeof(double)));
       struct {
@@ -324,11 +321,9 @@ TEST_CASE("Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem") {
         double* res;
       } args_f{A_d, result};
       auto size = sizeof(args_f);
-      void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f,
-        HIP_LAUNCH_PARAM_BUFFER_SIZE,
-        &size, HIP_LAUNCH_PARAM_END};
-      HIP_CHECK(hipModuleLaunchKernel(fmaxkernel, 1, 1, 1, 1, 1, 1, 0,
-                nullptr, nullptr, config_d));
+      void* config_d[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args_f, HIP_LAUNCH_PARAM_BUFFER_SIZE,
+                          &size, HIP_LAUNCH_PARAM_END};
+      HIP_CHECK(hipModuleLaunchKernel(fmaxkernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, config_d));
       HIP_CHECK(hipDeviceSynchronize());
       HIP_CHECK(hipMemcpy(B_h, result, sizeof(double), hipMemcpyDeviceToHost));
       REQUIRE(*B_h == INITIAL_VAL);
@@ -338,7 +333,9 @@ TEST_CASE("Unit_BuiltinAtomicsRTC_fminNonCoherentGlobalFlatMem") {
       free(B_h);
     }
   } else {
-      SUCCEED("Memory model feature is only supported for gfx90a, Hence"
-               "skipping the testcase for this GPU " << device);
+    SUCCEED(
+        "Memory model feature is only supported for gfx90a, Hence"
+        "skipping the testcase for this GPU "
+        << device);
   }
 }

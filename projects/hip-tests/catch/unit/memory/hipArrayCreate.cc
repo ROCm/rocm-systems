@@ -50,8 +50,9 @@ static constexpr auto ARRAY_LOOP{100};
 
 static void ArrayCreate_DiffSizes(int gpu) {
   HIP_CHECK_THREAD(hipSetDevice(gpu));
-  //Use of GENERATE in thead function causes random failures with multithread condition.
-  std::vector<std::pair<size_t, size_t>> runs {std::make_pair(NUM_W, NUM_H), std::make_pair(BIGNUM_W, BIGNUM_H)};
+  // Use of GENERATE in thead function causes random failures with multithread condition.
+  std::vector<std::pair<size_t, size_t>> runs{std::make_pair(NUM_W, NUM_H),
+                                              std::make_pair(BIGNUM_W, BIGNUM_H)};
   for (const auto& size : runs) {
     std::array<HIP_ARRAY, ARRAY_LOOP> array;
     size_t pavail;

@@ -94,20 +94,20 @@ struct MemoryTimestamp {
     return result;
   }
 
-  std::unordered_set<hip::Stream*>  safe_streams_;  //!< Safe streams for memory reuse
-  hip::Event*   event_ = nullptr;   //!< Last known HIP event, associated with the memory object
+  std::unordered_set<hip::Stream*> safe_streams_;  //!< Safe streams for memory reuse
+  hip::Event* event_ = nullptr;  //!< Last known HIP event, associated with the memory object
 };
 
 class Heap : public amd::EmbeddedObject {
-public:
+ public:
   typedef std::map<std::pair<size_t, amd::Memory*>, MemoryTimestamp> SortedMap;
 
   Heap(hip::Device* device, amd::VmHeapArray& vm_heap)
-    : total_size_(0)
-    , max_total_size_(0)
-    , release_threshold_(0)
-    , device_(device)
-    , vm_heap_(vm_heap) {}
+      : total_size_(0),
+        max_total_size_(0),
+        release_threshold_(0),
+        device_(device),
+        vm_heap_(vm_heap) {}
   ~Heap() {}
 
   /// Adds allocation into the heap on a specific stream
@@ -117,8 +117,8 @@ public:
   void AddMemory(amd::Memory* memory, const MemoryTimestamp& ts);
 
   /// Finds memory object with the specified size
-  amd::Memory* FindMemory(size_t size, Stream* stream, bool opportunistic,
-    void* dptr, MemoryTimestamp* ts);
+  amd::Memory* FindMemory(size_t size, Stream* stream, bool opportunistic, void* dptr,
+                          MemoryTimestamp* ts);
 
   /// Removes allocation from the map
   bool RemoveMemory(amd::Memory* memory, MemoryTimestamp* ts = nullptr);
@@ -179,7 +179,7 @@ public:
 
   const auto& Allocations() { return allocations_; }
 
-private:
+ private:
   Heap() = delete;
   Heap(const Heap&) = delete;
   Heap& operator=(const Heap&) = delete;
@@ -189,9 +189,9 @@ private:
   uint64_t max_total_size_;     //!< Maximum heap allocation size
   uint64_t release_threshold_;  //!< Threshold size in bytes for memory release from heap, default 0
 
-  hip::Device*  device_;        //!< Hip device the allocations will reside
-  amd::VmHeapArray&  vm_heap_;  //!< Managed heap for memory allocaitons
-  bool use_vm_heap_ = false;    //!< Use virtual heap or direct allocations
+  hip::Device* device_;        //!< Hip device the allocations will reside
+  amd::VmHeapArray& vm_heap_;  //!< Managed heap for memory allocaitons
+  bool use_vm_heap_ = false;   //!< Use virtual heap or direct allocations
 };
 
 /// Allocates memory in the pool on the specified stream and places the allocation into busy_heap_
@@ -201,21 +201,21 @@ private:
 class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
  public:
   struct SharedAccess {
-    int device_id_;             //!< Device ID for access with a specified shared resource
-    hipMemAccessFlags flags_;   //!< Flags which define access type
+    int device_id_;            //!< Device ID for access with a specified shared resource
+    hipMemAccessFlags flags_;  //!< Flags which define access type
   };
 
   static constexpr uint32_t kMaxMgpuAccess = 32;
   struct SharedMemPool {
-    amd::Os::FileDesc handle_;            //!< File descriptor for shared memory
-    uint32_t state_;                      //!< Memory pool state
-    uint32_t access_size_;                //!< The number of entries in access array
-    SharedAccess access_[kMaxMgpuAccess]; //!< The list of devices for access
+    amd::Os::FileDesc handle_;             //!< File descriptor for shared memory
+    uint32_t state_;                       //!< Memory pool state
+    uint32_t access_size_;                 //!< The number of entries in access array
+    SharedAccess access_[kMaxMgpuAccess];  //!< The list of devices for access
   };
 
   MemoryPool(hip::Device* device, const hipMemPoolProps* props = nullptr, bool phys_mem = false)
       : VmHeapArray(device->devices()[0],
-                    [this]()->amd::HostQueue&{ return *device_->NullStream(); }),
+                    [this]() -> amd::HostQueue& { return *device_->NullStream(); }),
         busy_heap_(device, *this),
         free_heap_(device, *this),
         lock_pool_ops_(true),
@@ -280,9 +280,7 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   void ReleaseAllMemory();
 
   /// Place the allocated memory into the busy heap
-  void AddBusyMemory(amd::Memory* memory) {
-    busy_heap_.AddMemory(memory, nullptr);
-  }
+  void AddBusyMemory(amd::Memory* memory) { busy_heap_.AddMemory(memory, nullptr); }
 
   /// Add a safe stream for quick looks-ups if event dependencies option is enabled
   void AddSafeStream(Stream* event_stream, Stream* wait_stream) {
@@ -334,30 +332,31 @@ class MemoryPool : public amd::ReferenceCountedObject, amd::VmHeapArray {
   MemoryPool(const MemoryPool&) = delete;
   MemoryPool& operator=(const MemoryPool&) = delete;
 
-  Heap busy_heap_;    //!< Heap of busy allocations
-  Heap free_heap_;    //!< Heap of freed allocations
+  Heap busy_heap_;  //!< Heap of busy allocations
+  Heap free_heap_;  //!< Heap of freed allocations
   union {
     struct {
       uint32_t event_dependencies_ : 1;     //!< Event dependencies tracking is enabled
       uint32_t opportunistic_ : 1;          //!< HIP event check is enabled
       uint32_t internal_dependencies_ : 1;  //!< Runtime adds internal events to handle memory
                                             //!< dependencies
-      uint32_t interprocess_ : 1;   //!< Memory pool can be used in interprocess communications
-      uint32_t graph_in_use_ : 1;   //!< Memory pool was used in a graph execution
-      uint32_t phys_mem_ : 1;       //!< Mempool is used for graphs and will have physical allocations
-      uint32_t use_vm_heap_ : 1;    //!< Use VM heap or direct allocations
+      uint32_t interprocess_ : 1;  //!< Memory pool can be used in interprocess communications
+      uint32_t graph_in_use_ : 1;  //!< Memory pool was used in a graph execution
+      uint32_t phys_mem_ : 1;     //!< Mempool is used for graphs and will have physical allocations
+      uint32_t use_vm_heap_ : 1;  //!< Use VM heap or direct allocations
     };
     uint32_t value_;
   } state_;
 
   hipMemPoolProps properties_;  //!< Properties of the memory pool
   amd::Monitor lock_pool_ops_;  //!< Access to the pool must be lock protected
-  std::map<hip::Device*, hipMemAccessFlags> access_map_;  //!< Map of access to the pool from devices
+  std::map<hip::Device*, hipMemAccessFlags>
+      access_map_;  //!< Map of access to the pool from devices
 
-  hip::Device* device_;     //!< Hip device the heap will reside
-  SharedMemPool* shared_;   //!< Pointer to shared memory for IPC
-  uint64_t max_total_size_; //!< Max of total reserved memory in the pool since last reset
+  hip::Device* device_;      //!< Hip device the heap will reside
+  SharedMemPool* shared_;    //!< Pointer to shared memory for IPC
+  uint64_t max_total_size_;  //!< Max of total reserved memory in the pool since last reset
 };
 
 
-} // Mamespace hip
+}  // namespace hip

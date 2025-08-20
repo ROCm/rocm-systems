@@ -294,6 +294,6 @@ TEMPLATE_TEST_CASE("Unit_surf1DLayered_Positive_ReadWrite", "", char, uchar, sho
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

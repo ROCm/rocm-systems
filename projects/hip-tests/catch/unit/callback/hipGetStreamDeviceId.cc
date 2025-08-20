@@ -32,14 +32,14 @@ THE SOFTWARE.
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Creates a new stream for each available device
  *  - Verifies that the Device Stream ID is equal to the Device ID
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipGetStreamDeviceId.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
@@ -53,14 +53,14 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Threaded_Basic") {
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Creates a new stream for each available device, through multiple threads
  *  - Verifies that the Device Stream ID is equal to the Device ID, from each thread
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipGetStreamDeviceId.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  *  - Multithreaded GPU
@@ -70,7 +70,7 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic") {
   const int device_count = HipTest::getDeviceCount();
 
   auto thread_function = [&]() {
-    for(int id = 0; id < device_count; ++id) {
+    for (int id = 0; id < device_count; ++id) {
       HIP_CHECK_THREAD(hipSetDevice(id));
 
       StreamGuard stream_guard{Streams::perThread};
@@ -79,12 +79,11 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic") {
   };
 
   std::vector<std::thread> thread_pool;
-  for(unsigned int i = 0; i < max_threads; ++i) {
+  for (unsigned int i = 0; i < max_threads; ++i) {
     thread_pool.emplace_back(thread_function);
   }
 
-  for(auto& thread: thread_pool)
-  {
+  for (auto& thread : thread_pool) {
     thread.join();
   }
 
@@ -93,13 +92,13 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Positive_Multithreaded_Basic") {
 
 /**
  * Test Description
- * ------------------------ 
+ * ------------------------
  *  - Checks that function returns valid ID if the stream is `nullptr`
  * Test source
- * ------------------------ 
+ * ------------------------
  *  - unit/callback/hipGetStreamDeviceId.cc
  * Test requirements
- * ------------------------ 
+ * ------------------------
  *  - HIP_VERSION >= 5.2
  *  - Platform specific (AMD)
  */
@@ -112,6 +111,6 @@ TEST_CASE("Unit_hipGetStreamDeviceId_Negative_Parameters") {
 }
 
 /**
-* End doxygen group CallbackTest.
-* @}
-*/
+ * End doxygen group CallbackTest.
+ * @}
+ */

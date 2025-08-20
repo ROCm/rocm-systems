@@ -83,7 +83,7 @@ TEST_CASE("Unit_hipStreamGetPriority_happy") {
  * both stream and priority passed as nullptr.
  */
 TEST_CASE("Unit_hipStreamGetPriority_nullptr_nullptr") {
-  auto res = hipStreamGetPriority(nullptr,nullptr);
+  auto res = hipStreamGetPriority(nullptr, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
 }
 
@@ -95,7 +95,7 @@ TEST_CASE("Unit_hipStreamGetPriority_stream_nullptr") {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  auto res = hipStreamGetPriority(stream,nullptr);
+  auto res = hipStreamGetPriority(stream, nullptr);
   REQUIRE(res == hipErrorInvalidValue);
 
   HIP_CHECK(hipStreamDestroy(stream));
@@ -107,7 +107,7 @@ TEST_CASE("Unit_hipStreamGetPriority_stream_nullptr") {
  */
 TEST_CASE("Unit_hipStreamGetPriority_nullptr_priority") {
   int priority = -1;
-  HIP_CHECK(hipStreamGetPriority(nullptr,&priority));
+  HIP_CHECK(hipStreamGetPriority(nullptr, &priority));
 }
 
 /**
@@ -118,7 +118,7 @@ TEST_CASE("Unit_hipStreamGetPriority_stream_priority") {
   hipStream_t stream = nullptr;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipStreamGetPriority(stream,&priority));
+  HIP_CHECK(hipStreamGetPriority(stream, &priority));
 
   HIP_CHECK(hipStreamDestroy(stream));
 }

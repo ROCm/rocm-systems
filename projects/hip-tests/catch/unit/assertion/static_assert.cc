@@ -88,6 +88,6 @@ TEST_CASE("Unit_StaticAssert_Positive_Basic_RTC") { StaticAssertWrapper(kStaticA
 TEST_CASE("Unit_StaticAssert_Negative_Basic_RTC") { StaticAssertWrapper(kStaticAssert_Negative); }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

@@ -25,25 +25,26 @@
 #include "utils/debug.hpp"
 #include "platform/memory.hpp"
 
-#include <inttypes.h> //to exp
+#include <inttypes.h>  //to exp
 #include <string>
 #include <vector>
 #include <tuple>
 #include <algorithm>
 
-//Address sanitizer runtime entry-function to report the invalid device memory access
-//this will be defined in llvm-project/compiler-rt/lib/asan, and will have effect only
-//when compiler-rt is build for AMDGPU.
-//Note: This API is runtime interface of asan library and only defined for linux os.
-extern "C"
-void __asan_report_nonself_error(uint64_t *callstack, uint32_t n_callstack, uint64_t* addr,
-    uint32_t naddr, uint64_t* entity_ids, uint32_t n_entities, bool is_write, uint32_t access_size,
-    bool is_abort, const char* name, int64_t vma_adjust, int fd,
-    uint64_t file_extent_size, uint64_t file_extent_start = 0);
+// Address sanitizer runtime entry-function to report the invalid device memory access
+// this will be defined in llvm-project/compiler-rt/lib/asan, and will have effect only
+// when compiler-rt is build for AMDGPU.
+// Note: This API is runtime interface of asan library and only defined for linux os.
+extern "C" void __asan_report_nonself_error(uint64_t* callstack, uint32_t n_callstack,
+                                            uint64_t* addr, uint32_t naddr, uint64_t* entity_ids,
+                                            uint32_t n_entities, bool is_write,
+                                            uint32_t access_size, bool is_abort, const char* name,
+                                            int64_t vma_adjust, int fd, uint64_t file_extent_size,
+                                            uint64_t file_extent_start = 0);
 
-namespace amd{
+namespace amd {
 void handleSanitizerService(Payload* packt_payload, uint64_t activemask,
-        const amd::Device* gpu_device, device::UriLocator* uri_locator) {
+                            const amd::Device* gpu_device, device::UriLocator* uri_locator) {
   // An address results in invalid access in each active lane
   uint64_t device_failing_addresses[64];
   // An array of identifications of entities requesting a report.
@@ -64,36 +65,33 @@ void handleSanitizerService(Payload* packt_payload, uint64_t activemask,
     auto wi = amd::leastBitSet(activemask);
     activemask ^= static_cast<decltype(activemask)>(1) << wi;
     auto data_slot = packt_payload->slots[wi];
-    //encoding of packet payload arguments is
-    //defined in device-libs/asanrtl/src/report.cl
+    // encoding of packet payload arguments is
+    // defined in device-libs/asanrtl/src/report.cl
     if (!first_workitem) {
       device_failing_addresses[indx] = data_slot[0];
-      callstack[0]                   = data_slot[1];
-      entity_id[en_idx]              = data_slot[2];
-      entity_id[++en_idx]            = data_slot[3];
-      entity_id[++en_idx]            = data_slot[4];
-      entity_id[++en_idx]            = data_slot[5];
-      access_info                    = data_slot[6];
-      access_size                    = data_slot[7];
-      first_workitem                 = true;
-    }
-    else {
+      callstack[0] = data_slot[1];
+      entity_id[en_idx] = data_slot[2];
+      entity_id[++en_idx] = data_slot[3];
+      entity_id[++en_idx] = data_slot[4];
+      entity_id[++en_idx] = data_slot[5];
+      access_info = data_slot[6];
+      access_size = data_slot[7];
+      first_workitem = true;
+    } else {
       device_failing_addresses[indx] = data_slot[0];
-      entity_id[en_idx]              = data_slot[5];
+      entity_id[en_idx] = data_slot[5];
     }
     indx++;
     en_idx++;
   }
 
   bool is_write = false;
-  if (access_info & 0xFFFFFFFF00000000)
-    is_abort = false;
-  if (access_info & 1)
-    is_write = true;
+  if (access_info & 0xFFFFFFFF00000000) is_abort = false;
+  if (access_info & 1) is_write = true;
 
   std::string fileuri;
   uint64_t size = 0, offset = 0;
-  int64_t  loadAddrAdjust = 0;
+  int64_t loadAddrAdjust = 0;
   auto uri_fd = amd::Os::FDescInit();
   if (uri_locator) {
     device::UriLocator::UriInfo uri_info = uri_locator->lookUpUri(callstack[0]);
@@ -102,9 +100,9 @@ void handleSanitizerService(Payload* packt_payload, uint64_t activemask,
   }
 
 #if defined(__linux__)
-  __asan_report_nonself_error(callstack, 1, device_failing_addresses, n_activelanes,
-      entity_id, n_activelanes+4, is_write, access_size, is_abort,
-      /*thread key*/"amdgpu", loadAddrAdjust, uri_fd, size, offset);
+  __asan_report_nonself_error(callstack, 1, device_failing_addresses, n_activelanes, entity_id,
+                              n_activelanes + 4, is_write, access_size, is_abort,
+                              /*thread key*/ "amdgpu", loadAddrAdjust, uri_fd, size, offset);
 #endif
 }
-} // namespace amd
+}  // namespace amd
