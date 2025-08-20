@@ -160,9 +160,9 @@ def create_df_kernel_top_stats(
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
-        "ExeTime": ["count", "sum", "mean", "median"]
-    })
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
+        {"ExeTime": ["count", "sum", "mean", "median"]}
+    )
 
     time_unit_str = "(" + time_unit + ")"
     grouped.columns = [
