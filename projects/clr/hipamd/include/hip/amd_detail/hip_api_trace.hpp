@@ -1087,6 +1087,21 @@ typedef hipError_t (*t_hipGetDriverEntryPoint)(const char* symbol, void** funcPt
 typedef hipError_t (*t_hipGetDriverEntryPoint_spt)(const char* symbol, void** funcPtr,
                                                    unsigned long long flags,
                                                    hipDriverEntryPointQueryResult* status);
+typedef hipError_t (*t_hipLibraryLoadData)(hipLibrary_t* library, const void* code,
+                                           hipJitOption** jitOptions, void** jitOptionsValues,
+                                           unsigned int numJitOptions,
+                                           hipLibraryOption** libraryOptions,
+                                           void** libraryOptionValues,
+                                           unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryLoadFromFile)(hipLibrary_t* library, const char* fileName,
+                                               hipJitOption** jitOptions, void** jitOptionsValues,
+                                               unsigned int numJitOptions,
+                                               hipLibraryOption** libraryOptions,
+                                               void** libraryOptionValues,
+                                               unsigned int numLibraryOptions);
+typedef hipError_t (*t_hipLibraryUnload)(hipLibrary_t library);
+typedef hipError_t (*t_hipLibraryGetKernel)(hipKernel_t* pKernel, hipLibrary_t library,
+                                            const char* name);
 
 // HIP Compiler dispatch table
 struct HipCompilerDispatchTable {
@@ -1652,7 +1667,10 @@ struct HipDispatchTable {
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
   t_hipStreamGetId hipStreamGetId_fn;
-
+  t_hipLibraryLoadData hipLibraryLoadData_fn;
+  t_hipLibraryLoadFromFile hipLibraryLoadFromFile_fn;
+  t_hipLibraryUnload hipLibraryUnload_fn;
+  t_hipLibraryGetKernel hipLibraryGetKernel_fn;
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
 
   // DO NOT EDIT ABOVE!
