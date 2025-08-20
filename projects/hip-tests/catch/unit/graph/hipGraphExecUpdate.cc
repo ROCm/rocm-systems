@@ -812,6 +812,6 @@ TEST_CASE("Unit_hipGraphExecUpdate_Functional_KernelFunction_Changed") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

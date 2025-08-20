@@ -117,8 +117,9 @@ static bool validateMapFlags(cl_map_flags flags) {
  *
  *  \version 2.0r15
  */
-RUNTIME_ENTRY_RET_NOERRCODE(void*, clSVMAlloc, (cl_context context, cl_svm_mem_flags flags,
-                                                size_t size, unsigned int alignment)) {
+RUNTIME_ENTRY_RET_NOERRCODE(void*, clSVMAlloc,
+                            (cl_context context, cl_svm_mem_flags flags, size_t size,
+                             unsigned int alignment)) {
   if (!is_valid(context)) {
     LogWarning("invalid parameter \"context\"");
     return NULL;
@@ -322,8 +323,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMFree,
   amd::HostQueue& hostQueue = *queue;
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -448,8 +449,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMemcpy,
   amd::HostQueue& hostQueue = *queue;
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -585,8 +586,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMemFill,
   amd::HostQueue& hostQueue = *queue;
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -748,8 +749,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMap,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -856,8 +857,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMUnmap,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }
@@ -979,8 +980,9 @@ RUNTIME_EXIT
  *
  *  \version 2.0r15
  */
-RUNTIME_ENTRY(cl_int, clSetKernelExecInfo, (cl_kernel kernel, cl_kernel_exec_info param_name,
-                                            size_t param_value_size, const void* param_value)) {
+RUNTIME_ENTRY(cl_int, clSetKernelExecInfo,
+              (cl_kernel kernel, cl_kernel_exec_info param_name, size_t param_value_size,
+               const void* param_value)) {
   if (!is_valid(kernel)) {
     return CL_INVALID_KERNEL;
   }
@@ -1121,10 +1123,9 @@ RUNTIME_EXIT
  *  \version 2.1r00
  */
 RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
-              (cl_command_queue command_queue, cl_uint num_svm_pointers, const void **svm_pointers,
-               const size_t *size, cl_mem_migration_flags flags, cl_uint num_events_in_wait_list,
+              (cl_command_queue command_queue, cl_uint num_svm_pointers, const void** svm_pointers,
+               const size_t* size, cl_mem_migration_flags flags, cl_uint num_events_in_wait_list,
                const cl_event* event_wait_list, cl_event* event)) {
-
   if (!is_valid(command_queue)) {
     return CL_INVALID_COMMAND_QUEUE;
   }
@@ -1172,7 +1173,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
       // Make sure the specified size[i] is within a valid range
       // TODO: handle the size parameter properly
       size_t svm_size = (size == NULL) ? 0 : size[i];
-      size_t offset = reinterpret_cast<const_address>(svm_ptr) - reinterpret_cast<address>(svmMem->getSvmPtr());
+      size_t offset =
+          reinterpret_cast<const_address>(svm_ptr) - reinterpret_cast<address>(svmMem->getSvmPtr());
       if ((offset + svm_size) > svmMem->getSize()) {
         LogWarning("wrong svm address ");
         return CL_INVALID_VALUE;
@@ -1183,8 +1185,8 @@ RUNTIME_ENTRY(cl_int, clEnqueueSVMMigrateMem,
   }
 
   amd::Command::EventWaitList eventWaitList;
-  cl_int err = amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list,
-                                       event_wait_list);
+  cl_int err =
+      amd::clSetEventWaitList(eventWaitList, hostQueue, num_events_in_wait_list, event_wait_list);
   if (err != CL_SUCCESS) {
     return err;
   }

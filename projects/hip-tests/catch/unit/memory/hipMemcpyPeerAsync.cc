@@ -197,12 +197,14 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Positive_ZeroSize") {
     const auto block_count = element_count / thread_count + 1;
     constexpr int set_value_s = 22;
     HIP_CHECK(hipSetDevice(src_device));
-    VectorSet<<<block_count, thread_count, 0, stream>>>(src_alloc.ptr(), set_value_s, element_count);
+    VectorSet<<<block_count, thread_count, 0, stream>>>(src_alloc.ptr(), set_value_s,
+                                                        element_count);
     HIP_CHECK(hipGetLastError());
 
     constexpr int expected_value = 20;
     HIP_CHECK(hipSetDevice(dst_device));
-    VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value, element_count);
+    VectorSet<<<block_count, thread_count, 0, stream>>>(dst_alloc.ptr(), expected_value,
+                                                        element_count);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipSetDevice(src_device));
 
@@ -311,6 +313,6 @@ TEST_CASE("Unit_hipMemcpyPeerAsync_Negative_Parameters") {
 }
 
 /**
-* End doxygen group PeerToPeerTest.
-* @}
-*/
+ * End doxygen group PeerToPeerTest.
+ * @}
+ */

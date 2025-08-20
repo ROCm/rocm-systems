@@ -22,11 +22,12 @@ THE SOFTWARE.
 /*
 Testcase Scenarios :
 Unit_hipEventCreate_NullCheck - Test unsuccessful event creation when event passed as nullptr
-Unit_hipEventCreateWithFlags_NullCheck - Test unsuccessful event creation with flags when event passed as nullptr
-Unit_hipEventSynchronize_NullCheck - Test unsuccessful event synchronization when event passed as nullptr
-Unit_hipEventQuery_NullCheck - Test unsuccessful event query when event passed as nullptr
-Unit_hipEventDestroy_NullCheck - Test unsuccessful event destruction when event passed as nullptr
-Unit_hipEventCreate_IncompatibleFlags - Test unsuccessful event creation when incompatible flags are passed
+Unit_hipEventCreateWithFlags_NullCheck - Test unsuccessful event creation with flags when event
+passed as nullptr Unit_hipEventSynchronize_NullCheck - Test unsuccessful event synchronization when
+event passed as nullptr Unit_hipEventQuery_NullCheck - Test unsuccessful event query when event
+passed as nullptr Unit_hipEventDestroy_NullCheck - Test unsuccessful event destruction when event
+passed as nullptr Unit_hipEventCreate_IncompatibleFlags - Test unsuccessful event creation when
+incompatible flags are passed
 */
 
 #include <hip_test_common.hh>

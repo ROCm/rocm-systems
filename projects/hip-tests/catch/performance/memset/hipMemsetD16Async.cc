@@ -82,6 +82,6 @@ TEST_CASE("Performance_hipMemsetD16Async") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

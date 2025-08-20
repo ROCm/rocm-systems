@@ -109,7 +109,6 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeElementType", "", char, 
 
         const auto ref_val = fixture.tex_h.TexCubemap(x, y, z, params.tex_desc);
         REQUIRE(fixture.Verify(fixture.out_alloc_h[index], ref_val));
-
       }
     }
   }
@@ -199,6 +198,6 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeNormalizedFloat", "", ch
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

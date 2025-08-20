@@ -29,14 +29,12 @@ THE SOFTWARE.
  * Helper function to get and print the Total device and free device memory,
  * and reserved current, used current memory from pool.
  */
-void getAndPrintMemoryDetails(const hipMemPool_t &pool) {
+void getAndPrintMemoryDetails(const hipMemPool_t& pool) {
   size_t freeVRAM = 0, totalVRAM = 0, reservedCurrent = 0, usedCurrent = 0;
 
   HIP_CHECK(hipMemGetInfo(&freeVRAM, &totalVRAM));
-  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent,
-                                   &reservedCurrent));
-  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent,
-                                   &usedCurrent));
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reservedCurrent));
+  HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &usedCurrent));
 
   std::cout << "\n Total device memory (GB) : " << totalVRAM / 1_GB;
   std::cout << "\n Free device memory (GB)  : " << freeVRAM / 1_GB;
@@ -80,8 +78,7 @@ TEST_CASE("Perf_MempoolManager_hipMallocAsync_hipFreeAsync") {
   HIP_CHECK(hipDeviceGetDefaultMemPool(&pool, device));
 
   uint64_t threshold = 30_GB;
-  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold,
-                                   &threshold));
+  HIP_CHECK(hipMemPoolSetAttribute(pool, hipMemPoolAttrReleaseThreshold, &threshold));
 
   std::cout << "\n Memory details at start : ";
   getAndPrintMemoryDetails(pool);
@@ -90,7 +87,7 @@ TEST_CASE("Perf_MempoolManager_hipMallocAsync_hipFreeAsync") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   constexpr int ptrs = 20;
-  void *dPtr[ptrs];
+  void* dPtr[ptrs];
   for (int i = 0; i < ptrs; i++) {
     dPtr[i] = nullptr;
   }

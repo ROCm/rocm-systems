@@ -45,16 +45,14 @@ Testcase Scenarios :
 /**
  * Local Function to validate number of edges.
  */
-static void validate_hipGraphGetEdges_fromto(size_t numEdgesToGet,
-                                        int testnum,
-                                        hipGraphNode_t *nodes_from,
-                                        hipGraphNode_t *nodes_to,
-                                        hipGraph_t graph) {
+static void validate_hipGraphGetEdges_fromto(size_t numEdgesToGet, int testnum,
+                                             hipGraphNode_t* nodes_from, hipGraphNode_t* nodes_to,
+                                             hipGraph_t graph) {
   int numEdges = static_cast<int>(numEdgesToGet);
-  hipGraphNode_t *fromnode = new hipGraphNode_t[numEdges]{};
-  hipGraphNode_t *tonode = new hipGraphNode_t[numEdges]{};
-  hipGraphNode_t *expected_from_nodes = nodes_from;
-  hipGraphNode_t *expected_to_nodes = nodes_to;
+  hipGraphNode_t* fromnode = new hipGraphNode_t[numEdges]{};
+  hipGraphNode_t* tonode = new hipGraphNode_t[numEdges]{};
+  hipGraphNode_t* expected_from_nodes = nodes_from;
+  hipGraphNode_t* expected_to_nodes = nodes_to;
   HIP_CHECK(hipGraphGetEdges(graph, fromnode, tonode, &numEdgesToGet));
   bool nodeFound;
   int found_count = 0;
@@ -120,8 +118,7 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0,
-                                                    &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_A, graph, nullptr, 0, &memsetParams));
 
   memset(&memsetParams, 0, sizeof(memsetParams));
   memsetParams.dst = reinterpret_cast<void*>(B_d);
@@ -130,38 +127,34 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0,
-                                                    &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memset_B, graph, nullptr, 0, &memsetParams));
 
-  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func =
-                       reinterpret_cast<void *>(HipTest::memsetReverse<int>);
+  void* kernelArgs1[] = {&C_d, &memsetVal, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::memsetReverse<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs1);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&memsetKer_C, graph, nullptr, 0, &kernelNodeParams));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d,
-                                   Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
-  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
@@ -171,10 +164,10 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
   HIP_CHECK(hipGraphAddDependencies(graph, &memsetKer_C, &kernel_vecAdd, 1));
   HIP_CHECK(hipGraphAddDependencies(graph, &kernel_vecAdd, &memcpyD2H_C, 1));
 
-  hipGraphNode_t nodes_from[EXPECTED_NUM_OF_EDGES] = {memset_A, memset_B,
-  memcpyH2D_A, memcpyH2D_B, memsetKer_C, kernel_vecAdd};
-  hipGraphNode_t nodes_to[EXPECTED_NUM_OF_EDGES] = {memcpyH2D_A, memcpyH2D_B,
-  kernel_vecAdd, kernel_vecAdd, kernel_vecAdd, memcpyD2H_C};
+  hipGraphNode_t nodes_from[EXPECTED_NUM_OF_EDGES] = {memset_A,    memset_B,    memcpyH2D_A,
+                                                      memcpyH2D_B, memsetKer_C, kernel_vecAdd};
+  hipGraphNode_t nodes_to[EXPECTED_NUM_OF_EDGES] = {memcpyH2D_A,   memcpyH2D_B,   kernel_vecAdd,
+                                                    kernel_vecAdd, kernel_vecAdd, memcpyD2H_C};
   // Validate hipGraphGetEdges() API
   // Scenario 1
   SECTION("Validate number of edges") {
@@ -184,18 +177,15 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
   }
   // Scenario 2
   SECTION("Validate from/to list when numEdges = num of edges") {
-    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES, 0,
-                                    nodes_from, nodes_to, graph);
+    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES, 0, nodes_from, nodes_to, graph);
   }
   // Scenario 3
   SECTION("Validate from/to list when numEdges = less than num of edges") {
-    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES - 1, 1,
-                                    nodes_from, nodes_to, graph);
+    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES - 1, 1, nodes_from, nodes_to, graph);
   }
   // Scenario 4
   SECTION("Validate from/to list when numEdges = more than num of edges") {
-    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES + 1, 2,
-                                    nodes_from, nodes_to, graph);
+    validate_hipGraphGetEdges_fromto(EXPECTED_NUM_OF_EDGES + 1, 2, nodes_from, nodes_to, graph);
   }
   // Scenario 5
   SECTION("Validate number of edges when zero or one node in graph") {
@@ -221,30 +211,25 @@ TEST_CASE("Unit_hipGraphGetEdges_Functionality") {
 TEST_CASE("Unit_hipGraphGetEdges_Negative") {
   hipGraph_t graph{}, graph_uninit{};
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  hipGraphNode_t nodes_from[EXPECTED_NUM_OF_EDGES]{},
-                nodes_to[EXPECTED_NUM_OF_EDGES]{};
+  hipGraphNode_t nodes_from[EXPECTED_NUM_OF_EDGES]{}, nodes_to[EXPECTED_NUM_OF_EDGES]{};
   size_t numEdges = 0;
   SECTION("graph is nullptr") {
-    REQUIRE(hipErrorInvalidValue ==
-        hipGraphGetEdges(nullptr, nodes_from, nodes_to, &numEdges));
+    REQUIRE(hipErrorInvalidValue == hipGraphGetEdges(nullptr, nodes_from, nodes_to, &numEdges));
   }
   SECTION("from is nullptr") {
-    REQUIRE(hipErrorInvalidValue ==
-        hipGraphGetEdges(graph, nullptr, nodes_to, &numEdges));
+    REQUIRE(hipErrorInvalidValue == hipGraphGetEdges(graph, nullptr, nodes_to, &numEdges));
   }
 
   SECTION("to is nullptr") {
-    REQUIRE(hipErrorInvalidValue ==
-        hipGraphGetEdges(graph, nodes_from, nullptr, &numEdges));
+    REQUIRE(hipErrorInvalidValue == hipGraphGetEdges(graph, nodes_from, nullptr, &numEdges));
   }
   SECTION("numEdges is nullptr") {
-    REQUIRE(hipErrorInvalidValue ==
-        hipGraphGetEdges(graph, nodes_from, nodes_to, nullptr));
+    REQUIRE(hipErrorInvalidValue == hipGraphGetEdges(graph, nodes_from, nodes_to, nullptr));
   }
 
   SECTION("graph is uninitialized") {
     REQUIRE(hipErrorInvalidValue ==
-        hipGraphGetEdges(graph_uninit, nodes_from, nodes_to, &numEdges));
+            hipGraphGetEdges(graph_uninit, nodes_from, nodes_to, &numEdges));
   }
 
   HIP_CHECK(hipGraphDestroy(graph));

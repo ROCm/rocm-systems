@@ -237,11 +237,11 @@ TEST_CASE("Unit_hipGetSetDeviceFlags_InvalidFlag") {
   HipTest::HIP_SKIP_TEST("EXSWCPHIPT-115");
   return;
 #endif
-  const unsigned int invalidFlag = GENERATE(0b011,     // schedule flags should not overlap
-                                            0b101,     // schedule flags should not overlap
-                                            0b110,     // schedule flags should not overlap
-                                            0b111,     // schedule flags should not overlap
-                                            //0b100000,  // out of bounds is no longer invalid
+  const unsigned int invalidFlag = GENERATE(0b011,  // schedule flags should not overlap
+                                            0b101,  // schedule flags should not overlap
+                                            0b110,  // schedule flags should not overlap
+                                            0b111,  // schedule flags should not overlap
+                                            // 0b100000,  // out of bounds is no longer invalid
                                             0xFFFF);
   CAPTURE(invalidFlag);
   HIP_CHECK_ERROR(hipSetDeviceFlags(invalidFlag), hipErrorInvalidValue);

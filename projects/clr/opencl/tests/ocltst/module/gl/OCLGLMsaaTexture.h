@@ -28,8 +28,7 @@ class OCLGLMsaaTexture : public OCLGLCommon {
   OCLGLMsaaTexture();
   virtual ~OCLGLMsaaTexture();
   static const unsigned int c_dimSize = 128;
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -45,8 +44,7 @@ class OCLGLMsaaTexture : public OCLGLCommon {
   //////////////////////////////
 
   // returns element size in bytes.
-  static bool absDiff(unsigned int* pGLBuffer, unsigned int* pCLBuffer,
-                      const unsigned int dimSize);
+  static bool absDiff(unsigned int* pGLBuffer, unsigned int* pCLBuffer, const unsigned int dimSize);
 
   /////////////////////
   // private members //

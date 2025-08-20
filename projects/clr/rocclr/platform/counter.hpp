@@ -43,6 +43,7 @@ class Counter : public RuntimeObject {
 };
 
 /*@}*/
-/*@}*/ } // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #endif  // COUNTERS_HPP_

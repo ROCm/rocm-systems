@@ -87,6 +87,6 @@ TEST_CASE("Unit_hipCreateSurfaceObject_Negative_Parameters") {
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

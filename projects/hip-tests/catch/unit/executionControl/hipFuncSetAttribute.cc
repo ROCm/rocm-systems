@@ -83,7 +83,8 @@ TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout") {
  *  - Validates handling of valid arguments:
  *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize == 0`
  *      - Expected output: return `hipSuccess`
- *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize == maxSharedMemoryPerBlock - sharedSizeBytes`
+ *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize == maxSharedMemoryPerBlock -
+ * sharedSizeBytes`
  *      - Expected output: return `hipSuccess`
  *    -# When `hipFuncAttributePreferredSharedMemoryCarveout` is 0%
  *      - Expected output: return `hipSuccess`
@@ -145,7 +146,8 @@ TEST_CASE("Unit_hipFuncSetAttribute_Positive_Parameters") {
  *      - Expected output: return `hipErrorInvalidValue`
  *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize < 0`
  *      - Expected output: return `hipErrorInvalidValue`
- *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize > maxSharedMemoryPerBlock - sharedSizeBytes`
+ *    -# When `hipFuncAttributeMaxDynamicSharedMemorySize > maxSharedMemoryPerBlock -
+ * sharedSizeBytes`
  *      - Expected output: return `hipErrorInvalidValue`
  *    -# When `hipFuncAttributePreferredSharedMemoryCarveout` is negative
  *      - Expected output: return `hipErrorInvalidValue`
@@ -270,6 +272,6 @@ TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_S
 }
 
 /**
-* End doxygen group ExecutionTest.
-* @}
-*/
+ * End doxygen group ExecutionTest.
+ * @}
+ */

@@ -74,7 +74,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
                              false);
   }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy2DDtoHPageableSyncBehavior(
         std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr), true);
@@ -91,7 +91,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Positive_Synchronization_Behavior") {
                              false);
   }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") {
     Memcpy2DHtoHSyncBehavior(std::bind(hipMemcpy2DAsync, _1, _2, _3, _4, _5, _6, _7, nullptr),
                              true);
@@ -143,7 +143,7 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
                                        height, kind, nullptr),
                       hipErrorInvalidValue);
     }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-234
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-234
     SECTION("Invalid MemcpyKind") {
       HIP_CHECK_ERROR(hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height,
                                        static_cast<hipMemcpyKind>(-1), nullptr),
@@ -182,19 +182,18 @@ TEST_CASE("Unit_hipMemcpy2DAsync_Negative_Parameters") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic scenario to trigger capturehipMemcpy2DAsync internal api for
-*  improved code coverage
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpy2DAsync.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
-TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_capturehipMemcpy2DAsync", "", int,
-                   float, double) {
+ * Test Description
+ * ------------------------
+ *  - Basic scenario to trigger capturehipMemcpy2DAsync internal api for
+ *  improved code coverage
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpy2DAsync.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_capturehipMemcpy2DAsync", "", int, float, double) {
   TestType *A_h, *B_h, *A_d;
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
@@ -212,16 +211,14 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy2DAsync_capturehipMemcpy2DAsync", "", int,
       B_h[i * col + j] = i * col + j;
     }
   }
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void **>(&A_d), &devPitch,
-                           sizeof(TestType) * col, row));
-  HIP_CHECK(hipMemcpy2D(A_d, devPitch, B_h, sizeof(TestType) * col,
-                        sizeof(TestType) * col, row, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &devPitch, sizeof(TestType) * col, row));
+  HIP_CHECK(hipMemcpy2D(A_d, devPitch, B_h, sizeof(TestType) * col, sizeof(TestType) * col, row,
+                        hipMemcpyHostToDevice));
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpy2DAsync(A_h, col * sizeof(TestType), A_d, devPitch,
-                             col * sizeof(TestType), row,
-                             hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpy2DAsync(A_h, col * sizeof(TestType), A_d, devPitch, col * sizeof(TestType),
+                             row, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   HIP_CHECK(hipDeviceSynchronize());
 

@@ -24,7 +24,7 @@ THE SOFTWARE.
  * @{
  * @ingroup DriverTest
  * `hipRuntimeGetVersion(int* runtimeVersion)` -
- * Returns the approximate HIP runtime version. 
+ * Returns the approximate HIP runtime version.
  * On HIP/HCC path this function returns HIP runtime patch version
  * (a 5 digit code) however on
  * HIP/NVCC path this function return CUDA runtime version.
@@ -68,6 +68,6 @@ TEST_CASE("Unit_hipRuntimeGetVersion_Negative") {
 }
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

@@ -103,8 +103,8 @@ bool Program::defineGlobalVar(const char* name, void* dptr) {
 
   hsa_agent_t hsa_device = rocDevice().getBackendDevice();
 
-  hsa_status_t status = hsa_executable_agent_global_variable_define(hsaExecutable_,
-                                                                    hsa_device, name, dptr);
+  hsa_status_t status =
+      hsa_executable_agent_global_variable_define(hsaExecutable_, hsa_device, name, dptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Could not define global variable : ";
     buildLog_ += hsa_strerror(status);
@@ -114,8 +114,8 @@ bool Program::defineGlobalVar(const char* name, void* dptr) {
   return (status == HSA_STATUS_SUCCESS);
 }
 
-bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
-                                 size_t* bytes, const char* global_name) const {
+bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
+                                 const char* global_name) const {
   if (!device().isOnline()) {
     return false;
   }
@@ -135,8 +135,8 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
   hsa_device = rocDevice().getBackendDevice();
 
   /* Find HSA Symbol by name */
-  status = hsa_executable_get_symbol_by_name(hsaExecutable_, global_name, &hsa_device,
-                                             &global_symbol);
+  status =
+      hsa_executable_get_symbol_by_name(hsaExecutable_, global_name, &hsa_device, &global_symbol);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Failed to find the Symbol by Name: ";
     buildLog_ += hsa_strerror(status);
@@ -145,8 +145,8 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
   }
 
   /* Find HSA Symbol Type */
-  status = hsa_executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE,
-                                          &sym_type);
+  status =
+      hsa_executable_symbol_get_info(global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_TYPE, &sym_type);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: Failed to find the Symbol Type : ";
     buildLog_ += hsa_strerror(status);
@@ -176,8 +176,8 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
   // Handle size 0 symbols
   if (*bytes != 0) {
     // Find HSA Symbol Address
-    status = hsa_executable_symbol_get_info(global_symbol,
-                                          HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, device_pptr);
+    status = hsa_executable_symbol_get_info(
+        global_symbol, HSA_EXECUTABLE_SYMBOL_INFO_VARIABLE_ADDRESS, device_pptr);
     if (status != HSA_STATUS_SUCCESS) {
       buildLog_ += "Error: Failed to find the Symbol Address : ";
       buildLog_ += hsa_strerror(status);
@@ -186,9 +186,8 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
     }
 
     roc_device = &(rocDevice());
-    *amd_mem_obj = new(roc_device->context()) amd::Buffer(roc_device->context(),
-                                                          ROCCLR_MEM_INTERNAL_MEMORY,
-                                                          *bytes, *device_pptr);
+    *amd_mem_obj = new (roc_device->context())
+        amd::Buffer(roc_device->context(), ROCCLR_MEM_INTERNAL_MEMORY, *bytes, *device_pptr);
 
     if (*amd_mem_obj == nullptr) {
       buildLog_ += "[OCL] Failed to create a mem object!";
@@ -209,21 +208,18 @@ bool Program::createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
 HSAILProgram::HSAILProgram(roc::NullDevice& device, amd::Program& owner)
     : roc::Program(device, owner) {}
 
-HSAILProgram::~HSAILProgram() {
-}
+HSAILProgram::~HSAILProgram() {}
 
-bool HSAILProgram::saveBinaryAndSetType(type_t type) {
-  return true;
-}
+bool HSAILProgram::saveBinaryAndSetType(type_t type) { return true; }
 
-bool HSAILProgram::setKernels(void* binary, size_t binSize,
-                              amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+bool HSAILProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc, size_t foffset,
+                              std::string uri) {
   return true;
 }
 
 
 LightningProgram::LightningProgram(roc::NullDevice& device, amd::Program& owner)
-  : roc::Program(device, owner) {
+    : roc::Program(device, owner) {
   isLC_ = true;
   isHIP_ = (owner.language() == amd::Program::HIP);
 }
@@ -234,7 +230,7 @@ bool LightningProgram::createBinary(amd::option::Options* options) {
     LogError("Failed to create ELF binary image!");
     return false;
   }
-#endif // defined(USE_COMGR_LIBRARY)
+#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 
@@ -243,8 +239,7 @@ bool LightningProgram::saveBinaryAndSetType(type_t type, void* rawBinary, size_t
   // Write binary to memory
   if (type == TYPE_EXECUTABLE) {  // handle code object binary
     assert(rawBinary != nullptr && size != 0 && "must pass in the binary");
-  }
-  else {  // handle LLVM binary
+  } else {  // handle LLVM binary
     if (llvmBinary_.empty()) {
       buildLog_ += "ERROR: Tried to save empty LLVM binary \n";
       return false;
@@ -256,7 +251,7 @@ bool LightningProgram::saveBinaryAndSetType(type_t type, void* rawBinary, size_t
 
   // Set the type of binary
   setType(type);
-#endif // defined(USE_COMGR_LIBRARY)
+#endif  // defined(USE_COMGR_LIBRARY)
   return true;
 }
 
@@ -268,7 +263,7 @@ bool LightningProgram::createKernels(void* binary, size_t binSize, bool useUnifo
     return false;
   }
 
-  for (const auto &kernelMeta : kernelMetadataMap_) {
+  for (const auto& kernelMeta : kernelMetadataMap_) {
     const std::string kernelName = kernelMeta.first;
     Kernel* aKernel = new roc::Kernel(kernelName, this);
     if (!aKernel->init()) {
@@ -283,8 +278,8 @@ bool LightningProgram::createKernels(void* binary, size_t binSize, bool useUnifo
   return true;
 }
 
-bool LightningProgram::setKernels(void* binary, size_t binSize,
-                                  amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc,
+                                  size_t foffset, std::string uri) {
 #if defined(USE_COMGR_LIBRARY)
   // Stop compilation if it is an offline device - HSA runtime does not
   // support ISA compiled offline
@@ -315,8 +310,8 @@ bool LightningProgram::setKernels(void* binary, size_t binSize,
     return false;
   }
 
-  status = hsa_executable_load_agent_code_object(hsaExecutable_, agent, hsaCodeObjectReader_, nullptr,
-                                                 nullptr);
+  status = hsa_executable_load_agent_code_object(hsaExecutable_, agent, hsaCodeObjectReader_,
+                                                 nullptr, nullptr);
   if (status != HSA_STATUS_SUCCESS) {
     buildLog_ += "Error: AMD HSA Code Object loading failed: ";
     buildLog_ += hsa_strerror(status);

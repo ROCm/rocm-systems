@@ -64,9 +64,7 @@ TEST_CASE("Unit_hipDeviceCanAccessPeer_positive") {
 
   if (dev != peerDev) {
     REQUIRE(canAccessPeer >= 0);
-  }
-  else
-  {
+  } else {
     REQUIRE(canAccessPeer == 0);
   }
 }
@@ -113,6 +111,6 @@ TEST_CASE("Unit_hipDeviceCanAccessPeer_negative") {
 }
 
 /**
-* End doxygen group PeerToPeerTest.
-* @}
-*/
+ * End doxygen group PeerToPeerTest.
+ * @}
+ */

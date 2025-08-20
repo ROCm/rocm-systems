@@ -5,6 +5,8 @@ name: rocprofiler-compute RHEL 8/9
 # Controls when the workflow will run
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-compute/**'
       - '!projects/rocprofiler-compute/*.md'

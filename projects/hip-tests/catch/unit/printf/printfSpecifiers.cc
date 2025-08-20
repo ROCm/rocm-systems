@@ -26,12 +26,12 @@ THE SOFTWARE.
 #include <hip_test_process.hh>
 
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 
 /**
  * Test Description
@@ -189,6 +189,6 @@ TEST_CASE("Unit_Printf_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

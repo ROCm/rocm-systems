@@ -25,31 +25,28 @@ THE SOFTWARE.
 #include "hip/hip_runtime_api.h"
 #include "hip/hip_runtime.h"
 
-#define HIP_CHECK(error) \
-{ \
-  hipError_t localError = error; \
-  if ((localError != hipSuccess) && \
-      (localError != hipErrorPeerAccessAlreadyEnabled)) { \
-    return -1; \
-  } \
-}
+#define HIP_CHECK(error)                                                                           \
+  {                                                                                                \
+    hipError_t localError = error;                                                                 \
+    if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
+      return -1;                                                                                   \
+    }                                                                                              \
+  }
 
 // Kernel
-__global__ void MemAdvise_Exe(int *Hmm, int n) {
+__global__ void MemAdvise_Exe(int* Hmm, int n) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < n; i+=stride) {
-    Hmm[i] +=  10;
+  for (int i = offset; i < n; i += stride) {
+    Hmm[i] += 10;
   }
 }
 
 static int hipMemAdvise_AlignedAllocMem_Exe() {
   int managedMem = 0, pageMemAccess = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess,
-            hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0));
   std::cout << "\n hipDeviceAttributePageableMemoryAccess:" << pageMemAccess;
-  HIP_CHECK(hipDeviceGetAttribute(&managedMem,
-                                  hipDeviceAttributeManagedMemory, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managedMem, hipDeviceAttributeManagedMemory, 0));
   std::cout << "\n hipDeviceAttributeManagedMemory: " << managedMem;
 
   if ((managedMem == 1) && (pageMemAccess == 1)) {
@@ -68,7 +65,7 @@ static int hipMemAdvise_AlignedAllocMem_Exe() {
     HIP_CHECK(hipMemAdvise(Mllc, MemSz, hipMemAdviseSetPreferredLocation, 0));
     HIP_CHECK(hipMemPrefetchAsync(Mllc, MemSz, 0, strm));
     HIP_CHECK(hipStreamSynchronize(strm));
-    MemAdvise_Exe<<<(NumElms/32), 32, 0, strm>>>(Mllc, NumElms);
+    MemAdvise_Exe<<<(NumElms / 32), 32, 0, strm>>>(Mllc, NumElms);
     HIP_CHECK(hipStreamSynchronize(strm));
     for (int i = 0; i < NumElms; ++i) {
       if (Mllc[i] != (InitVal + 10)) {
@@ -80,7 +77,5 @@ static int hipMemAdvise_AlignedAllocMem_Exe() {
   return 0;
 }
 
-int main() {
-  return hipMemAdvise_AlignedAllocMem_Exe();
-}
+int main() { return hipMemAdvise_AlignedAllocMem_Exe(); }
 #endif

@@ -26,8 +26,7 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-__global__ void tex2DKernel(float* outputData,
-                            hipTextureObject_t textureObject, int width) {
+__global__ void tex2DKernel(float* outputData, hipTextureObject_t textureObject, int width) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -78,12 +77,10 @@ TEST_CASE("Unit_hipTextureObj2D_Check") {
     }
   }
 
-  hipChannelFormatDesc channelDesc =
-     hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
-  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size,
-                             hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToArray(hipArray, 0, 0, hData, size, hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -101,15 +98,13 @@ TEST_CASE("Unit_hipTextureObj2D_Check") {
 
   // Create texture object
   hipTextureObject_t textureObject = 0;
-  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc,
-                                   &texDesc, nullptr));
+  HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, nullptr));
 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
 
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock),
-                     0, 0, dData, textureObject, width);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, textureObject, width);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
@@ -117,8 +112,8 @@ TEST_CASE("Unit_hipTextureObj2D_Check") {
   for (i = 0; i < height; i++) {
     for (j = 0; j < width; j++) {
       if (hData[i * width + j] != hOutputData[i * width + j]) {
-        INFO("Difference found at [ " << i << j << " ]: " <<
-              hData[i * width + j] << hOutputData[i * width + j]);
+        INFO("Difference found at [ " << i << j << " ]: " << hData[i * width + j]
+                                      << hOutputData[i * width + j]);
         REQUIRE(false);
       }
     }
@@ -131,6 +126,6 @@ TEST_CASE("Unit_hipTextureObj2D_Check") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

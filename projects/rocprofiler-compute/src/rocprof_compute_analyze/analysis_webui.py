@@ -48,7 +48,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = str(Path(args.path[0][0]).absolute().resolve())
         self.arch = None
 
-        self.__hidden_sections = ["Memory Chart", "Roofline"]
+        self.__hidden_sections = ["Memory Chart"]
         self.__hidden_columns = HIDDEN_COLUMNS
         # define different types of bar charts
         self.__barchart_elements = {
@@ -151,7 +151,7 @@ class webui_analysis(OmniAnalyze_Base):
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
                 temp = {}
-                keep = [1, 2, 101, 201, 301, 401]
+                keep = [1, 2, 101, 201, 301, 401, 402]
                 for key in base_data[base_run].dfs:
                     if keep.count(key) != 0:
                         temp[key] = base_data[base_run].dfs[key]
@@ -219,7 +219,6 @@ class webui_analysis(OmniAnalyze_Base):
                     .lower()
                 )
                 html_section = []
-
                 if panel["title"] not in self.__hidden_sections:
                     # Iterate over each table per section
                     for data_source in panel["data source"]:

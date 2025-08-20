@@ -118,42 +118,39 @@ TEST_CASE("Unit_OccupancyAPIs_StreamCapture") {
 
   int gridSize = 0, blockSize = 0, numBlocks = 0;
 
-  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(&gridSize, &blockSize,
-            reinterpret_cast<const void *>(HipTest::vectorADD<int>), 0, 0));
+  HIP_CHECK(hipOccupancyMaxPotentialBlockSize(
+      &gridSize, &blockSize, reinterpret_cast<const void*>(HipTest::vectorADD<int>), 0, 0));
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);
 
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-            &numBlocks, reinterpret_cast<const void *>(HipTest::vectorADD<int>),
-            blockSize, 0));
+      &numBlocks, reinterpret_cast<const void*>(HipTest::vectorADD<int>), blockSize, 0));
   REQUIRE(numBlocks > 0);
 
   numBlocks = 0;
   HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
-            &numBlocks, reinterpret_cast<const void *>(HipTest::vectorADD<int>),
-            blockSize, 0, 0));
+      &numBlocks, reinterpret_cast<const void*>(HipTest::vectorADD<int>), blockSize, 0, 0));
   REQUIRE(numBlocks > 0);
 
   gridSize = 0, blockSize = 0;
-  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize,
-                                                    function, 0, 0));
+  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSize(&gridSize, &blockSize, function, 0, 0));
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);
 
-  gridSize = 0; blockSize = 0;
-  HIP_CHECK(hipModuleOccupancyMaxPotentialBlockSizeWithFlags(
-            &gridSize, &blockSize, function, 0, 0, 0));
+  gridSize = 0;
+  blockSize = 0;
+  HIP_CHECK(
+      hipModuleOccupancyMaxPotentialBlockSizeWithFlags(&gridSize, &blockSize, function, 0, 0, 0));
   REQUIRE(gridSize > 0);
   REQUIRE(blockSize > 0);
 
   numBlocks = 0;
-  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(
-            &numBlocks, function, blockSize, 0));
+  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks, function, blockSize, 0));
   REQUIRE(numBlocks > 0);
 
   numBlocks = 0;
-  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
-            &numBlocks, function, blockSize, 0, 0));
+  HIP_CHECK(hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlocks, function,
+                                                                        blockSize, 0, 0));
   REQUIRE(numBlocks > 0);
 
   END_CAPTURE(stream);
@@ -161,4 +158,3 @@ TEST_CASE("Unit_OccupancyAPIs_StreamCapture") {
   HIP_CHECK(hipModuleUnload(module));
   HIP_CHECK(hipStreamDestroy(stream));
 }
-

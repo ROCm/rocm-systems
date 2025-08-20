@@ -22,36 +22,35 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 
 /**
-* @addtogroup hipGraphKernelNodeCopyAttributes hipGraphKernelNodeCopyAttributes
-* @{
-* @ingroup GraphTest
-* `hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst)` -
-* Copies attributes from source node to destination node.
-*/
+ * @addtogroup hipGraphKernelNodeCopyAttributes hipGraphKernelNodeCopyAttributes
+ * @{
+ * @ingroup GraphTest
+ * `hipGraphKernelNodeCopyAttributes(hipGraphNode_t hSrc, hipGraphNode_t hDst)` -
+ * Copies attributes from source node to destination node.
+ */
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hipGraphKernelNodeCopyAttributes
-*   Create graph with kernel node and add its- functionality.
-*   1) Copy kernelNodeAttribute to same graph kernel node.
-*   2) Copy kernelNodeAttribute to different graph kernel node.
-*   3) Copy kernelNodeAttribute to cloned graph kernel node.
-*   4) Copy kernelNodeAttribute to child graph kernel node.
-* Test source
-* ------------------------
-*  - /unit/graph/hipGraphKernelNodeCopyAttributes.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hipGraphKernelNodeCopyAttributes
+ *   Create graph with kernel node and add its- functionality.
+ *   1) Copy kernelNodeAttribute to same graph kernel node.
+ *   2) Copy kernelNodeAttribute to different graph kernel node.
+ *   3) Copy kernelNodeAttribute to cloned graph kernel node.
+ *   4) Copy kernelNodeAttribute to child graph kernel node.
+ * Test source
+ * ------------------------
+ *  - /unit/graph/hipGraphKernelNodeCopyAttributes.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
-static bool validateKernelNodeAttrValue(hipKernelNodeAttrValue in,
-                                        hipKernelNodeAttrValue out) {
-  if ((in.accessPolicyWindow.base_ptr != out.accessPolicyWindow.base_ptr)   ||
-      (in.accessPolicyWindow.hitProp != out.accessPolicyWindow.hitProp)     ||
-      (in.accessPolicyWindow.hitRatio != out.accessPolicyWindow.hitRatio)   ||
-      (in.accessPolicyWindow.missProp != out.accessPolicyWindow.missProp)   ||
+static bool validateKernelNodeAttrValue(hipKernelNodeAttrValue in, hipKernelNodeAttrValue out) {
+  if ((in.accessPolicyWindow.base_ptr != out.accessPolicyWindow.base_ptr) ||
+      (in.accessPolicyWindow.hitProp != out.accessPolicyWindow.hitProp) ||
+      (in.accessPolicyWindow.hitRatio != out.accessPolicyWindow.hitRatio) ||
+      (in.accessPolicyWindow.missProp != out.accessPolicyWindow.missProp) ||
       (in.accessPolicyWindow.num_bytes != out.accessPolicyWindow.num_bytes) ||
       (in.cooperative != out.cooperative)) {
     return false;
@@ -78,22 +77,21 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
-  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0,
-                                  &kNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kNodeParams));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpy_A, &kernel_vecAdd, 1));
@@ -112,10 +110,10 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
     memset(&value_out, 0, sizeof(hipKernelNodeAttrValue));
 
     HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_vecAdd,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_in));
+                                             hipKernelNodeAttributeAccessPolicyWindow, &value_in));
     HIP_CHECK(hipGraphKernelNodeCopyAttributes(kernel_vecAdd, kNode2));
-    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode2,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_out));
+    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode2, hipKernelNodeAttributeAccessPolicyWindow,
+                                             &value_out));
     REQUIRE(true == validateKernelNodeAttrValue(value_in, value_out));
 
     //  copy back the node attributes for functional verification only
@@ -125,17 +123,16 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
     hipGraphNode_t kNode3;
     hipGraph_t graph3;
     HIP_CHECK(hipGraphCreate(&graph3, 0));
-    HIP_CHECK(hipGraphAddKernelNode(&kNode3, graph3,
-                                    nullptr, 0, &kNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode3, graph3, nullptr, 0, &kNodeParams));
 
     memset(&value_in, 0, sizeof(hipKernelNodeAttrValue));
     memset(&value_out, 0, sizeof(hipKernelNodeAttrValue));
 
     HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_vecAdd,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_in));
+                                             hipKernelNodeAttributeAccessPolicyWindow, &value_in));
     HIP_CHECK(hipGraphKernelNodeCopyAttributes(kernel_vecAdd, kNode3));
-    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode3,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_out));
+    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode3, hipKernelNodeAttributeAccessPolicyWindow,
+                                             &value_out));
     REQUIRE(true == validateKernelNodeAttrValue(value_in, value_out));
 
     //  copy back the node attributes for functional verification only
@@ -146,17 +143,16 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
     hipGraphNode_t kNode4;
     hipGraph_t clonedGraph;
     HIP_CHECK(hipGraphClone(&clonedGraph, graph));
-    HIP_CHECK(hipGraphAddKernelNode(&kNode4, clonedGraph,
-                                    nullptr, 0, &kNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode4, clonedGraph, nullptr, 0, &kNodeParams));
 
     memset(&value_in, 0, sizeof(hipKernelNodeAttrValue));
     memset(&value_out, 0, sizeof(hipKernelNodeAttrValue));
 
     HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_vecAdd,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_in));
+                                             hipKernelNodeAttributeAccessPolicyWindow, &value_in));
     HIP_CHECK(hipGraphKernelNodeCopyAttributes(kernel_vecAdd, kNode4));
-    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode4,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_out));
+    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode4, hipKernelNodeAttributeAccessPolicyWindow,
+                                             &value_out));
     REQUIRE(true == validateKernelNodeAttrValue(value_in, value_out));
 
     //  copy back the node attributes for functional verification only
@@ -167,20 +163,18 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
     hipGraphNode_t kNode5, childGraphNode;
     hipGraph_t childGraph;
     HIP_CHECK(hipGraphCreate(&childGraph, 0));
-    HIP_CHECK(hipGraphAddKernelNode(&kNode5, childGraph,
-                                    nullptr, 0, &kNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode5, childGraph, nullptr, 0, &kNodeParams));
 
-    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph,
-                                        nullptr, 0, childGraph));
+    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0, childGraph));
 
     memset(&value_in, 0, sizeof(hipKernelNodeAttrValue));
     memset(&value_out, 0, sizeof(hipKernelNodeAttrValue));
 
     HIP_CHECK(hipGraphKernelNodeGetAttribute(kernel_vecAdd,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_in));
+                                             hipKernelNodeAttributeAccessPolicyWindow, &value_in));
     HIP_CHECK(hipGraphKernelNodeCopyAttributes(kernel_vecAdd, kNode5));
-    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode5,
-              hipKernelNodeAttributeAccessPolicyWindow, &value_out));
+    HIP_CHECK(hipGraphKernelNodeGetAttribute(kNode5, hipKernelNodeAttributeAccessPolicyWindow,
+                                             &value_out));
     REQUIRE(true == validateKernelNodeAttrValue(value_in, value_out));
 
     //  copy back the node attributes for functional verification only
@@ -203,20 +197,20 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Functional") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Negative Test for API - hipGraphKernelNodeCopyAttributes
-*   1) Pass source kernel node as nullptr for copy attribute api
-*   2) Pass destination kernel node as nullptr for copy attribute api
-*   3) Pass source kernel node as Uninitialize for copy attribute api
-*   4) Pass dest kernel node as Uninitialize for copy attribute api
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphKernelNodeCopyAttributes.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Negative Test for API - hipGraphKernelNodeCopyAttributes
+ *   1) Pass source kernel node as nullptr for copy attribute api
+ *   2) Pass destination kernel node as nullptr for copy attribute api
+ *   3) Pass source kernel node as Uninitialize for copy attribute api
+ *   4) Pass dest kernel node as Uninitialize for copy attribute api
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphKernelNodeCopyAttributes.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative") {
   constexpr size_t N = 1024;
@@ -238,27 +232,26 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative") {
   unsigned blocks = HipTest::setNumBlocks(blocksPerCU, threadsPerBlock, N);
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, B_d, B_h,
-                                   Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
   dependencies.push_back(memcpyNode);
 
-  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.sharedMemBytes = 0;
   kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
   kNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, dependencies.data(),
-                                  dependencies.size(), &kNodeParams));
+  HIP_CHECK(
+      hipGraphAddKernelNode(&kNode, graph, dependencies.data(), dependencies.size(), &kNodeParams));
   dependencies.clear();
   dependencies.push_back(kNode);
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, dependencies.data(),
-                                    dependencies.size(), C_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                    C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipGraphAddKernelNode(&kNode_2, graph, nullptr, 0, &kNodeParams));
 
   SECTION("Pass source kernel node as nullptr for copy attribute api") {
@@ -286,6 +279,6 @@ TEST_CASE("Unit_hipGraphKernelNodeCopyAttributes_Attribute_Negative") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

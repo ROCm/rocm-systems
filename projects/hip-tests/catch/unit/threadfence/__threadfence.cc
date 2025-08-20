@@ -205,6 +205,6 @@ TEST_CASE("Unit___threadfence_Positive_Basic_Peer") {
 }
 
 /**
-* End doxygen group ThreadfenceTest.
-* @}
-*/
+ * End doxygen group ThreadfenceTest.
+ * @}
+ */

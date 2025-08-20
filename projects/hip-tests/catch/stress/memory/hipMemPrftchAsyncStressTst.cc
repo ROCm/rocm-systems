@@ -35,29 +35,25 @@ __global__ void MemPrftchAsyncKernel1(int* Hmm, size_t N) {
 
 static int HmmAttrPrint() {
   int managed = 0;
-  WARN("The following are the attribute values related to HMM for"
-         " device 0:\n");
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-              hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
+  WARN(
+      "The following are the attribute values related to HMM for"
+      " device 0:\n");
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeDirectManagedMemAccessFromHost, 0));
   WARN("hipDeviceAttributeDirectManagedMemAccessFromHost: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-                                 hipDeviceAttributeConcurrentManagedAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeConcurrentManagedAccess, 0));
   WARN("hipDeviceAttributeConcurrentManagedAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-                                 hipDeviceAttributePageableMemoryAccess, 0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccess, 0));
   WARN("hipDeviceAttributePageableMemoryAccess: " << managed);
-  HIP_CHECK(hipDeviceGetAttribute(&managed,
-              hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
-  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:"
-         << managed);
+  HIP_CHECK(
+      hipDeviceGetAttribute(&managed, hipDeviceAttributePageableMemoryAccessUsesHostPageTables, 0));
+  WARN("hipDeviceAttributePageableMemoryAccessUsesHostPageTables:" << managed);
 
-  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&managed, hipDeviceAttributeManagedMemory, 0));
   WARN("hipDeviceAttributeManagedMemory: " << managed);
   return managed;
 }
 
-static void ReleaseResource(int *Hmm, hipStream_t *strm) {
+static void ReleaseResource(int* Hmm, hipStream_t* strm) {
   HIP_CHECK(hipFree(Hmm));
   HIP_CHECK(hipStreamDestroy(*strm));
 }
@@ -70,7 +66,7 @@ TEST_CASE("Stress_hipMemPrefetchAsyncOneToAll") {
   int MangdMem = HmmAttrPrint();
   if (MangdMem == 1) {
     int *Hmm1 = nullptr, NumDevs, MemSz = (4096 * 4);
-    int InitVal = 123, NumElms = MemSz/4;
+    int InitVal = 123, NumElms = MemSz / 4;
     bool IfTestPassed = true;
     HIP_CHECK(hipGetDeviceCount(&NumDevs));
     HIP_CHECK(hipMallocManaged(&Hmm1, MemSz));
@@ -91,7 +87,7 @@ TEST_CASE("Stress_hipMemPrefetchAsyncOneToAll") {
         // Prefetching memory from i to j
         HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, j, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
-        MemPrftchAsyncKernel1<<<(NumElms/32), 32, 0, strm>>>(Hmm1, NumElms);
+        MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm1, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         // Verifying the result
         for (int m = 0; m < NumElms; ++m) {
@@ -107,7 +103,7 @@ TEST_CASE("Stress_hipMemPrefetchAsyncOneToAll") {
         // Prefetching memory from j to i
         HIP_CHECK(hipMemPrefetchAsync(Hmm1, MemSz, i, strm));
         HIP_CHECK(hipStreamSynchronize(strm));
-        MemPrftchAsyncKernel1<<<(NumElms/32), 32, 0, strm>>>(Hmm1, NumElms);
+        MemPrftchAsyncKernel1<<<(NumElms / 32), 32, 0, strm>>>(Hmm1, NumElms);
         HIP_CHECK(hipStreamSynchronize(strm));
         // Verifying the result
         for (int m = 0; m < NumElms; ++m) {
@@ -127,7 +123,8 @@ TEST_CASE("Stress_hipMemPrefetchAsyncOneToAll") {
     // Releasing the resources in case all the scenarios passed
     HIP_CHECK(hipFree(Hmm1));
   } else {
-    SUCCEED("GPU 0 doesn't support hipDeviceAttributeManagedMemory "
-           "attribute. Hence skipping the testing with Pass result.\n");
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeManagedMemory "
+        "attribute. Hence skipping the testing with Pass result.\n");
   }
 }

@@ -62,34 +62,29 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Negative_Parameters") {
   LinearAllocGuard3D<int> src_alloc(extent);
   LinearAllocGuard3D<int> dst_alloc(extent);
 
-  auto params = GetDrvMemcpy3DParms(
-      dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
-      make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
+  auto params =
+      GetDrvMemcpy3DParms(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
+                          make_hipPos(0, 0, 0), dst_alloc.extent(), hipMemcpyDeviceToDevice);
 
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
 
   SECTION("node == nullptr") {
-    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(nullptr, &params),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(nullptr, &params), hipErrorInvalidValue);
   }
 
   SECTION("pNodeParams == nullptr") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(
-        hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context));
-    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(node, nullptr),
-                    hipErrorInvalidValue);
+    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context));
+    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(node, nullptr), hipErrorInvalidValue);
     HIP_CHECK(hipGraphDestroy(graph));
   }
 #if HT_AMD
   SECTION("Node is destroyed") {
     HIP_CHECK(hipGraphCreate(&graph, 0));
-    HIP_CHECK(
-        hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context));
+    HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &params, context));
     HIP_CHECK(hipGraphDestroy(graph));
-    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(node, &params),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeGetParams(node, &params), hipErrorInvalidValue);
   }
 #endif
 
@@ -151,8 +146,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeGetParams_Positive") {
   memCpy_params.dstPitch = numW;
   memCpy_params.dstHeight = 1;
 
-  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params,
-                                     context));
+  HIP_CHECK(hipDrvGraphAddMemcpyNode(&node, graph, nullptr, 0, &memCpy_params, context));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));

@@ -111,6 +111,6 @@ TEST_CASE("Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported") {
 }
 
 /**
-* End doxygen group ExecutionTest.
-* @}
-*/
+ * End doxygen group ExecutionTest.
+ * @}
+ */

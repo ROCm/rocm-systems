@@ -28,69 +28,65 @@ static size_t Nbytes = SIZE * sizeof(int);
 __device__ int globalOut[SIZE];
 
 /**
-* @addtogroup hipStreamBeginCapture hipStreamBeginCapture
-* @{
-* @ingroup GraphTest
-* `hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode)` -
-* Returns the last error from a runtime call.
-*/
+ * @addtogroup hipStreamBeginCapture hipStreamBeginCapture
+ * @{
+ * @ingroup GraphTest
+ * `hipStreamBeginCapture(hipStream_t stream, hipStreamCaptureMode mode)` -
+ * Returns the last error from a runtime call.
+ */
 
-static void verifyArrayMemset(int *A_h, int val) {
+static void verifyArrayMemset(int* A_h, int val) {
   int expected_val = val | (val << 8) | (val << 16) | (val << 24);
   for (size_t i = 0; i < SIZE; i++) {
     if (A_h[i] != expected_val) {
-      INFO("Memset Validation failed at i " << i << " A_h[i] "<< A_h[i]);
+      INFO("Memset Validation failed at i " << i << " A_h[i] " << A_h[i]);
       REQUIRE(false);
     }
   }
 }
 
-__device__ __host__ static void callbackFunc(void *A_h) {
-  int *A = reinterpret_cast<int *>(A_h);
+__device__ __host__ static void callbackFunc(void* A_h) {
+  int* A = reinterpret_cast<int*>(A_h);
   for (int i = 0; i < SIZE; i++) {
-    A[i] = i + i%2;
+    A[i] = i + i % 2;
   }
 }
 
-__global__ static void kCallbackFunc(void *A_h) {
-  callbackFunc(A_h);
-}
+__global__ static void kCallbackFunc(void* A_h) { callbackFunc(A_h); }
 
-static void verifyCallbackFunc(int *A_h) {
+static void verifyCallbackFunc(int* A_h) {
   for (size_t i = 0; i < SIZE; i++) {
-    if (A_h[i] != static_cast<int>(i + i%2)) {
-      INFO("CallBack Validation failed i " << i << " A_h[i] "<< A_h[i]);
+    if (A_h[i] != static_cast<int>(i + i % 2)) {
+      INFO("CallBack Validation failed i " << i << " A_h[i] " << A_h[i]);
       REQUIRE(false);
     }
   }
 }
 
-__global__ static void addGpuKernel(int *i_d) {
-  *i_d = *i_d + 1;
-}
+__global__ static void addGpuKernel(int* i_d) { *i_d = *i_d + 1; }
 
-static void CpuCallback(void *args) {
+static void CpuCallback(void* args) {
   // do nothing function
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipStreamBeginCapture, hipStreamEndCapture status with
-*    hipGraphAddHostNode api call.
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphAddNodeBeginCapture.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipStreamBeginCapture, hipStreamEndCapture status with
+ *    hipGraphAddHostNode api call.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddNodeBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
   hipGraph_t graph;
   hipGraphExec_t graphExec;
   hipGraphNode_t cpuGraphNode;
-  int *i_d;
+  int* i_d;
   HIP_CHECK(hipMalloc(&i_d, sizeof(int)));
   REQUIRE(i_d != nullptr);
 
@@ -119,29 +115,29 @@ TEST_CASE("Unit_hipStreamBeginCapture_with_hipGraphAddHostNode") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Capture graph sequence using hipStreamBeginCapture and try to add a new
-*    node to the capture stream using hipStreamUpdateCaptureDependencies api
-*    which will copy back the result from the existing graph and verify
-*  1) Add a hipGraphAddMemcpyNode1D node before hipStreamEndCapture
-*  2) Add a hipGraphAddMemsetNode node before hipStreamEndCapture
-*  3) Add a hipGraphAddMemcpyNode node before hipStreamEndCapture
-*  4) Add a hipGraphAddKernelNode node before hipStreamEndCapture
-*  5) Add a hipGraphAddMemcpyNodeToSymbol and hipGraphAddMemcpyNodeFromSymbol
-*     node before hipStreamEndCapture
-*  6) Add a hipGraphAddHostNode node before hipStreamEndCapture
-*  7) Add a hipGraphAddChildGraphNode node before hipStreamEndCapture
-*  8) Add a hipGraphAddEmptyNode node before hipStreamEndCapture
-*  9) Add a hipGraphAddEventRecordNode node before hipStreamEndCapture
-*  10) Add a hipGraphAddEventWaitNode node before hipStreamEndCapture
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphAddNodeBeginCapture.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Capture graph sequence using hipStreamBeginCapture and try to add a new
+ *    node to the capture stream using hipStreamUpdateCaptureDependencies api
+ *    which will copy back the result from the existing graph and verify
+ *  1) Add a hipGraphAddMemcpyNode1D node before hipStreamEndCapture
+ *  2) Add a hipGraphAddMemsetNode node before hipStreamEndCapture
+ *  3) Add a hipGraphAddMemcpyNode node before hipStreamEndCapture
+ *  4) Add a hipGraphAddKernelNode node before hipStreamEndCapture
+ *  5) Add a hipGraphAddMemcpyNodeToSymbol and hipGraphAddMemcpyNodeFromSymbol
+ *     node before hipStreamEndCapture
+ *  6) Add a hipGraphAddHostNode node before hipStreamEndCapture
+ *  7) Add a hipGraphAddChildGraphNode node before hipStreamEndCapture
+ *  8) Add a hipGraphAddEmptyNode node before hipStreamEndCapture
+ *  9) Add a hipGraphAddEventRecordNode node before hipStreamEndCapture
+ *  10) Add a hipGraphAddEventWaitNode node before hipStreamEndCapture
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddNodeBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   hipGraphExec_t graphExec;
@@ -161,17 +157,17 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   const hipGraphNode_t* nodelist{};
   size_t numDependencies;
 
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr,
-                               &capGraph, &nodelist, &numDependencies));
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr, &capGraph, &nodelist,
+                                       &numDependencies));
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
   REQUIRE(capGraph != nullptr);
 
   SECTION("Add a hipGraphAddMemcpyNode1D node before hipStreamEndCapture") {
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nodelist,
-                 numDependencies, C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nodelist, numDependencies, C_h, C_d,
+                                      Nbytes, hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -194,11 +190,11 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     memsetParams.elementSize = sizeof(char);
     memsetParams.width = Nbytes;
     memsetParams.height = 1;
-    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, capGraph, nodelist,
-                                    numDependencies, &memsetParams));
+    HIP_CHECK(
+        hipGraphAddMemsetNode(&memsetNode, capGraph, nodelist, numDependencies, &memsetParams));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memsetNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -222,11 +218,10 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     myparams.extent = make_hipExtent(Nbytes, 1, 1);
     myparams.kind = hipMemcpyDeviceToHost;
 
-    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, capGraph, nodelist,
-                                    numDependencies, &myparams));
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, capGraph, nodelist, numDependencies, &myparams));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -243,17 +238,16 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     hipKernelNodeParams kNodeParams{};
     memset(&kNodeParams, 0x00, sizeof(kNodeParams));
     void* kernelArgs[] = {&C_d};
-    kNodeParams.func = reinterpret_cast<void *>(kCallbackFunc);
+    kNodeParams.func = reinterpret_cast<void*>(kCallbackFunc);
     kNodeParams.gridDim = dim3(1);
     kNodeParams.blockDim = dim3(256);
     kNodeParams.sharedMemBytes = 0;
     kNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs);
     kNodeParams.extra = nullptr;
-    HIP_CHECK(hipGraphAddKernelNode(&kNode, capGraph, nodelist,
-                                    numDependencies, &kNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kNode, capGraph, nodelist, numDependencies, &kNodeParams));
 
-    HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &kNode, 1,
-                                    hipStreamSetCaptureDependencies));
+    HIP_CHECK(
+        hipStreamUpdateCaptureDependencies(stream, &kNode, 1, hipStreamSetCaptureDependencies));
     HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -268,21 +262,20 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   SECTION("Add hipGraphAddMemcpyNodeToSymbol node before hipStreamEndCapture") {
     hipGraphNode_t memcpyToSymNode, memcpyFromSymNode;
 
-    HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&memcpyToSymNode, capGraph,
-                              nodelist, numDependencies, HIP_SYMBOL(globalOut),
-                              C_d, Nbytes, 0, hipMemcpyDeviceToDevice));
+    HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&memcpyToSymNode, capGraph, nodelist, numDependencies,
+                                            HIP_SYMBOL(globalOut), C_d, Nbytes, 0,
+                                            hipMemcpyDeviceToDevice));
 
-    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&memcpyFromSymNode, capGraph,
-                                     nullptr, 0, C_h, HIP_SYMBOL(globalOut),
-                                     Nbytes, 0, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&memcpyFromSymNode, capGraph, nullptr, 0, C_h,
+                                              HIP_SYMBOL(globalOut), Nbytes, 0,
+                                              hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyToSymNode,
-                                      &memcpyFromSymNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyToSymNode, &memcpyFromSymNode, 1));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyToSymNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyFromSymNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -295,22 +288,21 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     HipTest::checkVectorADD(A_h, B_h, C_h, SIZE);
   }
   SECTION("Add a hipGraphAddHostNode node before hipStreamEndCapture") {
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nodelist,
-                 numDependencies, C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nodelist, numDependencies, C_h, C_d,
+                                      Nbytes, hipMemcpyDeviceToHost));
 
     hipGraphNode_t hostNode;
     hipHostNodeParams hostParams = {0, 0};
     hostParams.fn = callbackFunc;
     hostParams.userData = C_h;
-    HIP_CHECK(hipGraphAddHostNode(&hostNode, capGraph,
-                                  nullptr, 0, &hostParams));
+    HIP_CHECK(hipGraphAddHostNode(&hostNode, capGraph, nullptr, 0, &hostParams));
 
     HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyD2H_C, &hostNode, 1));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                    hipStreamSetCaptureDependencies));
-    HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &hostNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
+    HIP_CHECK(
+        hipStreamUpdateCaptureDependencies(stream, &hostNode, 1, hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -337,17 +329,15 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     memsetParams.height = 1;
 
     HIP_CHECK(hipGraphCreate(&childGraph, 0));
-    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, childGraph, nullptr, 0,
-                                    &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, childGraph, nullptr, 0,
-                                   C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipGraphAddDependencies(childGraph, &memsetNode,
-                                      &memcpyD2H_C, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, childGraph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, childGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddDependencies(childGraph, &memsetNode, &memcpyD2H_C, 1));
 
-    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, capGraph, nodelist,
-                                        numDependencies, childGraph));
+    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, capGraph, nodelist, numDependencies,
+                                        childGraph));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &childGraphNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
     // Instantiate and launch the graph
@@ -361,18 +351,17 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
   }
   SECTION("Add a hipGraphAddEmptyNode node before hipStreamEndCapture") {
     hipGraphNode_t emptyNode;
-    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, capGraph,
-                                   nodelist, numDependencies));
+    HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, capGraph, nodelist, numDependencies));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0,
-                               C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipGraphAddDependencies(capGraph, &emptyNode, &memcpyD2H_C, 1));
 
-    HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &emptyNode, 1,
-                                    hipStreamSetCaptureDependencies));
+    HIP_CHECK(
+        hipStreamUpdateCaptureDependencies(stream, &emptyNode, 1, hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -391,24 +380,23 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
     HIP_CHECK(hipEventCreate(&eventstart));
     HIP_CHECK(hipEventCreate(&eventend));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&event_start, capGraph,
-                              nodelist, numDependencies, eventstart));
+    HIP_CHECK(
+        hipGraphAddEventRecordNode(&event_start, capGraph, nodelist, numDependencies, eventstart));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0,
-                               C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&event_end, capGraph,
-                                         nullptr, 0, eventend));
+    HIP_CHECK(hipGraphAddEventRecordNode(&event_end, capGraph, nullptr, 0, eventend));
 
     HIP_CHECK(hipGraphAddDependencies(capGraph, &event_start, &memcpyD2H_C, 1));
     HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyD2H_C, &event_end, 1));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &event_start, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                    hipStreamSetCaptureDependencies));
-    HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &event_end, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
+    HIP_CHECK(
+        hipStreamUpdateCaptureDependencies(stream, &event_end, 1, hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -434,26 +422,23 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
 
     HIP_CHECK(hipEventCreate(&event));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&eventRecNode, capGraph,
-                                         nodelist, numDependencies, event));
+    HIP_CHECK(
+        hipGraphAddEventRecordNode(&eventRecNode, capGraph, nodelist, numDependencies, event));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0,
-                         C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, capGraph,
-                                       nullptr, 0, event));
+    HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, capGraph, nullptr, 0, event));
 
-    HIP_CHECK(hipGraphAddDependencies(capGraph, &eventRecNode,
-                                      &memcpyD2H_C, 1));
-    HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyD2H_C,
-                                      &eventWaitNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(capGraph, &eventRecNode, &memcpyD2H_C, 1));
+    HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyD2H_C, &eventWaitNode, 1));
 
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &eventRecNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
     HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &eventWaitNode, 1,
-                                    hipStreamSetCaptureDependencies));
+                                                 hipStreamSetCaptureDependencies));
 
     HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -476,29 +461,29 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_add_a_node_inbetween") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Capture graph sequence using hipStreamBeginCapture and hipStreamEndCapture
-*    Try to add a new node and link this new node to the existing graph
-*    which will copy back the result from the existing graph and verify
-*  1) Add a hipGraphAddMemcpyNode1D node after hipStreamEndCapture
-*  2) Add a hipGraphAddMemsetNode node after hipStreamEndCapture
-*  3) Add a hipGraphAddMemcpyNode node after hipStreamEndCapture
-*  4) Add a hipGraphAddKernelNode node after hipStreamEndCapture
-*  5) Add a hipGraphAddMemcpyNodeToSymbol and hipGraphAddMemcpyNodeFromSymbol
-*     node after hipStreamEndCapture
-*  6) Add a hipGraphAddHostNode node after hipStreamEndCapture
-*  7) Add a hipGraphAddChildGraphNode node after hipStreamEndCapture
-*  8) Add a hipGraphAddEmptyNode node after hipStreamEndCapture
-*  9) Add a hipGraphAddEventRecordNode node after hipStreamEndCapture
-*  10) Add a hipGraphAddEventWaitNode node after hipStreamEndCapture
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphAddNodeBeginCapture.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Capture graph sequence using hipStreamBeginCapture and hipStreamEndCapture
+ *    Try to add a new node and link this new node to the existing graph
+ *    which will copy back the result from the existing graph and verify
+ *  1) Add a hipGraphAddMemcpyNode1D node after hipStreamEndCapture
+ *  2) Add a hipGraphAddMemsetNode node after hipStreamEndCapture
+ *  3) Add a hipGraphAddMemcpyNode node after hipStreamEndCapture
+ *  4) Add a hipGraphAddKernelNode node after hipStreamEndCapture
+ *  5) Add a hipGraphAddMemcpyNodeToSymbol and hipGraphAddMemcpyNodeFromSymbol
+ *     node after hipStreamEndCapture
+ *  6) Add a hipGraphAddHostNode node after hipStreamEndCapture
+ *  7) Add a hipGraphAddChildGraphNode node after hipStreamEndCapture
+ *  8) Add a hipGraphAddEmptyNode node after hipStreamEndCapture
+ *  9) Add a hipGraphAddEventRecordNode node after hipStreamEndCapture
+ *  10) Add a hipGraphAddEventWaitNode node after hipStreamEndCapture
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddNodeBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   hipGraph_t graph;
@@ -519,8 +504,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   int foundAt = -1;
   HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numN));
 
-  hipGraphNode_t* nodes =
-     reinterpret_cast<hipGraphNode_t *>(malloc(numN * sizeof(hipGraphNode_t)));
+  hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numN * sizeof(hipGraphNode_t)));
   REQUIRE(nodes != nullptr);
 
   HIP_CHECK(hipGraphGetNodes(graph, nodes, &numN));
@@ -534,8 +518,8 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   }
 
   SECTION("Add a hipGraphAddMemcpyNode1D node after hipStreamEndCapture") {
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                                 C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
     HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &memcpyD2H_C, 1));
 
     // Instantiate and launch the graph
@@ -557,10 +541,9 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     memsetParams.elementSize = sizeof(char);
     memsetParams.width = Nbytes;
     memsetParams.height = 1;
-    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0,
-                                    &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                               C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &memsetNode, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &memsetNode, &memcpyD2H_C, 1));
@@ -602,7 +585,7 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     hipKernelNodeParams kNodeParams{};
     memset(&kNodeParams, 0x00, sizeof(kNodeParams));
     void* kernelArgs[] = {&C_d};
-    kNodeParams.func = reinterpret_cast<void *>(kCallbackFunc);
+    kNodeParams.func = reinterpret_cast<void*>(kCallbackFunc);
     kNodeParams.gridDim = dim3(1);
     kNodeParams.blockDim = dim3(256);
     kNodeParams.sharedMemBytes = 0;
@@ -610,8 +593,8 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     kNodeParams.extra = nullptr;
     HIP_CHECK(hipGraphAddKernelNode(&kNode, graph, nullptr, 0, &kNodeParams));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                               C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &kNode, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &kNode, &memcpyD2H_C, 1));
@@ -626,18 +609,16 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
   }
   SECTION("Add hipGraphAddMemcpyNodeToSymbol node after hipStreamEndCapture") {
     hipGraphNode_t memcpyToSymNode, memcpyFromSymNode;
-    HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&memcpyToSymNode, graph, nullptr,
-                                     0, HIP_SYMBOL(globalOut), C_d, Nbytes, 0,
-                                     hipMemcpyDeviceToDevice));
+    HIP_CHECK(hipGraphAddMemcpyNodeToSymbol(&memcpyToSymNode, graph, nullptr, 0,
+                                            HIP_SYMBOL(globalOut), C_d, Nbytes, 0,
+                                            hipMemcpyDeviceToDevice));
 
-    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&memcpyFromSymNode, graph,
-                                     nullptr, 0, C_h, HIP_SYMBOL(globalOut),
-                                     Nbytes, 0, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNodeFromSymbol(&memcpyFromSymNode, graph, nullptr, 0, C_h,
+                                              HIP_SYMBOL(globalOut), Nbytes, 0,
+                                              hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt],
-                                      &memcpyToSymNode, 1));
-    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyToSymNode,
-                                      &memcpyFromSymNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &memcpyToSymNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &memcpyToSymNode, &memcpyFromSymNode, 1));
 
     // Instantiate and launch the graph
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -648,8 +629,8 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     HipTest::checkVectorSUB(A_h, B_h, C_h, SIZE);
   }
   SECTION("Add hipGraphAddHostNode node after hipStreamEndCapture") {
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                         C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
     hipGraphNode_t hostNode;
     hipHostNodeParams hostParams = {0, 0};
@@ -683,18 +664,14 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     memsetParams.height = 1;
 
     HIP_CHECK(hipGraphCreate(&childGraph, 0));
-    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, childGraph, nullptr, 0,
-                                    &memsetParams));
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, childGraph, nullptr, 0,
-                                   C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipGraphAddDependencies(childGraph, &memsetNode,
-                                      &memcpyD2H_C, 1));
+    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, childGraph, nullptr, 0, &memsetParams));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, childGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddDependencies(childGraph, &memsetNode, &memcpyD2H_C, 1));
 
-    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0,
-                                        childGraph));
+    HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph, nullptr, 0, childGraph));
 
-    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt],
-                                      &childGraphNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &childGraphNode, 1));
 
     // Instantiate and launch the graph
     HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -709,8 +686,8 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     hipGraphNode_t emptyNode;
     HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, graph, nullptr, 0));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                         C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
     HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &emptyNode, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &emptyNode, &memcpyD2H_C, 1));
@@ -730,14 +707,12 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
     HIP_CHECK(hipEventCreate(&eventstart));
     HIP_CHECK(hipEventCreate(&eventend));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&event_start, graph,
-                                         nullptr, 0, eventstart));
+    HIP_CHECK(hipGraphAddEventRecordNode(&event_start, graph, nullptr, 0, eventstart));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                         C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&event_end, graph,
-                                         nullptr, 0, eventend));
+    HIP_CHECK(hipGraphAddEventRecordNode(&event_end, graph, nullptr, 0, eventend));
 
     HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &event_start, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &event_start, &memcpyD2H_C, 1));
@@ -765,17 +740,14 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
 
     HIP_CHECK(hipEventCreate(&event));
 
-    HIP_CHECK(hipGraphAddEventRecordNode(&eventRecNode, graph,
-                                         nullptr, 0, event));
+    HIP_CHECK(hipGraphAddEventRecordNode(&eventRecNode, graph, nullptr, 0, event));
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0,
-                         C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                      hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, graph,
-                                         nullptr, 0, event));
+    HIP_CHECK(hipGraphAddEventWaitNode(&eventWaitNode, graph, nullptr, 0, event));
 
-    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt],
-                                      &eventRecNode, 1));
+    HIP_CHECK(hipGraphAddDependencies(graph, &nodes[foundAt], &eventRecNode, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &eventRecNode, &memcpyD2H_C, 1));
     HIP_CHECK(hipGraphAddDependencies(graph, &memcpyD2H_C, &eventWaitNode, 1));
 
@@ -799,17 +771,17 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_a_node_later") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Capture graph sequence using hipStreamBeginCapture and hipStreamEndCapture
-*    Add some new node to the same graph and execute it and verify
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphAddNodeBeginCapture.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Capture graph sequence using hipStreamBeginCapture and hipStreamEndCapture
+ *    Add some new node to the same graph and execute it and verify
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddNodeBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   hipGraph_t graph;
@@ -832,14 +804,14 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
   HIP_CHECK(hipMemcpyAsync(C_h1, C_d1, Nbytes, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_C, graph, nullptr, 0, C_d, C_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_AC, graph, nullptr, 0, A_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_C, graph, nullptr, 0, C_d, C_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_AC, graph, nullptr, 0, A_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
   hipGraphNode_t hostNode;
   hipHostNodeParams hostParams = {0, 0};
   hostParams.fn = callbackFunc;
@@ -868,18 +840,18 @@ TEST_CASE("Unit_hipStreamEndCapture_first_and_add_other_graph_node_later") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Capture graph sequence using hipStreamBeginCapture and
-*    add some new node before hipStreamEndCapture to the same graph
-*    and hipGraphAddEmptyNode to use as last node to grah to complete.
-* Test source
-* ------------------------
-*  - unit/graph/hipGraphAddNodeBeginCapture.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Capture graph sequence using hipStreamBeginCapture and
+ *    add some new node before hipStreamEndCapture to the same graph
+ *    and hipGraphAddEmptyNode to use as last node to grah to complete.
+ * Test source
+ * ------------------------
+ *  - unit/graph/hipGraphAddNodeBeginCapture.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   hipGraphExec_t graphExec;
@@ -899,8 +871,8 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   const hipGraphNode_t* nodelist{};
   size_t numDependencies;
 
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr,
-                               &capGraph, &nodelist, &numDependencies));
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(stream, &captureStatus, nullptr, &capGraph, &nodelist,
+                                       &numDependencies));
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
   REQUIRE(capGraph != nullptr);
 
@@ -914,11 +886,10 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   memsetParams.elementSize = sizeof(char);
   memsetParams.width = Nbytes;
   memsetParams.height = 1;
-  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, capGraph, nodelist,
-                                  numDependencies, &memsetParams));
+  HIP_CHECK(hipGraphAddMemsetNode(&memsetNode, capGraph, nodelist, numDependencies, &memsetParams));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0,
-                             C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, capGraph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
   hipGraphNode_t emptyNode;
   HIP_CHECK(hipGraphAddEmptyNode(&emptyNode, capGraph, nullptr, 0));
@@ -926,12 +897,12 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
   HIP_CHECK(hipGraphAddDependencies(capGraph, &memsetNode, &memcpyD2H_C, 1));
   HIP_CHECK(hipGraphAddDependencies(capGraph, &memcpyD2H_C, &emptyNode, 1));
 
-  HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memsetNode, 1,
-                                  hipStreamSetCaptureDependencies));
-  HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1,
-                                  hipStreamSetCaptureDependencies));
-  HIP_CHECK(hipStreamUpdateCaptureDependencies(stream, &emptyNode, 1,
-                                  hipStreamSetCaptureDependencies));
+  HIP_CHECK(
+      hipStreamUpdateCaptureDependencies(stream, &memsetNode, 1, hipStreamSetCaptureDependencies));
+  HIP_CHECK(
+      hipStreamUpdateCaptureDependencies(stream, &memcpyD2H_C, 1, hipStreamSetCaptureDependencies));
+  HIP_CHECK(
+      hipStreamUpdateCaptureDependencies(stream, &emptyNode, 1, hipStreamSetCaptureDependencies));
 
   HIP_CHECK(hipStreamEndCapture(stream, &capGraph));
 
@@ -951,6 +922,6 @@ TEST_CASE("Unit_hipStreamEndCapture_later_and_addEmptyNode") {
 
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */
