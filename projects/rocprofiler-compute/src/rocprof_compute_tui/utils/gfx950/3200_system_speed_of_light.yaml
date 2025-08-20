@@ -84,20 +84,20 @@ Panel Config:
         Kernel Time:
           avg: AVG((End_Timestamp - Start_Timestamp))
           unit: ns
-          peak: None
-          pop: None
+          peak: N/A
+          pop: N/A
         Kernel Time (Cycles):
           avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
           unit: Cycle
-          peak: None
-          pop: None
+          peak: N/A
+          pop: N/A
         SIMD Utilization:
           value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
           unit: Pct
           peak: 100
           pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
         Clock Rate:
-          value: None
+          value: (GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu) / (End_Timestamp - Start_Timestamp)
           unit: ns
-          peak: None
-          pop: None
+          peak: N/A
+          pop: N/A

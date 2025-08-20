@@ -32,7 +32,6 @@ from textual.widgets import Collapsible, DataTable, Label
 
 from rocprof_compute_tui.widgets.charts import (
     MemoryChart,
-    RooflinePlot,
     SimpleBar,
     SimpleBox,
     SimpleMultiBar,

@@ -30,8 +30,9 @@ from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
-import config
 import pandas as pd
+
+import config
 from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,

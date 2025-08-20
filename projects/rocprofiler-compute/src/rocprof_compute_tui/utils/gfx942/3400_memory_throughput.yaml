@@ -143,20 +143,20 @@ Panel Config:
           avg: AVG(((100 * TA_TA_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: pct
           peak: 100
-          pop: None
+          pop: N/A
         Data-Return Busy:
           avg: AVG(((100 * TD_TD_BUSY_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
           unit: pct
           peak: 100
-          pop: None
+          pop: N/A
         L1I-L2 Bandwidth:
           avg: AVG(((SQC_TC_INST_REQ * 64) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
-          peak: None
-          pop: None
+          peak: N/A
+          pop: N/A
         sL1D-L2 BW:
           value: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ)
             * 64)) / (End_Timestamp - Start_Timestamp)))
           unit: GB/s
-          peak: None
-          pop: None
+          peak: N/A
+          pop: N/A
