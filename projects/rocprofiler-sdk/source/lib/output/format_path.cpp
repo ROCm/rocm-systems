@@ -52,8 +52,6 @@
 #include <string_view>
 #include <vector>
 
-#include <regex>
-
 namespace rocprofiler
 {
 namespace tool
