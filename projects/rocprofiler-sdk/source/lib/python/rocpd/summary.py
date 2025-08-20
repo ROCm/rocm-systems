@@ -356,9 +356,6 @@ def export_summary_region_queries(
                 WHERE {" OR ".join(conditions)}
             """
 
-            # Export the region summary query
-            export_query(connection, config, k, region_query)
-
             # Create regular summary query
             summary_query_name, summary_query = generate_summary_query(k, region_query)
             export_query(connection, config, summary_query_name, summary_query)
