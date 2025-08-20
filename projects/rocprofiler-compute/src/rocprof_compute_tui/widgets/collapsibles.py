@@ -127,7 +127,7 @@ def build_section_from_config(
 
             df = dfs.get(data_path[0], {}).get(data_path[1], {})
             df = df.get("df") if isinstance(df, dict) else None
-            if df is not None and tui_style is None:
+            if df is not None and isinstance(df, dict) and tui_style is None:
                 tui_style = df.get("tui_style")
 
             widgets = [
