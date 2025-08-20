@@ -1006,6 +1006,8 @@ hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
         swidth,
         sheight
     );
+    params.srcPos = make_hipPos(0,0,0);
+    params.srcArray = nullptr;
   } else if (desc.src.type == hipMemcpyOperandTypeArray) {
     params.srcArray = desc.src.op.array.array;
     params.srcPos = make_hipPos(
@@ -1013,6 +1015,7 @@ hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
         desc.src.op.array.offset.y,
         desc.src.op.array.offset.z
     );
+    params.srcPtr.ptr = nullptr;
   }
   // dest
   if (desc.dst.type == hipMemcpyOperandTypePointer) {
@@ -1027,6 +1030,8 @@ hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
         swidth,
         sheight
     );
+    params.dstPos = make_hipPos(0,0,0);
+    params.dstArray = nullptr;
   } else if (desc.dst.type == hipMemcpyOperandTypeArray) {
     params.dstArray = desc.dst.op.array.array;
     params.dstPos = make_hipPos(
@@ -1034,6 +1039,7 @@ hipMemcpy3DParms getMemcpy3DParms(const hipMemcpy3DBatchOp& desc) {
         desc.dst.op.array.offset.y,
         desc.dst.op.array.offset.z
     );
+    params.dstPtr.ptr = nullptr;
   }
   return params;
 }
