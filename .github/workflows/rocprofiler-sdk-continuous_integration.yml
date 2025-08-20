@@ -85,10 +85,10 @@ jobs:
         apt-get update
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
         mkdir --parents --mode=0755 /etc/apt/keyrings
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
-        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/.7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
+        apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
+        sed -i "s/\/30.10/\/.30.10/" /etc/apt/sources.list.d/amdgpu*.list
+        sed -i "s|rocm/apt/7.0|rocm/apt/.apt_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/apt/sources.list.d/rocm.list
         apt-get update
         apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev rccl-dev rocdecode-dev rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
@@ -312,7 +312,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi325']
-        os: ['rhel-9.1', 'sles-15.4']
+        os: ['rhel-8.8', 'rhel-9.5', 'sles-15.6']
         build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
@@ -332,12 +332,14 @@ jobs:
 
     steps:
     - name: Setup Git
-      if: ${{ matrix.os == 'rhel-9.1' }}
+      if: ${{ matrix.os == 'rhel-8.8' || matrix.os == 'rhel-9.5' }}
       shell: bash
       run: |
         wget https://www.kernel.org/pub/software/scm/git/git-2.9.5.tar.xz
         tar -xf git-2.9.5.tar.xz
         cd git-2.9.5
+        sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
+        sudo dnf clean all
         dnf install perl-ExtUtils-MakeMaker
         make prefix=/usr all -j 32
         sudo make prefix=/usr install
@@ -351,37 +353,36 @@ jobs:
         submodules: true
         set-safe-directory: true
 
-    - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.1
-      if: ${{ matrix.os == 'rhel-9.1' }}
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 8.8
+      if: ${{ matrix.os == 'rhel-8.8' }}
       shell: bash
       working-directory: /tmp
       run: |
-        sudo tee /etc/yum.repos.d/rocm.repo <<EOF
-        [ROCm-7.0.0]
-        name=ROCm7.0.0
-        baseurl=https://repo.radeon.com/rocm/rhel9/7.0_rc1/main
-        enabled=1
-        priority=50
-        gpgcheck=1
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-        EOF
-        sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
+        sudo dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm
+        sudo sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
+        sudo sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
         sudo dnf clean all
         sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
-    - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.4
-      if: ${{ matrix.os == 'sles-15.4' }}
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.5
+      if: ${{ matrix.os == 'rhel-9.5' }}
       shell: bash
       working-directory: /tmp
       run: |
-        sudo tee /etc/zypp/repos.d/rocm.repo <<EOF
-        [ROCm-7.0.0]
-        name=ROCm7.0.0
-        baseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main
-        enabled=1
-        gpgcheck=1
-        gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key
-        EOF
+        sudo dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm
+        sudo sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
+        sudo sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
+        sudo dnf clean all
+        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+
+    - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.6
+      if: ${{ matrix.os == 'sles-15.6' }}
+      shell: bash
+      working-directory: /tmp
+      run: |
+        sudo zypper --no-gpg-checks install https://repo.radeon.com/amdgpu-install/.7.0/sle/15.6/amdgpu-install-7.0.70000-1.noarch.rpm
+        sudo sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo
+        sudo sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo
         sudo zypper --gpg-auto-import-keys refresh
         sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
@@ -424,10 +425,8 @@ jobs:
           echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
           echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
           echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
-          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
+          echo 'LLVM_PATH=/opt/rocm-7.0.0/llvm' >> $GITHUB_ENV
           echo 'CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}' >> $GITHUB_ENV
-          echo 'HIP_DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/lib/llvm/lib/clang/20/lib/amdgcn/bitcode' >> $GITHUB_ENV
-          echo 'DEVICE_LIB_PATH=${{ env.ROCM_PATH }}/lib/llvm/lib/clang/20/lib/amdgcn/bitcode' >> $GITHUB_ENV
 
     - name: Build and Install Aqlprofile
       shell: bash
@@ -548,10 +547,10 @@ jobs:
         apt-get update
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
         mkdir --parents --mode=0755 /etc/apt/keyrings
-        wget https://repo.radeon.com/rocm/rocm.gpg.key -O - | gpg --dearmor | tee /etc/apt/keyrings/rocm.gpg > /dev/null
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/rocm/apt/7.0_rc1 jammy main" | tee /etc/apt/sources.list.d/rocm.list
-        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/rocm.gpg] https://repo.radeon.com/amdgpu/latest/ubuntu jammy main" | tee /etc/apt/sources.list.d/amdgpu.list
-        echo -e 'Package: *\nPin: release o=repo.radeon.com\nPin-Priority: 600' | tee /etc/apt/preferences.d/rocm-pin-600
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/.7.0/ubuntu/noble/amdgpu-install_7.0.70000-1_all.deb
+        apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
+        sed -i "s/\/30.10/\/.30.10/" /etc/apt/sources.list.d/amdgpu*.list
+        sed -i "s|rocm/apt/7.0|rocm/apt/.apt_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/apt/sources.list.d/rocm.list
         apt-get update
         apt-get install -y rocm-openmp-sdk rocm-llvm-dev rccl-dev rocdecode-dev rocjpeg-dev
         add-apt-repository ppa:git-core/ppa
