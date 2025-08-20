@@ -144,7 +144,7 @@ class KernelView(Container):
             "Kernel_Name",
             "Mean(ns)",
             "Median(ns)",
-            "Sun(ns)",
+            "Sum(ns)",
             "Compute Throughput",
             "Memory Throughput",
             "VGPRs",
