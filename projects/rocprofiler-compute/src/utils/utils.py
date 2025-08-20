@@ -294,15 +294,10 @@ def capture_subprocess_output(
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
-    sanitized_env = None
-    if new_env is not None:
-        sanitized_env = {}
-        for k, v in new_env.items():
-            if isinstance(v, list):
-                # Convert list to colon-separated string, or change separator if needed
-                sanitized_env[k] = ":".join(str(i) for i in v)
-            else:
-                sanitized_env[k] = str(v)
+    sanitized_env = None if new_env is None else {
+        k: ":".join(str(i) for i in v) if isinstance(v, list) else str(v)
+        for k, v in new_env.items()
+    }
 
     process = (
         subprocess.Popen(

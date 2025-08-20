@@ -6,10 +6,13 @@
 Using Live Attach Detach in ROCm Compute Profiler
 ********************************************
 
-Live Attach/Detach is a new way for rocprofiler-compute of coupling with the workload process, which does not control the start and end of the workload application. When it runs, the application is already running. What the profiler does is only to attach to the workload process, collect the needed counter and detach, without changing the lifecycle of the workload.
+Live Attach/Detach is a new feature of rocprofiler-compute that allows coupling with a workload process, without controlling its start or end. Instead, the application is already running when the profiler is invoked. The profiler simply attaches to the process, collects the required counters, and then detaches—without altering the lifecycle of the workload.
 
-Due to a specific attach is not repeatable, it can only collect a set of counter that the hardware is capable of doing during one run. Therefore, in current implementation, the user needs to specific the subset of goupe of counter and ensure that it's able to acquire during only one run. It can be achieved either by using "--block" parameter, for example, "--block 3.1.1 4.1.1 5.1.1", or by using single path argument such as "--set launch_stats".
-The method of detach can be achieve by two way: 1. by setting parameter "--attach-duration-msec" of a specific time in terms of milliseconds, the detach will happen after this preset time since the start of subprocess of rocprofiler. 2. By clicking "Enter" key after the successful attach within the same profiling terminal session. When successful attach happens, a message indicating it can be seen in the terminal log of the workload process.
+Since a specific attach is not repeatable, it can only collect the set of counters that the hardware is capable of capturing in a single run. Therefore, in the current implementation, the user must specify a subset of counter groups that can be collected within one run. This can be done either by using the --block (for example, --block 3.1.1 4.1.1 5.1.1), or by providing a predefined set through the use of single pass counter collection --set.
+
+Detachment can be achieved in two ways:
+By setting the --attach-duration-msec parameter to a specific duration (in milliseconds). In this case, detachment occurs automatically after the specified time has elapsed since the rocprofiler subprocess started.
+By pressing the Enter key after a successful attach within the same profiling terminal session. Upon a successful attach, a confirmation message is displayed in the terminal log of the workload process.
 
 ---------------------
 Profiling options
