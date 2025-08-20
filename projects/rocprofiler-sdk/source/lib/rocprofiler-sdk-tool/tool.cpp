@@ -943,10 +943,12 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 std::string_view include_regex(kernel_filter_include);
                 std::string_view exclude_regex(kernel_filter_exclude);
-                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name, include_regex))
+                if(rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                            include_regex))
                 {
                     if(kernel_filter_exclude.empty() ||
-                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name, exclude_regex))
+                       !rocprofiler::common::regex::regex_search(kernel_info->formatted_kernel_name,
+                                                                 exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
@@ -2198,8 +2200,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     }
 
     // Handle kernel id of zero
-    bool include = rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_include);
-    bool exclude = rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
+    bool include =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_include);
+    bool exclude =
+        rocprofiler::common::regex::regex_search("0", tool::get_config().kernel_filter_exclude);
     if(include && (!exclude || tool::get_config().kernel_filter_exclude.empty()))
         add_kernel_target(0, tool::get_config().kernel_filter_range);
 

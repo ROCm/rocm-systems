@@ -26,8 +26,8 @@
 #include "statistics.hpp"
 #include "timestamps.hpp"
 
-#include "lib/common/regex.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>

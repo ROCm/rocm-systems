@@ -199,8 +199,8 @@ get_uuid()
 auto
 replace_uuid(std::string_view inp)
 {
-    const auto& _repl = get_uuid();
-    const auto replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
+    const auto& _repl       = get_uuid();
+    const auto  replacement = (_repl.empty()) ? std::string{} : fmt::format("_{}", _repl);
     return replace_all(std::string{inp}, std::string_view{"{{uuid}}"}, replacement);
 }
 

@@ -67,7 +67,6 @@ namespace common
 {
 namespace regex
 {
-
 // =============================== AST ===============================
 
 struct Node

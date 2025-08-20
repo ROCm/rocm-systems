@@ -28,10 +28,10 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/regex.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/output/output_key.hpp"
-#include "lib/common/regex.hpp"
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
@@ -134,7 +134,7 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
     // remove %arg<N>% where N >= argc
     try
     {
-        auto   _re = std::string{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
+        auto _re = std::string{"(.*)(%|\\{)(arg[0-9]+)(%|\\})([-/_]*)(.*)"};
         while(rocprofiler::common::regex::regex_search(_fpath, _re))
             _fpath = rocprofiler::common::regex::regex_replace(_fpath, _re, "$1$6");
     } catch(std::exception& _e)
