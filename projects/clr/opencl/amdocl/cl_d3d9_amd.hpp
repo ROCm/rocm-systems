@@ -29,18 +29,13 @@
 
 #include <utility>
 
-namespace amd
-{
+namespace amd {
 
-cl_mem clCreateImage2DFromD3D9ResourceAMD(
-    Context&        amdContext,
-    cl_mem_flags    flags,
-    cl_dx9_media_adapter_type_khr adapter_type,
-    cl_dx9_surface_info_khr*  surface_info,
-    cl_uint         plane,
-    int*            errcode_ret);
+cl_mem clCreateImage2DFromD3D9ResourceAMD(Context& amdContext, cl_mem_flags flags,
+                                          cl_dx9_media_adapter_type_khr adapter_type,
+                                          cl_dx9_surface_info_khr* surface_info, cl_uint plane,
+                                          int* errcode_ret);
 
 void SyncD3D9Objects(std::vector<amd::Memory*>& memObjects);
 
-} //namespace amd
-
+}  // namespace amd

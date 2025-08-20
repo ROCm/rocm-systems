@@ -42,7 +42,7 @@ static const size_t TotalArgs = 4;
 #define SNPRINTF snprintf
 #endif
 
-static const char *Arguments[TotalArgs] = {
+static const char* Arguments[TotalArgs] = {
     "__global uint* out",
     "__global uint* out, __global uint* buf0, __global uint* buf1, __global "
     "uint* buf2, __global uint* buf3",
@@ -59,7 +59,7 @@ static const char *Arguments[TotalArgs] = {
     "__global uint* buf14, __global uint* buf15, __global uint* buf16, "
     "__global uint* buf17, __global uint* buf18"};
 
-static const char *strKernel =
+static const char* strKernel =
     "__kernel void dummy(%s)                    \n"
     "{                                          \n"
     "   uint id = get_global_id(0);             \n"
@@ -75,8 +75,7 @@ OCLPerfSVMKernelArguments::OCLPerfSVMKernelArguments() {
 
 OCLPerfSVMKernelArguments::~OCLPerfSVMKernelArguments() {}
 
-void OCLPerfSVMKernelArguments::open(unsigned int test, char *units,
-                                     double &conversion,
+void OCLPerfSVMKernelArguments::open(unsigned int test, char* units, double& conversion,
                                      unsigned int deviceId) {
 #if defined(CL_VERSION_2_0)
   // cl_mem  buffer;
@@ -85,8 +84,8 @@ void OCLPerfSVMKernelArguments::open(unsigned int test, char *units,
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
   test_ = test;
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   cl_device_svm_capabilities caps;
@@ -106,17 +105,16 @@ void OCLPerfSVMKernelArguments::open(unsigned int test, char *units,
   }
 
   size_t numArguments = (test_ / TotalQueues) % TotalArgs;
-  char *program = new char[4096];
+  char* program = new char[4096];
   SNPRINTF(program, sizeof(char) * 4096, strKernel, Arguments[numArguments]);
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&program, NULL, &error_);
+  program_ =
+      _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&program, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -131,7 +129,7 @@ void OCLPerfSVMKernelArguments::open(unsigned int test, char *units,
   size_t bufSize = BufSize * sizeof(cl_int);
 
   numBufs_ = (unsigned int)NumBuffs[test_ / (TotalQueues * TotalArgs)];
-  inOutBuffer = (void **)malloc(sizeof(void *) * numBufs_);
+  inOutBuffer = (void**)malloc(sizeof(void*) * numBufs_);
 
   for (size_t b = 0; b < numBufs_; ++b) {
     inOutBuffer[b] = clSVMAlloc(context_, CL_MEM_READ_WRITE, bufSize, 0);
@@ -144,9 +142,8 @@ void OCLPerfSVMKernelArguments::open(unsigned int test, char *units,
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfSVMKernelArguments::run(void) {
   if (skip_) {
@@ -161,8 +158,7 @@ void OCLPerfSVMKernelArguments::run(void) {
   static const size_t Queues[] = {1, 2, 4, 8};
   size_t numQueues = Queues[test_ % TotalQueues];
   cl_uint numArguments;
-  _wrapper->clGetKernelInfo(kernel_, CL_KERNEL_NUM_ARGS, sizeof(cl_uint),
-                            &numArguments, NULL);
+  _wrapper->clGetKernelInfo(kernel_, CL_KERNEL_NUM_ARGS, sizeof(cl_uint), &numArguments, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clGetKernelInfo() failed");
 
   size_t iter = Iterations / numQueues / numBufs_;
@@ -170,8 +166,8 @@ void OCLPerfSVMKernelArguments::run(void) {
 
   std::vector<cl_command_queue> cmdQueues(numQueues);
   for (size_t q = 0; q < numQueues; ++q) {
-    cl_command_queue cmdQueue = _wrapper->clCreateCommandQueue(
-        context_, devices_[_deviceId], 0, &error_);
+    cl_command_queue cmdQueue =
+        _wrapper->clCreateCommandQueue(context_, devices_[_deviceId], 0, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueue() failed");
     cmdQueues[q] = cmdQueue;
   }
@@ -179,16 +175,15 @@ void OCLPerfSVMKernelArguments::run(void) {
   for (size_t b = 0; b < (numBufs_ / numArguments); ++b) {
     for (size_t q = 0; q < numQueues; ++q) {
       for (cl_uint a = 0; a < numArguments; ++a) {
-        void *buffer = inOutBuffer[(b * numArguments + a) % numBufs_];
+        void* buffer = inOutBuffer[(b * numArguments + a) % numBufs_];
         error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, a, buffer);
-        CHECK_RESULT((error_ != CL_SUCCESS),
-                     "clSetKernelArgSVMPointer() failed");
+        CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArgSVMPointer() failed");
       }
 
       size_t gws[1] = {256};
       size_t lws[1] = {256};
-      error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues[q], kernel_, 1, NULL,
-                                                gws, lws, 0, NULL, NULL);
+      error_ =
+          _wrapper->clEnqueueNDRangeKernel(cmdQueues[q], kernel_, 1, NULL, gws, lws, 0, NULL, NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     }
   }
@@ -204,16 +199,15 @@ void OCLPerfSVMKernelArguments::run(void) {
     for (size_t b = 0; b < numBufs_; ++b) {
       for (size_t q = 0; q < numQueues; ++q) {
         for (cl_uint a = 0; a < numArguments; ++a) {
-          void *buffer = inOutBuffer[(b * numArguments + a) % numBufs_];
+          void* buffer = inOutBuffer[(b * numArguments + a) % numBufs_];
           error_ = _wrapper->clSetKernelArgSVMPointer(kernel_, a, buffer);
-          CHECK_RESULT((error_ != CL_SUCCESS),
-                       "clSetKernelArgSVMPointer() failed");
+          CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArgSVMPointer() failed");
         }
 
         size_t gws[1] = {256};
         size_t lws[1] = {256};
-        error_ = _wrapper->clEnqueueNDRangeKernel(
-            cmdQueues[q], kernel_, 1, NULL, gws, lws, 0, NULL, NULL);
+        error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues[q], kernel_, 1, NULL, gws, lws, 0, NULL,
+                                                  NULL);
         CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
         disp++;
       }
@@ -226,8 +220,7 @@ void OCLPerfSVMKernelArguments::run(void) {
 
   for (size_t q = 0; q < numQueues; ++q) {
     error_ = _wrapper->clReleaseCommandQueue(cmdQueues[q]);
-    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS),
-                           "clReleaseCommandQueue() failed");
+    CHECK_RESULT_NO_RETURN((error_ != CL_SUCCESS), "clReleaseCommandQueue() failed");
   }
 
   std::stringstream stream;

@@ -93,6 +93,6 @@ TEST_CASE("Unit_hipEventQuery_DifferentDevice") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

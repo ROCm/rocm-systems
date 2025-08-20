@@ -353,6 +353,6 @@ TEMPLATE_TEST_CASE("Unit_surf2D_Positive_ReadWrite", "", char, uchar, short, ush
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

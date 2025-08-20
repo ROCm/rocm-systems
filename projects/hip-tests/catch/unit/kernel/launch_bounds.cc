@@ -17,19 +17,17 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- 
+
 
 constexpr size_t N = 1024;
 int p_blockSize = 256;
 
-__global__ void
-__launch_bounds__(256, 2)
-    myKern(int* C, const int* A, int N) {
-    int tid = (blockIdx.x * blockDim.x + threadIdx.x);
+__global__ void __launch_bounds__(256, 2) myKern(int* C, const int* A, int N) {
+  int tid = (blockIdx.x * blockDim.x + threadIdx.x);
 
-    if (tid < N) {
-        C[tid] = A[tid];
-    }
+  if (tid < N) {
+    C[tid] = A[tid];
+  }
 }
 /**
 * @addtogroup hipLaunchKernelGGL
@@ -70,8 +68,7 @@ TEST_CASE("Unit_kernel_LaunchBounds_Functional") {
 
   HIPCHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIPCHECK(hipGetLastError());
-  hipLaunchKernelGGL(myKern, dim3(blocks), dim3(p_blockSize), 0,
-                     0, C_d, A_d, N);
+  hipLaunchKernelGGL(myKern, dim3(blocks), dim3(p_blockSize), 0, 0, C_d, A_d, N);
 
 #ifdef __HIP_PLATFORM_NVIDIA__
   cudaFuncAttributes attrib;
@@ -102,6 +99,6 @@ TEST_CASE("Unit_kernel_LaunchBounds_Functional") {
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

@@ -56,10 +56,10 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int
 #else
 TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int, unsigned int,
                    unsigned long, unsigned long long, float, double) {
-#endif // HT_NVIDIA
+#endif  // HT_NVIDIA
   for (auto current = 0; current < cmd_options.iterations; ++current) {
-      DYNAMIC_SECTION("Positive Same Address" << current) {
-         AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
+    DYNAMIC_SECTION("Positive Same Address" << current) {
+      AtomicExchSameAddressTest<TestType, AtomicScopes::device>();
     }
   }
 }
@@ -91,12 +91,11 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Same_Address_Compile_Time", "", int
  *    - HIP_VERSION >= 5.2
  */
 #if HT_NVIDIA
-TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int,
-                   unsigned long long, float) {
+TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long long, float) {
 #else
 TEMPLATE_TEST_CASE("Unit_atomicExch_Positive", "", int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
-#endif // HT_NVIDIA
+#endif  // HT_NVIDIA
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -149,7 +148,7 @@ TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned in
 #else
 TEMPLATE_TEST_CASE("Unit_atomicExch_Positive_Multi_Kernel", "", int, unsigned int, unsigned long,
                    unsigned long long, float, double) {
-#endif // HT_NVIDIA
+#endif  // HT_NVIDIA
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -215,6 +214,6 @@ TEST_CASE("Unit_atomicExch_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

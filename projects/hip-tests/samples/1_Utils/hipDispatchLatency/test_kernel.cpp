@@ -19,6 +19,4 @@ THE SOFTWARE.
 
 #include "hip/hip_runtime.h"
 
-extern "C" __global__ void test() {
-}
-
+extern "C" __global__ void test() {}

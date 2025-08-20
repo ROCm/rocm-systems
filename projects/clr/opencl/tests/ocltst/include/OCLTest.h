@@ -32,14 +32,12 @@ class OCLTest {
   virtual unsigned int getThreadUsage(void) = 0;
   virtual int getNumSubTests(void) = 0;
   virtual void open() = 0;
-  virtual void open(unsigned int test, const char* deviceName,
-                    unsigned int architecture) = 0;
+  virtual void open(unsigned int test, const char* deviceName, unsigned int architecture) = 0;
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId, unsigned int platformIndex) = 0;
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId,
+                    unsigned int platformIndex) = 0;
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId) = 0;
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId) = 0;
 
   virtual void run(void) = 0;
   virtual unsigned int close(void) = 0;
@@ -67,7 +65,7 @@ class OCLTest {
   std::string testDescString;
   void resetDescString(void) { testDescString.clear(); }
 
-  virtual ~OCLTest(){};
+  virtual ~OCLTest() {};
 };
 
 #endif  // _OCLTEST_H_

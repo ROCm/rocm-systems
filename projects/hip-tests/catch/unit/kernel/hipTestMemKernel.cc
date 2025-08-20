@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- 
+
 
 #define LEN8 8 * 4
 #define LEN9 9 * 4
@@ -26,53 +26,53 @@ THE SOFTWARE.
 #define LEN12 12 * 4
 
 __global__ void MemCpy8(uint8_t* In, uint8_t* Out) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memcpy(Out + tid * 8, In + tid * 8, 8);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memcpy(Out + tid * 8, In + tid * 8, 8);
 }
 
 __global__ void MemCpy9(uint8_t* In, uint8_t* Out) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memcpy(Out + tid * 9, In + tid * 9, 9);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memcpy(Out + tid * 9, In + tid * 9, 9);
 }
 
 __global__ void MemCpy10(uint8_t* In, uint8_t* Out) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memcpy(Out + tid * 10, In + tid * 10, 10);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memcpy(Out + tid * 10, In + tid * 10, 10);
 }
 
 __global__ void MemCpy11(uint8_t* In, uint8_t* Out) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memcpy(Out + tid * 11, In + tid * 11, 11);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memcpy(Out + tid * 11, In + tid * 11, 11);
 }
 
 __global__ void MemCpy12(uint8_t* In, uint8_t* Out) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memcpy(Out + tid * 12, In + tid * 12, 12);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memcpy(Out + tid * 12, In + tid * 12, 12);
 }
 
 __global__ void MemSet8(uint8_t* In) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memset(In + tid * 8, 1, 8);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memset(In + tid * 8, 1, 8);
 }
 
 __global__ void MemSet9(uint8_t* In) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memset(In + tid * 9, 1, 9);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memset(In + tid * 9, 1, 9);
 }
 
 __global__ void MemSet10(uint8_t* In) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memset(In + tid * 10, 1, 10);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memset(In + tid * 10, 1, 10);
 }
 
 __global__ void MemSet11(uint8_t* In) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memset(In + tid * 11, 1, 11);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memset(In + tid * 11, 1, 11);
 }
 
 __global__ void MemSet12(uint8_t* In) {
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    memset(In + tid * 12, 1, 12);
+  int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  memset(In + tid * 12, 1, 12);
 }
 /**
 * @addtogroup hipLaunchKernelGGL
@@ -161,9 +161,9 @@ TEST_CASE("Unit_kernel_MemoryOperationsViaKernels") {
     B = new uint8_t[LEN10];
     C = new uint8_t[LEN10];
     for (uint32_t i = 0; i < LEN10; i++) {
-        A[i] = i;
-        B[i] = 0;
-        C[i] = 0;
+      A[i] = i;
+      B[i] = 0;
+      C[i] = 0;
     }
     HIP_CHECK(hipMalloc(&Ad, LEN10));
     HIP_CHECK(hipMalloc(&Bd, LEN10));
@@ -248,6 +248,6 @@ TEST_CASE("Unit_kernel_MemoryOperationsViaKernels") {
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

@@ -20,15 +20,15 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 
 /**
-* @addtogroup hipExtLaunchMultiKernelMultiDevice
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList,
-*                                          int  numDevices, unsigned int  flags)` -
-* Launches kernels on multiple devices and guarantees all specified kernels are dispatched
-* on respective streams before enqueuing any other work on the specified streams from any
-* other threads
-*/
+ * @addtogroup hipExtLaunchMultiKernelMultiDevice
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipExtLaunchMultiKernelMultiDevice(hipLaunchParams* launchParamsList,
+ *                                          int  numDevices, unsigned int  flags)` -
+ * Launches kernels on multiple devices and guarantees all specified kernels are dispatched
+ * on respective streams before enqueuing any other work on the specified streams from any
+ * other threads
+ */
 
 /**
  * Test Description
@@ -44,8 +44,7 @@ THE SOFTWARE.
 
 // Square each element in the array A and write to array C.
 #define NUM_KERNEL_ARGS 3
-__global__ void
-vector_square(float *C_d, float *A_d, size_t N) {
+__global__ void vector_square(float* C_d, float* A_d, size_t N) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
 
@@ -76,7 +75,7 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
   HIP_CHECK(C_h == 0 ? hipErrorOutOfMemory : hipSuccess);
   // Fill with Phi + i
   for (size_t i = 0; i < N; i++) {
-     A_h[i] = 1.618f + i;
+    A_h[i] = 1.618f + i;
   }
 
   const unsigned blocks = 512;
@@ -97,22 +96,21 @@ TEST_CASE("Unit_hipExtLaunchMultiKernelMultiDevice_Functional") {
     HIP_CHECK(hipMemcpy(A_d[i], A_h, Nbytes, hipMemcpyHostToDevice));
   }
 
-  hipLaunchParams *launchParamsList = reinterpret_cast<hipLaunchParams *>(
-        malloc(sizeof(hipLaunchParams)*nGpu));
+  hipLaunchParams* launchParamsList =
+      reinterpret_cast<hipLaunchParams*>(malloc(sizeof(hipLaunchParams) * nGpu));
 
-  void *args[MAX_GPUS * NUM_KERNEL_ARGS];
+  void* args[MAX_GPUS * NUM_KERNEL_ARGS];
 
   for (int i = 0; i < nGpu; i++) {
-    args[i * NUM_KERNEL_ARGS]     = &C_d[i];
+    args[i * NUM_KERNEL_ARGS] = &C_d[i];
     args[i * NUM_KERNEL_ARGS + 1] = &A_d[i];
     args[i * NUM_KERNEL_ARGS + 2] = &N;
-    launchParamsList[i].func  =
-              reinterpret_cast<void *>(vector_square);
-    launchParamsList[i].gridDim   = dim3(blocks);
-    launchParamsList[i].blockDim  = dim3(threadsPerBlock);
+    launchParamsList[i].func = reinterpret_cast<void*>(vector_square);
+    launchParamsList[i].gridDim = dim3(blocks);
+    launchParamsList[i].blockDim = dim3(threadsPerBlock);
     launchParamsList[i].sharedMem = 0;
-    launchParamsList[i].stream    = stream[i];
-    launchParamsList[i].args      = args + i * NUM_KERNEL_ARGS;
+    launchParamsList[i].stream = stream[i];
+    launchParamsList[i].args = args + i * NUM_KERNEL_ARGS;
   }
 
   INFO("info: launch vector_square kernel with")

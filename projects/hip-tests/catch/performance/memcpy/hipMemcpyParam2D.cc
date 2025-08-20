@@ -27,54 +27,52 @@ THE SOFTWARE.
 
 class MemcpyParam2DBenchmark : public Benchmark<MemcpyParam2DBenchmark> {
  public:
-  void operator()(void* dst, size_t dst_pitch, void* src, size_t src_pitch,
-                  size_t width, size_t height, hipMemcpyKind kind) {
-    hip_Memcpy2D params = CreateMemcpy2DParam(dst, dst_pitch, src, src_pitch,
-                                              width, height, kind);
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpyParam2D(&params));
-    }
+  void operator()(void* dst, size_t dst_pitch, void* src, size_t src_pitch, size_t width,
+                  size_t height, hipMemcpyKind kind) {
+    hip_Memcpy2D params = CreateMemcpy2DParam(dst, dst_pitch, src, src_pitch, width, height, kind);
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyParam2D(&params)); }
   }
 };
 
 static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
-                         bool enable_peer_access=false) {
+                         bool enable_peer_access = false) {
   MemcpyParam2DBenchmark benchmark;
   benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
 
   if (kind == hipMemcpyDeviceToHost) {
     LinearAllocGuard2D<int> device_allocation(width, height);
-    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, device_allocation.width() * height);
-    benchmark.Run(host_allocation.ptr(), device_allocation.width(),
-                  device_allocation.ptr(), device_allocation.pitch(),
-                  device_allocation.width(), device_allocation.height(), kind);
+    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc,
+                                          device_allocation.width() * height);
+    benchmark.Run(host_allocation.ptr(), device_allocation.width(), device_allocation.ptr(),
+                  device_allocation.pitch(), device_allocation.width(), device_allocation.height(),
+                  kind);
   } else if (kind == hipMemcpyHostToDevice) {
     LinearAllocGuard2D<int> device_allocation(width, height);
-    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, device_allocation.width() * height);
-    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(),
-                  host_allocation.ptr(), device_allocation.width(),
-                  device_allocation.width(), device_allocation.height(), kind);
+    LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc,
+                                          device_allocation.width() * height);
+    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(), host_allocation.ptr(),
+                  device_allocation.width(), device_allocation.width(), device_allocation.height(),
+                  kind);
   } else if (kind == hipMemcpyHostToHost) {
     LinearAllocGuard<int> src_allocation(LinearAllocs::hipHostMalloc, width * sizeof(int) * height);
     LinearAllocGuard<int> dst_allocation(LinearAllocs::hipHostMalloc, width * sizeof(int) * height);
-    benchmark.Run(dst_allocation.ptr(), width * sizeof(int),
-                  src_allocation.ptr(), width * sizeof(int),
-                  width * sizeof(int), height, kind);
+    benchmark.Run(dst_allocation.ptr(), width * sizeof(int), src_allocation.ptr(),
+                  width * sizeof(int), width * sizeof(int), height, kind);
   } else {
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard2D<int> src_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
     LinearAllocGuard2D<int> dst_allocation(width, height);
     HIP_CHECK(hipSetDevice(src_device));
 
-    benchmark.Run(dst_allocation.ptr(), dst_allocation.pitch(),
-                  src_allocation.ptr(), src_allocation.pitch(),
-                  dst_allocation.width(), dst_allocation.height(),
-                  kind);
+    benchmark.Run(dst_allocation.ptr(), dst_allocation.pitch(), src_allocation.ptr(),
+                  src_allocation.pitch(), dst_allocation.width(), dst_allocation.height(), kind);
   }
 }
 

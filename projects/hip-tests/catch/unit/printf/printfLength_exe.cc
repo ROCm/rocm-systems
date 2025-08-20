@@ -41,7 +41,7 @@ __global__ void test_kernel() {
   printf("%lx %lX\n", 42l, 42l);
   printf("%llx %llX\n", 42ll, 42ll);
   printf("%lf\n", 123.456);
-  printf("%lc\n", wint_t ('x'));
+  printf("%lc\n", wint_t('x'));
 #if HT_AMD
   const char* N = nullptr;
   printf("%lF\n", 123.456);

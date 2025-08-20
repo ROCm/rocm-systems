@@ -441,6 +441,6 @@ MATH_TERNARY_HP_KERNEL_DEF(__hfma2_sat);
 MATH_TERNARY_HP_TEST_DEF_IMPL(__hfma2_sat, __hfma_sat_ref, EqValidatorBuilderFactory<float>());
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

@@ -23,17 +23,15 @@ THE SOFTWARE.
 #define N 16
 #define offset 3
 
-static __global__ void tex1dKernel(float *val, hipTextureObject_t obj) {
+static __global__ void tex1dKernel(float* val, hipTextureObject_t obj) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int k = blockIdx.x * blockDim.x + threadIdx.x;
-  if (k < (N - offset))
-      val[k] = tex1Dfetch<float>(obj, k+offset);
+  if (k < (N - offset)) val[k] = tex1Dfetch<float>(obj, k + offset);
 #endif
 }
 
 
-static void runTest(hipTextureAddressMode addressMode,
-                                         hipTextureFilterMode filterMode) {
+static void runTest(hipTextureAddressMode addressMode, hipTextureFilterMode filterMode) {
   hipCtx_t HipContext;
   hipDevice_t HipDevice;
   int deviceID = 0;
@@ -46,8 +44,8 @@ static void runTest(hipTextureAddressMode addressMode,
   float val[N], output[N];
 
   for (int i = 0; i < N; i++) {
-      val[i] = i+1;
-      output[i] = 0.0;
+    val[i] = i + 1;
+    output[i] = 0.0;
   }
 
   HIP_CHECK(hipMalloc(&texBuf, N * sizeof(float)));
@@ -59,8 +57,7 @@ static void runTest(hipTextureAddressMode addressMode,
   memset(&resDescLinear, 0, sizeof(resDescLinear));
   resDescLinear.resType = hipResourceTypeLinear;
   resDescLinear.res.linear.devPtr = texBuf;
-  resDescLinear.res.linear.desc = hipCreateChannelDesc(32, 0, 0, 0,
-                                                  hipChannelFormatKindFloat);
+  resDescLinear.res.linear.desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   resDescLinear.res.linear.sizeInBytes = N * sizeof(float);
 
   hipTextureDesc texDesc;
@@ -78,27 +75,25 @@ static void runTest(hipTextureAddressMode addressMode,
   dim3 dimBlock(1, 1, 1);
   dim3 dimGrid(N, 1, 1);
 
-  hipLaunchKernelGGL(tex1dKernel, dim3(dimGrid), dim3(dimBlock), 0, 0,
-                     texBufOut, texObj);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex1dKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, texBufOut, texObj);
+  HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
-  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float),
-                                                    hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(output, texBufOut, N * sizeof(float), hipMemcpyDeviceToHost));
 
   for (int i = 0; i < (N - offset); i++) {
-      if (output[i] != val[i + offset]) {
-          INFO("Mismatch found at output[" << i << "]:" << output[i] <<
-               " val[" << i + offset << "]:" << val[i + offset]);
-          REQUIRE(false);
-      }
+    if (output[i] != val[i + offset]) {
+      INFO("Mismatch found at output[" << i << "]:" << output[i] << " val[" << i + offset
+                                       << "]:" << val[i + offset]);
+      REQUIRE(false);
+    }
   }
 
   for (int i = (N - offset); i < N; i++) {
-     if (output[i] != 0) {
-          INFO("Output found to be updated at index " << i);
-          REQUIRE(false);
-     }
+    if (output[i] != 0) {
+      INFO("Output found to be updated at index " << i);
+      REQUIRE(false);
+    }
   }
 
   HIP_CHECK(hipDestroyTextureObject(texObj));

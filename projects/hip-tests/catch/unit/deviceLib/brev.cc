@@ -108,8 +108,7 @@ TEST_CASE("Unit_brev") {
   HIP_CHECK(hipMalloc((void**)&deviceD, NUM * sizeof(unsigned long long int)));
 
   HIP_CHECK(hipMemcpy(deviceB, hostB, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceD, hostD, NUM * sizeof(unsigned long long int), hipMemcpyHostToDevice));
 
 
   hipLaunchKernelGGL(HIP_kernel, dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
@@ -119,8 +118,7 @@ TEST_CASE("Unit_brev") {
 
 
   HIP_CHECK(hipMemcpy(hostA, deviceA, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
-  HIP_CHECK(
-      hipMemcpy(hostC, deviceC, NUM * sizeof(unsigned long long int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(hostC, deviceC, NUM * sizeof(unsigned long long int), hipMemcpyDeviceToHost));
 
 
   // verify the results

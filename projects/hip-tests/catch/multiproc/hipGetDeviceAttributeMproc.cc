@@ -37,7 +37,7 @@ THE SOFTWARE.
 /**
  * Fetches Gpu device count
  */
-static void getDeviceCount(int *pdevCnt) {
+static void getDeviceCount(int* pdevCnt) {
   int fd[2], val = 0;
   pid_t childpid;
 
@@ -112,15 +112,14 @@ static bool validateGetAttributeOfMaskedDevices(int actualNumGPUs) {
     setenv("HIP_VISIBLE_DEVICES", visibleDeviceString, 1);
 #endif
 
-    for (int count = 1;
-        count < actualNumGPUs; count++) {
+    for (int count = 1; count < actualNumGPUs; count++) {
       int pi = -1;
       err = hipDeviceGetAttribute(&pi, hipDeviceAttributePciBusId, count);
       if (err == hipSuccess) {
         testResult &= false;
       } else {
-        printf("hipDeviceGetAttribute: Error Code Returned: '%s'(%d)\n",
-              hipGetErrorString(err), err);
+        printf("hipDeviceGetAttribute: Error Code Returned: '%s'(%d)\n", hipGetErrorString(err),
+               err);
       }
     }
     close(fd[0]);

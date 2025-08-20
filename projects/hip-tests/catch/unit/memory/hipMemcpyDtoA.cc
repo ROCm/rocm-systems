@@ -71,8 +71,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
 
   SECTION("src device ptr is invalid") {
     HIP_CHECK(hipFree(reinterpret_cast<void*>(src_device)));
-    HIP_CHECK_ERROR(hipMemcpyDtoA(dst_array, 0, src_device, copy_size),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpyDtoA(dst_array, 0, src_device, copy_size), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipFreeArray(dst_array));
@@ -106,14 +105,14 @@ TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
 
   std::vector<int> srcHost(size), dstHost(size);
   for (int i = 0; i < size; i++) {
-    srcHost[i] = value; dstHost[i] = 0;
+    srcHost[i] = value;
+    dstHost[i] = 0;
   }
 
   int* srcDevice = nullptr;
   HIP_CHECK(hipMalloc(&srcDevice, sizeBytes));
   REQUIRE(srcDevice != nullptr);
-  HIP_CHECK(hipMemcpy(srcDevice, srcHost.data(), sizeBytes,
-            hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(srcDevice, srcHost.data(), sizeBytes, hipMemcpyHostToDevice));
 
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   unsigned int flags = hipArrayDefault;
@@ -121,9 +120,7 @@ TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
   HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
   REQUIRE(array != nullptr);
 
-  HIP_CHECK(hipMemcpyDtoA(array, 0,
-                          reinterpret_cast<hipDeviceptr_t>(srcDevice),
-                          sizeBytes));
+  HIP_CHECK(hipMemcpyDtoA(array, 0, reinterpret_cast<hipDeviceptr_t>(srcDevice), sizeBytes));
 
   HIP_CHECK(hipMemcpyAtoH(dstHost.data(), array, 0, sizeBytes));
   for (int i = 0; i < size; i++) {

@@ -81,9 +81,7 @@ class ThreadTrace : public RuntimeObject {
 
   //! Constructor of the thread trace object
   ThreadTrace(const Device& device)  //!< device object
-      : deviceThreadTrace_(NULL),
-        device_(device),
-        state_(Undefined) {}
+      : deviceThreadTrace_(NULL), device_(device), state_(Undefined) {}
 
   //! Get the thread trace's associated device
   const Device& device() const { return device_; }
@@ -141,6 +139,7 @@ class ThreadTrace : public RuntimeObject {
 };
 
 /*@}*/
-/*@}*/ } // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #endif  // THREAD_TRACE_HPP_

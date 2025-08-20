@@ -52,7 +52,7 @@
 
 #ifdef ROCCLR_SUPPORT_NUMA_POLICY
 #include <numa.h>
-#endif // ROCCLR_SUPPORT_NUMA_POLICY
+#endif  // ROCCLR_SUPPORT_NUMA_POLICY
 
 #include <atomic>
 #include <vector>

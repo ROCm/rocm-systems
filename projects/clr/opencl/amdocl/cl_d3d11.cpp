@@ -469,7 +469,7 @@ RUNTIME_EXIT
 //      clCreateBufferFromD3D11ResourceAMD
 //
 cl_mem amd::clCreateBufferFromD3D11ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                          ID3D11Resource* pD3DResource, int* errcode_ret) {
+                                               ID3D11Resource* pD3DResource, int* errcode_ret) {
   // Verify pD3DResource is a buffer
   D3D11_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -504,8 +504,8 @@ cl_mem amd::clCreateBufferFromD3D11ResourceAMD(Context& amdContext, cl_mem_flags
 //      clCreateImage2DFromD3D11ResourceAMD
 //
 cl_mem amd::clCreateImage2DFromD3D11ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D11Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D11Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D11_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -540,8 +540,8 @@ cl_mem amd::clCreateImage2DFromD3D11ResourceAMD(Context& amdContext, cl_mem_flag
 //      clCreateImage2DFromD3D11ResourceAMD
 //
 cl_mem amd::clCreateImage3DFromD3D11ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D11Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D11Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D11_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -621,8 +621,6 @@ void amd::SyncD3D11Objects(std::vector<amd::Memory*>& memObjects) {
 
   d3dDev->Release();
 }
-
-
 
 
 #endif  //_WIN32

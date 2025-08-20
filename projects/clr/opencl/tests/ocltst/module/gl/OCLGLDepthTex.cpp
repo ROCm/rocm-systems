@@ -58,8 +58,8 @@ void OCLGLDepthTex::open(unsigned int test, char* units, double& conversion,
 
   char* pExtensions = (char*)malloc(8192);
   size_t returnSize;
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 8192,
-                            pExtensions, &returnSize);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_EXTENSIONS, 8192, pExtensions,
+                            &returnSize);
 
   // if extension if not supported
   if (!strstr(pExtensions, "cl_khr_gl_depth_images")) {
@@ -78,17 +78,14 @@ void OCLGLDepthTex::open(unsigned int test, char* units, double& conversion,
   _currentTest = test % 4;
 
   // Build the kernel
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateProgramWithSource()  failed (%d)", error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], options,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], options, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -105,20 +102,17 @@ void OCLGLDepthTex::run(void) {
   bool retVal;
   switch (_currentTest) {
     case 0:
-      retVal = testDepthRead(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL,
-                             GL_UNSIGNED_INT_24_8);
+      retVal = testDepthRead(GL_DEPTH24_STENCIL8, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8);
       break;
     case 1:
-      retVal =
-          testDepthRead(GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_FLOAT);
+      retVal = testDepthRead(GL_DEPTH_COMPONENT16, GL_DEPTH_COMPONENT, GL_FLOAT);
       break;
     case 2:
-      retVal =
-          testDepthRead(GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT);
+      retVal = testDepthRead(GL_DEPTH_COMPONENT32F, GL_DEPTH_COMPONENT, GL_FLOAT);
       break;
     case 3:
-      retVal = testDepthRead(GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL,
-                             GL_FLOAT_32_UNSIGNED_INT_24_8_REV);
+      retVal =
+          testDepthRead(GL_DEPTH32F_STENCIL8, GL_DEPTH_STENCIL, GL_FLOAT_32_UNSIGNED_INT_24_8_REV);
       break;
     default:
       CHECK_RESULT(true, "unsupported test number\n");
@@ -126,8 +120,7 @@ void OCLGLDepthTex::run(void) {
   CHECK_RESULT((retVal != true), "cl-gl depth test failed ");
 }
 
-bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format,
-                                  GLenum type) {
+bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format, GLenum type) {
   const unsigned int bufferSize = c_dimSize * c_dimSize * 4;
 
   pGLOutput_ = (float*)malloc(bufferSize);
@@ -143,23 +136,19 @@ bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format,
   glGenTextures(1, &colorBuffer_);
   glBindTexture(GL_TEXTURE_2D, colorBuffer_);
 
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, c_dimSize, c_dimSize, 0, GL_RGBA,
-               GL_UNSIGNED_BYTE, 0);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, c_dimSize, c_dimSize, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0);
 
   glGenTextures(1, &glDepthBuffer_);
   glBindTexture(GL_TEXTURE_2D, glDepthBuffer_);
-  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, c_dimSize, c_dimSize, 0,
-               format, type, 0);
+  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, c_dimSize, c_dimSize, 0, format, type, 0);
   GLint glError = glGetError();
   //
   glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorBuffer_, 0);
 
   if (GL_DEPTH_COMPONENT == format) {
-    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, glDepthBuffer_,
-                         0);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, glDepthBuffer_, 0);
   } else {
-    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
-                         glDepthBuffer_, 0);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, glDepthBuffer_, 0);
   }
 
   glBindFramebuffer(GL_FRAMEBUFFER, frameBufferOBJ_);
@@ -181,22 +170,20 @@ bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format,
 
   cl_int error;
 
-  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY,
-                                             bufferSize, NULL, &error);
+  clOutputBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufferSize, NULL, &error);
   if (CL_SUCCESS != error) return false;
 
-  clSampler_ = _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_NONE,
-                                         CL_FILTER_NEAREST, &error);
+  clSampler_ =
+      _wrapper->clCreateSampler(context_, CL_FALSE, CL_ADDRESS_NONE, CL_FILTER_NEAREST, &error);
   if (CL_SUCCESS != error) return false;
 
-  clDepth_ = _wrapper->clCreateFromGLTexture(
-      context_, CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0, glDepthBuffer_, &error);
+  clDepth_ = _wrapper->clCreateFromGLTexture(context_, CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0,
+                                             glDepthBuffer_, &error);
   if (CL_SUCCESS != error) return false;
 
   for (int i = 0; i < 3; ++i) {
     // The Type Of Depth Testing To Do
-    glClear(GL_COLOR_BUFFER_BIT |
-            GL_DEPTH_BUFFER_BIT);  // Clear Screen And Depth Buffer
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);  // Clear Screen And Depth Buffer
 
     const float zValues[3][2] = {
         {-6.f, -3.f},
@@ -213,8 +200,7 @@ bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format,
 
     glFinish();
 
-    error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1,
-                                                &clDepth_, 0, NULL, NULL);
+    error = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0, NULL, NULL);
 
     _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &clOutputBuffer_);
 
@@ -222,18 +208,15 @@ bool OCLGLDepthTex::testDepthRead(GLint internalFormat, GLenum format,
 
     _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_sampler), &clSampler_);
 
-    _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL,
-                                     dimSizes, NULL, 0, NULL, NULL);
+    _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, dimSizes, NULL, 0,
+                                     NULL, NULL);
 
-    _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0,
-                                        NULL, NULL);
+    _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 1, &clDepth_, 0, NULL, NULL);
 
-    _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_,
-                                  CL_TRUE, 0, bufferSize, pCLOutput_, 0, NULL,
-                                  NULL);
+    _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], clOutputBuffer_, CL_TRUE, 0, bufferSize,
+                                  pCLOutput_, 0, NULL, NULL);
 
-    glReadPixels(0, 0, c_dimSize, c_dimSize, GL_DEPTH_COMPONENT, GL_FLOAT,
-                 pGLOutput_);
+    glReadPixels(0, 0, c_dimSize, c_dimSize, GL_DEPTH_COMPONENT, GL_FLOAT, pGLOutput_);
 
     // test that both resources are identical.
     if (0 == memcmp(pGLOutput_, pCLOutput_, bufferSize)) {

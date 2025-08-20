@@ -21,15 +21,14 @@ THE SOFTWARE.
 
 __device__ int globalDevData = 10;
 
-extern "C" __global__ void addKernel(int *a, int size) {
+extern "C" __global__ void addKernel(int* a, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
-  for (int i = offset; i < size; i+= stride) {
+  for (int i = offset; i < size; i += stride) {
     a[i] += 2;
   }
 }
 
 texture<float, 2> tex;
 
-extern "C" __global__ void sampleModuleKernel() {
-}
+extern "C" __global__ void sampleModuleKernel() {}

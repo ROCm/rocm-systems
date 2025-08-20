@@ -61,7 +61,7 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
   std::string arch = prop.gcnArchName;
 #if HT_AMD
   if (std::string::npos == arch.find("xnack+")) {
-    const char *msg = "Xnack not supported. Skipping test ..";
+    const char* msg = "Xnack not supported. Skipping test ..";
     HipTest::HIP_SKIP_TEST(msg);
     return;
   }
@@ -70,8 +70,7 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
   // Get available GPU memory and total GPU memory
   HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
   INFO("Maximum GPU memory Size = " << maxGpuMem);
-  size_t allocsize = maxGpuMem +
-                    ((maxGpuMem*ADDITIONAL_MEMORY_PERCENT)/100);
+  size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
   // Calculate grid size and block size
   size_t num_threads = prop.maxThreadsDim[0];
   size_t use_size = num_threads * 1024 * 1024;
@@ -86,7 +85,7 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
   INFO("Free Host Memory = " << hostMemFree);
   // Ensure that allocsize < hostMemFree
   if (allocsize >= hostMemFree) {
-    const char *msg = "Free Host Memory is insufficient. Skipping test ...";
+    const char* msg = "Free Host Memory is insufficient. Skipping test ...";
     HipTest::HIP_SKIP_TEST(msg);
     return;
   }
@@ -98,10 +97,9 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
   // Register the entire host memory chunk
   HIP_CHECK(hipHostRegister(A, allocsize, 0));
   // Read and Write the entire allocsize in chunks of use_size
-  for (size_t chk_chunk = 0; chk_chunk < allocsize; chk_chunk+=use_size) {
+  for (size_t chk_chunk = 0; chk_chunk < allocsize; chk_chunk += use_size) {
     ptr = A + chk_chunk;
-    hipLaunchKernelGGL(Inc, dim3(use_size / num_threads), num_threads,
-                       0, 0, ptr);
+    hipLaunchKernelGGL(Inc, dim3(use_size / num_threads), num_threads, 0, 0, ptr);
     HIP_CHECK(hipDeviceSynchronize());
     for (int i = 0; i < use_size; i++) {
       REQUIRE(ptr[i] == EXPECTED_VAL);
@@ -112,6 +110,6 @@ TEST_CASE("Stress_hipHostRegister_Oversubscription") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

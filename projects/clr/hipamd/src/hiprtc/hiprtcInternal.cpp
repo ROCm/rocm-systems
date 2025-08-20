@@ -90,7 +90,8 @@ bool RTCCompileProgram::addSource(const std::string& source, const std::string& 
 // objects
 bool RTCCompileProgram::addSource_impl() {
   std::vector<char> vsource(source_code_.begin(), source_code_.end());
-  if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_, AMD_COMGR_DATA_KIND_SOURCE)) {
+  if (!hip::helpers::addCodeObjData(compile_input_, vsource, source_name_,
+                                    AMD_COMGR_DATA_KIND_SOURCE)) {
     return false;
   }
   return true;
@@ -118,7 +119,7 @@ bool RTCCompileProgram::addBuiltinHeader() {
 }
 
 bool RTCCompileProgram::findExeOptions(const std::vector<std::string>& options,
-                                        std::vector<std::string>& exe_options) {
+                                       std::vector<std::string>& exe_options) {
   for (size_t i = 0; i < options.size(); ++i) {
     // -mllvm options passed by the app such as "-mllvm" "-amdgpu-early-inline-all=true"
     if (options[i] == "-mllvm") {
@@ -201,14 +202,15 @@ bool RTCCompileProgram::compile(const std::vector<std::string>& options, bool fg
   }
 
   if (fgpu_rdc_) {
-    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_, LLVMBitcode_)) {
+    if (!hip::helpers::compileToBitCode(compile_input_, isa_, compileOpts, build_log_,
+                                        LLVMBitcode_)) {
       LogError("Error in hiprtc: unable to compile source to bitcode");
       return false;
     }
   } else {
     LogInfo("Using the new path of comgr");
-    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_, build_log_,
-                             executable_)) {
+    if (!hip::helpers::compileToExecutable(compile_input_, isa_, compileOpts, link_options_,
+                                           build_log_, executable_)) {
       LogError("Failing to compile to realloc");
       return false;
     }
@@ -234,7 +236,6 @@ void RTCCompileProgram::stripNamedExpression(std::string& strippedName) {
   if (strippedName.front() == '&') {
     strippedName.erase(0, 1);
   }
-
 }
 
 bool RTCCompileProgram::trackMangledName(std::string& name) {
@@ -249,8 +250,10 @@ bool RTCCompileProgram::trackMangledName(std::string& name) {
 
   std::string gcn_expr = "__amdgcn_name_expr_";
   std::string size = std::to_string(mangled_names_.size());
-  const auto var1{"\n static __device__ const void* " + gcn_expr + size + "[]= {\"" + strippedName + "\", (void*)&" + strippedName + "};"};
-  const auto var2{"\n static auto __amdgcn_name_expr_stub_" + size + " = " + gcn_expr + size + ";\n"};
+  const auto var1{"\n static __device__ const void* " + gcn_expr + size + "[]= {\"" + strippedName +
+                  "\", (void*)&" + strippedName + "};"};
+  const auto var2{"\n static auto __amdgcn_name_expr_stub_" + size + " = " + gcn_expr + size +
+                  ";\n"};
   const auto code{var1 + var2};
 
   source_code_ += code;

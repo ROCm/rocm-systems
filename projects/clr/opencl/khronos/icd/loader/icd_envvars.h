@@ -19,8 +19,8 @@
 #ifndef _ICD_ENVVARS_H_
 #define _ICD_ENVVARS_H_
 
-char *khrIcd_getenv(const char *name);
-char *khrIcd_secure_getenv(const char *name);
-void khrIcd_free_getenv(char *val);
+char* khrIcd_getenv(const char* name);
+char* khrIcd_secure_getenv(const char* name);
+void khrIcd_free_getenv(char* val);
 
 #endif

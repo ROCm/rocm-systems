@@ -17,15 +17,14 @@
  * THE SOFTWARE.
  * */
 
-#include<hip/hip_runtime_api.h>
-#include<stdio.h>
+#include <hip/hip_runtime_api.h>
+#include <stdio.h>
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 int hipMallocfunc() {
-  int *Ad;
+  int* Ad;
   hipMalloc((void**)&Ad, 1024);
   printf("hipMalloc PASSED!\n");
   hipFree(Ad);

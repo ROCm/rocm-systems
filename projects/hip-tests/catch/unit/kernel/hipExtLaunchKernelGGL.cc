@@ -21,37 +21,35 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
+
 #include "hip/hip_ext.h"
 
 static unsigned threadsPerBlock = 256;
 static unsigned blocksPerCU = 6;
 
 struct _t {
-    double _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
+  double _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
 };
 
 typedef struct _t _T;
 
-__global__ void sKernel(_T s, double *a) {
-    *a = s._a + s._b + s._c + s._d + s._e + s._f + s._g + s._h + s._i + s._j;
+__global__ void sKernel(_T s, double* a) {
+  *a = s._a + s._b + s._c + s._d + s._e + s._f + s._g + s._h + s._i + s._j;
 }
 
-__global__ void mKernel(char f, int16_t a, int b, double c,
-                        int16_t d, int e, double* res) {
-    *res = a + b + c + d + e + f;
+__global__ void mKernel(char f, int16_t a, int b, double c, int16_t d, int e, double* res) {
+  *res = a + b + c + d + e + f;
 }
 
 void testMixData() {
   double m = 0;
-  double *d_m;
+  double* d_m;
   HIP_CHECK(hipMalloc(&d_m, sizeof(double)));
   int a = 1, e = 10;
   int16_t b = 2, d = 4;
   double c = 3.0;
   char ff = 10;
-  hipExtLaunchKernelGGL(mKernel, 1, 1, 0, 0, nullptr, nullptr, 0, ff,
-                         b, a, c, d, e, d_m);
+  hipExtLaunchKernelGGL(mKernel, 1, 1, 0, 0, nullptr, nullptr, 0, ff, b, a, c, d, e, d_m);
   HIP_CHECK(hipMemcpy(&m, d_m, sizeof(double), hipMemcpyDeviceToHost));
   REQUIRE(m == 30.0);
   HIP_CHECK(hipFree(d_m));
@@ -59,7 +57,7 @@ void testMixData() {
 
 void testStruct() {
   double m = 0;
-  double *d_m;
+  double* d_m;
   HIP_CHECK(hipMalloc(&d_m, sizeof(double)));
   _T s{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
   hipExtLaunchKernelGGL(sKernel, 1, 1, 0, 0, nullptr, nullptr, 0, s, d_m);
@@ -80,10 +78,9 @@ void test(size_t N) {
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
 
-  hipExtLaunchKernelGGL(HipTest::vectorADD, dim3(blocks),
-                        dim3(threadsPerBlock), 0, 0, nullptr, nullptr, 0,
-                        static_cast<const int*>(A_d),
-                        static_cast<const int*>(B_d), C_d, N);
+  hipExtLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, 0, nullptr,
+                        nullptr, 0, static_cast<const int*>(A_d), static_cast<const int*>(B_d), C_d,
+                        N);
 
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
@@ -99,7 +96,8 @@ void test(size_t N) {
                               std::uint32_t sharedMemBytes, hipStream_t stream,
                               hipEvent_t startEvent, hipEvent_t stopEvent, std::uint32_t flags,
                               Args... args)` -
-* Launches kernel with dimention parameters and shared memory on stream with templated kernel and arguments
+* Launches kernel with dimention parameters and shared memory on stream with templated kernel and
+arguments
 */
 
 /**
@@ -125,15 +123,11 @@ TEST_CASE("Unit_hipExtLaunchKernelGGL") {
     size_t N = 4 * 1024 * 1024;
     test(N);
   }
-  SECTION("testStruct run") {
-    testStruct();
-  }
-  SECTION("testMixData run") {
-    testMixData();
-  }
+  SECTION("testStruct run") { testStruct(); }
+  SECTION("testMixData run") { testMixData(); }
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

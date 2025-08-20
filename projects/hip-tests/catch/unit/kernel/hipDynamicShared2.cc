@@ -20,9 +20,9 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
 
-#define LEN  (16 * 1024)
+
+#define LEN (16 * 1024)
 #define SIZE (LEN * sizeof(float))
 
 __global__ void vectorAdd(float* Ad, float* Bd) {
@@ -46,7 +46,7 @@ __global__ void vectorAdd(float* Ad, float* Bd) {
 /**
  * Test Description
  * ------------------------
- *    - Assign max dynamic shared memory to kernel function and 
+ *    - Assign max dynamic shared memory to kernel function and
  * verify the results.
 
  * Test source
@@ -62,17 +62,16 @@ TEST_CASE("Unit_hipDynamicShared2") {
   A = new float[LEN];
   B = new float[LEN];
   for (int i = 0; i < LEN; i++) {
-      A[i] = 1.0f;
-      B[i] = 1.0f;
+    A[i] = 1.0f;
+    B[i] = 1.0f;
   }
   HIP_CHECK(hipMalloc(&Ad, SIZE));
   HIP_CHECK(hipMalloc(&Bd, SIZE));
   HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(Bd, B, SIZE, hipMemcpyHostToDevice));
 
-  hipError_t ret = hipFuncSetAttribute(
-      reinterpret_cast<const void*>(&vectorAdd),
-      hipFuncAttributeMaxDynamicSharedMemorySize, SIZE);
+  hipError_t ret = hipFuncSetAttribute(reinterpret_cast<const void*>(&vectorAdd),
+                                       hipFuncAttributeMaxDynamicSharedMemorySize, SIZE);
 
   REQUIRE(ret == hipSuccess);
   hipLaunchKernelGGL(vectorAdd, dim3(1, 1, 1), dim3(64, 1, 1), SIZE, 0, Ad, Bd);
@@ -89,6 +88,6 @@ TEST_CASE("Unit_hipDynamicShared2") {
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

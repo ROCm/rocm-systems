@@ -27,13 +27,13 @@ static constexpr size_t NBYTES = N * sizeof(int);
 /**
  * Local Function to fill the array with given value
  */
-static void fillArr(int *arr, unsigned int size, int value) {
-  for ( int i = 0; i < size; i++ ) {
+static void fillArr(int* arr, unsigned int size, int value) {
+  for (int i = 0; i < size; i++) {
     arr[i] = value;
   }
 }
 
- /**
+/**
  * Test Description
  * ------------------------
  *  - This test, tests the following scenario with per thread compiler option:-
@@ -50,26 +50,23 @@ static void fillArr(int *arr, unsigned int size, int value) {
  *  - HIP_VERSION >= 6.3
  */
 TEST_CASE("Unit_hipStreamLegacy_WithSptCompilerOption") {
-  int *hostArrSrc = new int[N];
+  int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillArr(hostArrSrc, N, 1);
 
-  int *devArr = nullptr;
+  int* devArr = nullptr;
   HIP_CHECK(hipMalloc(&devArr, NBYTES));
   REQUIRE(devArr != nullptr);
 
-  int *hostArrDst = new int[N];
+  int* hostArrDst = new int[N];
   REQUIRE(hostArrDst != nullptr);
   fillArr(hostArrDst, N, 3);
 
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES,
-                           hipMemcpyHostToDevice, hipStreamLegacy));
-  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES,
-                           hipMemcpyDeviceToHost, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArrSrc, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArrDst, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
 
-  for ( int i = 0; i < N; i++ ) {
-    INFO("At index : " << i << " Got value : " << hostArrDst[i] <<
-         " Expected value : 1 \n");
+  for (int i = 0; i < N; i++) {
+    INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 1 \n");
     REQUIRE(hostArrDst[i] == 1);
   }
 
@@ -82,18 +79,14 @@ TEST_CASE("Unit_hipStreamLegacy_WithSptCompilerOption") {
  * Local helper function to copy data from host to device
  */
 static void copyHostToDevice(int* hostArr, int* devArr) {
-  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, NBYTES,
-                           hipMemcpyHostToDevice,
-                           hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(devArr, hostArr, NBYTES, hipMemcpyHostToDevice, hipStreamLegacy));
 }
 
 /*
  * Local helper function to copy data from device to host
  */
 static void copyDeviceToHost(int* devArr, int* hostArr) {
-  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, NBYTES,
-                           hipMemcpyDeviceToHost,
-                           hipStreamLegacy));
+  HIP_CHECK(hipMemcpyAsync(hostArr, devArr, NBYTES, hipMemcpyDeviceToHost, hipStreamLegacy));
 }
 
 /**
@@ -118,20 +111,21 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption") {
   const unsigned int threadsSupported = std::thread::hardware_concurrency();
 
   if (threadsSupported < 2) {
-    HipTest::HIP_SKIP_TEST("Skipping due to machine does't " \
-                           "support two concurrent threads");
+    HipTest::HIP_SKIP_TEST(
+        "Skipping due to machine does't "
+        "support two concurrent threads");
     return;
   }
 
-  int *hostArrSrc = new int[N];
+  int* hostArrSrc = new int[N];
   REQUIRE(hostArrSrc != nullptr);
   fillArr(hostArrSrc, N, 50);
 
-  int *devArr = nullptr;
+  int* devArr = nullptr;
   HIP_CHECK(hipMalloc(&devArr, NBYTES));
   REQUIRE(devArr != nullptr);
 
-  int *hostArrDst = new int[N];
+  int* hostArrDst = new int[N];
   REQUIRE(hostArrDst != nullptr);
   fillArr(hostArrDst, N, 52);
 
@@ -140,9 +134,8 @@ TEST_CASE("Unit_hipStreamLegacy_TwoThreadsDiffOperationWithSptCompOption") {
   std::thread D2H_Thread(copyDeviceToHost, devArr, hostArrDst);
   D2H_Thread.join();
 
-  for ( int i = 0; i < N; i++ ) {
-    INFO("At index : " << i << " Got value : " << hostArrDst[i] <<
-         " Expected value : 50 \n");
+  for (int i = 0; i < N; i++) {
+    INFO("At index : " << i << " Got value : " << hostArrDst[i] << " Expected value : 50 \n");
     REQUIRE(hostArrDst[i] == 50);
   }
 

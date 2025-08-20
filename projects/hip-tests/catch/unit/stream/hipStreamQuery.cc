@@ -27,11 +27,9 @@ THE SOFTWARE.
 TEST_CASE("Unit_hipStreamQuery_WithNoWork") {
   hipStream_t stream{nullptr};
 
-  SECTION("Null Stream") {
-    HIP_CHECK(hipStreamQuery(stream));
-  }
+  SECTION("Null Stream") { HIP_CHECK(hipStreamQuery(stream)); }
 
-  SECTION ("Created Stream") {
+  SECTION("Created Stream") {
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(hipStreamQuery(stream));
     HIP_CHECK(hipStreamDestroy(stream));
@@ -52,7 +50,7 @@ TEST_CASE("Unit_hipStreamQuery_WithFinishedWork") {
     HIP_CHECK(hipStreamQuery(stream));
   }
 
-  SECTION ("Created Stream") {
+  SECTION("Created Stream") {
     HIP_CHECK(hipStreamCreate(&stream));
     hip::stream::empty_kernel<<<dim3(1), dim3(1), 0, stream>>>();
     HIP_CHECK(hipStreamSynchronize(stream));
