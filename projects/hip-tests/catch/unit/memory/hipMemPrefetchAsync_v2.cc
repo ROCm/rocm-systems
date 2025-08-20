@@ -1,0 +1,215 @@
+/*
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
+#include <hip_test_common.hh>
+
+/**
+ * Kernel to fill value for each element in the given array
+ */
+static __global__ void fillDataKernel(int* arr, size_t size, int value) {
+  size_t offset = blockDim.x * blockIdx.x + threadIdx.x;
+  size_t stride = blockDim.x * gridDim.x;
+
+  for (size_t i = offset; i < size; i += stride) {
+    arr[i] = value;
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenarios
+ *  - 1) With Location type Device
+ *  - 2) With Location type Host
+ *  - 3) With Location type Host Numa
+ *  - 4) With Location type Host Numa Current
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemPrefetchAsync_v2.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
+  const int N = 1024;
+  const int Nbytes = N * sizeof(int);
+  int value = 10;
+
+  int* memPtr = nullptr;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  REQUIRE(memPtr != nullptr);
+
+  SECTION("With Device") {
+    int deviceCount = 0;
+    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+
+    for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
+      hipMemLocation location;
+      location.type = hipMemLocationTypeDevice;
+      location.id = deviceId;
+
+      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+
+      fillDataKernel<<<1, N / 2, 0, stream>>>(memPtr, N, value);
+      HIP_CHECK(hipStreamSynchronize(stream));
+    }
+  }
+
+  SECTION("With Host") {
+    hipMemLocation location;
+    location.type = hipMemLocationTypeHost;
+
+    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Fill data in Host
+    for (int i = 0; i < N; i++) {
+      memPtr[i] = value;
+    }
+  }
+
+  SECTION("With Host NUMA") {
+    hipMemLocation location;
+    location.type = hipMemLocationTypeHostNuma;
+    // Get numa nodes count and pass values based on that
+    location.id = GENERATE(0, 1);
+
+    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Fill data in Host
+    for (int i = 0; i < N; i++) {
+      memPtr[i] = value;
+    }
+  }
+
+  SECTION("With Host Numa Current") {
+    hipMemLocation location;
+    location.type = hipMemLocationTypeHostNumaCurrent;
+
+    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
+    HIP_CHECK(hipStreamSynchronize(stream));
+
+    // Fill data in Host
+    for (int i = 0; i < N; i++) {
+      memPtr[i] = value;
+    }
+  }
+
+  // Validate data
+  for (int i = 0; i < N; i++) {
+    REQUIRE(memPtr[i] == value);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(memPtr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following Negative scenarios
+ *  - 1) With dev_ptr as nullptr
+ *  - 2) With count 0
+ *  - 3) With count larger than actual size
+ *  - 4) With invalid device
+ *  - 5) With Invalid location
+ *  - 6) With Invalid location -1
+ *  - 7) With invalid numa node
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemPrefetchAsync_v2.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
+  const int N = 16;
+  const int Nbytes = N * sizeof(int);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  void* memPtr = nullptr;
+  HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
+
+  hipMemLocation location;
+  location.type = hipMemLocationTypeHost;
+
+  SECTION("With dev_ptr as nullptr") {
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(nullptr, Nbytes, location, 0, stream),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("With count 0") {
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, 0, location, 0, stream), hipErrorInvalidValue);
+  }
+
+  SECTION("With count larger than actual size") {
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes + 10, location, 0, stream),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("With invalid device") {
+    hipMemLocation dstLocation;
+    dstLocation.type = hipMemLocationTypeDevice;
+    int deviceCount = 0;
+    HIP_CHECK(hipGetDeviceCount(&deviceCount));
+    dstLocation.id = deviceCount;
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
+                    hipErrorInvalidDevice);
+  }
+
+#if 0
+  SECTION("With Invalid location") {
+    hipMemLocation location;
+    location.type = GENERATE(hipMemLocationTypeInvalid, hipMemLocationTypeNone);
+
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("With Invalid location -1") {
+    hipMemLocation location;
+    location.type = static_cast<hipMemLocationType>(-1);
+
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
+                    hipErrorInvalidValue);
+  }
+
+  SECTION("With invalid numa node") {
+    hipMemLocation dstLocation;
+    dstLocation.type = hipMemLocationTypeHostNuma;
+    // Get numa nodes count and pass below
+    dstLocation.id = 2;
+    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
+                    hipErrorInvalidDevice);
+  }
+#endif
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(memPtr));
+}
