@@ -26,22 +26,22 @@ THE SOFTWARE.
 
 bool UNSETENV(std::string var) {
   int result = -1;
-  #ifdef __unix__
-    result = unsetenv(var.c_str());
-  #else
-    result = _putenv((var + '=').c_str());
-  #endif
-  return (result == 0) ? true: false;
+#ifdef __unix__
+  result = unsetenv(var.c_str());
+#else
+  result = _putenv((var + '=').c_str());
+#endif
+  return (result == 0) ? true : false;
 }
 
 bool SETENV(std::string var, std::string value) {
   int result = -1;
-  #ifdef __unix__
-    result = setenv(var.c_str(), value.c_str(), 1);
-  #else
-    result = _putenv((var + '=' + value).c_str());
-  #endif
-  return (result == 0) ? true: false;
+#ifdef __unix__
+  result = setenv(var.c_str(), value.c_str(), 1);
+#else
+  result = _putenv((var + '=' + value).c_str());
+#endif
+  return (result == 0) ? true : false;
 }
 
 // Expects 1 command line arg, which is the Device Visible String

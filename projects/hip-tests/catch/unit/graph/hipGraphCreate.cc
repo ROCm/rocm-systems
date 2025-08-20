@@ -72,6 +72,6 @@ TEST_CASE("Unit_hipGraphCreate_Positive_Basic") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

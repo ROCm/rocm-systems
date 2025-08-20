@@ -27,8 +27,8 @@ THE SOFTWARE.
 
 class Memcpy2DToArrayAsyncBenchmark : public Benchmark<Memcpy2DToArrayAsyncBenchmark> {
  public:
-  void operator()(hipArray_t dst, const void* src, size_t src_pitch, size_t width,
-                  size_t height, hipMemcpyKind kind, const hipStream_t& stream) {
+  void operator()(hipArray_t dst, const void* src, size_t src_pitch, size_t width, size_t height,
+                  hipMemcpyKind kind, const hipStream_t& stream) {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
       HIP_CHECK(hipMemcpy2DToArrayAsync(dst, 0, 0, src, src_pitch, width, height, kind, stream));
     }
@@ -37,7 +37,7 @@ class Memcpy2DToArrayAsyncBenchmark : public Benchmark<Memcpy2DToArrayAsyncBench
 };
 
 static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
-                         bool enable_peer_access=false) {
+                         bool enable_peer_access = false) {
   Memcpy2DToArrayAsyncBenchmark benchmark;
   benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
 
@@ -48,22 +48,23 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     size_t allocation_size = width * height * sizeof(int);
     LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
-    benchmark.Run(array_allocation.ptr(), host_allocation.ptr(),
-                  width * sizeof(int), width * sizeof(int), height,
-                  hipMemcpyHostToDevice, stream);
+    benchmark.Run(array_allocation.ptr(), host_allocation.ptr(), width * sizeof(int),
+                  width * sizeof(int), height, hipMemcpyHostToDevice, stream);
   } else {
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard2D<int> device_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
     HIP_CHECK(hipSetDevice(src_device));
     benchmark.Run(array_allocation.ptr(), device_allocation.ptr(), device_allocation.pitch(),
-                  device_allocation.width(), device_allocation.height(),
-                  hipMemcpyDeviceToDevice, stream);
+                  device_allocation.width(), device_allocation.height(), hipMemcpyDeviceToDevice,
+                  stream);
   }
 }
 

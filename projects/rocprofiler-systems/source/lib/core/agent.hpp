@@ -43,7 +43,8 @@ enum class agent_type : uint8_t
 struct agent
 {
     agent_type  type;
-    uint64_t    id;
+    uint64_t    handle;
+    uint64_t    device_id;
     uint32_t    node_id;
     int32_t     logical_node_id;
     int32_t     logical_node_type_id;
@@ -52,7 +53,7 @@ struct agent
     std::string vendor_name;
     std::string product_name;
 
-    size_t device_id{ 0 };
+    size_t device_type_index{ 0 };
     size_t base_id{ 0 };
 #if ROCPROFSYS_USE_ROCM > 0
     amdsmi_processor_handle smi_handle = nullptr;

@@ -29,14 +29,13 @@ class OCLPerfProgramGlobalRead : public OCLTestImp {
   virtual ~OCLPerfProgramGlobalRead();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
   std::string shader_;
-  void genShader(unsigned int type, unsigned int vecWidth,
-                 unsigned int numReads, unsigned int bufSize);
+  void genShader(unsigned int type, unsigned int vecWidth, unsigned int numReads,
+                 unsigned int bufSize);
   void setData(cl_mem buffer, float data);
   void checkData(cl_mem buffer);
 

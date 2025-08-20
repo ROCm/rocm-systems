@@ -80,7 +80,7 @@ TEST_CASE("Unit_hipGetChannelDesc_Negative_Parameters") {
   CHECK_IMAGE_SUPPORT;
 
   hipChannelFormatDesc chan_test, chan_desc;
-  hipArray_t  hip_array;
+  hipArray_t hip_array;
 
   chan_desc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindSigned);
   HIP_CHECK(hipMallocArray(&hip_array, &chan_desc, C, R, 0));
@@ -97,6 +97,6 @@ TEST_CASE("Unit_hipGetChannelDesc_Negative_Parameters") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

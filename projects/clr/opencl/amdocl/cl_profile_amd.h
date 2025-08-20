@@ -43,28 +43,32 @@ enum PerfcounterInfo {
 };
 
 /*********************************
-* Set device clock mode data
-*********************************/
+ * Set device clock mode data
+ *********************************/
 enum cl_DeviceClockMode_AMD {
-  CL_DEVICE_CLOCK_MODE_DEFAULT_AMD = 0x0, /*Device clocks and other power settings are restored to default*/
-  CL_DEVICE_CLOCK_MODE_QUERY_AMD = 0x1, /*Queries the current device clock ratios. Leaves the clock mode of the device unchanged*/
+  CL_DEVICE_CLOCK_MODE_DEFAULT_AMD =
+      0x0, /*Device clocks and other power settings are restored to default*/
+  CL_DEVICE_CLOCK_MODE_QUERY_AMD = 0x1, /*Queries the current device clock ratios. Leaves the clock
+                                           mode of the device unchanged*/
   CL_DEVICE_CLOCK_MODE_PROFILING_AMD = 0x2, /*Scale down from peak ratio*/
-  CL_DEVICE_CLOCK_MODE_MINIMUMMEMORY_AMD = 0x3, /* Memory clock is set to the lowest available level*/
-  CL_DEVICE_CLOCK_MODE_MINIMUMENGINE_AMD = 0x4, /*Engine clock is set to the lowest available level*/
+  CL_DEVICE_CLOCK_MODE_MINIMUMMEMORY_AMD =
+      0x3, /* Memory clock is set to the lowest available level*/
+  CL_DEVICE_CLOCK_MODE_MINIMUMENGINE_AMD =
+      0x4,                             /*Engine clock is set to the lowest available level*/
   CL_DEVICE_CLOCK_MODE_PEAK_AMD = 0x5, /*Clocks set to maximum when possible. Fan set to maximum.*/
-  CL_DEVICE_CLOCK_MODE_QUERYPROFILING_AMD = 0x6, /*Queries the profiling device clock ratios. Leaves the clock mode of the device unchanged*/
-  CL_DEVICE_CLOCK_MODE_QUERYPEAK_AMD = 0x7, /*Queries the peak device clock ratios.Leaves the clock mode of the device unchanged*/
+  CL_DEVICE_CLOCK_MODE_QUERYPROFILING_AMD = 0x6, /*Queries the profiling device clock ratios. Leaves
+                                                    the clock mode of the device unchanged*/
+  CL_DEVICE_CLOCK_MODE_QUERYPEAK_AMD =
+      0x7, /*Queries the peak device clock ratios.Leaves the clock mode of the device unchanged*/
   CL_DEVICE_CLOCK_MODE_COUNT_AMD = 0x8, /*Maxmium count of device clock mode*/
 };
 
-typedef struct _cl_set_device_clock_mode_input_amd
-{
+typedef struct _cl_set_device_clock_mode_input_amd {
   /* specify the clock mode for AMD GPU device*/
   cl_DeviceClockMode_AMD clock_mode;
 } cl_set_device_clock_mode_input_amd;
 
-typedef struct _cl_set_device_clock_mode_output_amd
-{
+typedef struct _cl_set_device_clock_mode_output_amd {
   /*Ratio of current mem clock to peak clock as obtained from DeviceProperties::maxGpuClock*/
   cl_float memory_clock_ratio_to_peak;
   /*Ratio of current gpu core clock to peak clock as obtained from DeviceProperties::maxGpuClock*/

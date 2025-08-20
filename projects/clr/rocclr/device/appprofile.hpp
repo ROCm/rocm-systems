@@ -56,7 +56,7 @@ class AppProfile {
   DataMap propertyDataMap_;
   std::string appFileName_;  // without extension
   std::wstring wsAppFileName_;
-  std::string  appPathAndFileName_;  // with path and extension
+  std::string appPathAndFileName_;  // with path and extension
   std::wstring wsAppPathAndFileName_;
 
   virtual bool ParseApplicationProfile();
@@ -65,5 +65,5 @@ class AppProfile {
   bool profileOverridesAllSettings_;  // Overrides hint flags and env.var.
   std::string buildOptsAppend_;
 };
-}
+}  // namespace amd
 #endif

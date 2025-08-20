@@ -73,7 +73,8 @@ bool Runtime::init() {
     return true;
   }
 
-  if (!Flag::init() || !option::init() || !Device::init()
+  if (!Flag::init() || !option::init() ||
+      !Device::init()
       // Agent initializes last
       || (!amd::IS_HIP && !Agent::init())) {
     ClPrint(LOG_ERROR, LOG_INIT, "Runtime initialization failed");
@@ -113,7 +114,7 @@ RuntimeTearDown::~RuntimeTearDown() {
   // Only perform destruction if process matches the initialization,
   // to avoid a call with the child process after fork()
   if (amd::IS_HIP && amd::Os::getProcessId() == Runtime::pid()) {
-    for (auto it: external_) {
+    for (auto it : external_) {
       it->release();
     }
     Runtime::tearDown();
@@ -121,9 +122,7 @@ RuntimeTearDown::~RuntimeTearDown() {
 #endif
 }
 
-void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) {
-    external_.push_back(obj);
-}
+void RuntimeTearDown::RegisterObject(ReferenceCountedObject* obj) { external_.push_back(obj); }
 
 class RuntimeTearDown runtime_tear_down;
 

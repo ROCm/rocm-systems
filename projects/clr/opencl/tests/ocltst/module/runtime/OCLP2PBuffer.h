@@ -29,8 +29,7 @@ class OCLP2PBuffer : public OCLTestImp {
   virtual ~OCLP2PBuffer();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 

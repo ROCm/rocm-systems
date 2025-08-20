@@ -33,8 +33,7 @@ class OCLCreateBuffer : public OCLTestImp {
   virtual ~OCLCreateBuffer();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual void writeBuffer(size_t tmpMaxSize, void* dataBuf);
   virtual void checkResult(size_t tmpMaxSize, void* resultBuf, cl_ulong pattern);

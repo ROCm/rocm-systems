@@ -26,47 +26,41 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
-__global__ void kernel_abs_int64(long long *input, long long *output) {  // NOLINT
-    int tx = threadIdx.x;
-    output[tx] = abs(input[tx]);
+__global__ void kernel_abs_int64(long long* input, long long* output) {  // NOLINT
+  int tx = threadIdx.x;
+  output[tx] = abs(input[tx]);
 }
 
 
-#define CHECK_ABS_INT64(IN, OUT, EXP)    \
-  {                                      \
-    if (OUT != EXP)  {                   \
-      INFO("check_abs_int64 failed on " << IN << ", output " << OUT << \
-                  ", expected " << EXP); \
-      REQUIRE(false);                    \
-    }                                    \
+#define CHECK_ABS_INT64(IN, OUT, EXP)                                                              \
+  {                                                                                                \
+    if (OUT != EXP) {                                                                              \
+      INFO("check_abs_int64 failed on " << IN << ", output " << OUT << ", expected " << EXP);      \
+      REQUIRE(false);                                                                              \
+    }                                                                                              \
   }
 
-template<class T, class F>
-__global__ void kernel_simple(F f, T *out) {
-  *out = f();
-}
+template <class T, class F> __global__ void kernel_simple(F f, T* out) { *out = f(); }
 
-template<class T, class F>
-void check_simple(F f, T expected, const char* file, unsigned line) {
+template <class T, class F> void check_simple(F f, T expected, const char* file, unsigned line) {
   auto memsize = sizeof(T);
-  T *outputCPU = reinterpret_cast<T *>(malloc(memsize));
-  T *outputGPU = nullptr;
+  T* outputCPU = reinterpret_cast<T*>(malloc(memsize));
+  T* outputGPU = nullptr;
   REQUIRE(outputCPU != nullptr);
   HIP_CHECK(hipMalloc(&outputGPU, memsize));
   hipLaunchKernelGGL(kernel_simple, 1, 1, 0, 0, f, outputGPU);
   HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
   if (*outputCPU != expected) {
-    INFO("File " << file << ", line " << line << " check failed." <<
-    " output = " << static_cast<double>(*outputCPU) << " expected "
-    << static_cast<double>(expected));
+    INFO("File " << file << ", line " << line << " check failed."
+                 << " output = " << static_cast<double>(*outputCPU) << " expected "
+                 << static_cast<double>(expected));
     REQUIRE(false);
   }
   HIP_CHECK(hipFree(outputGPU));
   free(outputCPU);
 }
 
-#define CHECK_SIMPLE(lambda, expected) \
-    check_simple(lambda, expected, __FILE__, __LINE__);
+#define CHECK_SIMPLE(lambda, expected) check_simple(lambda, expected, __FILE__, __LINE__);
 
 
 /**
@@ -81,8 +75,8 @@ TEST_CASE("Unit_abs_int64_Verification") {
   auto memsize = NUM_INPUTS * sizeof(datatype_t);
 
   // allocate memories
-  inputCPU = reinterpret_cast<datatype_t *>(malloc(memsize));
-  outputCPU = reinterpret_cast<datatype_t *>(malloc(memsize));
+  inputCPU = reinterpret_cast<datatype_t*>(malloc(memsize));
+  outputCPU = reinterpret_cast<datatype_t*>(malloc(memsize));
   REQUIRE(inputCPU != nullptr);
   REQUIRE(outputCPU != nullptr);
   HIP_CHECK(hipMalloc(&inputGPU, memsize));
@@ -90,20 +84,19 @@ TEST_CASE("Unit_abs_int64_Verification") {
 
   // populate input with constants
   inputCPU[0] = -81985529216486895ll;
-  inputCPU[1] =  81985529216486895ll;
+  inputCPU[1] = 81985529216486895ll;
   inputCPU[2] = -1250999896491ll;
-  inputCPU[3] =  1250999896491ll;
+  inputCPU[3] = 1250999896491ll;
   inputCPU[4] = -19088743ll;
-  inputCPU[5] =  19088743ll;
+  inputCPU[5] = 19088743ll;
   inputCPU[6] = -291ll;
-  inputCPU[7] =  291ll;
+  inputCPU[7] = 291ll;
 
   // copy inputs to device
   HIP_CHECK(hipMemcpy(inputGPU, inputCPU, memsize, hipMemcpyHostToDevice));
 
   // launch kernel
-  hipLaunchKernelGGL(kernel_abs_int64, dim3(1), dim3(NUM_INPUTS), 0, 0,
-                                                      inputGPU, outputGPU);
+  hipLaunchKernelGGL(kernel_abs_int64, dim3(1), dim3(NUM_INPUTS), 0, 0, inputGPU, outputGPU);
   // copy outputs from device
   HIP_CHECK(hipMemcpy(outputCPU, outputGPU, memsize, hipMemcpyDeviceToHost));
 
@@ -128,9 +121,9 @@ TEST_CASE("Unit_abs_int64_Verification") {
   Verification of pow operations performed at device.
  */
 TEST_CASE("Unit_pown_Verification") {
-  CHECK_SIMPLE([]__device__(){ return powif(2.0f, 2); }, 4.0f);
-  CHECK_SIMPLE([]__device__(){ return powi(2.0, 2); }, 4.0);
-  CHECK_SIMPLE([]__device__(){ return pow(2.0f, 2); }, 4.0f);
-  CHECK_SIMPLE([]__device__(){ return pow(2.0, 2); }, 4.0);
-  CHECK_SIMPLE([]__device__(){ return pow(2.0f16, 2); }, 4.0f16);
+  CHECK_SIMPLE([] __device__() { return powif(2.0f, 2); }, 4.0f);
+  CHECK_SIMPLE([] __device__() { return powi(2.0, 2); }, 4.0);
+  CHECK_SIMPLE([] __device__() { return pow(2.0f, 2); }, 4.0f);
+  CHECK_SIMPLE([] __device__() { return pow(2.0, 2); }, 4.0);
+  CHECK_SIMPLE([] __device__() { return pow(2.0f16, 2); }, 4.0f16);
 }

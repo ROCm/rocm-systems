@@ -2,6 +2,8 @@ name: rocprofiler-compute Packaging
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-compute/**'
     tags:

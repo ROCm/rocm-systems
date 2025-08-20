@@ -219,7 +219,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_ZeroWidth") {
   const auto flag = GENERATE(from_range(std::begin(validFlags), std::end(validFlags)));
 
   HIP_CHECK_ERRORS(hipMallocMipmappedArray(&array, &desc, make_hipExtent(0, s, s), numLevels, flag),
-                  hipErrorInvalidValue, hipErrorNotSupported);
+                   hipErrorInvalidValue, hipErrorNotSupported);
 }
 
 // Zero height arrays are only allowed for 1D arrays and layered arrays

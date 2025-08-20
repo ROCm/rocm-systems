@@ -33,8 +33,8 @@ THE SOFTWARE.
 #include <vector>
 
 const char* funname = "testinline";
-static constexpr auto code {
-R"(
+static constexpr auto code{
+    R"(
 __forceinline__ __device__ float f() { return 123.4f; }
 extern "C"
 __global__ void testinline()

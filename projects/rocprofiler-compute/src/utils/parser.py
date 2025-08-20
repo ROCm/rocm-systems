@@ -103,6 +103,7 @@ supported_call = {
     "STD": "to_std",
     # functions apply to whole column of df or a single value
     "TO_INT": "to_int",
+    "SUM": "to_sum",
     # Support the below with 2 inputs
     "ROUND": "to_round",
     "QUANTILE": "to_quantile",
@@ -194,6 +195,19 @@ def to_int(a):
     #     return int(a)
     else:
         raise Exception("to_int: unsupported type.")
+
+
+def to_sum(a):
+    if str(type(a)) == "<class 'NoneType'>":
+        return np.nan
+    elif np.isnan(a).all():
+        return np.nan
+    elif a.empty:
+        return np.nan
+    elif isinstance(a, pd.core.series.Series):
+        return a.sum()
+    else:
+        raise Exception("to_sum: unsupported type.")
 
 
 def to_round(a, b):
@@ -755,7 +769,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
 
 
 @demarcate
-def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
+def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
     """
     Execute the expr string for each metric in the df.
     """
@@ -860,6 +874,30 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
             "wave_size is not available in sysinfo.csv, please provide the correct "
             "value using --specs-correction"
         )
+    if not empirical_peaks_df.empty:
+        peak_data_row = empirical_peaks_df.iloc[0]
+        for metric_name in empirical_peaks_df.columns:
+            var_name = f"ammolite__{metric_name}_empirical_peak"
+            locals()[var_name] = peak_data_row[metric_name]
+    else:
+        default_peaks = [
+            "MFMAF64Flops",
+            "MFMAF32Flops",
+            "MFMAF16Flops",
+            "MFMABF16Flops",
+            "MFMAF8Flops",
+            "MFMAI8Ops",
+            "HBMBw",
+            "L2Bw",
+            "L1Bw",
+            "LDSBw",
+            "MFMA_FLOPs_F6F4",
+        ]
+        # set values to 0 if no no empirical peaks from roofline.csv are provided
+        for peak_name in default_peaks:
+            var_name = f"ammolite__{peak_name}_empirical_peak"
+            exec(f"{var_name} = 0", globals(), locals())
+
     # TODO: fix all $normUnit in Unit column or title
 
     # build and eval all derived build-in global variables
@@ -958,8 +996,7 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                     except TypeError:
                                         console_warning(
                                             "Skipping entry. Encountered a missing "
-                                            "counter\n{} has been assigned to None\n{}"
-                                            .format(
+                                            "counter\n{} has been assigned to None\n{}".format(
                                                 expr,
                                                 np.nan,
                                             )
@@ -984,8 +1021,14 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                         row[expr] = ""
                                     else:
                                         row[expr] = out
-                                except TypeError:
-                                    row[expr] = ""
+                                except (TypeError, NameError) as e:
+                                    if "empirical_peak" in str(e):
+                                        console_warning(
+                                            f"Missing empirical peak data: {e}. Using empty value."
+                                        )
+                                        row[expr] = ""
+                                    else:
+                                        row[expr] = ""
                                 except AttributeError as ae:
                                     if (
                                         str(ae)
@@ -1043,8 +1086,7 @@ def apply_filters(workload, dir, is_gui, debug):
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
-                        "{} is an invalid kernel id. Please enter an id between 0-{}"
-                        .format(
+                        "{} is an invalid kernel id. Please enter an id between 0-{}".format(
                             kernel_id,
                             len(kernels_df["Kernel_Name"]) - 1,
                         )
@@ -1579,6 +1621,7 @@ def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False):
         workload.dfs,
         workload.dfs_type,
         workload.sys_info.iloc[0],
+        workload.roofline_peaks,
         apply_filters(workload, dir, is_gui, args.debug),
         args.debug,
         config,

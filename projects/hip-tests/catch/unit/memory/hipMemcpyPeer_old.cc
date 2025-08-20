@@ -27,10 +27,10 @@ This testfile verifies the following scenarios of hipMemcpyPeer API
 */
 
 /*This testcase verifies the negative scenarios of hipmemcpypeer
-*/
+ */
 TEST_CASE("Unit_hipMemcpyPeer_Negative") {
   constexpr auto numElements{10};
-  constexpr auto copy_bytes{numElements*sizeof(int)};
+  constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -41,14 +41,13 @@ TEST_CASE("Unit_hipMemcpyPeer_Negative") {
       int *A_d{nullptr}, *B_d{nullptr};
       int *A_h{nullptr}, *B_h{nullptr};
       HIP_CHECK(hipSetDevice(0));
-      HipTest::initArrays<int>(&A_d, nullptr, nullptr,
-          &A_h, &B_h, nullptr, numElements*sizeof(int));
+      HipTest::initArrays<int>(&A_d, nullptr, nullptr, &A_h, &B_h, nullptr,
+                               numElements * sizeof(int));
       HipTest::setDefaultData<int>(numElements, A_h, B_h, nullptr);
       HIP_CHECK(hipSetDevice(1));
-      HipTest::initArrays<int>(nullptr, &B_d, nullptr,
-          nullptr, nullptr, nullptr, numElements*sizeof(int));
-      HIP_CHECK(hipMemcpy(B_d, B_h, numElements*sizeof(int),
-               hipMemcpyHostToDevice));
+      HipTest::initArrays<int>(nullptr, &B_d, nullptr, nullptr, nullptr, nullptr,
+                               numElements * sizeof(int));
+      HIP_CHECK(hipMemcpy(B_d, B_h, numElements * sizeof(int), hipMemcpyHostToDevice));
 
       SECTION("Nullptr to Destination Pointer") {
         REQUIRE(hipMemcpyPeer(nullptr, 1, A_d, 0, copy_bytes) != hipSuccess);
@@ -59,27 +58,22 @@ TEST_CASE("Unit_hipMemcpyPeer_Negative") {
       }
 
       SECTION("Pass NumElements as 0") {
-        HIP_CHECK(hipMemcpy(A_d, A_h, numElements*sizeof(int),
-                            hipMemcpyHostToDevice));
+        HIP_CHECK(hipMemcpy(A_d, A_h, numElements * sizeof(int), hipMemcpyHostToDevice));
         HIP_CHECK(hipMemcpyPeer(B_d, 1, A_d, 0, 0));
-        HIP_CHECK(hipMemcpy(A_h, B_d, numElements*sizeof(int),
-                            hipMemcpyDeviceToHost));
+        HIP_CHECK(hipMemcpy(A_h, B_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
         HipTest::checkTest<int>(A_h, B_h, numElements);
       }
 
       SECTION("Passing more than allocated size") {
-        REQUIRE(hipMemcpyPeer(B_d, 1, A_d, 0,
-              ((numElements+40)*sizeof(int))) != hipSuccess);
+        REQUIRE(hipMemcpyPeer(B_d, 1, A_d, 0, ((numElements + 40) * sizeof(int))) != hipSuccess);
       }
 
       SECTION("Passing invalid Destination device ID") {
-        REQUIRE(hipMemcpyPeer(B_d, numDevices, A_d, 0, copy_bytes) !=
-                hipSuccess);
+        REQUIRE(hipMemcpyPeer(B_d, numDevices, A_d, 0, copy_bytes) != hipSuccess);
       }
 
       SECTION("Passing invalid Source device ID") {
-        REQUIRE(hipMemcpyPeer(B_d, 1, A_d, numDevices, copy_bytes) !=
-                hipSuccess);
+        REQUIRE(hipMemcpyPeer(B_d, 1, A_d, numDevices, copy_bytes) != hipSuccess);
       }
       HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, B_h, nullptr, false);
     } else {
@@ -99,7 +93,7 @@ TEST_CASE("Unit_hipMemcpyPeer_Negative") {
  */
 TEST_CASE("Unit_hipMemcpyPeer_Basic") {
   constexpr auto numElements{10};
-  constexpr auto copy_bytes{numElements*sizeof(int)};
+  constexpr auto copy_bytes{numElements * sizeof(int)};
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
@@ -112,38 +106,31 @@ TEST_CASE("Unit_hipMemcpyPeer_Basic") {
 
       // Initialization of Variables on GPU-0
       HIP_CHECK(hipSetDevice(0));
-      HipTest::initArrays<int>(&A_d, &B_d, &C_d,
-          &A_h, &B_h, &C_h, numElements*sizeof(int));
-      HIP_CHECK(hipMemcpy(A_d, A_h, numElements*sizeof(int),
-               hipMemcpyHostToDevice));
-      HIP_CHECK(hipMemcpy(B_d, B_h, numElements*sizeof(int),
-               hipMemcpyHostToDevice));
+      HipTest::initArrays<int>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, numElements * sizeof(int));
+      HIP_CHECK(hipMemcpy(A_d, A_h, numElements * sizeof(int), hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy(B_d, B_h, numElements * sizeof(int), hipMemcpyHostToDevice));
 
       // Initialization of Variables on GPU-1
       HIP_CHECK(hipSetDevice(1));
-      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr,
-          nullptr, nullptr, numElements*sizeof(int));
+      HipTest::initArrays<int>(&X_d, &Y_d, &Z_d, nullptr, nullptr, nullptr,
+                               numElements * sizeof(int));
 
       // Launching kernel and performing vector addition on GPU-0
       HIP_CHECK(hipSetDevice(0));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(A_d),
-          static_cast<const int*>(B_d), C_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(A_d),
+                         static_cast<const int*>(B_d), C_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, C_d, numElements*sizeof(int),
-               hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, C_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
 
       HIP_CHECK(hipSetDevice(1));
       // Copying data from GPU-0 to GPU-1 and performing vector addition
       HIP_CHECK(hipMemcpyPeer(X_d, 1, A_d, 0, copy_bytes));
       HIP_CHECK(hipMemcpyPeer(Y_d, 1, B_d, 0, copy_bytes));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1),
-          0, 0, static_cast<const int*>(X_d),
-          static_cast<const int*>(Y_d), Z_d, numElements*sizeof(int));
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0, static_cast<const int*>(X_d),
+                         static_cast<const int*>(Y_d), Z_d, numElements * sizeof(int));
       HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements*sizeof(int),
-            hipMemcpyDeviceToHost));
+      HIP_CHECK(hipMemcpy(C_h, Z_d, numElements * sizeof(int), hipMemcpyDeviceToHost));
       HipTest::checkVectorADD<int>(A_h, B_h, C_h, numElements);
 
       // Cleaning  the memory

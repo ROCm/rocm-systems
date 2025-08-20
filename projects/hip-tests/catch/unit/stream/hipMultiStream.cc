@@ -20,7 +20,7 @@ THE SOFTWARE.
 #include <iostream>
 #include <vector>
 constexpr int NN = 1 << 21;
-__global__ void kernel_do_nothing(__attribute__((unused))int a) {
+__global__ void kernel_do_nothing(__attribute__((unused)) int a) {
   // empty kernel
 }
 __global__ void kernel(float* x, float* y, int n) {

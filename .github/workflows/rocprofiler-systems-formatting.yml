@@ -10,6 +10,7 @@ on:
       - 'projects/rocprofiler-systems/**'
   pull_request:
     paths:
+      - '.github/workflows/rocprofiler-systems-formatting.yml'
       - 'projects/rocprofiler-systems/**'
 
 concurrency:
@@ -106,6 +107,7 @@ jobs:
         sudo apt-get install -y python3-pip
         python3 -m pip install gersemi
     - name: gersemi
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         gersemi -i $(find . -type f ! -path '*/external/*' | grep -E 'CMakeLists.txt|\.cmake$')
@@ -132,6 +134,7 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y software-properties-common wget curl clang-format-18
     - name: clang-format
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         FILES=$(find source examples tests -type f | egrep '\.(h|hpp|c|cpp)(|\.in)$')
@@ -152,6 +155,7 @@ jobs:
       with:
         sparse-checkout: projects/rocprofiler-systems
     - name: check-includes
+      working-directory: projects/rocprofiler-systems/
       run: |
         set +e
         FILES=$(find source examples -type f | egrep '\.(hpp|cpp)(|\.in)$')

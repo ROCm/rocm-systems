@@ -309,8 +309,7 @@ hiprtcResult hiprtcLinkCreate(unsigned int num_options, hiprtcJIT_option* option
 
   std::string name("LinkerProgram");
   hip::LinkProgram* rtc_link_prog_ptr = new hip::LinkProgram(name);
-  if (!rtc_link_prog_ptr->AddLinkerOptions(num_options, options_ptr,
-                                          options_vals_pptr)) {
+  if (!rtc_link_prog_ptr->AddLinkerOptions(num_options, options_ptr, options_vals_pptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_OPTION);
   }
 
@@ -331,12 +330,11 @@ hiprtcResult hiprtcLinkAddFile(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
   if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX ||
       input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT ||
       input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM ||
-      input_type == HIPRTC_JIT_INPUT_SPIRV ) {
+      input_type == HIPRTC_JIT_INPUT_SPIRV) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -361,7 +359,7 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
 
   if (input_type == HIPRTC_JIT_INPUT_CUBIN || input_type == HIPRTC_JIT_INPUT_PTX ||
       input_type == HIPRTC_JIT_INPUT_FATBINARY || input_type == HIPRTC_JIT_INPUT_OBJECT ||
-      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM || 
+      input_type == HIPRTC_JIT_INPUT_LIBRARY || input_type == HIPRTC_JIT_INPUT_NVVM ||
       input_type == HIPRTC_JIT_INPUT_SPIRV) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
@@ -371,8 +369,7 @@ hiprtcResult hiprtcLinkAddData(hiprtcLinkState hip_link_state, hiprtcJITInputTyp
     input_name = name;
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -392,8 +389,7 @@ hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void** bin_out, 
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);
@@ -409,8 +405,7 @@ hiprtcResult hiprtcLinkComplete(hiprtcLinkState hip_link_state, void** bin_out, 
 hiprtcResult hiprtcLinkDestroy(hiprtcLinkState hip_link_state) {
   HIPRTC_INIT_API(hip_link_state);
 
-  hip::LinkProgram* rtc_link_prog_ptr =
-      reinterpret_cast<hip::LinkProgram*>(hip_link_state);
+  hip::LinkProgram* rtc_link_prog_ptr = reinterpret_cast<hip::LinkProgram*>(hip_link_state);
 
   if (!hip::LinkProgram::isLinkerValid(rtc_link_prog_ptr)) {
     HIPRTC_RETURN(HIPRTC_ERROR_INVALID_INPUT);

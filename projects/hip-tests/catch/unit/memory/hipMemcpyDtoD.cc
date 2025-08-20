@@ -38,12 +38,10 @@ This testcase verifies hipMemcpyDtoD API
 6.Kernel Launch
 7.DtoH copy and validating the result
 */
-TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "",
-                   int, float, double) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "", int, float, double) {
   size_t Nbytes = NUM_ELM * sizeof(TestType);
   int numDevices = 0;
-  TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr},
-           *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
+  TestType *A_d{nullptr}, *B_d{nullptr}, *C_d{nullptr}, *X_d{nullptr}, *Y_d{nullptr}, *Z_d{nullptr};
   TestType *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr};
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
@@ -53,12 +51,10 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "",
     HIP_CHECK(hipSetDevice(0));
     if (canAccessPeer) {
       HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
-    }
-    else {
+    } else {
       INFO("Machine does not have P2P Capabilities");
     }
-    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h,
-                                  NUM_ELM, false);
+    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h, NUM_ELM, false);
     HIP_CHECK(hipSetDevice(1));
     HIP_CHECK(hipMalloc(&X_d, Nbytes));
     HIP_CHECK(hipMalloc(&Y_d, Nbytes));
@@ -67,10 +63,9 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "",
     HIP_CHECK(hipSetDevice(0));
     HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
     HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                        dim3(1), 0, 0,
-                        static_cast<const TestType *>(A_d),
-                        static_cast<const TestType *>(B_d), C_d, NUM_ELM);
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+                       static_cast<const TestType*>(A_d), static_cast<const TestType*>(B_d), C_d,
+                       NUM_ELM);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());

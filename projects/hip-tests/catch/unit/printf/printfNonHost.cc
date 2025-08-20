@@ -26,48 +26,46 @@
 #define ITER_COUNT_FOR_THREAD (BLOCK_SIZE * THREADS_PER_BLOCK)
 #define CONST_STR "Hello World from Device.Iam printing 55 bytes of data.\n"
 
-//info_.printfBufferSize_ = PrintfDbg::WorkitemDebugSize(4096) * info().maxWorkGroupSize_(1024)
-#define MAX_BUFF_SIZE  (4096 * 1024)
+// info_.printfBufferSize_ = PrintfDbg::WorkitemDebugSize(4096) * info().maxWorkGroupSize_(1024)
+#define MAX_BUFF_SIZE (4096 * 1024)
 //<control DWord (4 bytes)><format string hash (8 bytes)><printf arguments each aligned to 8 bytes>
 #define Item_BUFF_SIZE (4 + 8 + 56) /* 56 = 55 + 1 byte null terminator */
-#define VALID_COUNT    (MAX_BUFF_SIZE / Item_BUFF_SIZE)
-#define ITER_COUNT     (VALID_COUNT + 1)
+#define VALID_COUNT (MAX_BUFF_SIZE / Item_BUFF_SIZE)
+#define ITER_COUNT (VALID_COUNT + 1)
 
 // Kernel Functions
-__global__ void run_printf_basic(int *count) {
-  *count = printf("Hello World\n");
-}
+__global__ void run_printf_basic(int* count) { *count = printf("Hello World\n"); }
 
-__global__ void kernel_printf_loop(uint iterCount, int *count) {
+__global__ void kernel_printf_loop(uint iterCount, int* count) {
   for (uint i = 0; i < iterCount; i++) {
     count[i] = printf("%s", CONST_STR);
   }
 }
 
-__global__ void kernel_printf_thread(int *count) {
+__global__ void kernel_printf_thread(int* count) {
   uint tid = threadIdx.x + blockIdx.x * blockDim.x;
   count[tid] = printf("%s", CONST_STR);
 }
 
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify the printf return value for -mprintf-kind=buffered compiler option
-* - printf should return 0 for normal buffer.
-* Test source
-* ------------------------
-* - catch/unit/printf/printfNonHost.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 5.7
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify the printf return value for -mprintf-kind=buffered compiler option
+ * - printf should return 0 for normal buffer.
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/printfNonHost.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 5.7
+ */
 
 TEST_CASE("Unit_NonHost_Printf_basic") {
   int pcieAtomic = 0;
@@ -93,9 +91,10 @@ TEST_CASE("Unit_NonHost_Printf_basic") {
 /**
  * Test Description
  * ------------------------
- * - Test case to verify the printf return value for big buffer for -mprintf-kind=buffered compiler option
- * - Call the printf API for number of iterations in the Kernel Function. Printf should return -1 for overflow buffer.
- * Test source
+ * - Test case to verify the printf return value for big buffer for -mprintf-kind=buffered compiler
+ * option
+ * - Call the printf API for number of iterations in the Kernel Function. Printf should return -1
+ * for overflow buffer. Test source
  * ------------------------
  * - catch/unit/printf/printfNonHost.cc
  * Test requirements
@@ -114,18 +113,16 @@ TEST_CASE("Unit_NonHost_Printf_loop") {
   count = reinterpret_cast<int*>(malloc(ITER_COUNT * sizeof(int)));
   HIP_CHECK(hipMalloc(&count_d, ITER_COUNT * sizeof(int)));
 
-  hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0,
-                     ITER_COUNT, count_d);
+  hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT, count_d);
 
-  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT * sizeof(int),
-                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT * sizeof(int), hipMemcpyDeviceToHost));
   int test = 0;
   for (int i = 0; i < ITER_COUNT; i++) {
     if (count[i] == -1) {
       test = i;
     }
   }
-  if (test == (ITER_COUNT-1)) {
+  if (test == (ITER_COUNT - 1)) {
     REQUIRE(true);
   } else {
     REQUIRE(false);
@@ -136,7 +133,8 @@ TEST_CASE("Unit_NonHost_Printf_loop") {
 /**
  * Test Description
  * ------------------------
- * - Test case to verify the printf return value for big buffer for -mprintf-kind=buffered compiler option
+ * - Test case to verify the printf return value for big buffer for -mprintf-kind=buffered compiler
+ * option
  * - Call the single printf API for multiple threads. Printf should return -1 for overflow buffer.
  * Test source
  * ------------------------
@@ -158,17 +156,15 @@ TEST_CASE("Unit_NonHost_Printf_multiple_Threads") {
   count = reinterpret_cast<int*>(malloc(ITER_COUNT_FOR_THREAD * sizeof(int)));
   HIP_CHECK(hipMalloc(&count_d, ITER_COUNT_FOR_THREAD * sizeof(int)));
 
-  hipLaunchKernelGGL(kernel_printf_thread, dim3(BLOCK_SIZE),
-                     dim3(THREADS_PER_BLOCK),
-                     0, 0, count_d);
+  hipLaunchKernelGGL(kernel_printf_thread, dim3(BLOCK_SIZE), dim3(THREADS_PER_BLOCK), 0, 0,
+                     count_d);
 
-  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT_FOR_THREAD * sizeof(int),
-                      hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(count, count_d, ITER_COUNT_FOR_THREAD * sizeof(int), hipMemcpyDeviceToHost));
 
   int check = 0;
   for (int i = 0; i < ITER_COUNT_FOR_THREAD; i++) {
     if (count[i] == -1) {
-      check = check+1;
+      check = check + 1;
     }
   }
   if (VALID_COUNT < ITER_COUNT_FOR_THREAD) {
@@ -202,24 +198,22 @@ TEST_CASE("Unit_NonHost_Printf_BufferAvailability") {
   }
   int *count{nullptr}, *count_d{nullptr};
 
-  count = reinterpret_cast<int*>(malloc((ITER_COUNT-1) * sizeof(int)));
-  HIP_CHECK(hipMalloc(&count_d, (ITER_COUNT-1) * sizeof(int)));
+  count = reinterpret_cast<int*>(malloc((ITER_COUNT - 1) * sizeof(int)));
+  HIP_CHECK(hipMalloc(&count_d, (ITER_COUNT - 1) * sizeof(int)));
   int check = 0;
   for (int i = 0; i < KERNEL_ITERATIONS; i++) {
-    hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0,
-                     ITER_COUNT-1, count_d);
+    hipLaunchKernelGGL(kernel_printf_loop, dim3(1), dim3(1), 0, 0, ITER_COUNT - 1, count_d);
 
-    HIP_CHECK(hipMemcpy(count, count_d, (ITER_COUNT-1) * sizeof(int),
-                      hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(count, count_d, (ITER_COUNT - 1) * sizeof(int), hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
 
     int test = 0;
-    for (int i = 0; i < ITER_COUNT-1; i++) {
+    for (int i = 0; i < ITER_COUNT - 1; i++) {
       if (count[i] == 0) {
         test = test + 1;
       }
     }
-    if (test == (ITER_COUNT-1)) {
+    if (test == (ITER_COUNT - 1)) {
       check = check + 1;
     }
   }
@@ -235,6 +229,6 @@ TEST_CASE("Unit_NonHost_Printf_BufferAvailability") {
 
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

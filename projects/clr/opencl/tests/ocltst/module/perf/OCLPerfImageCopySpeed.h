@@ -29,8 +29,7 @@ class OCLPerfImageCopySpeed : public OCLTestImp {
   virtual ~OCLPerfImageCopySpeed();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -47,10 +46,8 @@ class OCLPerfImageCopySpeed : public OCLTestImp {
   bool srcImage_;
   bool dstImage_;
   unsigned int numIter;
-  void setData(void* ptr, unsigned int pitch, unsigned int size,
-               unsigned int value);
-  void checkData(void* ptr, unsigned int pitch, unsigned int size,
-                 unsigned int value);
+  void setData(void* ptr, unsigned int pitch, unsigned int size, unsigned int value);
+  void checkData(void* ptr, unsigned int pitch, unsigned int size, unsigned int value);
 };
 
 #endif  // _OCL_ImageCopySpeed_H_

@@ -29,22 +29,24 @@ THE SOFTWARE.
 
 // Common Definitions and Macros
 #if HT_AMD
-  static const char* visibility_env_var = "HIP_VISIBLE_DEVICES";
+static const char* visibility_env_var = "HIP_VISIBLE_DEVICES";
 #else
-  static const char* visibility_env_var = "CUDA_VISIBLE_DEVICES";
+static const char* visibility_env_var = "CUDA_VISIBLE_DEVICES";
 #endif
 
-#define UNUSED(expr) do { (void)(expr); } while (0)
+#define UNUSED(expr)                                                                               \
+  do {                                                                                             \
+    (void)(expr);                                                                                  \
+  } while (0)
 
-void Callback(hipStream_t stream, hipError_t status,
-                       void* userData) {
+void Callback(hipStream_t stream, hipError_t status, void* userData) {
   UNUSED(stream);
   HIP_CHECK(status);
   REQUIRE(userData == NULL);
 }
 
 // Dummy RTC function
-static constexpr auto rtcfn {
+static constexpr auto rtcfn{
     R"(
 extern "C"
 __global__ void fn()
@@ -53,8 +55,7 @@ __global__ void fn()
 )"};
 
 // Dummy Kernel Function
-static __global__ void fn() {
-}
+static __global__ void fn() {}
 
 // No GPU test case for hipGetDeviceCount
 static bool NoGpuTst_hipGetDeviceCount() {
@@ -65,8 +66,7 @@ static bool NoGpuTst_hipGetDeviceCount() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipGetDeviceCount: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipGetDeviceCount: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -79,8 +79,7 @@ static bool NoGpuTst_hipSetDevice() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipSetDevice: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipSetDevice: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -95,8 +94,7 @@ static bool NoGpuTst_hipDeviceGetAttribute() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetAttribute: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetAttribute: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -107,13 +105,11 @@ static bool NoGpuTst_hipDeviceGetP2PAttribute() {
   hipError_t err;
   int srcDevice = 0, dstDevice = 1;
   int value{-1};
-  err = hipDeviceGetP2PAttribute(&value, hipDevP2PAttrPerformanceRank,
-                                 srcDevice, dstDevice);
+  err = hipDeviceGetP2PAttribute(&value, hipDevP2PAttrPerformanceRank, srcDevice, dstDevice);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetP2PAttribute: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetP2PAttribute: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -128,8 +124,7 @@ static bool NoGpuTst_hipDeviceGetPCIBusId() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetPCIBusId: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetPCIBusId: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -144,8 +139,7 @@ static bool NoGpuTst_hipDeviceGetByPCIBusId() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetByPCIBusId: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetByPCIBusId: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -165,8 +159,7 @@ static bool NoGpuTst_hipDeviceTotalMem() {
   if (err == err_exp) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceTotalMem: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceTotalMem: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -175,13 +168,11 @@ static bool NoGpuTst_hipDeviceTotalMem() {
 static bool NoGpuTst_hipFuncSetSharedMemConfig() {
   bool passed = false;
   hipError_t err;
-  err = hipFuncSetSharedMemConfig(reinterpret_cast<const void*>(&fn),
-                                  hipSharedMemBankSizeDefault);
+  err = hipFuncSetSharedMemConfig(reinterpret_cast<const void*>(&fn), hipSharedMemBankSizeDefault);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipFuncSetSharedMemConfig: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipFuncSetSharedMemConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -195,8 +186,7 @@ static bool NoGpuTst_hipStreamCreate() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamCreate: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamCreate: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -210,8 +200,7 @@ static bool NoGpuTst_hipStreamCreateWithPriority() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamCreateWithPriority: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamCreateWithPriority: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -224,8 +213,7 @@ static bool NoGpuTst_hipStreamSynchronize() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamSynchronize: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamSynchronize: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -239,8 +227,7 @@ static bool NoGpuTst_hipStreamGetFlags() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamGetFlags: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamGetFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -256,8 +243,7 @@ static bool NoGpuTst_hipExtStreamCreateWithCUMask() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipExtStreamCreateWithCUMask: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipExtStreamCreateWithCUMask: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -272,8 +258,7 @@ static bool NoGpuTst_hipStreamAddCallback() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamAddCallback: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamAddCallback: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -287,8 +272,7 @@ static bool NoGpuTst_hipEventCreateWithFlags() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipEventCreateWithFlags: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipEventCreateWithFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -301,8 +285,7 @@ static bool NoGpuTst_hipDeviceSynchronize() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceSynchronize: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceSynchronize: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -316,8 +299,7 @@ static bool NoGpuTst_hipGetDevice() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipGetDevice: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipGetDevice: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -331,8 +313,7 @@ static bool NoGpuTst_hipDeviceGetCacheConfig() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetCacheConfig: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetCacheConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -346,8 +327,7 @@ static bool NoGpuTst_hipDeviceGetSharedMemConfig() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetSharedMemConfig: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetSharedMemConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -361,8 +341,7 @@ static bool NoGpuTst_hipDeviceSetSharedMemConfig() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceSetSharedMemConfig: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceSetSharedMemConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -377,8 +356,7 @@ static bool NoGpuTst_hipPointerGetAttributes() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipPointerGetAttributes: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipPointerGetAttributes: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -387,14 +365,13 @@ static bool NoGpuTst_hipPointerGetAttributes() {
 static bool NoGpuTst_hipExtMallocWithFlags() {
   bool passed = false;
   hipError_t err;
-  int *Ptr = nullptr;
+  int* Ptr = nullptr;
   unsigned int flags = 0;
   err = hipExtMallocWithFlags(reinterpret_cast<void**>(Ptr), 128, flags);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipExtMallocWithFlags: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipExtMallocWithFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -403,13 +380,12 @@ static bool NoGpuTst_hipExtMallocWithFlags() {
 static bool NoGpuTst_hipMallocManaged() {
   bool passed = false;
   hipError_t err;
-  float *dev_ptr;
+  float* dev_ptr;
   err = hipMallocManaged(&dev_ptr, 128, hipMemAttachGlobal);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMallocManaged: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMallocManaged: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -423,8 +399,7 @@ static bool NoGpuTst_hipHostFree() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipHostFree: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipHostFree: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -442,8 +417,7 @@ static bool NoGpuTst_hipMemcpyWithStream() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMemcpyWithStream: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMemcpyWithStream: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -460,8 +434,7 @@ static bool NoGpuTst_hipMallocMipmappedArray() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMallocMipmappedArray: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMallocMipmappedArray: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -475,8 +448,7 @@ static bool NoGpuTst_hipDeviceEnablePeerAccess() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceEnablePeerAccess: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceEnablePeerAccess: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -485,14 +457,14 @@ static bool NoGpuTst_hipDeviceEnablePeerAccess() {
 static bool NoGpuTst_hipHostMalloc() {
   bool passed = false;
   hipError_t err;
-  int *ptr;
+  int* ptr;
   size_t size = 1024;
   unsigned int flag = hipHostMallocDefault;
   err = hipHostMalloc(&ptr, size, flag);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipHostMalloc: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipHostMalloc: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -501,13 +473,13 @@ static bool NoGpuTst_hipHostMalloc() {
 static bool NoGpuTst_hipMalloc() {
   bool passed = false;
   hipError_t err;
-  int *ptr;
+  int* ptr;
   size_t size = 1024;
   err = hipMalloc(&ptr, size);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMalloc: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipMalloc: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -518,12 +490,12 @@ static bool NoGpuTst_hipHostRegister() {
   hipError_t err;
   size_t size = 1024;
   unsigned int reg_flag = hipHostRegisterDefault;
-  void * hostPtr = reinterpret_cast<void*>(malloc(size));
+  void* hostPtr = reinterpret_cast<void*>(malloc(size));
   err = hipHostRegister(hostPtr, size, reg_flag);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipHostRegister: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipHostRegister: " << hipGetErrorName(err));
   }
   free(hostPtr);
   return passed;
@@ -534,13 +506,13 @@ static bool NoGpuTst_hipMemcpy() {
   bool passed = false;
   hipError_t err;
   size_t size = 1024;
-  int *dst = reinterpret_cast<int*>(malloc(size));
-  int *src = reinterpret_cast<int*>(malloc(size));
+  int* dst = reinterpret_cast<int*>(malloc(size));
+  int* src = reinterpret_cast<int*>(malloc(size));
   err = hipMemcpy(dst, src, size, hipMemcpyHostToHost);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMemcpy: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipMemcpy: " << hipGetErrorName(err));
   }
   free(dst);
   free(src);
@@ -565,7 +537,7 @@ static bool NoGpuTst_hipMemAllocPitch() {
   if (err == err_exp) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMemAllocPitch: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipMemAllocPitch: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -579,7 +551,7 @@ static bool NoGpuTst_hipMemGetInfo() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMemGetInfo: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipMemGetInfo: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -595,7 +567,7 @@ static bool NoGpuTst_hipMalloc3DArray() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMalloc3DArray: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipMalloc3DArray: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -604,13 +576,14 @@ static bool NoGpuTst_hipMalloc3DArray() {
 static bool NoGpuTst_hipDeviceCanAccessPeer() {
   bool passed = false;
   hipError_t err;
-  int canAccessPeer; int deviceId1 = 0; int peerDeviceId = 1;
-  err =  hipDeviceCanAccessPeer(&canAccessPeer, deviceId1, peerDeviceId);
+  int canAccessPeer;
+  int deviceId1 = 0;
+  int peerDeviceId = 1;
+  err = hipDeviceCanAccessPeer(&canAccessPeer, deviceId1, peerDeviceId);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceCanAccessPeer: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceCanAccessPeer: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -619,12 +592,11 @@ static bool NoGpuTst_hipDeviceCanAccessPeer() {
 static bool NoGpuTst_hipDeviceDisablePeerAccess() {
   bool passed = false;
   hipError_t err;
-  err =  hipDeviceDisablePeerAccess(1);
+  err = hipDeviceDisablePeerAccess(1);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceDisablePeerAccess: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceDisablePeerAccess: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -640,11 +612,11 @@ static bool NoGpuTst_hipDeviceGet() {
 #endif
   hipDevice_t device;
   int ordinal = 0;
-  err =  hipDeviceGet(&device, ordinal);
+  err = hipDeviceGet(&device, ordinal);
   if (err == err_exp) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGet: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGet: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -664,8 +636,7 @@ static bool NoGpuTst_hipDeviceComputeCapability() {
   if (err == err_exp) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceComputeCapability: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceComputeCapability: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -685,7 +656,7 @@ static bool NoGpuTst_hipDeviceGetName() {
   if (err == err_exp) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetName: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetName: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -696,12 +667,11 @@ static bool NoGpuTst_hipGetDeviceProperties() {
   hipError_t err;
   int deviceId = 0;
   hipDeviceProp_t prop;
-  err =  hipGetDeviceProperties(&prop, deviceId);
+  err = hipGetDeviceProperties(&prop, deviceId);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipGetDeviceProperties: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipGetDeviceProperties: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -718,7 +688,7 @@ static bool NoGpuTst_hipChooseDevice() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipChooseDevice: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipChooseDevice: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -733,8 +703,7 @@ static bool NoGpuTst_hipExtGetLinkTypeAndHopCount() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipExtGetLinkTypeAndHopCount: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipExtGetLinkTypeAndHopCount: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -749,8 +718,7 @@ static bool NoGpuTst_hipExtStreamGetCUMask() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipExtStreamGetCUMask: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipExtStreamGetCUMask: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -765,8 +733,7 @@ static bool NoGpuTst_hipFuncSetAttribute() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipFuncSetAttribute: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipFuncSetAttribute: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -780,8 +747,7 @@ static bool NoGpuTst_hipFuncSetCacheConfig() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipFuncSetCacheConfig: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipFuncSetCacheConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -792,12 +758,11 @@ static bool NoGpuTst_hipStreamCreateWithFlags() {
   hipError_t err;
   hipStream_t stream;
   unsigned int flags = 0;
-  err =  hipStreamCreateWithFlags(&stream, flags);
+  err = hipStreamCreateWithFlags(&stream, flags);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamCreateWithFlags: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamCreateWithFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -808,12 +773,11 @@ static bool NoGpuTst_hipDeviceGetStreamPriorityRange() {
   hipError_t err;
   int leastPriority;
   int greatestPriority;
-  err =  hipDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority);
+  err = hipDeviceGetStreamPriorityRange(&leastPriority, &greatestPriority);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetStreamPriorityRange: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetStreamPriorityRange: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -827,7 +791,7 @@ static bool NoGpuTst_hipEventCreate() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipEventCreate: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipEventCreate: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -837,12 +801,11 @@ static bool NoGpuTst_hipStreamGetPriority() {
   bool passed = false;
   hipError_t err;
   int priority;
-  err =  hipStreamGetPriority(0, &priority);
+  err = hipStreamGetPriority(0, &priority);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamGetPriority: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamGetPriority: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -855,7 +818,7 @@ static bool NoGpuTst_hipDeviceReset() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceReset: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceReset: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -869,8 +832,7 @@ static bool NoGpuTst_hipDeviceSetCacheConfig() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceSetCacheConfig: "
-          <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceSetCacheConfig: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -881,11 +843,11 @@ static bool NoGpuTst_hipDeviceGetLimit() {
   hipError_t err;
   size_t pValue;
   hipLimit_t limit = hipLimitStackSize;
-  err =  hipDeviceGetLimit(&pValue, limit);
+  err = hipDeviceGetLimit(&pValue, limit);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipDeviceGetLimit: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipDeviceGetLimit: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -895,11 +857,11 @@ static bool NoGpuTst_hipGetDeviceFlags() {
   bool passed = false;
   hipError_t err;
   unsigned int flags;
-  err =  hipGetDeviceFlags(&flags);
+  err = hipGetDeviceFlags(&flags);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipGetDeviceFlags: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipGetDeviceFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -912,7 +874,7 @@ static bool NoGpuTst_hipSetDeviceFlags() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipSetDeviceFlags: " <<hipGetErrorName(err));
+    WARN("Error Code Returned by hipSetDeviceFlags: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -947,8 +909,7 @@ static bool NoGpuTst_hipFuncGetAttributes() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipFuncGetAttributes: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipFuncGetAttributes: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -974,8 +935,7 @@ static bool NoGpuTst_hipModuleLoadData() {
     }
 #endif
     if (passed == false) {
-      WARN("Error Code Returned by hipModuleLoadData: " <<
-            hipGetErrorName(err));
+      WARN("Error Code Returned by hipModuleLoadData: " << hipGetErrorName(err));
     }
   } else {
     WARN("File Read Failed");
@@ -1004,8 +964,7 @@ static bool NoGpuTst_hipModuleLoadDataEx() {
     }
 #endif
     if (passed == false) {
-      WARN("Error Code Returned by hipModuleLoadDataEx: " <<
-            hipGetErrorName(err));
+      WARN("Error Code Returned by hipModuleLoadDataEx: " << hipGetErrorName(err));
     }
   } else {
     WARN("File Read Failed");
@@ -1018,14 +977,12 @@ static bool NoGpuTst_hipLaunchCooperativeKernel() {
   bool passed = false;
   hipError_t err;
   dim3 dimBlock = dim3(1);
-  dim3 dimGrid  = dim3(1);
-  err = hipLaunchCooperativeKernel(reinterpret_cast<void*>(fn),
-        dimGrid, dimBlock, nullptr, 0, 0);
+  dim3 dimGrid = dim3(1);
+  err = hipLaunchCooperativeKernel(reinterpret_cast<void*>(fn), dimGrid, dimBlock, nullptr, 0, 0);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipLaunchCooperativeKernel: " <<
-          hipGetErrorName(err));
+    WARN("Error Code Returned by hipLaunchCooperativeKernel: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1043,7 +1000,7 @@ static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
   dimBlock.y = 1;
   dimBlock.z = 1;
   hipLaunchParams md_params[1];
-  void *dev_params[1][1];
+  void* dev_params[1][1];
   dev_params[0][0] = nullptr;
   md_params[0].func = reinterpret_cast<void*>(fn);
   md_params[0].gridDim = dimGrid;
@@ -1056,8 +1013,7 @@ static bool NoGpuTst_hipLaunchCooperativeKernelMultiDevice() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipLaunchCooperativeKernelMultiDevice: " <<
-          hipGetErrorName(err));
+    WARN("Error Code Returned by hipLaunchCooperativeKernelMultiDevice: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1087,8 +1043,7 @@ static bool NoGpuTst_hipExtLaunchMultiKernelMultiDevice() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipExtLaunchMultiKernelMultiDevice: " <<
-          hipGetErrorName(err));
+    WARN("Error Code Returned by hipExtLaunchMultiKernelMultiDevice: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1099,13 +1054,11 @@ static bool NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor() {
   bool passed = false;
   hipError_t err;
   int numBlock = 0, blockSize = 256;
-  err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlock,
-        fn, blockSize, 0);
+  err = hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlock, fn, blockSize, 0);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code hipOccupancyMaxActiveBlocksPerMultiprocessor: " <<
-        hipGetErrorName(err));
+    WARN("Error Code hipOccupancyMaxActiveBlocksPerMultiprocessor: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1115,8 +1068,7 @@ static bool NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags() {
   bool passed = false;
   hipError_t err;
   int numBlock = 0, blockSize = 256;
-  err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlock,
-        fn, blockSize, 0, 0);
+  err = hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(&numBlock, fn, blockSize, 0, 0);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
@@ -1131,13 +1083,11 @@ static bool NoGpuTst_hipOccupancyMaxPotentialBlockSize() {
   bool passed = false;
   hipError_t err;
   int blocksizelimit = 256, blockSize = 0, gridsize = 0;
-  err = hipOccupancyMaxPotentialBlockSize(&gridsize, &blockSize, fn,
-        0, blocksizelimit);
+  err = hipOccupancyMaxPotentialBlockSize(&gridsize, &blockSize, fn, 0, blocksizelimit);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipOccupancyMaxPotentialBlockSize: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipOccupancyMaxPotentialBlockSize: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1150,8 +1100,7 @@ static bool NoGpuTst_hiprtcVersion() {
   if (err == HIPRTC_SUCCESS) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hiprtcVersion: " <<
-        hiprtcGetErrorString(err));
+    WARN("Error Code Returned by hiprtcVersion: " << hiprtcGetErrorString(err));
   }
   return passed;
 }
@@ -1160,8 +1109,7 @@ static bool NoGpuTst_hiprtcVersion() {
 static bool NoGpuTst_hiprtcCreateProgram_DestroyProg() {
   bool passed = false;
   hiprtcProgram prog;
-  hiprtcResult err = hiprtcCreateProgram(&prog, rtcfn, "rtcfn.cu",
-                                        0, nullptr, nullptr);
+  hiprtcResult err = hiprtcCreateProgram(&prog, rtcfn, "rtcfn.cu", 0, nullptr, nullptr);
   if (err == HIPRTC_SUCCESS) {
     passed = true;
     err = hiprtcDestroyProgram(&prog);
@@ -1169,12 +1117,10 @@ static bool NoGpuTst_hiprtcCreateProgram_DestroyProg() {
       passed = true;
     } else {
       passed = false;
-      WARN("Error Code Returned by hiprtcDestroyProgram: " <<
-            hiprtcGetErrorString(err));
+      WARN("Error Code Returned by hiprtcDestroyProgram: " << hiprtcGetErrorString(err));
     }
   } else {
-    WARN("Error Code Returned by hiprtcCreateProgram: " <<
-        hiprtcGetErrorString(err));
+    WARN("Error Code Returned by hiprtcCreateProgram: " << hiprtcGetErrorString(err));
   }
   return passed;
 }
@@ -1183,16 +1129,14 @@ static bool NoGpuTst_hiprtcCreateProgram_DestroyProg() {
 static bool NoGpuTst_hiprtcAddNameExpression() {
   bool passed = false;
   hiprtcProgram prog;
-  hiprtcResult err = hiprtcCreateProgram(&prog, rtcfn, "rtcfn.cu",
-                                        0, nullptr, nullptr);
+  hiprtcResult err = hiprtcCreateProgram(&prog, rtcfn, "rtcfn.cu", 0, nullptr, nullptr);
   if (err == HIPRTC_SUCCESS) {
     err = hiprtcAddNameExpression(prog, "dummy_func");
     if (err == HIPRTC_SUCCESS) {
       passed = true;
     } else {
       passed = false;
-      WARN("Error Code Returned by hiprtcAddNameExpression: " <<
-            hiprtcGetErrorString(err));
+      WARN("Error Code Returned by hiprtcAddNameExpression: " << hiprtcGetErrorString(err));
     }
   }
   if (err == HIPRTC_SUCCESS) {
@@ -1209,13 +1153,11 @@ static bool NoGpuTst_hipMallocPitch() {
   hipError_t err;
   int* devPtr;
   size_t devPitch;
-  err = hipMallocPitch(reinterpret_cast<void**>(&devPtr), &devPitch,
-                                       SIZE_W*sizeof(int), SIZE_H);
+  err = hipMallocPitch(reinterpret_cast<void**>(&devPtr), &devPitch, SIZE_W * sizeof(int), SIZE_H);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMallocPitch: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMallocPitch: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1224,15 +1166,13 @@ static bool NoGpuTst_hipMallocPitch() {
 static bool NoGpuTst_hipMallocArray() {
   bool passed = false;
   hipError_t err;
-  hipChannelFormatDesc channelDesc =
-  hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   err = hipMallocArray(&hipArray, &channelDesc, 256, 256);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMallocArray: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMallocArray: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1247,8 +1187,7 @@ static bool NoGpuTst_hipMipmappedArrayCreate() {
   width /= pow(2, mipmap_level);
   height /= pow(2, mipmap_level);
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0,
-                                    0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   HIP_ARRAY3D_DESCRIPTOR mipmapped_array_desc;
   memset(&mipmapped_array_desc, 0x00, sizeof(HIP_ARRAY3D_DESCRIPTOR));
   mipmapped_array_desc.Width = orig_width;
@@ -1256,18 +1195,15 @@ static bool NoGpuTst_hipMipmappedArrayCreate() {
   mipmapped_array_desc.Depth = 0;
   mipmapped_array_desc.Format = HIP_AD_FORMAT_FLOAT;
   mipmapped_array_desc.NumChannels =
-  ((channelDesc.x != 0) + (channelDesc.y != 0) +\
-  (channelDesc.z != 0) + (channelDesc.w != 0));
+      ((channelDesc.x != 0) + (channelDesc.y != 0) + (channelDesc.z != 0) + (channelDesc.w != 0));
   mipmapped_array_desc.Flags = 0;
 
   hipMipmappedArray* mip_array_ptr;
-  err = hipMipmappedArrayCreate(&mip_array_ptr, &mipmapped_array_desc,
-        2*mipmap_level);
+  err = hipMipmappedArrayCreate(&mip_array_ptr, &mipmapped_array_desc, 2 * mipmap_level);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMipmappedArrayCreate: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMipmappedArrayCreate: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1284,8 +1220,7 @@ static bool NoGpuTst_hipMalloc3D() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipMalloc3D: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipMalloc3D: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1300,8 +1235,7 @@ static bool NoGpuTst_hipGraphCreate() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipGraphCreate: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipGraphCreate: " << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1315,16 +1249,17 @@ static bool NoGpuTst_hipStreamBeginCapture() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamBeginCapture with null stream: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamBeginCapture with null stream: " << hipGetErrorName(err));
   }
 
   err = hipStreamBeginCapture(hipStreamPerThread, hipStreamCaptureModeGlobal);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamBeginCapture with "
-         "hipStreamPerThread stream: " << hipGetErrorName(err));
+    WARN(
+        "Error Code Returned by hipStreamBeginCapture with "
+        "hipStreamPerThread stream: "
+        << hipGetErrorName(err));
   }
   return passed;
 }
@@ -1339,24 +1274,24 @@ static bool NoGpuTst_hipStreamIsCapturing() {
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamIsCapturing: " <<
-        hipGetErrorName(err));
+    WARN("Error Code Returned by hipStreamIsCapturing: " << hipGetErrorName(err));
   }
   err = hipStreamIsCapturing(hipStreamPerThread, &cStatus);
   if (err == hipErrorNoDevice) {
     passed = true;
   } else {
-    WARN("Error Code Returned by hipStreamIsCapturing with "
-         "hipStreamPerThread stream: " << hipGetErrorName(err));
+    WARN(
+        "Error Code Returned by hipStreamIsCapturing with "
+        "hipStreamPerThread stream: "
+        << hipGetErrorName(err));
   }
   return passed;
 }
 // Common function invoking individual tests
-static bool NoGpuTst_Common(bool(*test_fn)()) {
+static bool NoGpuTst_Common(bool (*test_fn)()) {
   bool passed = false;
-  int *Ptr = reinterpret_cast<int*>(mmap(NULL, sizeof(int),
-                                        PROT_READ | PROT_WRITE,
-                                        MAP_SHARED|MAP_ANONYMOUS, 0, 0));
+  int* Ptr = reinterpret_cast<int*>(
+      mmap(NULL, sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
   if (Ptr == MAP_FAILED) {
     WARN("Mapping Failed\n");
     return false;
@@ -1388,9 +1323,7 @@ TEST_CASE("Unit_NoGpuTst_hipGetDeviceCount") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDeviceCount));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipSetDevice") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDevice));
-}
+TEST_CASE("Unit_NoGpuTst_hipSetDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDevice)); }
 
 TEST_CASE("Unit_NoGpuTst_hipDeviceGetAttribute") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetAttribute));
@@ -1416,9 +1349,7 @@ TEST_CASE("Unit_NoGpuTst_hipFuncSetSharedMemConfig") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncSetSharedMemConfig));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipStreamCreate") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreate));
-}
+TEST_CASE("Unit_NoGpuTst_hipStreamCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreate)); }
 
 TEST_CASE("Unit_NoGpuTst_hipStreamCreateWithPriority") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamCreateWithPriority));
@@ -1448,9 +1379,7 @@ TEST_CASE("Unit_NoGpuTst_hipDeviceSynchronize") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceSynchronize));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipGetDevice") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDevice));
-}
+TEST_CASE("Unit_NoGpuTst_hipGetDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDevice)); }
 
 TEST_CASE("Unit_NoGpuTst_hipDeviceGetCacheConfig") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetCacheConfig));
@@ -1472,21 +1401,15 @@ TEST_CASE("Unit_NoGpuTst_hipExtMallocWithFlags") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtMallocWithFlags));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipMallocManaged") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocManaged));
-}
+TEST_CASE("Unit_NoGpuTst_hipMallocManaged") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocManaged)); }
 
-TEST_CASE("Unit_NoGpuTst_hipHostFree") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostFree));
-}
+TEST_CASE("Unit_NoGpuTst_hipHostFree") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostFree)); }
 
 TEST_CASE("Unit_NoGpuTst_hipMemcpyWithStream") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpyWithStream));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipMallocArray") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocArray));
-}
+TEST_CASE("Unit_NoGpuTst_hipMallocArray") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocArray)); }
 #if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipMallocMipmappedArray") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocMipmappedArray));
@@ -1496,33 +1419,19 @@ TEST_CASE("Unit_NoGpuTst_hipDeviceEnablePeerAccess") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceEnablePeerAccess));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipHostMalloc") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostMalloc));
-}
+TEST_CASE("Unit_NoGpuTst_hipHostMalloc") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostMalloc)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMalloc") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc));
-}
+TEST_CASE("Unit_NoGpuTst_hipMalloc") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc)); }
 
-TEST_CASE("Unit_NoGpuTst_hipHostRegister") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostRegister));
-}
+TEST_CASE("Unit_NoGpuTst_hipHostRegister") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipHostRegister)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemcpy") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpy));
-}
+TEST_CASE("Unit_NoGpuTst_hipMemcpy") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemcpy)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemAllocPitch") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemAllocPitch));
-}
+TEST_CASE("Unit_NoGpuTst_hipMemAllocPitch") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemAllocPitch)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMemGetInfo") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemGetInfo));
-}
+TEST_CASE("Unit_NoGpuTst_hipMemGetInfo") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMemGetInfo)); }
 
-TEST_CASE("Unit_NoGpuTst_hipMalloc3DArray") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3DArray));
-}
+TEST_CASE("Unit_NoGpuTst_hipMalloc3DArray") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3DArray)); }
 
 TEST_CASE("Unit_NoGpuTst_hipDeviceCanAccessPeer") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceCanAccessPeer));
@@ -1532,25 +1441,19 @@ TEST_CASE("Unit_NoGpuTst_hipDeviceDisablePeerAccess") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceDisablePeerAccess));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGet") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGet));
-}
+TEST_CASE("Unit_NoGpuTst_hipDeviceGet") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGet)); }
 
 TEST_CASE("Unit_NoGpuTst_hipDeviceComputeCapability") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceComputeCapability));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceGetName") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetName));
-}
+TEST_CASE("Unit_NoGpuTst_hipDeviceGetName") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetName)); }
 
 TEST_CASE("Unit_NoGpuTst_hipGetDeviceProperties") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipGetDeviceProperties));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipChooseDevice") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipChooseDevice));
-}
+TEST_CASE("Unit_NoGpuTst_hipChooseDevice") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipChooseDevice)); }
 
 #if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipExtGetLinkTypeAndHopCount") {
@@ -1578,17 +1481,13 @@ TEST_CASE("Unit_NoGpuTst_hipDeviceGetStreamPriorityRange") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceGetStreamPriorityRange));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipEventCreate") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipEventCreate));
-}
+TEST_CASE("Unit_NoGpuTst_hipEventCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipEventCreate)); }
 
 TEST_CASE("Unit_NoGpuTst_hipStreamGetPriority") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamGetPriority));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipDeviceReset") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceReset));
-}
+TEST_CASE("Unit_NoGpuTst_hipDeviceReset") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceReset)); }
 
 TEST_CASE("Unit_NoGpuTst_hipDeviceSetCacheConfig") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipDeviceSetCacheConfig));
@@ -1606,9 +1505,7 @@ TEST_CASE("Unit_NoGpuTst_hipSetDeviceFlags") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipSetDeviceFlags));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipModuleLoad") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoad));
-}
+TEST_CASE("Unit_NoGpuTst_hipModuleLoad") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipModuleLoad)); }
 
 TEST_CASE("Unit_NoGpuTst_hipFuncGetAttributes") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipFuncGetAttributes));
@@ -1627,33 +1524,26 @@ TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernel") {
 }
 
 TEST_CASE("Unit_NoGpuTst_hipLaunchCooperativeKernelMultiDevice") {
-  REQUIRE(NoGpuTst_Common(
-          NoGpuTst_hipLaunchCooperativeKernelMultiDevice));
+  REQUIRE(NoGpuTst_Common(NoGpuTst_hipLaunchCooperativeKernelMultiDevice));
 }
 #if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipExtLaunchMultiKernelMultiDevice") {
-  REQUIRE(NoGpuTst_Common(
-          NoGpuTst_hipExtLaunchMultiKernelMultiDevice));
+  REQUIRE(NoGpuTst_Common(NoGpuTst_hipExtLaunchMultiKernelMultiDevice));
 }
 #endif
 TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor") {
-  REQUIRE(NoGpuTst_Common(
-  NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor));
+  REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessor));
 }
 
 TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags") {
-  REQUIRE(NoGpuTst_Common(
-          NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags));
+  REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxActiveBlocksPerMultiprocessorFlags));
 }
 
 TEST_CASE("Unit_NoGpuTst_hipOccupancyMaxPotentialBlockSize") {
-  REQUIRE(NoGpuTst_Common(
-          NoGpuTst_hipOccupancyMaxPotentialBlockSize));
+  REQUIRE(NoGpuTst_Common(NoGpuTst_hipOccupancyMaxPotentialBlockSize));
 }
 
-TEST_CASE("Unit_NoGpuTst_hiprtcVersion") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcVersion));
-}
+TEST_CASE("Unit_NoGpuTst_hiprtcVersion") { REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcVersion)); }
 
 TEST_CASE("Unit_NoGpuTst_hiprtcCreateProgram_DestroyProg") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcCreateProgram_DestroyProg));
@@ -1663,22 +1553,16 @@ TEST_CASE("Unit_NoGpuTst_hiprtcAddNameExpression") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hiprtcAddNameExpression));
 }
 
-TEST_CASE("Unit_NoGpuTst_hipMallocPitch") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocPitch));
-}
+TEST_CASE("Unit_NoGpuTst_hipMallocPitch") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMallocPitch)); }
 
 #if HT_AMD
 TEST_CASE("Unit_NoGpuTst_hipMipmappedArrayCreate") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipMipmappedArrayCreate));
 }
 #endif
-TEST_CASE("Unit_NoGpuTst_hipMalloc3D") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3D));
-}
+TEST_CASE("Unit_NoGpuTst_hipMalloc3D") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipMalloc3D)); }
 
-TEST_CASE("Unit_NoGpuTst_hipGraphCreate") {
-  REQUIRE(NoGpuTst_Common(NoGpuTst_hipGraphCreate));
-}
+TEST_CASE("Unit_NoGpuTst_hipGraphCreate") { REQUIRE(NoGpuTst_Common(NoGpuTst_hipGraphCreate)); }
 
 TEST_CASE("Unit_NoGpuTst_hipStreamBeginCapture") {
   REQUIRE(NoGpuTst_Common(NoGpuTst_hipStreamBeginCapture));

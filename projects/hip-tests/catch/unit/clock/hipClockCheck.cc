@@ -205,6 +205,6 @@ TEST_CASE("Unit_hipWallClock64_Positive_Basic") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

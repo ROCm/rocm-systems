@@ -34,177 +34,143 @@ using namespace bif;
 
 // Utility function to set a flag in option structure
 // of the aclDevCaps.
-void
-setFlag(aclDevCaps *elf, compDeviceCaps option);
+void setFlag(aclDevCaps* elf, compDeviceCaps option);
 
 // Utility function to flip a flag in option structure
 // of the aclDevCaps.
-void
-flipFlag(aclDevCaps *elf, compDeviceCaps option);
+void flipFlag(aclDevCaps* elf, compDeviceCaps option);
 
 // Utility function to clear a flag in option structure
 // of the aclDevCaps.
-void
-clearFlag(aclDevCaps *elf, compDeviceCaps option);
+void clearFlag(aclDevCaps* elf, compDeviceCaps option);
 
 // Utility function to check that a flag in option structure
 // of the aclDevCaps is set.
-bool
-checkFlag(aclDevCaps *elf, compDeviceCaps option);
+bool checkFlag(aclDevCaps* elf, compDeviceCaps option);
 
 // Utility function to initialize and elf device capabilities
-void
-initElfDeviceCaps(aclBinary *elf);
+void initElfDeviceCaps(aclBinary* elf);
 
 // Append the string to the aclCompiler log string.
-void
-appendLogToCL(aclCompiler *cl, const std::string &logStr);
+void appendLogToCL(aclCompiler* cl, const std::string& logStr);
 
-const char *getDeviceName(const aclTargetInfo &target);
+const char* getDeviceName(const aclTargetInfo& target);
 
 // Select the correct library from the target information.
-amd::LibrarySelector getLibraryType(const aclTargetInfo *target);
+amd::LibrarySelector getLibraryType(const aclTargetInfo* target);
 
 // get family_enum from the target information.
-unsigned getFamilyEnum(const aclTargetInfo *target);
+unsigned getFamilyEnum(const aclTargetInfo* target);
 
 // get chip_enum from the target information.
-unsigned getChipEnum(const aclTargetInfo *target);
+unsigned getChipEnum(const aclTargetInfo* target);
 
 // get isa type name (compute capability) from the target information.
-const std::string &getIsaTypeName(const aclTargetInfo *target);
+const std::string& getIsaTypeName(const aclTargetInfo* target);
 
 // get isa type  (compute capability) from the target information.
-int getIsaType(const aclTargetInfo *target);
+int getIsaType(const aclTargetInfo* target);
 
 // get Feature String for target.
-std::string getFeatureString(const aclTargetInfo& target, amd::option::Options *OptionsObj);
+std::string getFeatureString(const aclTargetInfo& target, amd::option::Options* OptionsObj);
 
 // Create a copy of an ELF and duplicate all sections/symbols
-aclBinary*
-createELFCopy(aclBinary *src);
+aclBinary* createELFCopy(aclBinary* src);
 
 // Create a BIF2.1 elf from a BIF 2.0 elf
-aclBinary*
-convertBIF20ToBIF21(aclBinary *src);
+aclBinary* convertBIF20ToBIF21(aclBinary* src);
 
 // Create a BIF3.0 elf from a BIF 2.0 elf
-aclBinary*
-convertBIF20ToBIF30(aclBinary *src);
+aclBinary* convertBIF20ToBIF30(aclBinary* src);
 
 // Create a BIF3.1 elf from a BIF 2.0 elf
-aclBinary*
-convertBIF20ToBIF31(aclBinary *src);
+aclBinary* convertBIF20ToBIF31(aclBinary* src);
 
 // Create a BIF2.0 elf from a BIF 2.1 elf
-aclBinary*
-convertBIF21ToBIF20(aclBinary *src);
+aclBinary* convertBIF21ToBIF20(aclBinary* src);
 
 // Create a BIF3.0 elf from a BIF 2.1 elf
-aclBinary*
-convertBIF21ToBIF30(aclBinary *src);
+aclBinary* convertBIF21ToBIF30(aclBinary* src);
 
 // Create a BIF3.1 elf from a BIF 2.1 elf
-aclBinary*
-convertBIF21ToBIF31(aclBinary *src);
+aclBinary* convertBIF21ToBIF31(aclBinary* src);
 
 // Create a BIF2.0 elf from a BIF 3.0 elf
-aclBinary*
-convertBIF30ToBIF20(aclBinary *src);
+aclBinary* convertBIF30ToBIF20(aclBinary* src);
 
 // Create a BIF2.1 elf from a BIF 3.0 elf
-aclBinary*
-convertBIF30ToBIF21(aclBinary *src);
+aclBinary* convertBIF30ToBIF21(aclBinary* src);
 
 // Create a BIF3.1 elf from a BIF 3.0 elf
-aclBinary*
-convertBIF30ToBIF31(aclBinary *src);
+aclBinary* convertBIF30ToBIF31(aclBinary* src);
 
 // Create a BIF2.0 elf from a BIF 3.1 elf
-aclBinary*
-convertBIF31ToBIF20(aclBinary *src);
+aclBinary* convertBIF31ToBIF20(aclBinary* src);
 
 // Create a BIF2.1 elf from a BIF 3.1 elf
-aclBinary*
-convertBIF31ToBIF21(aclBinary *src);
+aclBinary* convertBIF31ToBIF21(aclBinary* src);
 
 // Create a BIF3.0 elf from a BIF 3.1 elf
-aclBinary*
-convertBIF31ToBIF30(aclBinary *src);
+aclBinary* convertBIF31ToBIF30(aclBinary* src);
 
 // get a pointer to the aclBIF irrespective of the
 // binary version.
-aclBIF*
-aclutGetBIF(aclBinary*);
+aclBIF* aclutGetBIF(aclBinary*);
 
 // Get a pointer to the aclOptions irrespective of
 // the binary version.
-aclOptions*
-aclutGetOptions(aclBinary*);
+aclOptions* aclutGetOptions(aclBinary*);
 
 // Get a pointer to the aclBinaryOptions struct
 // irrespective of the binary version.
-aclBinaryOptions*
-aclutGetBinOpts(aclBinary*);
+aclBinaryOptions* aclutGetBinOpts(aclBinary*);
 
 // Get a pointer to the target info struct
 // irrespective of the binary version.
-aclTargetInfo*
-aclutGetTargetInfo(aclBinary*);
+aclTargetInfo* aclutGetTargetInfo(aclBinary*);
 
 // Get a pointer to the device caps
 // irrespective of the binary version.
-aclDevCaps*
-aclutGetCaps(aclBinary*);
+aclDevCaps* aclutGetCaps(aclBinary*);
 
 // Copy two binary option structures irrespective
 // of the binary version and uses defaults when
 // things don't match up.
-void
-aclutCopyBinOpts(aclBinaryOptions *dst,
-    const aclBinaryOptions *src,
-    bool is64bit);
+void aclutCopyBinOpts(aclBinaryOptions* dst, const aclBinaryOptions* src, bool is64bit);
 
 // Retrieve kernel statistics from binary
 // and insert to elf as symbol
 acl_error aclutInsertKernelStatistics(aclCompiler*, aclBinary*);
 
 // Returns target chip name.
-std::string aclutGetCodegenName(const aclTargetInfo &tgtInfo);
+std::string aclutGetCodegenName(const aclTargetInfo& tgtInfo);
 
 // Helper function that returns the
 // allocation function from the binary.
-AllocFunc
-aclutAlloc(const aclBinary *bin);
+AllocFunc aclutAlloc(const aclBinary* bin);
 
 // Helper function that returns the
 // de-allocation function from the binary.
-FreeFunc
-aclutFree(const aclBinary *bin);
+FreeFunc aclutFree(const aclBinary* bin);
 
 
 // Helper function that returns the
 // allocation function from the compiler.
-AllocFunc
-aclutAlloc(const aclCompiler *bin);
+AllocFunc aclutAlloc(const aclCompiler* bin);
 
 // Helper function that returns the
 // de-allocation function from the compiler.
-FreeFunc
-aclutFree(const aclCompiler *bin);
+FreeFunc aclutFree(const aclCompiler* bin);
 
 // Helper function that returns the
 // allocation function from the compiler options.
-AllocFunc
-aclutAlloc(const aclCompilerOptions *bin);
+AllocFunc aclutAlloc(const aclCompilerOptions* bin);
 
 // Helper function that returns the
 // de-allocation function from the compiler options.
-FreeFunc
-aclutFree(const aclCompilerOptions *bin);
+FreeFunc aclutFree(const aclCompilerOptions* bin);
 
-inline std::vector<std::string> splitSpaceSeparatedString(char *str)
-{
+inline std::vector<std::string> splitSpaceSeparatedString(char* str) {
   std::string s(str);
   std::stringstream ss(s);
   std::istream_iterator<std::string> beg(ss), end;
@@ -213,18 +179,14 @@ inline std::vector<std::string> splitSpaceSeparatedString(char *str)
 }
 
 // Helper function that returns OpenCL mangled kernel name.
-inline std::string
-aclutOpenclMangledKernelName(const std::string& kernel_name)
-{
+inline std::string aclutOpenclMangledKernelName(const std::string& kernel_name) {
   const oclBIFSymbolStruct* sym = findBIF30SymStruct(symOpenclKernel);
   assert(sym && "symbol not found");
   return std::string("&") + sym->str[PRE] + kernel_name + sym->str[POST];
 }
 
 // Helper function that returns OpenCL mangled kernel metadata symbol name.
-inline std::string
-aclutOpenclMangledKernelMetadataName(const std::string& kernel_name)
-{
+inline std::string aclutOpenclMangledKernelMetadataName(const std::string& kernel_name) {
   const oclBIFSymbolStruct* sym = findBIF30SymStruct(symOpenclMeta);
   assert(sym && "symbol not found");
   return sym->str[PRE] + aclutOpenclMangledKernelName(kernel_name) + sym->str[POST];
@@ -233,8 +195,8 @@ aclutOpenclMangledKernelMetadataName(const std::string& kernel_name)
 #ifdef WITH_TARGET_HSAIL
 // Helper function that updates metadata for all the kernels in binary;
 // the updated attribute is the number of hidden kernel arguments.
-inline acl_error
-aclutUpdateMetadataWithHiddenKernargsNum(aclCompiler* cl, aclBinary* bin, uint32_t num) {
+inline acl_error aclutUpdateMetadataWithHiddenKernargsNum(aclCompiler* cl, aclBinary* bin,
+                                                          uint32_t num) {
   if (num == MAX_HIDDEN_KERNARGS_NUM) {
     return ACL_SUCCESS;
   }
@@ -257,7 +219,8 @@ aclutUpdateMetadataWithHiddenKernargsNum(aclCompiler* cl, aclBinary* bin, uint32
   size_t roSize = 0;
   for (auto it = vKernels.begin(); it != vKernels.end(); ++it) {
     std::string symbol = aclutOpenclMangledKernelMetadataName(*it);
-    void* roSec = const_cast<void*>(aclExtractSymbol(cl, bin, &roSize, secID, symbol.c_str(), &error_code));
+    void* roSec =
+        const_cast<void*>(aclExtractSymbol(cl, bin, &roSize, secID, symbol.c_str(), &error_code));
     if (error_code != ACL_SUCCESS) {
       return error_code;
     }
@@ -265,7 +228,7 @@ aclutUpdateMetadataWithHiddenKernargsNum(aclCompiler* cl, aclBinary* bin, uint32
       error_code = ACL_ELF_ERROR;
       return error_code;
     }
-    aclMetadata *md = reinterpret_cast<aclMetadata*>(roSec);
+    aclMetadata* md = reinterpret_cast<aclMetadata*>(roSec);
     md->numHiddenKernelArgs = num;
     error_code = aclRemoveSymbol(cl, bin, secID, symbol.c_str());
     if (error_code != ACL_SUCCESS) {
@@ -284,40 +247,32 @@ struct _target_mappings_rec;
 typedef _target_mappings_rec TargetMapping;
 
 // Returns the TargetMapping for the specific target device.
-const TargetMapping& getTargetMapping(const aclTargetInfo &target);
+const TargetMapping& getTargetMapping(const aclTargetInfo& target);
 
-inline bool is64BitTarget(const aclTargetInfo& target)
-{
-  return (target.arch_id == aclX64 ||
-          target.arch_id == aclAMDIL64 ||
-          target.arch_id == aclHSAIL64);
+inline bool is64BitTarget(const aclTargetInfo& target) {
+  return (target.arch_id == aclX64 || target.arch_id == aclAMDIL64 || target.arch_id == aclHSAIL64);
 }
 
-inline bool isCpuTarget(const aclTargetInfo& target)
-{
+inline bool isCpuTarget(const aclTargetInfo& target) {
   return (target.arch_id == aclX64 || target.arch_id == aclX86);
 }
 
-inline bool isGpuTarget(const aclTargetInfo& target)
-{
+inline bool isGpuTarget(const aclTargetInfo& target) {
   return (target.arch_id == aclAMDIL || target.arch_id == aclAMDIL64 ||
           target.arch_id == aclHSAIL || target.arch_id == aclHSAIL64);
 }
 
-inline bool isAMDILTarget(const aclTargetInfo& target)
-{
+inline bool isAMDILTarget(const aclTargetInfo& target) {
   return (target.arch_id == aclAMDIL || target.arch_id == aclAMDIL64);
 }
 
-inline bool isHSAILTarget(const aclTargetInfo& target)
-{
+inline bool isHSAILTarget(const aclTargetInfo& target) {
   return (target.arch_id == aclHSAIL || target.arch_id == aclHSAIL64);
 }
 
 const std::string& getLegacyLibName();
 
-inline bool isValidTarget(const aclTargetInfo& target)
-{
+inline bool isValidTarget(const aclTargetInfo& target) {
   return (target.arch_id && target.chip_id);
 }
 
@@ -330,13 +285,11 @@ enum scId {
 };
 
 // Helper function that allocates an aligned memory.
-inline void*
-alignedMalloc(size_t size, size_t alignment)
-{
+inline void* alignedMalloc(size_t size, size_t alignment) {
 #if defined(_WIN32)
   return ::_aligned_malloc(size, alignment);
 #else
-  void * ptr = NULL;
+  void* ptr = NULL;
   if (0 == ::posix_memalign(&ptr, alignment, size)) {
     return ptr;
   }
@@ -345,9 +298,7 @@ alignedMalloc(size_t size, size_t alignment)
 }
 
 // Helper function that frees an aligned memory.
-inline void
-alignedFree(void *ptr)
-{
+inline void alignedFree(void* ptr) {
 #if defined(_WIN32)
   ::_aligned_free(ptr);
 #else
@@ -356,8 +307,7 @@ alignedFree(void *ptr)
 }
 
 #if defined(_WIN32)
-inline void convertLongAbsFilePathIfNeeded(std::string &filename)
-{
+inline void convertLongAbsFilePathIfNeeded(std::string& filename) {
   if (filename.empty()) {
     return;
   }
@@ -372,25 +322,23 @@ inline void convertLongAbsFilePathIfNeeded(std::string &filename)
 }
 #endif
 
-inline char* readFile(std::string source_filename, size_t& size)
-{
+inline char* readFile(std::string source_filename, size_t& size) {
 #if defined(_WIN32)
   convertLongAbsFilePathIfNeeded(source_filename);
 #endif
-  FILE *fp = ::fopen( source_filename.c_str(), "rb" );
+  FILE* fp = ::fopen(source_filename.c_str(), "rb");
   unsigned int length;
   size_t offset = 0;
-  char *ptr;
+  char* ptr;
   if (!fp) {
     return NULL;
   }
   // obtain file size
-  ::fseek (fp , 0 , SEEK_END);
-  length = ::ftell (fp);
-  ::rewind (fp);
+  ::fseek(fp, 0, SEEK_END);
+  length = ::ftell(fp);
+  ::rewind(fp);
   ptr = reinterpret_cast<char*>(::malloc(offset + length + 1));
-  if (length != fread(&ptr[offset], 1, length, fp))
-  {
+  if (length != fread(&ptr[offset], 1, length, fp)) {
     ::free(ptr);
     ::fclose(fp);
     return NULL;
@@ -401,12 +349,11 @@ inline char* readFile(std::string source_filename, size_t& size)
   return ptr;
 }
 
-inline bool writeFile(std::string source_filename, const char *source, size_t size)
-{
+inline bool writeFile(std::string source_filename, const char* source, size_t size) {
 #if defined(_WIN32)
   convertLongAbsFilePathIfNeeded(source_filename);
 #endif
-  FILE *fp = ::fopen(source_filename.c_str(), "wb");
+  FILE* fp = ::fopen(source_filename.c_str(), "wb");
   if (!fp) {
     return EXIT_FAILURE;
   }
@@ -419,20 +366,18 @@ inline bool writeFile(std::string source_filename, const char *source, size_t si
 }
 
 #if !defined(BCMAG)
-#define BCMAG  "BC"
+#define BCMAG "BC"
 #define SBCMAG 2
 #endif
 // Helper predicate returns true if p starts with bit code signature.
 // TODO: Move it into Compiler Lib back in new 1_0 API
-inline static bool
-isBcMagic(const char* p)
-{
-    if (p==NULL || strncmp(p, BCMAG, SBCMAG) != 0) {
-        return false;
-    }
-    return true;
+inline static bool isBcMagic(const char* p) {
+  if (p == NULL || strncmp(p, BCMAG, SBCMAG) != 0) {
+    return false;
+  }
+  return true;
 }
 
-void dump(aclBinary *bin);
+void dump(aclBinary* bin);
 
-#endif // _CL_LIB_UTILS_0_8_H_
+#endif  // _CL_LIB_UTILS_0_8_H_

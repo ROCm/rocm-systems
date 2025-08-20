@@ -684,7 +684,7 @@ TEST_CASE("Unit_Device___longlong_as_double_Negative_RTC") {
 }
 
 __global__ void __hiloint2double_kernel(double* const ys, const size_t num_xs, int* const x1s,
-                                      int* const x2s) {
+                                        int* const x2s) {
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
@@ -735,6 +735,6 @@ TEST_CASE("Unit_Device___hiloint2double_Positive") {
 TEST_CASE("Unit_Device___hiloint2double_Negative_RTC") { NegativeTestRTCWrapper<5>(kHilo2Double); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */
