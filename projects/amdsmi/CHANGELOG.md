@@ -192,6 +192,11 @@ $ amd-smi
 - **Updated `amdsmi_bdf_t` in `amdsmi.h`**.  
   - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
 
+- **Updated `amdsmi_get_temp_metric` and `amdsmi_temperature_type_t` with new values**.  
+  - New values have added to `amdsmi_temperature_type_t` representing various baseboard and gpuboard temperature measures.
+  - `amdsmi_get_temp_metric` API has also been updated to be able to take in and return the respective values for the new
+  temperature types.
+
 ### Removed
 
 - **Removed unnecessary API, `amdsmi_free_name_value_pairs(),` from amdsmi.h**
@@ -371,7 +376,9 @@ $ amd-smi
 
 ### Upcoming changes
 
-- N/A
+- **`amd-smi metric` will also display gpuboard and baseboard temperatures**.  
+  - This change is meant to follow the API change to amdsmi_get_temp_metric. If these measures are not available due
+  to hardware incompatibility, then they will simply not be displayed in the results when using the metric command.
 
 ### Known issues
 
