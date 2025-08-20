@@ -171,9 +171,15 @@ def generate_machine_specs(args, sysinfo: dict = None):
     vbios = gpu_data.get("vbios", {}).get("part_number")
 
     # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
-    partition_data = json.loads(
-        run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False)
-    )
+    try:
+        partition_data = json.loads(
+            run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=True)
+        )
+    # Handle multiple JSON arrays output in amd-smi == 25.5.1 && ROCm == 6.4.2
+    except json.JSONDecodeError as e:
+        # Use gpu_data fallback (amd-smi < 26.0.0)
+        partition_data = {}
+
     current_partition = partition_data.get("current_partition", [{}])[0]
 
     # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
