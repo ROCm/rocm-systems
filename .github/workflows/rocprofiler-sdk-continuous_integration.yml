@@ -66,7 +66,10 @@ jobs:
 
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: ubuntu:22.04
+      image: rocm/rocprofiler-private:${{ matrix.system.os }}
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
       options: --privileged
@@ -332,17 +335,17 @@ jobs:
 
     steps:
     - name: Setup Git
-      if: ${{ matrix.os == 'rhel-8.8' || matrix.os == 'rhel-9.5' }}
+      if: ${{ matrix.os == 'rhel-8.8' }}
       shell: bash
       run: |
         wget https://www.kernel.org/pub/software/scm/git/git-2.9.5.tar.xz
         tar -xf git-2.9.5.tar.xz
         cd git-2.9.5
-        sudo rm -rf /etc/yum.repos.d/RHEL-partners.repo
-        sudo dnf clean all
+        rm -rf /etc/yum.repos.d/redhat-partner.repo
+        dnf clean all
         dnf install perl-ExtUtils-MakeMaker
         make prefix=/usr all -j 32
-        sudo make prefix=/usr install
+        make prefix=/usr install
 
     - name: Checkout
       uses: actions/checkout@v5
@@ -358,33 +361,33 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        sudo dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm
-        sudo sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
-        sudo sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
-        sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm
+        sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
+        sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
+        dnf clean all
+        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
     - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.5
       if: ${{ matrix.os == 'rhel-9.5' }}
       shell: bash
       working-directory: /tmp
       run: |
-        sudo dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm
-        sudo sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
-        sudo sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
-        sudo dnf clean all
-        sudo dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm
+        sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
+        sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
+        dnf clean all
+        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
     - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.6
       if: ${{ matrix.os == 'sles-15.6' }}
       shell: bash
       working-directory: /tmp
       run: |
-        sudo zypper --no-gpg-checks install https://repo.radeon.com/amdgpu-install/.7.0/sle/15.6/amdgpu-install-7.0.70000-1.noarch.rpm
-        sudo sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo
-        sudo sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo
-        sudo zypper --gpg-auto-import-keys refresh
-        sudo zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        zypper --no-gpg-checks install https://repo.radeon.com/amdgpu-install/.7.0/sle/15.6/amdgpu-install-7.0.70000-1.noarch.rpm
+        sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo
+        sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo
+        zypper --gpg-auto-import-keys refresh
+        zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
 
     - name: Install Latest Nightly ROCm using TheRock Tarballs
       shell: bash
@@ -404,9 +407,9 @@ jobs:
         aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
         ls -lh rocm.tar.gz
         echo "Downloaded: ${KEY}"
-        sudo tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         rm -rf /opt/rocm
-        sudo ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
+        ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
     - name: Install requirements
       timeout-minutes: 10
@@ -439,7 +442,7 @@ jobs:
         export PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:/usr/bin:$PATH
         cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
         cmake --build build --target all --parallel 16
-        sudo cmake --build build --target install
+        cmake --build build --target install
         echo "✅ Installation complete!"
 
     - name: List Files
@@ -528,7 +531,10 @@ jobs:
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: ubuntu:24.04
+      image: rocm/rocprofiler-private:${{ matrix.os }}
+      credentials:
+        username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+        password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
       env:
         DEBIAN_FRONTEND: noninteractive
       options: --privileged --cap-add=SYS_PTRACE --security-opt seccomp=unconfined
