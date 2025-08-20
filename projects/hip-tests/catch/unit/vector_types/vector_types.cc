@@ -316,17 +316,13 @@ TEMPLATE_TEST_CASE("Unit_VectorStructuredBindings_SanityCheck_Basic_host", "", f
   REQUIRE(ret1 == value);
 }
 
-__host__ __device__ constexpr bool func()
-  {
-    int3 vec3 = int3{0};
-    int exp = int{0};
-    return vec3.x == exp;
-  }
-
-__global__ void generate_my_kernel()
-{
-  static_assert(func());
+__host__ __device__ constexpr bool func() {
+  int3 vec3 = int3{0};
+  int exp = int{0};
+  return vec3.x == exp;
 }
+
+__global__ void generate_my_kernel() { static_assert(func()); }
 
 
 /**
@@ -348,6 +344,6 @@ TEST_CASE("Unit_VectorConstexpr_SanityCheck_Basic_host_device", "") {
 #endif  // HT_AMD
 
 /**
-* End doxygen group VectorTypeTest.
-* @}
-*/
+ * End doxygen group VectorTypeTest.
+ * @}
+ */

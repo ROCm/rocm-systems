@@ -66,7 +66,6 @@ TEST_CASE("Unit_hipStreamDestroy_WithFinishedWork") {
 // of work
 #if HT_AMD /* Disabled because frequency based wait is timing out on nvidia platforms */
 TEST_CASE("Unit_hipStreamDestroy_WithPendingWork") {
-
   hipStream_t stream{};
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr int numDataPoints = 10;
@@ -76,9 +75,7 @@ TEST_CASE("Unit_hipStreamDestroy_WithPendingWork") {
 
   LaunchDelayKernel(std::chrono::milliseconds(500), stream);
   setToOne<<<1, numDataPoints, 0, stream>>>(deviceData, numDataPoints);
-  SECTION("Without stream query") {
-    fprintf(stderr, "Without stream query\n");
-  }
+  SECTION("Without stream query") { fprintf(stderr, "Without stream query\n"); }
   SECTION("With stream query") {
     fprintf(stderr, "With stream query\n");
     HIP_CHECK_ERROR(hipStreamQuery(stream), hipErrorNotReady);

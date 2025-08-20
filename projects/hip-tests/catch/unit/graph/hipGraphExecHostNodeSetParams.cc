@@ -129,7 +129,7 @@ TEST_CASE("Unit_hipGraphExecHostNodeSetParams_Negative") {
                     hipErrorInvalidValue);
   }
 
-#if HT_NVIDIA // segfaults on AMD
+#if HT_NVIDIA  // segfaults on AMD
   SECTION("node is not a host node") {
     HIP_CHECK_ERROR(hipGraphExecHostNodeSetParams(graphExec, empty_node, &sethostParams),
                     hipErrorInvalidValue);

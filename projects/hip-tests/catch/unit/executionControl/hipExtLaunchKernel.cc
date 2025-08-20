@@ -176,32 +176,31 @@ TEST_CASE("Unit_hipExtLaunchKernel_Negative_Parameters") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Basic functional testcase to trigger capturehipExtLaunchKernel internal api
-*  to improve code coverage.
-* Test source
-* ------------------------
-*  - unit/executionControl/hipExtLaunchKernel.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - Basic functional testcase to trigger capturehipExtLaunchKernel internal api
+ *  to improve code coverage.
+ * Test source
+ * ------------------------
+ *  - unit/executionControl/hipExtLaunchKernel.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_hipExtLaunchKernel_capturehipExtLaunchKernel") {
   hipGraph_t graph{nullptr};
   hipGraphExec_t graphExec{nullptr};
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
-  int *A_d;
-  int *A_h = nullptr;
+  int* A_d;
+  int* A_h = nullptr;
   A_h = reinterpret_cast<int*>(malloc(sizeof(int)));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&A_d), sizeof(int)));
-  void *args[1] = {&A_d};
+  void* args[1] = {&A_d};
   // Begin Capture operation
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel_42),
-                               dim3{1, 1, 1}, dim3{1, 1, 1}, args, 0, stream,
-                               nullptr, nullptr, 0u));
+  HIP_CHECK(hipExtLaunchKernel(reinterpret_cast<void*>(kernel_42), dim3{1, 1, 1}, dim3{1, 1, 1},
+                               args, 0, stream, nullptr, nullptr, 0u));
   // End Capture
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
 

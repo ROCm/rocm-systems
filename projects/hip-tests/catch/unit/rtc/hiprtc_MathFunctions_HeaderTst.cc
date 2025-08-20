@@ -18,15 +18,15 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_MathFunctions_HeaderTst hiprtc_MathFunctions_HeaderTst
-* @{
-* @ingroup hiprtcHeaders
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
-*                                    int numOptions,
-*                                    const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_MathFunctions_HeaderTst hiprtc_MathFunctions_HeaderTst
+ * @{
+ * @ingroup hiprtcHeaders
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
+ *                                    int numOptions,
+ *                                    const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
@@ -34,8 +34,8 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include "hip_test_rtc.hh"
 
-static constexpr auto mathFuntn_string {
-R"(
+static constexpr auto mathFuntn_string{
+    R"(
 extern "C"
 __global__ void mathFuntn(float *res) {
   res[0] = (amd_mixed_dot(short2{10, 10}, short2{20, 20}, (int)30, 1) == 430);
@@ -48,23 +48,23 @@ __global__ void mathFuntn(float *res) {
 )"};
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*    1) To test working of "hip/math_functions.h" header inside kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hiprtc_MathFunctions_HeaderTst.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *    1) To test working of "hip/math_functions.h" header inside kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hiprtc_MathFunctions_HeaderTst.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 
 TEST_CASE("Unit_Rtc_MathFunctions_header") {
   std::string kernel_name = "mathFuntn";
   const char* kername = kernel_name.c_str();
-  float *result_h;
-  float *result_d;
+  float* result_h;
+  float* result_d;
   int n = 6;
   int Nbytes = n * sizeof(float);
   result_h = new float[n];
@@ -80,10 +80,8 @@ TEST_CASE("Unit_Rtc_MathFunctions_header") {
   const char* compiler_option = complete_CO.c_str();
 
   hiprtcProgram prog;
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathFuntn_string,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             1, &compiler_option)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathFuntn_string, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -101,18 +99,16 @@ TEST_CASE("Unit_Rtc_MathFunctions_header") {
   void* kernelParam[] = {result_d};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < n; i++) {
-  if (result_h[i] != 1.0f) {
+    if (result_h[i] != 1.0f) {
       WARN("FAIL for " << i << " iteration");
       WARN(result_h[i]);
       REQUIRE(false);
@@ -121,11 +117,11 @@ TEST_CASE("Unit_Rtc_MathFunctions_header") {
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   HIP_CHECK(hipFree(result_d));
-  delete [] result_h;
+  delete[] result_h;
   REQUIRE(true);
 }
 
 /**
-* End doxygen group hiprtcHeaders.
-* @}
-*/
+ * End doxygen group hiprtcHeaders.
+ * @}
+ */

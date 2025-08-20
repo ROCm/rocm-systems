@@ -36,7 +36,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
   const StreamGuard stream_guard(stream_type);
   const hipStream_t stream = stream_guard.stream();
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Host") {
     Memcpy2DDeviceToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
@@ -56,7 +56,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Basic") {
     Memcpy2DHostToDeviceShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Host to Host") {
     Memcpy2DHostToHostShell<async>(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, stream), stream);
@@ -76,13 +76,13 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
     Memcpy2DHtoDSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy2DDtoHPageableSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), true);
   }
 #endif
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-236
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-236
   SECTION("Device to Pinned Host") {
     Memcpy2DDtoHPinnedSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
@@ -92,7 +92,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Positive_Synchronization_Behavior") {
     Memcpy2DDtoDSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), false);
   }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") {
     Memcpy2DHtoHSyncBehavior(
         std::bind(MemcpyParam2DAdapter<async>(), _1, _2, _3, _4, _5, _6, _7, nullptr), true);
@@ -160,7 +160,7 @@ TEST_CASE("Unit_hipMemcpyParam2DAsync_Negative_Parameters") {
                                                     width, height, kind),
                       hipErrorInvalidValue);
     }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-237
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-237
     SECTION("WidthInBytes + srcXInBytes > srcPitch") {
       HIP_CHECK_ERROR(MemcpyParam2DAdapter<async>(make_hipExtent(spitch - width + 1, 0, 0))(
                           dst, dpitch, src, spitch, width, height, kind),

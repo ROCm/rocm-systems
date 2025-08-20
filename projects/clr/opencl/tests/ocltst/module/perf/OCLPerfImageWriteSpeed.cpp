@@ -38,30 +38,26 @@
 static const unsigned int Sizes[NUM_SIZES] = {256, 512, 1024, 2048};
 
 #define NUM_FORMATS 1
-static const cl_image_format formats[NUM_FORMATS] = {
-    {CL_RGBA, CL_UNSIGNED_INT8}};
-static const char *textFormats[NUM_FORMATS] = {"R8G8B8A8"};
+static const cl_image_format formats[NUM_FORMATS] = {{CL_RGBA, CL_UNSIGNED_INT8}};
+static const char* textFormats[NUM_FORMATS] = {"R8G8B8A8"};
 static const unsigned int formatSize[NUM_FORMATS] = {4};
 
 static const unsigned int Iterations[2] = {1, OCLPerfImageWriteSpeed::NUM_ITER};
 
-OCLPerfImageWriteSpeed::OCLPerfImageWriteSpeed() {
-  _numSubTests = NUM_SIZES * NUM_FORMATS * 2;
-}
+OCLPerfImageWriteSpeed::OCLPerfImageWriteSpeed() { _numSubTests = NUM_SIZES * NUM_FORMATS * 2; }
 
 OCLPerfImageWriteSpeed::~OCLPerfImageWriteSpeed() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfImageWriteSpeed::open(unsigned int test, char *units,
-                                  double &conversion, unsigned int deviceId) {
+void OCLPerfImageWriteSpeed::open(unsigned int test, char* units, double& conversion,
+                                  unsigned int deviceId) {
   cl_uint typeOfDevice = type_;
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -76,7 +72,7 @@ void OCLPerfImageWriteSpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -86,13 +82,12 @@ void OCLPerfImageWriteSpeed::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], typeOfDevice,
-                                      0, NULL, &num_devices);
+    error_ =
+        _wrapper->clGetDeviceIDs(platforms[_platformIndex], typeOfDevice, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -118,35 +113,33 @@ void OCLPerfImageWriteSpeed::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ = _wrapper->clGetDeviceIDs(platform, typeOfDevice, num_devices,
-                                    devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, typeOfDevice, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
   size_t size;
   cl_bool imageSupport_ = false;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT,
-                            sizeof(imageSupport_), &imageSupport_, &size);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupport_),
+                                     &imageSupport_, &size);
   if (!imageSupport_) {
     printf("\n%s\n", "Image not supported, skipping this test!");
     skip_ = true;
     return;
   }
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   cl_mem_flags flags = CL_MEM_WRITE_ONLY;
-  outBuffer_ = _wrapper->clCreateImage2D(context_, flags, &formats[bufnum_],
-                                         bufSize_, bufSize_, 0, NULL, &error_);
+  outBuffer_ = _wrapper->clCreateImage2D(context_, flags, &formats[bufnum_], bufSize_, bufSize_, 0,
+                                         NULL, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateImage(outBuffer) failed");
   memptr = new char[bufSize_ * bufSize_ * formatSize[bufnum_]];
 }
@@ -159,18 +152,16 @@ void OCLPerfImageWriteSpeed::run(void) {
   size_t origin[3] = {0, 0, 0};
   size_t region[3] = {bufSize_, bufSize_, 1};
   // Warm up
-  error_ =
-      _wrapper->clEnqueueWriteImage(cmd_queue_, outBuffer_, CL_TRUE, origin,
-                                    region, 0, 0, memptr, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueWriteImage(cmd_queue_, outBuffer_, CL_TRUE, origin, region, 0, 0,
+                                         memptr, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueReadImage failed");
 
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < numIter; i++) {
-    error_ =
-        _wrapper->clEnqueueWriteImage(cmd_queue_, outBuffer_, CL_TRUE, origin,
-                                      region, 0, 0, memptr, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueWriteImage(cmd_queue_, outBuffer_, CL_TRUE, origin, region, 0, 0,
+                                           memptr, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueReadImage failed");
   }
@@ -179,19 +170,18 @@ void OCLPerfImageWriteSpeed::run(void) {
   double sec = timer.GetElapsedTime();
 
   // Image write bandwidth in GB/s
-  double perf = ((double)bufSize_ * bufSize_ * formatSize[bufnum_] * numIter *
-                 (double)(1e-09)) /
-                sec;
+  double perf =
+      ((double)bufSize_ * bufSize_ * formatSize[bufnum_] * numIter * (double)(1e-09)) / sec;
 
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " (%4dx%4d) fmt:%s i: %4d (GB/s) ", bufSize_,
-           bufSize_, textFormats[bufnum_], numIter);
+  SNPRINTF(buf, sizeof(buf), " (%4dx%4d) fmt:%s i: %4d (GB/s) ", bufSize_, bufSize_,
+           textFormats[bufnum_], numIter);
   testDescString = buf;
 }
 
 unsigned int OCLPerfImageWriteSpeed::close(void) {
-  if(skip_) {
+  if (skip_) {
     return CL_SUCCESS;
   }
   if (memptr) {
@@ -199,13 +189,11 @@ unsigned int OCLPerfImageWriteSpeed::close(void) {
   }
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);
@@ -221,14 +209,13 @@ OCLPerfPinnedImageWriteSpeed::OCLPerfPinnedImageWriteSpeed() {
 
 OCLPerfPinnedImageWriteSpeed::~OCLPerfPinnedImageWriteSpeed() {}
 
-void OCLPerfPinnedImageWriteSpeed::open(unsigned int test, char *units,
-                                        double &conversion,
+void OCLPerfPinnedImageWriteSpeed::open(unsigned int test, char* units, double& conversion,
                                         unsigned int deviceId) {
   cl_uint typeOfDevice = type_;
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -243,18 +230,17 @@ void OCLPerfPinnedImageWriteSpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], typeOfDevice,
-                                      0, NULL, &num_devices);
+    error_ =
+        _wrapper->clGetDeviceIDs(platforms[_platformIndex], typeOfDevice, 0, NULL, &num_devices);
     delete platforms;
   }
 
@@ -264,46 +250,43 @@ void OCLPerfPinnedImageWriteSpeed::open(unsigned int test, char *units,
 
   CHECK_RESULT(platform == 0, "Couldn't find platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ = _wrapper->clGetDeviceIDs(platform, typeOfDevice, num_devices,
-                                    devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, typeOfDevice, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
   size_t size;
   cl_bool imageSupport_ = false;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT,
-                            sizeof(imageSupport_), &imageSupport_, &size);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupport_),
+                                     &imageSupport_, &size);
   if (!imageSupport_) {
     printf("\n%s\n", "Image not supported, skipping this test!");
     skip_ = true;
     return;
   }
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   cl_mem_flags flags = CL_MEM_READ_ONLY | CL_MEM_ALLOC_HOST_PTR;
-  inBuffer_ = _wrapper->clCreateBuffer(
-      context_, flags, bufSize_ * bufSize_ * formatSize[bufnum_], NULL,
-      &error_);
+  inBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_ * bufSize_ * formatSize[bufnum_],
+                                       NULL, &error_);
   CHECK_RESULT(inBuffer_ == 0, "clCreateBuffer(inBuffer) failed");
 
   flags = CL_MEM_WRITE_ONLY;
-  outBuffer_ = _wrapper->clCreateImage2D(context_, flags, &formats[bufnum_],
-                                         bufSize_, bufSize_, 0, NULL, &error_);
+  outBuffer_ = _wrapper->clCreateImage2D(context_, flags, &formats[bufnum_], bufSize_, bufSize_, 0,
+                                         NULL, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateImage(outBuffer) failed");
 
-  memptr = (char *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, inBuffer_, CL_TRUE, CL_MAP_WRITE, 0,
-      bufSize_ * bufSize_ * formatSize[bufnum_], 0, NULL, NULL, &error_);
+  memptr = (char*)_wrapper->clEnqueueMapBuffer(cmd_queue_, inBuffer_, CL_TRUE, CL_MAP_WRITE, 0,
+                                               bufSize_ * bufSize_ * formatSize[bufnum_], 0, NULL,
+                                               NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
 }
 
@@ -312,26 +295,21 @@ unsigned int OCLPerfPinnedImageWriteSpeed::close(void) {
     return CL_SUCCESS;
   }
   if (memptr) {
-    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, inBuffer_, memptr, 0,
-                                               NULL, NULL);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clEnqueueUnmapMemObject(inBuffer_) failed");
+    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, inBuffer_, memptr, 0, NULL, NULL);
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clEnqueueUnmapMemObject(inBuffer_) failed");
     clFinish(cmd_queue_);
   }
   if (inBuffer_) {
     error_ = _wrapper->clReleaseMemObject(inBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

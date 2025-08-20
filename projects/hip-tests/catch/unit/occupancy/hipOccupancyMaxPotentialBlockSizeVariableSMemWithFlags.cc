@@ -19,12 +19,15 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 #define SHARED_MEM_CONST 256
-#define UNUSED(expr) do { (void)(expr); } while (0)
+#define UNUSED(expr)                                                                               \
+  do {                                                                                             \
+    (void)(expr);                                                                                  \
+  } while (0)
 // global variables
 static int gArrSize = 0;
 
 // sample global functions
-static __global__ void f1(float *a) { *a = 1.0; }
+static __global__ void f1(float* a) { *a = 1.0; }
 
 // Dynamic shared
 static __global__ void copyKerDyn(int* out, int* in) {
@@ -43,7 +46,7 @@ static __global__ void copyKer(int* out, int* in) {
 
 // sample function
 static size_t blockSizeToDynamicSMemSize(int blocksize) {
-  return (static_cast<size_t>(blocksize*SHARED_MEM_CONST));
+  return (static_cast<size_t>(blocksize * SHARED_MEM_CONST));
 }
 
 // sample functor
@@ -51,24 +54,21 @@ class functorBlockSizeToDynamicSMemSize {
   int myconst;
 
  public:
-  explicit functorBlockSizeToDynamicSMemSize(int n):myconst(n) {
-  }
-  int operator () (int blocksize) const {
-    return (static_cast<size_t>(blocksize*myconst));
-  }
+  explicit functorBlockSizeToDynamicSMemSize(int n) : myconst(n) {}
+  int operator()(int blocksize) const { return (static_cast<size_t>(blocksize * myconst)); }
 };
 
 /**
   Local function to check hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
   functionality for different block_size_limit.
 */
-void hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-                int block_size_limit, int maxThreadsPerBlock) {
+void hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(int block_size_limit,
+                                                             int maxThreadsPerBlock) {
   int minGridSize = 0, blockSize = 0;
   hipError_t ret;
   // Get potential blocksize
-  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-  &blockSize, f1, blockSizeToDynamicSMemSize, block_size_limit, 0);
+  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(
+      &minGridSize, &blockSize, f1, blockSizeToDynamicSMemSize, block_size_limit, 0);
   REQUIRE(ret == hipSuccess);
   REQUIRE(minGridSize > 0);
   REQUIRE(blockSize > 0);
@@ -86,20 +86,19 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange") {
   // Get current device property
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   SECTION("block_size_limit = 0") {
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0,
-    devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0, devProp.maxThreadsPerBlock);
   }
   SECTION("block_size_limit < maxThreadsPerBlock") {
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-    (devProp.maxThreadsPerBlock - 1), devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange((devProp.maxThreadsPerBlock - 1),
+                                                            devProp.maxThreadsPerBlock);
   }
   SECTION("block_size_limit = maxThreadsPerBlock") {
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-    devProp.maxThreadsPerBlock, devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(devProp.maxThreadsPerBlock,
+                                                            devProp.maxThreadsPerBlock);
   }
   SECTION("block_size_limit > maxThreadsPerBlock") {
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-    (devProp.maxThreadsPerBlock + 1), devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange((devProp.maxThreadsPerBlock + 1),
+                                                            devProp.maxThreadsPerBlock);
   }
 }
 
@@ -122,12 +121,11 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_mgpu") {
     hipDeviceProp_t devProp;
     HIP_CHECK(hipGetDeviceProperties(&devProp, dev));
     HIP_CHECK(hipSetDevice(dev));
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0,
-    devProp.maxThreadsPerBlock);
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-    (devProp.maxThreadsPerBlock - 1), devProp.maxThreadsPerBlock);
-    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(
-    devProp.maxThreadsPerBlock, devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(0, devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange((devProp.maxThreadsPerBlock - 1),
+                                                            devProp.maxThreadsPerBlock);
+    hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_chkRange(devProp.maxThreadsPerBlock,
+                                                            devProp.maxThreadsPerBlock);
     HIP_CHECK(hipSetDevice(0));
   }
 }
@@ -144,8 +142,8 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor") {
   int minGridSize = 0, blockSize = 0;
   hipError_t ret;
   // Get potential blocksize
-  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-  &blockSize, f1, testFunc, 0, 0);
+  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize, &blockSize, f1,
+                                                               testFunc, 0, 0);
   REQUIRE(ret == hipSuccess);
   REQUIRE(minGridSize > 0);
   REQUIRE(blockSize > 0);
@@ -159,25 +157,24 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functor") {
 TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Lambda") {
   hipDeviceProp_t devProp;
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
-  auto testFunc = [](const int blockSize){
-    return (static_cast<size_t>(blockSize*SHARED_MEM_CONST));
+  auto testFunc = [](const int blockSize) {
+    return (static_cast<size_t>(blockSize * SHARED_MEM_CONST));
   };
   // Get current device property
   int minGridSize = 0, blockSize = 0;
   hipError_t ret;
   // Get potential blocksize
-  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-  &blockSize, f1, testFunc, 0, 0);
+  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize, &blockSize, f1,
+                                                               testFunc, 0, 0);
   REQUIRE(ret == hipSuccess);
   REQUIRE(minGridSize > 0);
   REQUIRE(blockSize > 0);
   REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
   // Test again by passing the lamda function directly
-  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-  &blockSize, f1,
-  [](const int blockSize){
-    return (static_cast<size_t>(blockSize*SHARED_MEM_CONST));
-  }, 0, 0);
+  ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(
+      &minGridSize, &blockSize, f1,
+      [](const int blockSize) { return (static_cast<size_t>(blockSize * SHARED_MEM_CONST)); }, 0,
+      0);
   REQUIRE(ret == hipSuccess);
   REQUIRE(minGridSize > 0);
   REQUIRE(blockSize > 0);
@@ -196,24 +193,23 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst") {
   int minGridSize = 0, blockSize = 0;
 
   SECTION("null min_grid_size") {
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(nullptr,
-    &blockSize, f1, blockSizeToDynamicSMemSize, 0, 0);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(nullptr, &blockSize, f1,
+                                                                 blockSizeToDynamicSMemSize, 0, 0);
     REQUIRE(ret == hipErrorInvalidValue);
   }
   SECTION("null block_size") {
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-    nullptr, f1, blockSizeToDynamicSMemSize, 0, 0);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize, nullptr, f1,
+                                                                 blockSizeToDynamicSMemSize, 0, 0);
     REQUIRE(ret == hipErrorInvalidValue);
   }
   SECTION("null func") {
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags
-    <size_t(*)(int), void(*)(float*)>(&minGridSize, &blockSize, nullptr,
-    blockSizeToDynamicSMemSize, 0, 0);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags<size_t (*)(int), void (*)(float*)>(
+        &minGridSize, &blockSize, nullptr, blockSizeToDynamicSMemSize, 0, 0);
     REQUIRE(ret == hipErrorInvalidValue);
   }
   SECTION("invalid flag") {
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-    &blockSize, f1, blockSizeToDynamicSMemSize, 0, 0xffff);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(
+        &minGridSize, &blockSize, f1, blockSizeToDynamicSMemSize, 0, 0xffff);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 }
@@ -222,8 +218,7 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_NegTst") {
   Local function to launch kernel with gridsize and blocksize derived from
   hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags.
 */
-static void checkFunc(void(*kerFn)(int*, int*), int num,
-                    int sharedMemBytes, int blockSize) {
+static void checkFunc(void (*kerFn)(int*, int*), int num, int sharedMemBytes, int blockSize) {
   int SIZE = num * sizeof(int);
   int *inpArr_h, *outArr_h;
   int *inpArr_d, *outArr_d;
@@ -244,8 +239,7 @@ static void checkFunc(void(*kerFn)(int*, int*), int num,
   // Lauching kernel from host
   dim3 gridsize = dim3(num / blockSize);
   dim3 blocksize = dim3(blockSize);
-  hipLaunchKernelGGL(kerFn, gridsize, blocksize, sharedMemBytes, 0,
-                    outArr_d, inpArr_d);
+  hipLaunchKernelGGL(kerFn, gridsize, blocksize, sharedMemBytes, 0, outArr_d, inpArr_d);
   // Memory transfer from device to host
   HIP_CHECK(hipMemcpy(outArr_h, outArr_d, SIZE, hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
@@ -267,10 +261,10 @@ static void checkFunc(void(*kerFn)(int*, int*), int num,
 */
 static int getAppropriateDynShMemSize(int sharedMemPerBlock) {
   int size = 1;
-  while (static_cast<int>(size*size*sizeof(int)) < sharedMemPerBlock) {
+  while (static_cast<int>(size * size * sizeof(int)) < sharedMemPerBlock) {
     size = size * 2;
   }
-  return (size/2);
+  return (size / 2);
 }
 
 // functor to return 0 dynamic shared memory
@@ -282,7 +276,7 @@ static size_t getZeroDynShMem(int blocksize) {
 // functor to return maximum possible dynamic shared memory.
 static size_t getMaxDynShMem(int blocksize) {
   UNUSED(blocksize);
-  return static_cast<size_t>(gArrSize*gArrSize*sizeof(int));
+  return static_cast<size_t>(gArrSize * gArrSize * sizeof(int));
 }
 
 /**
@@ -307,13 +301,13 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional") {
     int minGridSize = 0, blockSize = 0;
     hipError_t ret;
     // Get potential blocksize
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-    &blockSize, copyKer, getZeroDynShMem, 0, 0);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize, &blockSize, copyKer,
+                                                                 getZeroDynShMem, 0, 0);
     REQUIRE(ret == hipSuccess);
     REQUIRE(minGridSize > 0);
     REQUIRE(blockSize > 0);
     REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
-    arrSize = minGridSize*blockSize;
+    arrSize = minGridSize * blockSize;
     checkFunc(copyKer, arrSize, 0, blockSize);
   }
   SECTION("Dynamic Shared Kernel") {
@@ -322,27 +316,24 @@ TEST_CASE("Unit_hipOccupancyMaxPotBlkSizeVariableSMemWithFlags_Functional") {
     int minGridSize = 0, blockSize = 0;
     hipError_t ret;
     // Get potential blocksize
-    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize,
-    &blockSize, copyKerDyn, getMaxDynShMem, 0, 0);
+    ret = hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(&minGridSize, &blockSize,
+                                                                 copyKerDyn, getMaxDynShMem, 0, 0);
     REQUIRE(ret == hipSuccess);
     REQUIRE(minGridSize > 0);
     REQUIRE(blockSize > 0);
     REQUIRE(blockSize <= devProp.maxThreadsPerBlock);
     int totalThreads;
-    totalThreads = minGridSize*blockSize;
+    totalThreads = minGridSize * blockSize;
     // allow launching kernel with occupancy derived blocksize and gridsize
     // only if allocated dynamic memory is less than system limit.
-    if ((totalThreads*sizeof(int)) < devProp.sharedMemPerBlock) {
-      checkFunc(copyKerDyn, totalThreads, (totalThreads*sizeof(int)),
-                blockSize);
+    if ((totalThreads * sizeof(int)) < devProp.sharedMemPerBlock) {
+      checkFunc(copyKerDyn, totalThreads, (totalThreads * sizeof(int)), blockSize);
     } else {
-      totalThreads = arrSize*arrSize;
+      totalThreads = arrSize * arrSize;
       // allow launching kernel only if blockSize is a multiple of
       // totalThreads
-      if (((totalThreads % blockSize) == 0) &&
-          ((totalThreads / blockSize) > 0)) {
-        checkFunc(copyKerDyn, totalThreads, (totalThreads*sizeof(int)),
-                  blockSize);
+      if (((totalThreads % blockSize) == 0) && ((totalThreads / blockSize) > 0)) {
+        checkFunc(copyKerDyn, totalThreads, (totalThreads * sizeof(int)), blockSize);
       }
     }
   }

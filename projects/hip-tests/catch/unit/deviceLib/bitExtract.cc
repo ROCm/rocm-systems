@@ -128,19 +128,14 @@ TEST_CASE("Unit_bitExtract") {
   HIP_CHECK(hipMalloc((void**)&deviceSrc164, NUM * sizeof(unsigned int)));
   HIP_CHECK(hipMalloc((void**)&deviceSrc264, NUM * sizeof(unsigned int)));
 
-  HIP_CHECK(
-      hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc032, hostSrc032, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc132, hostSrc132, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc232, hostSrc232, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
 
   HIP_CHECK(hipMemcpy(deviceSrc064, hostSrc064, NUM * sizeof(unsigned long long int),
-                       hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
-  HIP_CHECK(
-      hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+                      hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc164, hostSrc164, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(deviceSrc264, hostSrc264, NUM * sizeof(unsigned int), hipMemcpyHostToDevice));
 
 
   hipLaunchKernelGGL(HIP_kernel, dim3(num_blocks), dim3(num_threads_per_block), 0, 0, deviceOut32,
@@ -151,7 +146,7 @@ TEST_CASE("Unit_bitExtract") {
 
   HIP_CHECK(hipMemcpy(hostOut32, deviceOut32, NUM * sizeof(unsigned int), hipMemcpyDeviceToHost));
   HIP_CHECK(hipMemcpy(hostOut64, deviceOut64, NUM * sizeof(unsigned long long int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
 
   // verify the results
   errors = 0;

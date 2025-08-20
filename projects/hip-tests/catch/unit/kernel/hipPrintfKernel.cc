@@ -17,15 +17,13 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- 
+
 #include <cstring>
 #include "../kernel/printf_common.h"
 
 #define HIP_ENABLE_PRINTF
 
-__global__ void run_printf() {
-  printf("Hello World\n");
-}
+__global__ void run_printf() { printf("Hello World\n"); }
 /**
 * @addtogroup hipLaunchKernelGGL
 * @{
@@ -52,21 +50,22 @@ TEST_CASE("Unit_kernel_ChkPrintf") {
   CaptureStream capture(stdout);
   HIP_CHECK(hipGetDeviceCount(&device_count));
   std::string st = "Hello World";
-  const char * check = st.c_str();
+  const char* check = st.c_str();
   for (int i = 0; i < device_count; ++i) {
     HIP_CHECK(hipSetDevice(i));
     hipLaunchKernelGGL(run_printf, dim3(1), dim3(1), 0, 0);
     HIP_CHECK(hipDeviceSynchronize());
-    char* data = new char[st.size()];;
+    char* data = new char[st.size()];
+    ;
     std::ifstream CapturedData = capture.getCapturedData();
-    CapturedData.getline(data, st.size()+1);
+    CapturedData.getline(data, st.size() + 1);
     int result = strcmp(data, check);
     REQUIRE(result == 0);
-    delete [] data;
+    delete[] data;
   }
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

@@ -36,7 +36,7 @@ class MemcpyToSymbolBenchmark : public Benchmark<MemcpyToSymbolBenchmark> {
   }
 };
 
-static void RunBenchmark(const void* source, size_t size=1, size_t offset=0) {
+static void RunBenchmark(const void* source, size_t size = 1, size_t offset = 0) {
   MemcpyToSymbolBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(std::to_string(offset));

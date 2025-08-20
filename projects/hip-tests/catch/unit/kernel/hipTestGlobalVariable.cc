@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- 
+
 
 #define LEN 512
 #define SIZE 2048
@@ -62,7 +62,7 @@ void runTestConstantGlobalVar() {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(123 == A[i]);
   }
-  delete [] A;
+  delete[] A;
   HIP_CHECK(hipFree(Ad));
 }
 
@@ -91,7 +91,7 @@ void runTestGlobalArray() {
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(i == A[i]);
   }
-  delete [] A;
+  delete[] A;
   HIP_CHECK(hipFree(Ad));
 }
 
@@ -101,6 +101,6 @@ TEST_CASE("Unit_kernel_chkGlobalArrAndGlobalVaribleViaKernelFn") {
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

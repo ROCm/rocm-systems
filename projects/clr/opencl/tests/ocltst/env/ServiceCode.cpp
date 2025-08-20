@@ -121,8 +121,7 @@ void WINAPI ServiceMain(DWORD /*argc*/, wchar_t* /*argv*/[]) {
   serviceStatus.dwCheckPoint = 0;
   serviceStatus.dwWaitHint = 0;
 
-  serviceStatusHandle =
-      RegisterServiceCtrlHandlerW(serviceName, ServiceControlHandler);
+  serviceStatusHandle = RegisterServiceCtrlHandlerW(serviceName, ServiceControlHandler);
 
   if (serviceStatusHandle) {
     // service is starting
@@ -134,8 +133,7 @@ void WINAPI ServiceMain(DWORD /*argc*/, wchar_t* /*argv*/[]) {
     RetireServiceEvent = CreateEvent(0, FALSE, FALSE, 0);
 
     // running
-    serviceStatus.dwControlsAccepted |=
-        (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
+    serviceStatus.dwControlsAccepted |= (SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
     serviceStatus.dwCurrentState = SERVICE_RUNNING;
     if (!SetServiceStatus(serviceStatusHandle, &serviceStatus))
       AppendLog(L"SetServiceStatus SERVICE_RUNNING failed\n");
@@ -145,8 +143,7 @@ void WINAPI ServiceMain(DWORD /*argc*/, wchar_t* /*argv*/[]) {
     // wait for the thread to finish
     WaitForSingleObject(RetireServiceEvent, 60000);
 
-    HANDLE crossProcessEvent =
-        OpenEventW(EVENT_ALL_ACCESS, FALSE, CrossProcessEventName);
+    HANDLE crossProcessEvent = OpenEventW(EVENT_ALL_ACCESS, FALSE, CrossProcessEventName);
     if (NULL != crossProcessEvent) {
       SetEvent(crossProcessEvent);
     } else {
@@ -164,8 +161,7 @@ void WINAPI ServiceMain(DWORD /*argc*/, wchar_t* /*argv*/[]) {
     RetireServiceEvent = 0;
 
     // service is now stopped
-    serviceStatus.dwControlsAccepted &=
-        ~(SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
+    serviceStatus.dwControlsAccepted &= ~(SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SHUTDOWN);
     serviceStatus.dwCurrentState = SERVICE_STOPPED;
     if (!SetServiceStatus(serviceStatusHandle, &serviceStatus))
       AppendLog(L"SetServiceStatus SERVICE_STOPPED failed\n");
@@ -211,8 +207,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
   std::vector<cl::Platform>::iterator i;
   if (platforms.size() > 0) {
     for (i = platforms.begin(); i != platforms.end(); ++i) {
-      if (!strcmp((*i).getInfo<CL_PLATFORM_VENDOR>(&err).c_str(),
-                  "Advanced Micro Devices, Inc.")) {
+      if (!strcmp((*i).getInfo<CL_PLATFORM_VENDOR>(&err).c_str(), "Advanced Micro Devices, Inc.")) {
         break;
       }
     }
@@ -222,8 +217,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
     return -1;
   }
 
-  cl_context_properties cps[3] = {CL_CONTEXT_PLATFORM,
-                                  (cl_context_properties)(*i)(), 0};
+  cl_context_properties cps[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)(*i)(), 0};
 
   cl::Context context(CL_DEVICE_TYPE_GPU, cps, NULL, NULL, &err);
   if (err != CL_SUCCESS) {
@@ -241,8 +235,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
     return -1;
   }
 
-  cl::Program::Sources sources(
-      1, std::make_pair(c_kernelCode, sizeof(c_kernelCode)));
+  cl::Program::Sources sources(1, std::make_pair(c_kernelCode, sizeof(c_kernelCode)));
 
   cl::Program program = cl::Program(context, sources, &err);
   if (err != CL_SUCCESS) {
@@ -252,9 +245,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
   err = program.build(devices);
   if (err != CL_SUCCESS) {
     if (err == CL_BUILD_PROGRAM_FAILURE) {
-      std::string str(
-          (char*)program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0])
-              .c_str());
+      std::string str((char*)program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(devices[0]).c_str());
 
       AppendLog(L" \n\t\t\tBUILD LOG\n\n");
       AppendLog(L" ************************************************\n");
@@ -272,8 +263,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
     return -1;
   }
 
-  cl::Buffer buffer =
-      cl::Buffer(context, CL_MEM_READ_WRITE, c_bufferSize, 0, &err);
+  cl::Buffer buffer = cl::Buffer(context, CL_MEM_READ_WRITE, c_bufferSize, 0, &err);
   if (err != CL_SUCCESS) {
     AppendLog(L"Kernel::setArg() failed \n");
   }
@@ -290,8 +280,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
     return -1;
   }
 
-  err = queue.enqueueNDRangeKernel(kernel, cl::NullRange,
-                                   cl::NDRange(c_bufferSize), cl::NullRange);
+  err = queue.enqueueNDRangeKernel(kernel, cl::NullRange, cl::NDRange(c_bufferSize), cl::NullRange);
 
   if (err != CL_SUCCESS) {
     AppendLog(L"CommandQueue::enqueueNDRangeKernel()\n");
@@ -303,8 +292,7 @@ DWORD WINAPI ThreadProc(LPVOID lpdwThreadParam) {
     AppendLog(L"Event::wait() failed \n");
   }
   char* ptr = (char*)malloc(c_bufferSize);
-  err = queue.enqueueReadBuffer(buffer, CL_TRUE, 0, c_bufferSize, ptr, NULL,
-                                NULL);
+  err = queue.enqueueReadBuffer(buffer, CL_TRUE, 0, c_bufferSize, ptr, NULL, NULL);
   if (err != CL_SUCCESS) {
     AppendLog(L"CommandQueue::enqueueReadBuffer()\n");
     return -1;

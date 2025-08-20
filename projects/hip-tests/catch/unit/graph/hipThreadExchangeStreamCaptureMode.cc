@@ -150,6 +150,6 @@ TEST_CASE("Unit_hipThreadExchangeStreamCaptureMode_Negative_Parameters") {
 #endif
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

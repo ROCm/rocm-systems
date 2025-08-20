@@ -29,25 +29,21 @@ static constexpr auto fileName3 = "copiousArgKernel3.code";
 static constexpr auto fileName16 = "copiousArgKernel16.code";
 static constexpr auto fileName17 = "copiousArgKernel17.code";
 
-static constexpr int coeff[12] =
-       {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
+static constexpr int coeff[12] = {2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37};
 
-static void fillDataTransfer2Dev(int *hostBuf, int *devBuf, size_t len) {
+static void fillDataTransfer2Dev(int* hostBuf, int* devBuf, size_t len) {
   unsigned int seed = time(nullptr);
   for (size_t i = 0; i < len; i++) {
     hostBuf[i] = (HipTest::RAND_R(&seed) & 0xFF);
   }
-  HIP_CHECK(hipMemcpy(devBuf, hostBuf, len*sizeof(int),
-            hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(devBuf, hostBuf, len * sizeof(int), hipMemcpyHostToDevice));
 }
 
-static void verifyDevResult(int *hostBuf, int *devBuf, int coef1, int coef2,
-                            size_t len) {
-  int *buf = new int[len];
-  HIP_CHECK(hipMemcpy(buf, devBuf, len*sizeof(int),
-            hipMemcpyDeviceToHost));
+static void verifyDevResult(int* hostBuf, int* devBuf, int coef1, int coef2, size_t len) {
+  int* buf = new int[len];
+  HIP_CHECK(hipMemcpy(buf, devBuf, len * sizeof(int), hipMemcpyDeviceToHost));
   for (size_t i = 0; i < len; i++) {
-    REQUIRE(buf[i] == (coef1*hostBuf[i] + coef2));
+    REQUIRE(buf[i] == (coef1 * hostBuf[i] + coef2));
   }
   delete[] buf;
 }
@@ -57,17 +53,17 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
   constexpr size_t arraylenBytes = arraylen * sizeof(int);
   constexpr auto blocksize = 256;
   // Allocate host resources
-  int *x1_h = new int[arraylen];
+  int* x1_h = new int[arraylen];
   REQUIRE(x1_h != nullptr);
-  int *x2_h = new int[arraylen];
+  int* x2_h = new int[arraylen];
   REQUIRE(x2_h != nullptr);
-  int *x3_h = new int[arraylen];
+  int* x3_h = new int[arraylen];
   REQUIRE(x3_h != nullptr);
-  int *x4_h = new int[arraylen];
+  int* x4_h = new int[arraylen];
   REQUIRE(x4_h != nullptr);
-  int *x5_h = new int[arraylen];
+  int* x5_h = new int[arraylen];
   REQUIRE(x5_h != nullptr);
-  int *x6_h = new int[arraylen];
+  int* x6_h = new int[arraylen];
   REQUIRE(x6_h != nullptr);
   // Allocate device resources
   int *x1_d, *x2_d, *x3_d, *x4_d, *x5_d, *x6_d;
@@ -89,22 +85,22 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
   struct {
     int a1;
     int a2;
-    void *x1;
+    void* x1;
     int b1;
     int b2;
-    void *x2;
+    void* x2;
     int c1;
     int c2;
-    void *x3;
+    void* x3;
     int d1;
     int d2;
-    void *x4;
+    void* x4;
     int e1;
     int e2;
-    void *x5;
+    void* x5;
     int f1;
     int f2;
-    void *x6;
+    void* x6;
   } args;
   args.a1 = coeff[0];
   args.a2 = coeff[1];
@@ -125,8 +121,7 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
   args.f2 = coeff[11];
   args.x6 = x6_d;
   size_t size = sizeof(args);
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
 
   // Get module and function from module
@@ -160,9 +155,8 @@ TEST_CASE("Unit_KerArgOptimization_Saxpy") {
     HIP_CHECK(hipModuleLoad(&Module, fileName17));
     HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
   }
-  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylen, 1, 1,
-                                    blocksize, 1, 1, 0, 0, NULL,
-                                    reinterpret_cast<void**>(&config), 0));
+  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylen, 1, 1, blocksize, 1, 1, 0, 0, NULL,
+                                     reinterpret_cast<void**>(&config), 0));
   HIP_CHECK(hipDeviceSynchronize());
   // Verify results
   verifyDevResult(x1_h, x1_d, coeff[0], coeff[1], arraylen);

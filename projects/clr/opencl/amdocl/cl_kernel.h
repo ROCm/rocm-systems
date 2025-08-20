@@ -127,8 +127,8 @@ struct clk_parameter_descriptor_t {
 };
 #pragma pack(pop)
 
-//#define CLK_LOCAL_MEM_FENCE  (1 << 0)
-//#define CLK_GLOBAL_MEM_FENCE (1 << 1)
+// #define CLK_LOCAL_MEM_FENCE  (1 << 0)
+// #define CLK_GLOBAL_MEM_FENCE (1 << 1)
 
 struct clk_builtins_t {
   /* Synchronization functions */

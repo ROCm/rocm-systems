@@ -191,52 +191,45 @@ const static char * strKernel =
 
 #define NUM_SIZES 6
 // 4KB, 8KB, 64KB, 256KB, 1 MB, 4MB
-static const unsigned int Sizes[NUM_SIZES] = {4096,   8192,    65536,
-                                              262144, 1048576, 4194304};
+static const unsigned int Sizes[NUM_SIZES] = {4096, 8192, 65536, 262144, 1048576, 4194304};
 
 #define NUM_TYPES 3
-static const char *types[NUM_TYPES] = {"int", "int4", "int16"};
+static const char* types[NUM_TYPES] = {"int", "int4", "int16"};
 static const unsigned int typeSize[NUM_TYPES] = {4, 16, 64};
 
 #define NUM_TESTS 4
 
-OCLPerfPipeCopySpeed::OCLPerfPipeCopySpeed() {
-  _numSubTests = NUM_TESTS * NUM_SIZES * NUM_TYPES;
-}
+OCLPerfPipeCopySpeed::OCLPerfPipeCopySpeed() { _numSubTests = NUM_TESTS * NUM_SIZES * NUM_TYPES; }
 
 OCLPerfPipeCopySpeed::~OCLPerfPipeCopySpeed() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfPipeCopySpeed::setData(cl_mem buffer) {
-  int *mem;
+  int* mem;
   int dwTypeSize = (int)(typeSize[typeIdx_]) >> 2;
-  mem = (int *)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, CL_TRUE,
-                                            CL_MAP_WRITE, 0, bufSize_, 0, NULL,
-                                            NULL, &error_);
+  mem = (int*)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, CL_TRUE, CL_MAP_WRITE, 0, bufSize_,
+                                           0, NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   for (int i = 0; i < (int)numElements; i++) {
     for (int j = 0; j < dwTypeSize; j++) {
       mem[i * dwTypeSize + j] = i;
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, (void *)mem, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, (void*)mem, 0, NULL, NULL);
   CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
   clFinish(cmd_queue_);
 }
 
 void OCLPerfPipeCopySpeed::checkData(cl_mem buffer) {
-  int *mem;
+  int* mem;
   int dwTypeSize = (int)(typeSize[typeIdx_]) >> 2;
-  char *histo;
-  histo = (char *)malloc(numElements * sizeof(char));
+  char* histo;
+  histo = (char*)malloc(numElements * sizeof(char));
   memset(histo, 0, sizeof(char) * numElements);
-  mem = (int *)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, CL_TRUE,
-                                            CL_MAP_READ, 0, bufSize_, 0, NULL,
-                                            NULL, &error_);
+  mem = (int*)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, CL_TRUE, CL_MAP_READ, 0, bufSize_, 0,
+                                           NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   int errCnt = 0;
   for (int i = 0; (i < (int)numElements) && (errCnt < 5); i++) {
@@ -244,8 +237,7 @@ void OCLPerfPipeCopySpeed::checkData(cl_mem buffer) {
     for (int j = 1; (j < dwTypeSize) && (errCnt < 5); j++) {
       if (mem[i * dwTypeSize + j] != tmp) {
         // BAD DATA!
-        printf("BAD DATA at element %d, ref %d, got %d\n", i, tmp,
-               mem[i * dwTypeSize + j]);
+        printf("BAD DATA at element %d, ref %d, got %d\n", i, tmp, mem[i * dwTypeSize + j]);
         errCnt++;
       }
     }
@@ -262,15 +254,14 @@ void OCLPerfPipeCopySpeed::checkData(cl_mem buffer) {
       errCnt++;
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, (void *)mem, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, (void*)mem, 0, NULL, NULL);
   CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
   clFinish(cmd_queue_);
   free(histo);
 }
 
-void OCLPerfPipeCopySpeed::open(unsigned int test, char *units,
-                                double &conversion, unsigned int deviceId) {
+void OCLPerfPipeCopySpeed::open(unsigned int test, char* units, double& conversion,
+                                unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
@@ -298,8 +289,8 @@ void OCLPerfPipeCopySpeed::open(unsigned int test, char *units,
   numIter = NUM_ITER;
 
   char getVersion[128];
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_VERSION,
-                                     sizeof(getVersion), getVersion, NULL);
+  error_ =
+      _wrapper->clGetDeviceInfo(device, CL_DEVICE_VERSION, sizeof(getVersion), getVersion, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (getVersion[7] < '2') {
     failed_ = true;
@@ -307,34 +298,29 @@ void OCLPerfPipeCopySpeed::open(unsigned int test, char *units,
     return;
   }
 
-  srcBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, bufSize_,
-                                        NULL, &error_);
+  srcBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, bufSize_, NULL, &error_);
   CHECK_RESULT(srcBuffer_ == 0, "clCreateBuffer(srcBuffer) failed");
 
   numElements = bufSize_ / typeSize[typeIdx_];
   char args[100];
 
 #if defined(CL_VERSION_2_0)
-  pipe_[0] =
-      _wrapper->clCreatePipe(context_, CL_MEM_HOST_NO_ACCESS,
-                             typeSize[typeIdx_], numElements, NULL, &error_);
+  pipe_[0] = _wrapper->clCreatePipe(context_, CL_MEM_HOST_NO_ACCESS, typeSize[typeIdx_],
+                                    numElements, NULL, &error_);
   CHECK_RESULT(pipe_[0] == 0, "clCreatePipe(pipe_[0]) failed");
 
-  pipe_[1] =
-      _wrapper->clCreatePipe(context_, CL_MEM_HOST_NO_ACCESS,
-                             typeSize[typeIdx_], numElements, NULL, &error_);
+  pipe_[1] = _wrapper->clCreatePipe(context_, CL_MEM_HOST_NO_ACCESS, typeSize[typeIdx_],
+                                    numElements, NULL, &error_);
   CHECK_RESULT(pipe_[1] == 0, "clCreatePipe(pipe_[1]) failed");
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
-  char *p = strstr(charbuf, "cl_khr_subgroups");
+  char* p = strstr(charbuf, "cl_khr_subgroups");
   if (p) {
     subgroupSupport_ = true;
-    SNPRINTF(args, sizeof(args), "-cl-std=CL2.0 -D DATA_TYPE=%s -D SUBGROUPS",
-             types[typeIdx_]);
+    SNPRINTF(args, sizeof(args), "-cl-std=CL2.0 -D DATA_TYPE=%s -D SUBGROUPS", types[typeIdx_]);
   } else {
     if (test >= (NUM_SIZES * NUM_TYPES * 3)) {
       // No support for subgroups, so skip these tests
@@ -342,17 +328,14 @@ void OCLPerfPipeCopySpeed::open(unsigned int test, char *units,
       _errorMsg = "Subgroup extension not supported";
       return;
     }
-    SNPRINTF(args, sizeof(args), "-cl-std=CL2.0 -D DATA_TYPE=%s",
-             types[typeIdx_]);
+    SNPRINTF(args, sizeof(args), "-cl-std=CL2.0 -D DATA_TYPE=%s", types[typeIdx_]);
   }
 #endif
 
-  dstBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufSize_,
-                                        NULL, &error_);
+  dstBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufSize_, NULL, &error_);
   CHECK_RESULT(dstBuffer_ == 0, "clCreateBuffer(dstBuffer) failed");
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
   error_ = _wrapper->clBuildProgram(program_, 1, &device, args, NULL, NULL);
@@ -360,9 +343,8 @@ void OCLPerfPipeCopySpeed::open(unsigned int test, char *units,
     printf("\nerror: %d\n", error_);
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -412,24 +394,20 @@ void OCLPerfPipeCopySpeed::run(void) {
   size_t global_work_size[1] = {(size_t)numElements};
   size_t local_work_size[1] = {64};
 
-  error_ = _wrapper->clSetKernelArg(initPipe_, 0, sizeof(cl_mem),
-                                    (void *)&srcBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(initPipe_, 1, sizeof(cl_mem), (void *)&pipe_[0]);
+  error_ = _wrapper->clSetKernelArg(initPipe_, 0, sizeof(cl_mem), (void*)&srcBuffer_);
+  error_ = _wrapper->clSetKernelArg(initPipe_, 1, sizeof(cl_mem), (void*)&pipe_[0]);
   // Warm up
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, initPipe_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, initPipe_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
 
-  error_ =
-      _wrapper->clSetKernelArg(copyPipe_, 0, sizeof(cl_mem), (void *)&pipe_[0]);
-  error_ =
-      _wrapper->clSetKernelArg(copyPipe_, 1, sizeof(cl_mem), (void *)&pipe_[1]);
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, copyPipe_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clSetKernelArg(copyPipe_, 0, sizeof(cl_mem), (void*)&pipe_[0]);
+  error_ = _wrapper->clSetKernelArg(copyPipe_, 1, sizeof(cl_mem), (void*)&pipe_[1]);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, copyPipe_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
 
@@ -439,13 +417,11 @@ void OCLPerfPipeCopySpeed::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < numIter; i++) {
-    error_ = _wrapper->clSetKernelArg(copyPipe_, 0, sizeof(cl_mem),
-                                      (void *)&pipe_[(i + 1) % 2]);
-    error_ = _wrapper->clSetKernelArg(copyPipe_, 1, sizeof(cl_mem),
-                                      (void *)&pipe_[i % 2]);
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, copyPipe_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clSetKernelArg(copyPipe_, 0, sizeof(cl_mem), (void*)&pipe_[(i + 1) % 2]);
+    error_ = _wrapper->clSetKernelArg(copyPipe_, 1, sizeof(cl_mem), (void*)&pipe_[i % 2]);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, copyPipe_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
@@ -455,13 +431,11 @@ void OCLPerfPipeCopySpeed::run(void) {
   timer.Stop();
 
   // pipe[(numIter-1)%2 has the data
-  error_ = _wrapper->clSetKernelArg(readPipe_, 0, sizeof(cl_mem),
-                                    (void *)&pipe_[(numIter - 1) % 2]);
-  error_ = _wrapper->clSetKernelArg(readPipe_, 1, sizeof(cl_mem),
-                                    (void *)&dstBuffer_);
-  error_ = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, readPipe_, 1, NULL, (const size_t *)global_work_size,
-      (const size_t *)local_work_size, 0, NULL, NULL);
+  error_ = _wrapper->clSetKernelArg(readPipe_, 0, sizeof(cl_mem), (void*)&pipe_[(numIter - 1) % 2]);
+  error_ = _wrapper->clSetKernelArg(readPipe_, 1, sizeof(cl_mem), (void*)&dstBuffer_);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, readPipe_, 1, NULL,
+                                            (const size_t*)global_work_size,
+                                            (const size_t*)local_work_size, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel(readPipe) failed");
   error_ = _wrapper->clFinish(cmd_queue_);
@@ -473,31 +447,27 @@ void OCLPerfPipeCopySpeed::run(void) {
 
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " %17s (%8d bytes) block size: %2d i:%4d (GB/s) ",
-           testName_.c_str(), bufSize_, typeSize[typeIdx_], numIter);
+  SNPRINTF(buf, sizeof(buf), " %17s (%8d bytes) block size: %2d i:%4d (GB/s) ", testName_.c_str(),
+           bufSize_, typeSize[typeIdx_], numIter);
   testDescString = buf;
 }
 
 unsigned int OCLPerfPipeCopySpeed::close(void) {
   if (srcBuffer_) {
     error_ = _wrapper->clReleaseMemObject(srcBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(srcBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(srcBuffer_) failed");
   }
   if (pipe_[0]) {
     error_ = _wrapper->clReleaseMemObject(pipe_[0]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(pipe_[0]) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(pipe_[0]) failed");
   }
   if (pipe_[1]) {
     error_ = _wrapper->clReleaseMemObject(pipe_[1]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(pipe_[1]) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(pipe_[1]) failed");
   }
   if (dstBuffer_) {
     error_ = _wrapper->clReleaseMemObject(dstBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(dstBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(dstBuffer_) failed");
   }
 
   return OCLTestImp::close();
