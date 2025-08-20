@@ -758,13 +758,13 @@ hipError_t hipExtMallocWithFlags(void** ptr, size_t sizeBytes, unsigned int flag
 
 hipError_t hipMalloc(void** ptr, size_t sizeBytes) {
   HIP_INIT_API(hipMalloc, ptr, sizeBytes);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN_DURATION(ihipMalloc(ptr, sizeBytes, 0), ReturnPtrValue(ptr));
 }
 
 hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   HIP_INIT_API(hipHostMalloc, ptr, sizeBytes, flags);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   if (ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -774,7 +774,7 @@ hipError_t hipHostMalloc(void** ptr, size_t sizeBytes, unsigned int flags) {
 
 hipError_t hipFree(void* ptr) {
   HIP_INIT_API(hipFree, ptr);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipFree(ptr));
 }
 
@@ -844,7 +844,7 @@ hipError_t hipMemPtrGetInfo(void* ptr, size_t* size) {
 
 hipError_t hipHostFree(void* ptr) {
   HIP_INIT_API(hipHostFree, ptr);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   size_t offset = 0;
   amd::Memory* memory_object = getMemoryObject(ptr, offset);
   if (memory_object != nullptr) {
@@ -883,7 +883,7 @@ hipError_t ihipArrayDestroy(hipArray_t array) {
 
 hipError_t hipFreeArray(hipArray_t array) {
   HIP_INIT_API(hipFreeArray, array);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipArrayDestroy(array));
 }
 
@@ -978,13 +978,13 @@ hipError_t ihipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t heigh
 
 hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height) {
   HIP_INIT_API(hipMallocPitch, ptr, pitch, width, height);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipMallocPitch(ptr, pitch, width, height, 1), ReturnPtrValue(ptr));
 }
 
 hipError_t hipMalloc3D(hipPitchedPtr* pitchedDevPtr, hipExtent extent) {
   HIP_INIT_API(hipMalloc3D, pitchedDevPtr, extent);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   size_t pitch = 0;
 
   if (pitchedDevPtr == nullptr) {
@@ -1212,7 +1212,7 @@ hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, s
   if (array == nullptr || desc == nullptr) {
     return hipErrorInvalidValue;
   }
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {width,
                                           height,
                                           0, /* Depth */
@@ -1227,7 +1227,7 @@ hipError_t hipMallocArray(hipArray_t* array, const hipChannelFormatDesc* desc, s
 
 hipError_t hipArray3DCreate(hipArray_t* array, const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray) {
   HIP_INIT_API(hipArray3DCreate, array, pAllocateArray);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   if (pAllocateArray == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -1240,7 +1240,7 @@ hipError_t hipMalloc3DArray(hipArray_t* array, const hipChannelFormatDesc* desc,
   if (array == nullptr || desc == nullptr) {
     return hipErrorInvalidValue;
   }
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {extent.width,
                                           extent.height,
                                           extent.depth,
@@ -1366,13 +1366,13 @@ hipError_t ihipHostUnregister(void* hostPtr) {
 
 hipError_t hipHostUnregister(void* hostPtr) {
   HIP_INIT_API(hipHostUnregister, hostPtr);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipHostUnregister(hostPtr));
 }
 
 hipError_t hipHostAlloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   HIP_INIT_API(hipHostAlloc, ptr, sizeBytes, flags);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
 
   if (ptr == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -1387,19 +1387,24 @@ hipError_t hipHostAlloc(void** ptr, size_t sizeBytes, unsigned int flags) {
   HIP_RETURN_DURATION(status, ReturnPtrValue(ptr));
 }
 
-hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes, hipMemcpyKind kind,
-                                 hipStream_t stream) {
-  STREAM_CAPTURE(hipMemcpyAsync, stream, dst, src, sizeBytes, kind);
+hipError_t hipMemcpyAsync_common(void* dst, const void* src, size_t sizeBytes,
+                          hipMemcpyKind kind, hipStream_t stream) {
 
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
     return hipErrorInvalidMemcpyDirection;
   }
-  getStreamPerThread(stream);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
     return hipErrorInvalidValue;
   }
-  return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, true);
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturecapturehipMemcpyAsync, stream, dst, src, sizeBytes, kind);
+  } else {
+    return ihipMemcpy(dst, src, sizeBytes, kind, *hip_stream, true);
+  }
 }
 
 inline hipError_t ihipMemcpySymbol_validate(const void* symbol, size_t sizeBytes, size_t offset,
@@ -1489,14 +1494,7 @@ hipError_t hipMemcpyFromSymbol_spt(void* dst, const void* symbol, size_t sizeByt
 }
 
 hipError_t hipMemcpyToSymbolAsync_common(const void* symbol, const void* src, size_t sizeBytes,
-                                         size_t offset, hipMemcpyKind kind, hipStream_t stream) {
-  STREAM_CAPTURE(hipMemcpyToSymbolAsync, stream, symbol, src, sizeBytes, offset, kind);
-
-  if (kind != hipMemcpyHostToDevice && kind != hipMemcpyDeviceToDevice &&
-      kind != hipMemcpyDeviceToDeviceNoCU) {
-    return hipErrorInvalidMemcpyDirection;
-  }
-
+                                  size_t offset, hipMemcpyKind kind, hipStream_t stream) {
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
 
@@ -1522,14 +1520,7 @@ hipError_t hipMemcpyToSymbolAsync_spt(const void* symbol, const void* src, size_
 }
 
 hipError_t hipMemcpyFromSymbolAsync_common(void* dst, const void* symbol, size_t sizeBytes,
-                                           size_t offset, hipMemcpyKind kind, hipStream_t stream) {
-  STREAM_CAPTURE(hipMemcpyFromSymbolAsync, stream, dst, symbol, sizeBytes, offset, kind);
-
-  if (kind != hipMemcpyDeviceToHost && kind != hipMemcpyDeviceToDevice &&
-      kind != hipMemcpyDeviceToDeviceNoCU) {
-    return hipErrorInvalidMemcpyDirection;
-  }
-
+                                    size_t offset, hipMemcpyKind kind, hipStream_t stream) {
   size_t sym_size = 0;
   hipDeviceptr_t device_ptr = nullptr;
 
@@ -1539,7 +1530,7 @@ hipError_t hipMemcpyFromSymbolAsync_common(void* dst, const void* symbol, size_t
   }
 
   /* Copy memory from source to destination address */
-  return hipMemcpyAsync(dst, device_ptr, sizeBytes, kind, stream);
+  return hipMemcpyAsync_common(dst, device_ptr, sizeBytes, kind, stream);
 }
 
 hipError_t hipMemcpyFromSymbolAsync(void* dst, const void* symbol, size_t sizeBytes, size_t offset,
@@ -1605,7 +1596,6 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyHtoDAsync, dstDevice, srcHost, ByteCount, stream);
   hipMemcpyKind kind = hipMemcpyHostToDevice;
-  STREAM_CAPTURE(hipMemcpyHtoDAsync, stream, dstDevice, srcHost, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
     return hipErrorInvalidMemcpyDirection;
   }
@@ -1614,16 +1604,20 @@ hipError_t hipMemcpyHtoDAsync(hipDeviceptr_t dstDevice, const void* srcHost, siz
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
-  HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcHost, ByteCount, kind, *hip_stream, true));
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyHtoDAsync, stream, dstDevice, srcHost, ByteCount, kind);
+  } else {
+    HIP_RETURN_DURATION(
+        ihipMemcpy(dstDevice, srcHost, ByteCount, kind, *hip_stream, true));
+  }
 }
 
 hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice, size_t ByteCount,
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyDtoDAsync, dstDevice, srcDevice, ByteCount, stream);
   hipMemcpyKind kind = hipMemcpyDeviceToDevice;
-  STREAM_CAPTURE(hipMemcpyDtoDAsync, stream, dstDevice, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
     return hipErrorInvalidMemcpyDirection;
   }
@@ -1632,16 +1626,20 @@ hipError_t hipMemcpyDtoDAsync(hipDeviceptr_t dstDevice, hipDeviceptr_t srcDevice
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
-  HIP_RETURN_DURATION(ihipMemcpy(dstDevice, srcDevice, ByteCount, kind, *hip_stream, true));
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyDtoDAsync, stream, dstDevice, srcDevice, ByteCount, kind);
+  } else {
+    HIP_RETURN_DURATION(
+        ihipMemcpy(dstDevice, srcDevice, ByteCount, kind, *hip_stream, true));
+  }
 }
 
 hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t ByteCount,
                               hipStream_t stream) {
   HIP_INIT_API(hipMemcpyDtoHAsync, dstHost, srcDevice, ByteCount, stream);
   hipMemcpyKind kind = hipMemcpyDeviceToHost;
-  STREAM_CAPTURE(hipMemcpyDtoHAsync, stream, dstHost, srcDevice, ByteCount, kind);
   if (static_cast<uint32_t>(kind) > hipMemcpyDefault && kind != hipMemcpyDeviceToDeviceNoCU) {
     return hipErrorInvalidMemcpyDirection;
   }
@@ -1650,9 +1648,15 @@ hipError_t hipMemcpyDtoHAsync(void* dstHost, hipDeviceptr_t srcDevice, size_t By
   }
   hip::Stream* hip_stream = hip::getStream(stream);
   if (hip_stream == nullptr) {
-    HIP_RETURN(hipErrorInvalidValue);
+    return hipErrorInvalidValue;
   }
-  HIP_RETURN_DURATION(ihipMemcpy(dstHost, srcDevice, ByteCount, kind, *hip_stream, true));
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyDtoHAsync, stream, dstHost, srcDevice, ByteCount, kind);
+  } else {
+    HIP_RETURN_DURATION(
+        ihipMemcpy(dstHost, srcDevice, ByteCount, kind, *hip_stream, true));
+  }
+      
 }
 
 hipError_t ihipMemcpyAtoDCommand(amd::Command*& command, void* dstDevice, amd::Coord3D dstOrigin,
@@ -2462,9 +2466,18 @@ hipError_t hipMemcpy2D_spt(void* dst, size_t dpitch, const void* src, size_t spi
 hipError_t hipMemcpy2DAsync(void* dst, size_t dpitch, const void* src, size_t spitch, size_t width,
                             size_t height, hipMemcpyKind kind, hipStream_t stream) {
   HIP_INIT_API(hipMemcpy2DAsync, dst, dpitch, src, spitch, width, height, kind, stream);
-  STREAM_CAPTURE(hipMemcpy2DAsync, stream, dst, dpitch, src, spitch, width, height, kind);
-  HIP_RETURN_DURATION(
-      hipMemcpy2D_common(dst, dpitch, src, spitch, width, height, kind, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DAsync, stream, dst, dpitch, src, spitch, width, height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2D_common(dst, dpitch, src, spitch, width, height, kind, stream, true));
+  }
 }
 
 hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch, const void* src, size_t spitch,
@@ -2472,9 +2485,18 @@ hipError_t hipMemcpy2DAsync_spt(void* dst, size_t dpitch, const void* src, size_
                                 hipStream_t stream) {
   HIP_INIT_API(hipMemcpy2DAsync, dst, dpitch, src, spitch, width, height, kind, stream);
   PER_THREAD_DEFAULT_STREAM(stream);
-  STREAM_CAPTURE(hipMemcpy2DAsync, stream, dst, dpitch, src, spitch, width, height, kind);
-  HIP_RETURN_DURATION(
-      hipMemcpy2D_common(dst, dpitch, src, spitch, width, height, kind, stream, true));
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DAsync, stream, dst, dpitch, src, spitch, width, height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2D_common(dst, dpitch, src, spitch, width, height, kind, stream, true));
+  }
 }
 
 hipError_t ihipMemcpy2DToArray(hipArray_t dst, size_t wOffset, size_t hOffset, const void* src,
@@ -2737,8 +2759,18 @@ hipError_t hipMemcpy3D_spt(const hipMemcpy3DParms* p) {
 }
 
 hipError_t hipMemcpy3DAsync_common(const hipMemcpy3DParms* p, hipStream_t stream) {
-  STREAM_CAPTURE(hipMemcpy3DAsync, stream, p);
-  return ihipMemcpy3D(p, stream, true);
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone){
+    return StreamCapture(capturehipMemcpy3DAsync, stream, p);
+  } else {
+    return ihipMemcpy3D(p, stream, true);
+  }
 }
 
 hipError_t hipMemcpy3DAsync(const hipMemcpy3DParms* p, hipStream_t stream) {
@@ -3001,8 +3033,18 @@ hipError_t hipMemset(void* dst, int value, size_t sizeBytes) {
 
 hipError_t hipMemsetAsync_common(void* dst, int value, size_t sizeBytes, hipStream_t stream) {
   size_t valueSize = sizeof(int8_t);
-  STREAM_CAPTURE(hipMemsetAsync, stream, dst, value, valueSize, sizeBytes);
-  return ihipMemset(dst, value, sizeof(int8_t), sizeBytes, stream, true);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemsetAsync, stream, dst, value, valueSize, sizeBytes);
+  } else {
+    return ihipMemset(dst, value, sizeof(int8_t), sizeBytes, stream, true);
+  }
 }
 
 hipError_t hipMemsetAsync(void* dst, int value, size_t sizeBytes, hipStream_t stream) {
@@ -3028,8 +3070,18 @@ hipError_t hipMemsetD8Async(hipDeviceptr_t dst, unsigned char value, size_t coun
   int iValue = value;
   size_t valueSize = sizeof(int8_t);
   size_t sizeBytes = count * sizeof(int8_t);
-  STREAM_CAPTURE(hipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
-  HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
+  } else {
+    HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  }
 }
 
 hipError_t hipMemsetD16(hipDeviceptr_t dst, unsigned short value, size_t count) {
@@ -3044,8 +3096,18 @@ hipError_t hipMemsetD16Async(hipDeviceptr_t dst, unsigned short value, size_t co
   int iValue = value;
   size_t valueSize = sizeof(int16_t);
   size_t sizeBytes = count * sizeof(int16_t);
-  STREAM_CAPTURE(hipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
-  HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
+  } else {
+    HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  }
 }
 
 hipError_t hipMemsetD32(hipDeviceptr_t dst, int value, size_t count) {
@@ -3059,8 +3121,18 @@ hipError_t hipMemsetD32Async(hipDeviceptr_t dst, int value, size_t count, hipStr
   int iValue = value;
   size_t valueSize = sizeof(int32_t);
   size_t sizeBytes = count * sizeof(int32_t);
-  STREAM_CAPTURE(hipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
-  HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemsetAsync, stream, dst, iValue, valueSize, sizeBytes);
+  } else {
+    HIP_RETURN(ihipMemset(dst, value, valueSize, sizeBytes, stream, true));
+  }
 }
 
 hipError_t ihipMemset3D_validate(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
@@ -3176,9 +3248,19 @@ hipError_t hipMemset2D(void* dst, size_t pitch, int value, size_t width, size_t 
 
 hipError_t hipMemset2DAsync_common(void* dst, size_t pitch, int value, size_t width, size_t height,
                                    hipStream_t stream, size_t elementSize = 1) {
-  STREAM_CAPTURE(hipMemset2DAsync, stream, dst, pitch, value, width, height);
-  return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true,
-                      elementSize);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemset2DAsync, stream, dst, pitch, value, width, height);
+  } else {
+    return ihipMemset3D({dst, pitch, width, height}, value, {width, height, 1}, stream, true,
+                         elementSize);
+  }
 }
 
 hipError_t hipMemset2DAsync(void* dst, size_t pitch, int value, size_t width, size_t height,
@@ -3259,8 +3341,18 @@ hipError_t hipMemset3D_spt(hipPitchedPtr pitchedDevPtr, int value, hipExtent ext
 // ================================================================================================
 hipError_t hipMemset3DAsync_common(hipPitchedPtr pitchedDevPtr, int value, hipExtent extent,
                                    hipStream_t stream) {
-  STREAM_CAPTURE(hipMemset3DAsync, stream, pitchedDevPtr, value, extent);
-  return ihipMemset3D(pitchedDevPtr, value, extent, stream, true);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemset3DAsync, stream, pitchedDevPtr, value, extent);
+  } else {
+    return ihipMemset3D(pitchedDevPtr, value, extent, stream, true);
+  }
 }
 
 // ================================================================================================
@@ -3281,7 +3373,7 @@ hipError_t hipMemset3DAsync_spt(hipPitchedPtr pitchedDevPtr, int value, hipExten
 hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInBytes, size_t height,
                             unsigned int elementSizeBytes) {
   HIP_INIT_API(hipMemAllocPitch, dptr, pitch, widthInBytes, height, elementSizeBytes);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   if (widthInBytes == 0 || height == 0) {
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -3293,7 +3385,7 @@ hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInB
 
 hipError_t hipMemAllocHost(void** ptr, size_t size) {
   HIP_INIT_API(hipMemAllocHost, ptr, size);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN_DURATION(hipHostMalloc(ptr, size, 0), ReturnPtrValue(ptr));
 }
 
@@ -3755,7 +3847,7 @@ hipError_t hipDrvPointerGetAttributes(unsigned int numAttributes, hipPointer_att
 // ================================================================================================
 hipError_t hipArrayDestroy(hipArray_t array) {
   HIP_INIT_API(hipArrayDestroy, array);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipArrayDestroy(array));
 }
 
@@ -3780,7 +3872,7 @@ hipError_t ihipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* desc, hipArray_t arr
 hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsigned int* flags,
                            hipArray_t array) {
   HIP_INIT_API(hipArrayGetInfo, desc, extent, flags, array);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
 
   if (array == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
@@ -3816,7 +3908,7 @@ hipError_t hipArrayGetInfo(hipChannelFormatDesc* desc, hipExtent* extent, unsign
 
 hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArray_t array) {
   HIP_INIT_API(hipArrayGetDescriptor, pArrayDescriptor, array);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
 
   if (array == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
@@ -3842,7 +3934,7 @@ hipError_t hipArrayGetDescriptor(HIP_ARRAY_DESCRIPTOR* pArrayDescriptor, hipArra
 
 hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hipArray_t array) {
   HIP_INIT_API(hipArray3DGetDescriptor, pArrayDescriptor, array);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
 
   if (array == nullptr) {
     HIP_RETURN(hipErrorInvalidHandle);
@@ -3857,8 +3949,18 @@ hipError_t hipArray3DGetDescriptor(HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor, hip
 
 hipError_t hipMemcpyParam2DAsync(const hip_Memcpy2D* pCopy, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyParam2DAsync, pCopy);
-  STREAM_CAPTURE(hipMemcpyParam2DAsync, stream, pCopy);
-  HIP_RETURN(ihipMemcpyParam2D(pCopy, stream, true));
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyParam2DAsync, stream, pCopy);
+  } else {
+    HIP_RETURN_DURATION(ihipMemcpyParam2D(pCopy, stream, true));
+  }
 }
 
 // ================================================================================================
@@ -3958,12 +4060,22 @@ hipError_t hipMemcpy2DFromArray_spt(void* dst, size_t dpitch, hipArray_const_t s
 hipError_t hipMemcpy2DFromArrayAsync(void* dst, size_t dpitch, hipArray_const_t src,
                                      size_t wOffsetSrc, size_t hOffsetSrc, size_t width,
                                      size_t height, hipMemcpyKind kind, hipStream_t stream) {
-  HIP_INIT_API(hipMemcpy2DFromArrayAsync, dst, dpitch, src, wOffsetSrc, hOffsetSrc, width, height,
-               kind, stream);
-  STREAM_CAPTURE(hipMemcpy2DFromArrayAsync, stream, dst, dpitch, src, wOffsetSrc, hOffsetSrc, width,
-                 height, kind);
-  HIP_RETURN_DURATION(hipMemcpy2DFromArray_common(dst, dpitch, src, wOffsetSrc, hOffsetSrc, width,
-                                                  height, kind, stream, true));
+  HIP_INIT_API(hipMemcpy2DFromArrayAsync, dst, dpitch, src, wOffsetSrc, hOffsetSrc,
+               width, height, kind, stream);
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DFromArrayAsync, stream, dst, dpitch, src, wOffsetSrc,
+                 hOffsetSrc, width, height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2DFromArray_common(dst, dpitch, src, wOffsetSrc,
+                      hOffsetSrc, width, height, kind, stream, true));
+  }
 }
 
 // ================================================================================================
@@ -3973,10 +4085,20 @@ hipError_t hipMemcpy2DFromArrayAsync_spt(void* dst, size_t dpitch, hipArray_cons
   HIP_INIT_API(hipMemcpy2DFromArrayAsync, dst, dpitch, src, wOffsetSrc, hOffsetSrc, width, height,
                kind, stream);
   PER_THREAD_DEFAULT_STREAM(stream);
-  STREAM_CAPTURE(hipMemcpy2DFromArrayAsync, stream, dst, dpitch, src, wOffsetSrc, hOffsetSrc, width,
-                 height, kind);
-  HIP_RETURN_DURATION(hipMemcpy2DFromArray_common(dst, dpitch, src, wOffsetSrc, hOffsetSrc, width,
-                                                  height, kind, stream, true));
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DFromArrayAsync, stream, dst, dpitch, src, wOffsetSrc, hOffsetSrc,
+                 width, height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2DFromArray_common(dst, dpitch, src, wOffsetSrc, hOffsetSrc,
+                      width, height, kind, stream, true));
+  }
 }
 
 // ================================================================================================
@@ -3985,10 +4107,20 @@ hipError_t hipMemcpy2DToArrayAsync(hipArray_t dst, size_t wOffset, size_t hOffse
                                    hipStream_t stream) {
   HIP_INIT_API(hipMemcpy2DToArrayAsync, dst, wOffset, hOffset, src, spitch, width, height, kind,
                stream);
-  STREAM_CAPTURE(hipMemcpy2DToArrayAsync, stream, dst, wOffset, hOffset, src, spitch, width, height,
-                 kind);
-  HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch, width, height,
-                                                kind, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DToArrayAsync, stream, dst, wOffset, hOffset, src, spitch, width,
+                 height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch, width, height,
+                      kind, stream, true));
+  }
 }
 
 // ================================================================================================
@@ -3998,10 +4130,20 @@ hipError_t hipMemcpy2DToArrayAsync_spt(hipArray_t dst, size_t wOffset, size_t hO
   HIP_INIT_API(hipMemcpy2DToArrayAsync, dst, wOffset, hOffset, src, spitch, width, height, kind,
                stream);
   PER_THREAD_DEFAULT_STREAM(stream);
-  STREAM_CAPTURE(hipMemcpy2DToArrayAsync, stream, dst, wOffset, hOffset, src, spitch, width, height,
-                 kind);
-  HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch, width, height,
-                                                kind, stream, true));
+  if (!hip::isValid(stream)) {
+    return hipErrorContextIsDestroyed;
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpy2DToArrayAsync, stream, dst, wOffset, hOffset, src, spitch,
+                 width, height, kind);
+  } else {
+    HIP_RETURN_DURATION(hipMemcpy2DToArray_common(dst, wOffset, hOffset, src, spitch,
+                      width, height, kind, stream, true));
+  }
 }
 
 // ================================================================================================
@@ -4025,9 +4167,19 @@ hipError_t hipMemcpyAtoD(hipDeviceptr_t dstDevice, hipArray_t srcArray, size_t s
 hipError_t hipMemcpyAtoHAsync(void* dstHost, hipArray_t srcArray, size_t srcOffset,
                               size_t ByteCount, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyAtoHAsync, dstHost, srcArray, srcOffset, ByteCount, stream);
-  STREAM_CAPTURE(hipMemcpyAtoHAsync, stream, dstHost, srcArray, srcOffset, ByteCount);
-  HIP_RETURN_DURATION(ihipMemcpy2DFromArray(dstHost, 0, srcArray, srcOffset, 0, ByteCount, 1,
-                                            hipMemcpyDeviceToHost, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyAtoHAsync, stream, dstHost, srcArray, srcOffset, ByteCount);
+  } else {
+    HIP_RETURN_DURATION(ihipMemcpy2DFromArray(dstHost, 0, srcArray, srcOffset, 0, ByteCount, 1,
+                                              hipMemcpyDeviceToHost, stream, true));
+ }
 }
 
 // ================================================================================================
@@ -4043,9 +4195,19 @@ hipError_t hipMemcpyDtoA(hipArray_t dstArray, size_t dstOffset, hipDeviceptr_t s
 hipError_t hipMemcpyHtoAAsync(hipArray_t dstArray, size_t dstOffset, const void* srcHost,
                               size_t ByteCount, hipStream_t stream) {
   HIP_INIT_API(hipMemcpyHtoAAsync, dstArray, dstOffset, srcHost, ByteCount, stream);
-  STREAM_CAPTURE(hipMemcpyHtoAAsync, stream, dstArray, dstOffset, srcHost, ByteCount);
-  HIP_RETURN_DURATION(ihipMemcpy2DToArray(dstArray, dstOffset, 0, srcHost, 0, ByteCount, 1,
-                                          hipMemcpyHostToDevice, stream, true));
+  if (!hip::isValid(stream)) {
+    HIP_RETURN(hipErrorContextIsDestroyed);
+  }
+  hip::Stream* hip_stream = hip::getStream(stream);
+  if (hip_stream == nullptr) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
+  if (hip_stream->GetCaptureStatus() != hipStreamCaptureStatusNone) {
+    return StreamCapture(capturehipMemcpyHtoAAsync, stream, dstArray, dstOffset, srcHost, ByteCount);
+  } else {
+    HIP_RETURN_DURATION(ihipMemcpy2DToArray(dstArray, dstOffset, 0, srcHost, 0, ByteCount, 1,
+                                            hipMemcpyHostToDevice, stream, true));
+  }
 }
 
 hipError_t hipMemcpyHtoA(hipArray_t dstArray, size_t dstOffset, const void* srcHost,
@@ -4249,7 +4411,7 @@ hipError_t hipMipmappedArrayCreate(hipMipmappedArray_t* mipmapped_array_pptr,
 
 hipError_t hipMipmappedArrayDestroy(hipMipmappedArray_t mipmapped_array_ptr) {
   HIP_INIT_API(hipMipmappedArrayDestroy, mipmapped_array_ptr);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipMipmappedArrayDestroy(mipmapped_array_ptr));
 }
 
@@ -4268,7 +4430,7 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
   if (mipmappedArray == nullptr || desc == nullptr) {
     return hipErrorInvalidValue;
   }
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_ARRAY3D_DESCRIPTOR allocateArray = {extent.width,
                                           extent.height,
                                           extent.depth,
@@ -4283,7 +4445,7 @@ hipError_t hipMallocMipmappedArray(hipMipmappedArray_t* mipmappedArray,
 
 hipError_t hipFreeMipmappedArray(hipMipmappedArray_t mipmappedArray) {
   HIP_INIT_API(hipFreeMipmappedArray, mipmappedArray);
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
   HIP_RETURN(ihipMipmappedArrayDestroy(mipmappedArray));
 }
 
@@ -4302,7 +4464,7 @@ hipError_t hipExternalMemoryGetMappedMipmappedArray(
   if (mipmap == nullptr || extMem == nullptr || mipmapDesc == nullptr) {
     HIP_RETURN(hipErrorInvalidValue);
   }
-  CHECK_STREAM_CAPTURE_SUPPORTED();
+  CHECK_return StreamCapture_SUPPORTED();
 
   auto buf = reinterpret_cast<amd::ExternalBuffer*>(extMem);
   const device::Memory* devMem = buf->getDeviceMemory(*hip::getCurrentDevice()->devices()[0]);
