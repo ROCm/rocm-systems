@@ -1178,7 +1178,7 @@ class AMDSMIHelpers():
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               print(f"WARNING:No cper files will be dumped unless --folder=<folder_name> is specified.")
+               print(f"WARNING:No cper files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
                self._cper_warning_printed = True
 
             self._print_header(folder)
@@ -1442,11 +1442,13 @@ class AMDSMIHelpers():
         logger.set_cper_exit_message(False)
         self.stop = False
 
+        num_entries = 0
         while True:
             try:
                 entries, new_cursor, cper_data, status_code = amdsmi_interface.amdsmi_get_gpu_cper_entries(
                     device_handle, severity_mask, buffer_size, args.cursor[gpu_idx])
                 logging.debug(f"cper_entries | entries: {entries}")
+                num_entries = num_entries + len(entries)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Error opening CPER file. This command requires elevation') from e
@@ -1464,6 +1466,11 @@ class AMDSMIHelpers():
             if args.folder:
                 self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
                 break
+            else:
+                self.display_cper_files_generated(entries, device_handle, args.folder)
+        if num_entries == 0 and not args.follow:
+            if args.folder:
+                self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
 
