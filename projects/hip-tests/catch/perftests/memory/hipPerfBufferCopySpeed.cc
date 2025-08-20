@@ -136,14 +136,6 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
       HIP_CHECK(hipDeviceSynchronize());
       auto all_end = std::chrono::steady_clock::now();
       std::chrono::duration<double> elapsed_secs = all_end - all_start;
-      auto start_s =
-          std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
-              .count();
-      auto end_s =
-          std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
-              .count();
-
-      DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
       DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
       double bufSizeWithIter = static_cast<double>(bufSize_);
       DEBUG_PRINT("%f\n", bufSizeWithIter);
@@ -202,14 +194,6 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     }
     HIP_CHECK(hipDeviceSynchronize());
     auto all_end = std::chrono::steady_clock::now();
-    auto start_s =
-        std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
-            .count();
-    auto end_s =
-        std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
-            .count();
-
-    DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
     DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
     double bufSizeWithIter = static_cast<double>(bufSize_);
@@ -328,14 +312,6 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
         }
         HIP_CHECK(hipDeviceSynchronize());
         auto all_end = std::chrono::steady_clock::now();
-        auto start_s =
-            std::chrono::duration_cast<std::chrono::duration<double>>(all_start.time_since_epoch())
-                .count();
-        auto end_s =
-            std::chrono::duration_cast<std::chrono::duration<double>>(all_end.time_since_epoch())
-                .count();
-
-        DEBUG_PRINT("All_start: %f s, All_end: %f s\n", start_s, end_s);
         std::chrono::duration<double> elapsed_secs = all_end - all_start;
         DEBUG_PRINT("Elapsed seconds: %f\n", elapsed_secs.count());
         double bufSizeWithIter = static_cast<double>(bufSize_);
