@@ -149,7 +149,7 @@ class KernelView(Container):
             "Memory Throughput",
             "VGPRs",
             "Grid Size",
-            "Work Group Size",
+            "Workgroup Size",
         ]
         """
 
