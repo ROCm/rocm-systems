@@ -22,7 +22,7 @@ THE SOFTWARE.
 /**
 Test Case Scenarios of hipGraphAddHostNode API:
 
-Functional:
+Verify all below Functional:
 1. Creates graph, Adds HostNode which updates the variable and validates the result
 2. Create graph, Add Graph nodes and clones the graph. Add Host node to the cloned graph
    and validate the result
@@ -35,6 +35,7 @@ Negative:
 2) Pass graph as nullptr and verify api doesn’t crash, returns error code.
 3) Pass pNodeParams as nullptr and verify api doesn’t crash, returns error code.
 4) Pass hipHostNodeParams::hipHostFn_t as nullptr and verify api doesn't crash, returns error code.
+
 */
 
 #include <hip_test_checkers.hh>
