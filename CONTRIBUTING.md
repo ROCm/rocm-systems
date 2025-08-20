@@ -69,12 +69,14 @@ cd projects/hipblaslt
 
 ## Keeping Your Branch in Sync
 
-To stay up to date with the latest changes in the super-repo:
+To stay up to date with the latest changes in the super-repo `develop` branch:
 
 ```bash
-git fetch origin
-git rebase origin/develop
+git pull --rebase origin develop
+git push --force
 ```
+
+Force-push is required to avoid adding the unrelated commits to the PR history and requiring additional reviewers.
 
 Avoid using git merge to keep history clean and maintain a linear progression.
 
