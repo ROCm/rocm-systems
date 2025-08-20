@@ -1,0 +1,103 @@
+# TUI use only
+# NOTE: This is used as a TUI-only yaml file for the beta release of the new performance metric organization
+Panel Config:
+  id: 3200
+  title: GPU Speed-of-Light
+  metrics_description:
+    Theoretical LDS Bandwidth: Indicates the maximum amount of bytes that could have
+      been loaded from, stored to, or atomically updated in the LDS per unit time
+      (see LDS Bandwidth example for more detail). This is also presented as a percent
+      of the peak theoretical F64 MFMA operations achievable on the specific accelerator.
+    vL1D Cache BW: The number of bytes looked up in the vL1D cache as a result of
+      VMEM instructions per unit time. The number of bytes is calculated as the number
+      of cache lines requested multiplied by the cache line size. This value does
+      not consider partial requests, so e.g., if only a single value is requested
+      in a cache line, the data movement will still be counted as a full cache line.
+      This is also presented as a percent of the peak theoretical bandwidth achievable
+      on the specific accelerator.
+    L2 Cache BW: The number of bytes looked up in the L2 cache per unit time. The
+      number of bytes is calculated as the number of cache lines requested multiplied
+      by the cache line size. This value does not consider partial requests, so e.g.,
+      if only a single value is requested in a cache line, the data movement will
+      still be counted as a full cache line. This is also presented as a percent of
+      the peak theoretical bandwidth achievable on the specific accelerator.
+    L2-Fabric Read BW: "The number of bytes read by the L2 over the Infinity Fabric\u2122\
+      \ interface per unit time. This is also presented as a percent of the peak theoretical\
+      \ bandwidth achievable on the specific accelerator."
+    L2-Fabric Write BW: The number of bytes sent by the L2 over the Infinity Fabric
+      interface by write and atomic operations per unit time. This is also presented
+      as a percent of the peak theoretical bandwidth achievable on the specific accelerator.
+    Kernel Time: The total duration of the executed kernel.
+    Kernel Time (Cycles): The total duration of the executed kernel in cycles.
+    SIMD Utilization: The percent of total SIMD cycles in the kernel where any SIMD
+      on a CU was actively doing any work, summed over all CUs. Low values (less than
+      100%) indicate that the accelerator was not fully saturated by the kernel, or
+      a potential load-imbalance issue.
+    Clock Rate:
+  data source:
+  - metric_table:
+      id: 3201
+      title: GPU Speed-of-Light
+      header:
+        metric: Metric
+        value: Avg
+        unit: Unit
+        peak: Peak
+        pop: Pct of Peak
+      metric:
+        Theoretical LDS Bandwidth:
+          value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: (($max_sclk * $cu_per_gpu) * 0.128)
+          pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+            / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
+        vL1D Cache BW:
+          value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 128) * $cu_per_gpu)
+          pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp
+            - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
+        L2 Cache BW:
+          value: AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan))
+          pop: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))))
+            / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
+        L2-Fabric Read BW:
+          value: AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
+            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
+            - Start_Timestamp))
+          unit: GB/s
+          peak: $hbmBandwidth
+          pop: ((100 * (AVG((128 * TCC_BUBBLE_sum + 64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum
+            - TCC_EA0_RDREQ_32B_sum) + 32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp
+            - Start_Timestamp)))) / $hbmBandwidth)
+        L2-Fabric Write BW:
+          value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
+            * 32)) / (End_Timestamp - Start_Timestamp)))
+          unit: GB/s
+          peak: $hbmBandwidth
+          pop: ((100 * AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum -
+            TCC_EA0_WRREQ_64B_sum) * 32)) / (End_Timestamp - Start_Timestamp)))) /
+            $hbmBandwidth)
+        Kernel Time:
+          avg: AVG((End_Timestamp - Start_Timestamp))
+          unit: ns
+          peak: N/A
+          pop: N/A
+        Kernel Time (Cycles):
+          avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
+          unit: Cycle
+          peak: N/A
+          pop: N/A
+        SIMD Utilization:
+          value: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+          unit: Pct
+          peak: 100
+          pop: AVG(100 * SQ_BUSY_CU_CYCLES / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))
+        Clock Rate:
+          value: (GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu) / (End_Timestamp - Start_Timestamp)
+          unit: MHz
+          peak: N/A # attainable peak? theoretical freq?
+          pop: N/A
