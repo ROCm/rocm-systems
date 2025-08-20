@@ -30,8 +30,16 @@ from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
+import pandas as pd
+
 from utils import file_io, parser, schema
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
@@ -189,6 +197,21 @@ class OmniAnalyze_Base:
                 else file_io.find_1st_sub_dir(d[0])
             )
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+
+            if not getattr(self.get_args(), "no_roof", False):
+                try:
+                    roofline_path = sysinfo_path.joinpath("roofline.csv")
+                    roofline_df = pd.read_csv(roofline_path)
+
+                    # use original column names from roofline.csv directly
+                    w.roofline_peaks = roofline_df
+
+                except FileNotFoundError:
+                    console_warning("roofline.csv not found.")
+                    w.roofline_peaks = pd.DataFrame()
+            else:
+                w.roofline_peaks = pd.DataFrame()
+
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:
