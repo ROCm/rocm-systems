@@ -767,6 +767,8 @@ def init_metric_evaluator(raw_pmc_df: dict, ammolite_vars: dict) -> None:
 def run_metric_evaluator(row_expr: str) -> str:
     try:
         # cache dataframes of 'raw_pmc_df'
+        # this may replace some KeyErrors with NameErrors
+        # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
         row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r'raw_pmc_df_\1', row_expr)
         out = eval(compile(row_expr, "<string>", "eval"))
 
@@ -780,6 +782,9 @@ def run_metric_evaluator(row_expr: str) -> str:
         return ""
     
     except KeyError:
+        return ""
+    
+    except NameError:
         return ""
 
     except AttributeError as ae:
@@ -1012,6 +1017,11 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug, config):
                                                 expr,
                                                 np.nan,
                                             )
+                                        )
+                                    except KeyError as ke:
+                                        console_warning(
+                                            "Skipping entry. Encountered a missing "
+                                            "key\n{}".format(str(ke))
                                         )
                                     except AttributeError as ae:
                                         if (
