@@ -230,7 +230,7 @@ in its current form. Therefore, to achieve more precise performance profiling, i
 
 .. note::
 
-  Host-trap PC sampling is supported on AMD Instinct MI200, MI300, MI350, and MI355.
+  Host-trap PC sampling is supported on AMD Instinct MI200, MI300, MI325, MI350, and MI355.
 
 Hardware-based (stochastic) PC sampling method
 ===============================================
