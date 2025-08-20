@@ -210,7 +210,9 @@ def generate_summary_query(
     return (full_view_name, summary_query)
 
 
-def generate_domain_query(connection: RocpdImportData, by_rank=False) -> Tuple[str, str]:
+def generate_domain_query(
+    connection: RocpdImportData, summary_queries, by_rank=False
+) -> Tuple[str, str]:
     """Generate the SQL statement for domain summary by doing union over all summary views."""
 
     if by_rank:
@@ -230,20 +232,27 @@ def generate_domain_query(connection: RocpdImportData, by_rank=False) -> Tuple[s
         join_condition = "CROSS JOIN total_duration TD"
         order_by = 'ORDER BY GD."DURATION (nsec)" DESC'
 
-    summary_views = [
-        itr for itr in get_temp_view_names(connection) if itr.endswith(view_suffix)
-    ]
+    summary_views = {
+        query_name: query
+        for query_name, query in summary_queries.items()
+        if query_name.endswith(view_suffix)
+    }
 
     if len(summary_views) < 1:
         return ()
 
+    summary_selects = [
+        f"{query_name} AS ({query})," for query_name, query in summary_views.items()
+    ]
+
     union_selects = [
-        f" SELECT '{s.replace(view_suffix, '').upper()}' as domain, * FROM {s} "
-        for s in summary_views
+        f" SELECT '{query_name.replace(view_suffix, '').upper()}' as domain, * FROM {query_name} "
+        for query_name, query in summary_views.items()
     ]
 
     domain_select = f"""
         WITH
+            {f"".join(summary_selects)}
             all_domains AS (
                {f" UNION ALL ".join(union_selects)}
             ),
@@ -301,6 +310,8 @@ def export_summary_queries(
 
     views = get_temp_view_names(connection)
 
+    queries = {}
+
     for view_name in views:
         if any(pattern in view_name for pattern in avoid_view_pattern):
             continue
@@ -314,6 +325,7 @@ def export_summary_queries(
             view_name, "", name_column=NAME_COLUMN_MAP.get(view_name, "name")
         )
         export_query(connection, config, summary_query_name, summary_query)
+        queries[summary_query_name] = summary_query
 
         # Create per-rank summary query
         if by_rank:
@@ -324,6 +336,9 @@ def export_summary_queries(
                 by_rank=True,
             )
             export_query(connection, config, per_rank_query_name, summary_by_rank_query)
+            queries[per_rank_query_name] = summary_by_rank_query
+
+    return queries
 
 
 def export_summary_region_queries(
@@ -347,6 +362,8 @@ def export_summary_region_queries(
         if "MARKER" not in cat.upper()
     }
 
+    queries = {}
+
     for k, v in category_map.items():
         if len(v) > 0:
             conditions = [f"category LIKE '{c}'" for c in v]
@@ -359,6 +376,7 @@ def export_summary_region_queries(
             # Create regular summary query
             summary_query_name, summary_query = generate_summary_query(k, region_query)
             export_query(connection, config, summary_query_name, summary_query)
+            queries[summary_query_name] = summary_query
 
             # Create per-rank summary query
             if by_rank:
@@ -368,10 +386,11 @@ def export_summary_region_queries(
                 export_query(
                     connection, config, per_rank_query_name, summary_by_rank_query
                 )
+                queries[per_rank_query_name] = summary_by_rank_query
 
     # Markers
     if "MARKER" not in region_categories:
-        return
+        return queries
 
     markers_query_name = "markers"
     markers_query = f"""
@@ -385,6 +404,7 @@ def export_summary_region_queries(
         markers_query_name, markers_query, name_column="marker_name"
     )
     export_query(connection, config, summary_query_name, summary_query)
+    queries[summary_query_name] = summary_query
 
     # Create per-rank summary query
     if by_rank:
@@ -392,12 +412,17 @@ def export_summary_region_queries(
             markers_query_name, markers_query, name_column="marker_name", by_rank=True
         )
         export_query(connection, config, per_rank_query_name, summary_by_rank_query)
+        queries[per_rank_query_name] = summary_by_rank_query
+
+    return queries
 
 
-def export_domain_query(connection: RocpdImportData, config: ExportConfig, by_rank=False):
+def export_domain_query(
+    connection: RocpdImportData, config: ExportConfig, summary_queries, by_rank=False
+):
     """Create and export a domain summary query by aggregating all summary views."""
 
-    result = generate_domain_query(connection, by_rank=by_rank)
+    result = generate_domain_query(connection, summary_queries, by_rank=by_rank)
     if not result:
         return
 
@@ -434,17 +459,19 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
         filename=filename,
     )
 
+    summary_queries = {}
+
     # Create and export the summary queries
-    export_summary_queries(connection, config, by_rank)
-    export_summary_region_queries(
+    summary_queries |= export_summary_queries(connection, config, by_rank)
+    summary_queries |= export_summary_region_queries(
         connection, config, by_rank, region_categories=region_categories
     )
 
     if domain_summary:
-        export_domain_query(connection, config)
+        export_domain_query(connection, config, summary_queries)
         # Create and export domain summary per rank only if both domain_summary and summary_by_rank are enabled
         if by_rank:
-            export_domain_query(connection, config, by_rank=True)
+            export_domain_query(connection, config, summary_queries, by_rank=True)
 
 
 #
