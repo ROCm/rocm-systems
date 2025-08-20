@@ -455,6 +455,6 @@ TEMPLATE_TEST_CASE("Unit_Device_scalbln_Accuracy_Positive", "", float, double) {
 TEST_CASE("Unit_Device_scalbln_scalblnf_Negative_RTC") { NegativeTestRTCWrapper<8>(kScalbln); }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

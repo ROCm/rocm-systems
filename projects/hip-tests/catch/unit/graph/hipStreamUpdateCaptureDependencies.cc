@@ -471,6 +471,6 @@ TEST_CASE("Unit_hipStreamUpdateCaptureDependencies_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

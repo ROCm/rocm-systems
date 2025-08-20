@@ -20,12 +20,12 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 
 /**
-* @addtogroup hipFuncGetAttributes
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func)` -
-* Find out attributes for a given function
-*/
+ * @addtogroup hipFuncGetAttributes
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func)` -
+ * Find out attributes for a given function
+ */
 
 /**
  * Test Description
@@ -48,8 +48,7 @@ __global__ void getAttrFn(float* px, float* py) {
 TEST_CASE("Unit_hipFuncGetAttributes_basic") {
   hipFuncAttributes attr{};
 
-  auto r = hipFuncGetAttributes(&attr,
-           reinterpret_cast<const void*>(&getAttrFn));
+  auto r = hipFuncGetAttributes(&attr, reinterpret_cast<const void*>(&getAttrFn));
   REQUIRE(r == hipSuccess);
   REQUIRE(attr.maxThreadsPerBlock != 0);
 }

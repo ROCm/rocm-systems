@@ -63,7 +63,7 @@ THE SOFTWARE.
  *    - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE("Unit_atomicCAS_Positive", "", int, unsigned int, unsigned long long,
-                                                  unsigned short int TYPES) {
+                   unsigned short int TYPES) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
   const auto cache_line_size = 128u;
@@ -173,6 +173,6 @@ TEST_CASE("Unit_atomicCAS_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

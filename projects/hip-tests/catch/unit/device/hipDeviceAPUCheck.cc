@@ -48,6 +48,6 @@ TEST_CASE("Unit_hipDeviceAPUCheck") {
     HipTest::HIP_SKIP_TEST("This device is a Discrete Graphics card. So skipping test");
     return;
   } else {
-    std::cout<<"This device is an APU"<<std::endl;
+    std::cout << "This device is an APU" << std::endl;
   }
 }

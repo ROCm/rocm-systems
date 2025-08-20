@@ -24,10 +24,10 @@ THE SOFTWARE.
 This testfile verifies the basic scenario of hipMemPtrGetInfo API
 */
 #include <hip_test_common.hh>
-struct MemInfo{
-    float a;
-    int b;
-    void* c;
+struct MemInfo {
+  float a;
+  int b;
+  void* c;
 };
 
 /*

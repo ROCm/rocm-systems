@@ -39,7 +39,7 @@ static constexpr int launches = 5;
 /**
  * In fillKernel, all elements of the array filled with given value
  */
-static __global__ void fillKernel(int *arr, int size, int value) {
+static __global__ void fillKernel(int* arr, int size, int value) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = offset; i < size; i += stride) {
@@ -50,7 +50,7 @@ static __global__ void fillKernel(int *arr, int size, int value) {
 /**
  * In addOneKernel, all elements of the array are incremented by 1
  */
-static __global__ void addOneKernel(int *arr, int size) {
+static __global__ void addOneKernel(int* arr, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = offset; i < size; i += stride) {
@@ -62,7 +62,7 @@ static __global__ void addOneKernel(int *arr, int size) {
  * In addKernel, Array1 and Array2 will be added by element wise
  * and stored in Array 1
  */
-static __global__ void addKernel(int *arr1, int *arr2, int size) {
+static __global__ void addKernel(int* arr1, int* arr2, int size) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
   for (int i = offset; i < size; i += stride) {
@@ -93,7 +93,7 @@ static __global__ void addKernel(int *arr1, int *arr2, int size) {
 TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
   constexpr int numberOfNodes = 1024;
 
-  int *devMem[numberOfNodes];
+  int* devMem[numberOfNodes];
   for (int i = 0; i < numberOfNodes; i++) {
     devMem[i] = nullptr;
   }
@@ -116,17 +116,15 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
     memAllocNodeParams.bytesize = sizeof(int);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0,
-                                        &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
 
-      HIP_CHECK(hipGraphAddMemAllocNode(
-          &memAllocNode[i], graph, memAllocNodeDependencies.data(),
-          memAllocNodeDependencies.size(), &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, memAllocNodeDependencies.data(),
+                                        memAllocNodeDependencies.size(), &memAllocNodeParams));
     }
-    devMem[i] = reinterpret_cast<int *>(memAllocNodeParams.dptr);
+    devMem[i] = reinterpret_cast<int*>(memAllocNodeParams.dptr);
     REQUIRE(devMem[i] != nullptr);
   }
 
@@ -136,16 +134,16 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
       ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
       memFreeNodeDependencies.push_back(memAllocNode[numberOfNodes - 1]);
 
-      HIP_CHECK(hipGraphAddMemFreeNode(
-          &memFreeNode[i], graph, memFreeNodeDependencies.data(),
-          memFreeNodeDependencies.size(), reinterpret_cast<void *>(devMem[i])));
+      HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[i], graph, memFreeNodeDependencies.data(),
+                                       memFreeNodeDependencies.size(),
+                                       reinterpret_cast<void*>(devMem[i])));
     } else {
       ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
       memFreeNodeDependencies.push_back(memFreeNode[i - 1]);
 
-      HIP_CHECK(hipGraphAddMemFreeNode(
-          &memFreeNode[i], graph, memFreeNodeDependencies.data(),
-          memFreeNodeDependencies.size(), reinterpret_cast<void *>(devMem[i])));
+      HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[i], graph, memFreeNodeDependencies.data(),
+                                       memFreeNodeDependencies.size(),
+                                       reinterpret_cast<void*>(devMem[i])));
     }
   }
 
@@ -165,27 +163,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
-  auto launch_result =
-      std::chrono::duration<double, std::milli>(launch_stop - launch_start);
+  auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
-  auto sync_result =
-      std::chrono::duration<double, std::milli>(sync_stop - sync_start);
+  auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
 
   std::cout << "Time taken to Execute : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   launch_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(launch_result).count()
             << " millisecs " << std::endl;
 
   std::cout << "Time taken to Synchronize : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   sync_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
@@ -225,7 +217,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SingleBranchNoOperations") {
 TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
   constexpr int SIZE = 100;
 
-  char *dev[SIZE];
+  char* dev[SIZE];
   for (int i = 0; i < SIZE; i++) {
     dev[i] = nullptr;
   }
@@ -241,8 +233,8 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  hipGraphNode_t memAllocNode[SIZE], memsetNode[SIZE], kernelNode[SIZE],
-      memcpyNode[SIZE], memFreeNode[SIZE];
+  hipGraphNode_t memAllocNode[SIZE], memsetNode[SIZE], kernelNode[SIZE], memcpyNode[SIZE],
+      memFreeNode[SIZE];
 
   // Prapare Mem alloc Nodes
   for (int i = 0; i < SIZE; i++) {
@@ -254,24 +246,22 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
     memAllocNodeParams.bytesize = sizeof(char);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0,
-                                        &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
 
-      HIP_CHECK(hipGraphAddMemAllocNode(
-          &memAllocNode[i], graph, memAllocNodeDependencies.data(),
-          memAllocNodeDependencies.size(), &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, memAllocNodeDependencies.data(),
+                                        memAllocNodeDependencies.size(), &memAllocNodeParams));
     }
-    dev[i] = reinterpret_cast<char *>(memAllocNodeParams.dptr);
+    dev[i] = reinterpret_cast<char*>(memAllocNodeParams.dptr);
     REQUIRE(dev[i] != nullptr);
   }
 
   // Prapare Memset Nodes
   for (int i = 0; i < SIZE; i++) {
     hipMemsetParams pMemsetParams{};
-    pMemsetParams.dst = reinterpret_cast<void *>(dev[i]);
+    pMemsetParams.dst = reinterpret_cast<void*>(dev[i]);
     pMemsetParams.elementSize = 1;
     pMemsetParams.height = 1;
     pMemsetParams.pitch = 1;
@@ -284,21 +274,19 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
     } else {
       memsetNodeDependencies.push_back(memsetNode[i - 1]);
     }
-    HIP_CHECK(hipGraphAddMemsetNode(
-        &memsetNode[i], graph, memsetNodeDependencies.data(),
-        memsetNodeDependencies.size(), &pMemsetParams));
+    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode[i], graph, memsetNodeDependencies.data(),
+                                    memsetNodeDependencies.size(), &pMemsetParams));
   }
 
   // Prapare Kernel Nodes
   for (int i = 0; i < SIZE; i++) {
     hipKernelNodeParams kernelNodeParams{};
-    kernelNodeParams.func = reinterpret_cast<void *>(addOneKernel);
+    kernelNodeParams.func = reinterpret_cast<void*>(addOneKernel);
     kernelNodeParams.gridDim = dim3(1, 1, 1);
     kernelNodeParams.blockDim = dim3(1, 1, 1);
     kernelNodeParams.sharedMemBytes = 0;
     int size = 1;
-    void *kernelArgs[2] = {reinterpret_cast<void *>(&dev[i]),
-                           reinterpret_cast<void *>(&size)};
+    void* kernelArgs[2] = {reinterpret_cast<void*>(&dev[i]), reinterpret_cast<void*>(&size)};
     kernelNodeParams.kernelParams = kernelArgs;
     kernelNodeParams.extra = nullptr;
 
@@ -309,9 +297,8 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
       kernelNodeDependencies.push_back(kernelNode[i - 1]);
     }
 
-    HIP_CHECK(hipGraphAddKernelNode(
-        &kernelNode[i], graph, kernelNodeDependencies.data(),
-        kernelNodeDependencies.size(), &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelNode[i], graph, kernelNodeDependencies.data(),
+                                    kernelNodeDependencies.size(), &kernelNodeParams));
   }
 
   // Prapare Memcpy Nodes
@@ -330,9 +317,8 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
     } else {
       memcpyNodeDependencies.push_back(memcpyNode[i - 1]);
     }
-    HIP_CHECK(hipGraphAddMemcpyNode(
-        &memcpyNode[i], graph, memcpyNodeDependencies.data(),
-        memcpyNodeDependencies.size(), &pMemcpyParams));
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode[i], graph, memcpyNodeDependencies.data(),
+                                    memcpyNodeDependencies.size(), &pMemcpyParams));
   }
 
   // Prapare Mem free Nodes
@@ -341,16 +327,16 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
       ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
       memFreeNodeDependencies.push_back(memcpyNode[SIZE - 1]);
 
-      HIP_CHECK(hipGraphAddMemFreeNode(
-          &memFreeNode[i], graph, memFreeNodeDependencies.data(),
-          memFreeNodeDependencies.size(), reinterpret_cast<void *>(dev[i])));
+      HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[i], graph, memFreeNodeDependencies.data(),
+                                       memFreeNodeDependencies.size(),
+                                       reinterpret_cast<void*>(dev[i])));
     } else {
       ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
       memFreeNodeDependencies.push_back(memFreeNode[i - 1]);
 
-      HIP_CHECK(hipGraphAddMemFreeNode(
-          &memFreeNode[i], graph, memFreeNodeDependencies.data(),
-          memFreeNodeDependencies.size(), reinterpret_cast<void *>(dev[i])));
+      HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[i], graph, memFreeNodeDependencies.data(),
+                                       memFreeNodeDependencies.size(),
+                                       reinterpret_cast<void*>(dev[i])));
     }
   }
 
@@ -369,27 +355,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_SerialNodesSingleBranchWithOps") {
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
   }
   auto launch_stop = std::chrono::high_resolution_clock::now();
-  auto launch_result =
-      std::chrono::duration<double, std::milli>(launch_stop - launch_start);
+  auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
-  auto sync_result =
-      std::chrono::duration<double, std::milli>(sync_stop - sync_start);
+  auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
 
   std::cout << "Time taken to Execute : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   launch_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(launch_result).count()
             << " millisecs " << std::endl;
 
   std::cout << "Time taken to Synchronize : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   sync_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
   for (int i = 0; i < SIZE; i++) {
@@ -434,14 +414,14 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
   constexpr int BRANCHES = 10;
 
   int value = 100;
-  int *hostMemSrc = new int[SIZE];
+  int* hostMemSrc = new int[SIZE];
   REQUIRE(hostMemSrc != nullptr);
 
-  int *devMemSrc1 = nullptr;
+  int* devMemSrc1 = nullptr;
   HIP_CHECK(hipMalloc(&devMemSrc1, NBYTES));
   REQUIRE(devMemSrc1 != nullptr);
 
-  int *devMemSrc2[BRANCHES];
+  int* devMemSrc2[BRANCHES];
   for (int i = 0; i < BRANCHES; i++) {
     devMemSrc2[i] = nullptr;
   }
@@ -455,14 +435,12 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  hipGraphNode_t memcpyNodeH2D, memAllocNode[BRANCHES],
-      fillKernelNode[BRANCHES], addKernelNode[BRANCHES],
-      memcpyNodeD2H[BRANCHES], memFreeNode[BRANCHES], memcpyNodeH2H;
+  hipGraphNode_t memcpyNodeH2D, memAllocNode[BRANCHES], fillKernelNode[BRANCHES],
+      addKernelNode[BRANCHES], memcpyNodeD2H[BRANCHES], memFreeNode[BRANCHES], memcpyNodeH2H;
 
   // Add H2D Node
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0,
-                                    devMemSrc1, hostMemSrc, NBYTES,
-                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2D, graph, nullptr, 0, devMemSrc1, hostMemSrc,
+                                    NBYTES, hipMemcpyHostToDevice));
 
   for (int branch = 0; branch < BRANCHES; branch++) {
     // Add Mem alloc Nodes
@@ -476,11 +454,10 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
     memAllocNodeParams.poolProps.location.id = 0;
     memAllocNodeParams.bytesize = NBYTES;
 
-    HIP_CHECK(hipGraphAddMemAllocNode(
-        &memAllocNode[branch], graph, memAllocNodeDependencies.data(),
-        memAllocNodeDependencies.size(), &memAllocNodeParams));
+    HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[branch], graph, memAllocNodeDependencies.data(),
+                                      memAllocNodeDependencies.size(), &memAllocNodeParams));
 
-    devMemSrc2[branch] = reinterpret_cast<int *>(memAllocNodeParams.dptr);
+    devMemSrc2[branch] = reinterpret_cast<int*>(memAllocNodeParams.dptr);
     REQUIRE(devMemSrc2[branch] != nullptr);
 
     // Add Kernel Nodes (fillKernel)
@@ -488,57 +465,52 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
     kernelNodeDependencies.push_back(memAllocNode[branch]);
 
     hipKernelNodeParams kernelNodeParams{};
-    kernelNodeParams.func = reinterpret_cast<void *>(fillKernel);
+    kernelNodeParams.func = reinterpret_cast<void*>(fillKernel);
     kernelNodeParams.gridDim = dim3(1, 1, 1);
     kernelNodeParams.blockDim = dim3(1, 1, 1);
     kernelNodeParams.sharedMemBytes = 0;
     int size = SIZE;
-    void *kernelArgs[3] = {reinterpret_cast<void *>(&devMemSrc2[branch]),
-                           reinterpret_cast<void *>(&size),
-                           reinterpret_cast<void *>(&value)};
+    void* kernelArgs[3] = {reinterpret_cast<void*>(&devMemSrc2[branch]),
+                           reinterpret_cast<void*>(&size), reinterpret_cast<void*>(&value)};
     kernelNodeParams.kernelParams = kernelArgs;
     kernelNodeParams.extra = nullptr;
 
-    HIP_CHECK(hipGraphAddKernelNode(
-        &fillKernelNode[branch], graph, kernelNodeDependencies.data(),
-        kernelNodeDependencies.size(), &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&fillKernelNode[branch], graph, kernelNodeDependencies.data(),
+                                    kernelNodeDependencies.size(), &kernelNodeParams));
 
     // Add Kernel Nodes (addKernel)
     ::std::vector<hipGraphNode_t> kernelNodeDependencies2;
     kernelNodeDependencies2.push_back(fillKernelNode[branch]);
 
     hipKernelNodeParams kernelNodeParams2{};
-    kernelNodeParams2.func = reinterpret_cast<void *>(addKernel);
+    kernelNodeParams2.func = reinterpret_cast<void*>(addKernel);
     kernelNodeParams2.gridDim = dim3(1, 1, 1);
     kernelNodeParams2.blockDim = dim3(1, 1, 1);
     kernelNodeParams2.sharedMemBytes = 0;
     int size2 = SIZE;
-    void *kernelArgs2[3] = {reinterpret_cast<void *>(&devMemSrc2[branch]),
-                            reinterpret_cast<void *>(&devMemSrc1),
-                            reinterpret_cast<void *>(&size2)};
+    void* kernelArgs2[3] = {reinterpret_cast<void*>(&devMemSrc2[branch]),
+                            reinterpret_cast<void*>(&devMemSrc1), reinterpret_cast<void*>(&size2)};
     kernelNodeParams2.kernelParams = kernelArgs2;
     kernelNodeParams2.extra = nullptr;
 
-    HIP_CHECK(hipGraphAddKernelNode(
-        &addKernelNode[branch], graph, kernelNodeDependencies2.data(),
-        kernelNodeDependencies2.size(), &kernelNodeParams2));
+    HIP_CHECK(hipGraphAddKernelNode(&addKernelNode[branch], graph, kernelNodeDependencies2.data(),
+                                    kernelNodeDependencies2.size(), &kernelNodeParams2));
 
     // Add D2H Nodes
     ::std::vector<hipGraphNode_t> memcpyNodeD2HDependencies;
     memcpyNodeD2HDependencies.push_back(addKernelNode[branch]);
 
-    HIP_CHECK(hipGraphAddMemcpyNode1D(
-        &memcpyNodeD2H[branch], graph, memcpyNodeD2HDependencies.data(),
-        memcpyNodeD2HDependencies.size(), hostMemDst[branch],
-        devMemSrc2[branch], NBYTES, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeD2H[branch], graph,
+                                      memcpyNodeD2HDependencies.data(),
+                                      memcpyNodeD2HDependencies.size(), hostMemDst[branch],
+                                      devMemSrc2[branch], NBYTES, hipMemcpyDeviceToHost));
 
     ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
     memFreeNodeDependencies.push_back(memcpyNodeD2H[branch]);
 
-    HIP_CHECK(hipGraphAddMemFreeNode(
-        &memFreeNode[branch], graph, memFreeNodeDependencies.data(),
-        memFreeNodeDependencies.size(),
-        reinterpret_cast<void *>(devMemSrc2[branch])));
+    HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[branch], graph, memFreeNodeDependencies.data(),
+                                     memFreeNodeDependencies.size(),
+                                     reinterpret_cast<void*>(devMemSrc2[branch])));
   }
 
   // Add H2H Node
@@ -547,10 +519,9 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
     memcpyNodeH2HDependencies.push_back(memFreeNode[i]);
   }
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(
-      &memcpyNodeH2H, graph, memcpyNodeH2HDependencies.data(),
-      memcpyNodeH2HDependencies.size(), finalHostDst, hostMemDst,
-      BRANCHES * SIZE * sizeof(int), hipMemcpyHostToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyNodeH2H, graph, memcpyNodeH2HDependencies.data(),
+                                    memcpyNodeH2HDependencies.size(), finalHostDst, hostMemDst,
+                                    BRANCHES * SIZE * sizeof(int), hipMemcpyHostToHost));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
@@ -570,27 +541,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
-  auto launch_result =
-      std::chrono::duration<double, std::milli>(launch_stop - launch_start);
+  auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
-  auto sync_result =
-      std::chrono::duration<double, std::milli>(sync_stop - sync_start);
+  auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
 
   std::cout << "Time taken to Execute : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   launch_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(launch_result).count()
             << " millisecs " << std::endl;
 
   std::cout << "Time taken to Synchronize : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   sync_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
   for (int branch = 0; branch < BRANCHES; branch++) {
@@ -633,7 +598,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleBranches") {
 TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
   constexpr int BRANCHES = 10;
 
-  char *dev[BRANCHES];
+  char* dev[BRANCHES];
   for (int i = 0; i < BRANCHES; i++) {
     dev[i] = nullptr;
   }
@@ -649,8 +614,8 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  hipGraphNode_t memAllocNode[BRANCHES], memsetNode[BRANCHES],
-      kernelNode[BRANCHES], memcpyNode[BRANCHES], memFreeNode[BRANCHES];
+  hipGraphNode_t memAllocNode[BRANCHES], memsetNode[BRANCHES], kernelNode[BRANCHES],
+      memcpyNode[BRANCHES], memFreeNode[BRANCHES];
 
   // Prapare Mem alloc Nodes
   for (int i = 0; i < BRANCHES; i++) {
@@ -661,14 +626,13 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
     memAllocNodeParams.poolProps.location.id = 0;
     memAllocNodeParams.bytesize = sizeof(char);
 
-    HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0,
-                                      &memAllocNodeParams));
+    HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
 
-    dev[i] = reinterpret_cast<char *>(memAllocNodeParams.dptr);
+    dev[i] = reinterpret_cast<char*>(memAllocNodeParams.dptr);
     REQUIRE(dev[i] != nullptr);
 
     hipMemsetParams pMemsetParams{};
-    pMemsetParams.dst = reinterpret_cast<void *>(dev[i]);
+    pMemsetParams.dst = reinterpret_cast<void*>(dev[i]);
     pMemsetParams.elementSize = 1;
     pMemsetParams.height = 1;
     pMemsetParams.pitch = 1;
@@ -678,27 +642,24 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
     ::std::vector<hipGraphNode_t> memsetNodeDependencies;
     memsetNodeDependencies.push_back(memAllocNode[i]);
 
-    HIP_CHECK(hipGraphAddMemsetNode(
-        &memsetNode[i], graph, memsetNodeDependencies.data(),
-        memsetNodeDependencies.size(), &pMemsetParams));
+    HIP_CHECK(hipGraphAddMemsetNode(&memsetNode[i], graph, memsetNodeDependencies.data(),
+                                    memsetNodeDependencies.size(), &pMemsetParams));
 
     hipKernelNodeParams kernelNodeParams{};
-    kernelNodeParams.func = reinterpret_cast<void *>(addOneKernel);
+    kernelNodeParams.func = reinterpret_cast<void*>(addOneKernel);
     kernelNodeParams.gridDim = dim3(1, 1, 1);
     kernelNodeParams.blockDim = dim3(1, 1, 1);
     kernelNodeParams.sharedMemBytes = 0;
     int size = 1;
-    void *kernelArgs[2] = {reinterpret_cast<void *>(&dev[i]),
-                           reinterpret_cast<void *>(&size)};
+    void* kernelArgs[2] = {reinterpret_cast<void*>(&dev[i]), reinterpret_cast<void*>(&size)};
     kernelNodeParams.kernelParams = kernelArgs;
     kernelNodeParams.extra = nullptr;
 
     ::std::vector<hipGraphNode_t> kernelNodeDependencies;
     kernelNodeDependencies.push_back(memsetNode[i]);
 
-    HIP_CHECK(hipGraphAddKernelNode(
-        &kernelNode[i], graph, kernelNodeDependencies.data(),
-        kernelNodeDependencies.size(), &kernelNodeParams));
+    HIP_CHECK(hipGraphAddKernelNode(&kernelNode[i], graph, kernelNodeDependencies.data(),
+                                    kernelNodeDependencies.size(), &kernelNodeParams));
 
     hipMemcpy3DParms pMemcpyParams{};
     pMemcpyParams.srcPos = make_hipPos(0, 0, 0);
@@ -711,16 +672,15 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
     ::std::vector<hipGraphNode_t> memcpyNodeDependencies;
     memcpyNodeDependencies.push_back(kernelNode[i]);
 
-    HIP_CHECK(hipGraphAddMemcpyNode(
-        &memcpyNode[i], graph, memcpyNodeDependencies.data(),
-        memcpyNodeDependencies.size(), &pMemcpyParams));
+    HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode[i], graph, memcpyNodeDependencies.data(),
+                                    memcpyNodeDependencies.size(), &pMemcpyParams));
 
     ::std::vector<hipGraphNode_t> memFreeNodeDependencies;
     memFreeNodeDependencies.push_back(memcpyNode[i]);
 
-    HIP_CHECK(hipGraphAddMemFreeNode(
-        &memFreeNode[i], graph, memFreeNodeDependencies.data(),
-        memFreeNodeDependencies.size(), reinterpret_cast<void *>(dev[i])));
+    HIP_CHECK(hipGraphAddMemFreeNode(&memFreeNode[i], graph, memFreeNodeDependencies.data(),
+                                     memFreeNodeDependencies.size(),
+                                     reinterpret_cast<void*>(dev[i])));
   }
 
   hipGraphExec_t graphExec;
@@ -738,27 +698,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
     HIP_CHECK(hipGraphLaunch(graphExec, stream));
   }
   auto launch_stop = std::chrono::high_resolution_clock::now();
-  auto launch_result =
-      std::chrono::duration<double, std::milli>(launch_stop - launch_start);
+  auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
-  auto sync_result =
-      std::chrono::duration<double, std::milli>(sync_stop - sync_start);
+  auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
 
   std::cout << "Time taken to Execute : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   launch_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(launch_result).count()
             << " millisecs " << std::endl;
 
   std::cout << "Time taken to Synchronize : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   sync_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
   for (int i = 0; i < BRANCHES; i++) {
@@ -791,7 +745,7 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_MultipleIndependentBranches") {
 TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch") {
   constexpr int SIZE = 1024;
 
-  int *devMem[SIZE];
+  int* devMem[SIZE];
   for (int i = 0; i < SIZE; i++) {
     devMem[i] = nullptr;
   }
@@ -813,23 +767,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch") {
     memAllocNodeParams.bytesize = sizeof(int);
 
     if (i == 0) {
-      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0,
-                                        &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, nullptr, 0, &memAllocNodeParams));
     } else {
       ::std::vector<hipGraphNode_t> memAllocNodeDependencies;
       memAllocNodeDependencies.push_back(memAllocNode[i - 1]);
 
-      HIP_CHECK(hipGraphAddMemAllocNode(
-          &memAllocNode[i], graph, memAllocNodeDependencies.data(),
-          memAllocNodeDependencies.size(), &memAllocNodeParams));
+      HIP_CHECK(hipGraphAddMemAllocNode(&memAllocNode[i], graph, memAllocNodeDependencies.data(),
+                                        memAllocNodeDependencies.size(), &memAllocNodeParams));
     }
-    devMem[i] = reinterpret_cast<int *>(memAllocNodeParams.dptr);
+    devMem[i] = reinterpret_cast<int*>(memAllocNodeParams.dptr);
     REQUIRE(devMem[i] != nullptr);
   }
 
   hipGraphExec_t graphExec;
-  HIP_CHECK(hipGraphInstantiateWithFlags(
-      &graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
+  HIP_CHECK(
+      hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
   // Warm up call
   HIP_CHECK(hipGraphLaunch(graphExec, stream));
@@ -844,27 +796,21 @@ TEST_CASE("Perf_GraphWithMoreAllocFreeNodes_OneBranchNoOps_AutoFreeOnLaunch") {
   }
 
   auto launch_stop = std::chrono::high_resolution_clock::now();
-  auto launch_result =
-      std::chrono::duration<double, std::milli>(launch_stop - launch_start);
+  auto launch_result = std::chrono::duration<double, std::milli>(launch_stop - launch_start);
 
   auto sync_start = std::chrono::high_resolution_clock::now();
 
   HIP_CHECK(hipStreamSynchronize(stream));
 
   auto sync_stop = std::chrono::high_resolution_clock::now();
-  auto sync_result =
-      std::chrono::duration<double, std::milli>(sync_stop - sync_start);
+  auto sync_result = std::chrono::duration<double, std::milli>(sync_stop - sync_start);
 
   std::cout << "Time taken to Execute : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   launch_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(launch_result).count()
             << " millisecs " << std::endl;
 
   std::cout << "Time taken to Synchronize : "
-            << std::chrono::duration_cast<std::chrono::milliseconds>(
-                   sync_result)
-                   .count()
+            << std::chrono::duration_cast<std::chrono::milliseconds>(sync_result).count()
             << " millisecs " << std::endl;
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));

@@ -36,8 +36,8 @@ namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
                      uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
-    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs,
-                   priority, cuMask),
+    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
+                   cuMask),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
@@ -266,8 +266,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
           ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
-                  amd::activity_prof::getOclCommandKindString(command->type()),
-                  command, it);
+                  amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
           dependencyFailed |= !it->awaitCompletion();
@@ -289,8 +288,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     }
 
     ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
-            amd::activity_prof::getOclCommandKindString(command->type()),
-            command);
+            amd::activity_prof::getOclCommandKindString(command->type()), command);
 
     command->setStatus(CL_SUBMITTED);
 

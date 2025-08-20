@@ -245,8 +245,8 @@ inline static std::vector<std::string> splitSpaceSeparatedString(char* str) {
 inline static std::string GetUriFromMemoryAddress(const void* memory, size_t size) {
   int pid = amd::Os::getProcessId();
   std::ostringstream uri_stream;
-  uri_stream << "memory://" << pid << "#offset=0x" << std::hex <<
-    reinterpret_cast<uintptr_t>(memory) << std::dec << "&size=" << size;
+  uri_stream << "memory://" << pid << "#offset=0x" << std::hex
+             << reinterpret_cast<uintptr_t>(memory) << std::dec << "&size=" << size;
   return uri_stream.str();
 }
 
@@ -312,8 +312,8 @@ bool HSAILProgram::createKernels(void* binary, size_t binSize, bool useUniformWo
   return true;
 }
 
-bool HSAILProgram::setKernels(void* binary, size_t binSize,
-                              amd::Os::FileDesc fdesc, size_t foffset, std::string uri) {
+bool HSAILProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc, size_t foffset,
+                              std::string uri) {
 #if defined(WITH_COMPILER_LIB)
   if (!device().isOnline()) {
     return true;
@@ -809,8 +809,8 @@ bool LightningProgram::setKernels(void* binary, size_t binSize, amd::Os::FileDes
 #if defined(USE_COMGR_LIBRARY)
   // Collect the information about compiled binary, except the trap handler
   if (!isNull() && (palDevice().captureMgr() != nullptr) && !isTrapHandler()) {
-    apiHash_ = palDevice().captureMgr()->AddElfBinary(
-        binary, binSize, binary, binSize, codeSegGpu_->iMem(), codeSegGpu_->offset());
+    apiHash_ = palDevice().captureMgr()->AddElfBinary(binary, binSize, binary, binSize,
+                                                      codeSegGpu_->iMem(), codeSegGpu_->offset());
   }
 
   for (auto& kit : kernels()) {

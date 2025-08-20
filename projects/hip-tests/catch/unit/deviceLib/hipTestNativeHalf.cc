@@ -20,8 +20,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <type_traits>
 
-__global__
-void __halfTest(bool* result, __half a) {
+__global__ void __halfTest(bool* result, __half a) {
   // Construction
   result[0] &= std::is_default_constructible<__half>{};
   result[0] &= std::is_copy_constructible<__half>{};
@@ -94,14 +93,12 @@ void __halfTest(bool* result, __half a) {
   result[0] &= !(a > a) && result[0];
 }
 
-__device__
-static bool to_bool(const __half2& x) {
+__device__ static bool to_bool(const __half2& x) {
   auto r = static_cast<const __half2_raw&>(x);
   return r.data.x != 0 && r.data.y != 0;
 }
 
-__global__
-void __half2Test(bool* result, __half2 a) {
+__global__ void __half2Test(bool* result, __half2 a) {
   // Construction
   result[0] &= std::is_default_constructible<__half2>{};
   result[0] &= std::is_copy_constructible<__half2>{};
@@ -143,7 +140,6 @@ void __half2Test(bool* result, __half2 a) {
 
   // Dot Functions
   result[0] &= amd_mixed_dot(a, a, 1, 1) && result[0];
-
 }
 
 TEST_CASE("Unit_hipTestNativeHalf") {
@@ -151,15 +147,13 @@ TEST_CASE("Unit_hipTestNativeHalf") {
   HIP_CHECK(hipHostMalloc(&result, 1));
   SECTION("Half Test") {
     result[0] = true;
-    hipLaunchKernelGGL(
-        __halfTest, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half{1});
+    hipLaunchKernelGGL(__halfTest, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half{1});
     HIP_CHECK(hipDeviceSynchronize());
     REQUIRE(result[0] == true);
   }
   SECTION("Half2 Test") {
     result[0] = true;
-    hipLaunchKernelGGL(
-        __half2Test, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
+    hipLaunchKernelGGL(__half2Test, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, result, __half2{1, 1});
     HIP_CHECK(hipDeviceSynchronize());
     REQUIRE(result[0] == true);
   }

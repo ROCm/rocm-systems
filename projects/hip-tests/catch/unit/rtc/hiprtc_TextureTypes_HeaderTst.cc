@@ -18,21 +18,21 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_TextureTypes_HeaderTst hiprtc_TextureTypes_HeaderTst
-* @{
-* @ingroup hiprtcHeaders
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
-*                                    const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_TextureTypes_HeaderTst hiprtc_TextureTypes_HeaderTst
+ * @{
+ * @ingroup hiprtcHeaders
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
+ *                                    const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
 
-static constexpr auto TextureTypes_string {
-R"(
+static constexpr auto TextureTypes_string{
+    R"(
 extern "C"
 __global__ void TextureTypes(float *res) {
   res[0] = (hipTextureType1D == 0x01);
@@ -56,23 +56,23 @@ __global__ void TextureTypes(float *res) {
 )"};
 
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*    1) To test working of "hip/texture_types.h"  header inside kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hiprtc_TextureTypes_HeaderTst.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.1
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *    1) To test working of "hip/texture_types.h"  header inside kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hiprtc_TextureTypes_HeaderTst.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.1
+ */
 
 TEST_CASE("Unit_Rtc_TextureTypes_header") {
   std::string kernel_name = "TextureTypes";
   const char* kername = kernel_name.c_str();
-  float *result_h;
-  float *result_d;
+  float* result_h;
+  float* result_d;
   int n = 17;
   int Nbytes = n * sizeof(float);
   result_h = new float[n];
@@ -88,10 +88,8 @@ TEST_CASE("Unit_Rtc_TextureTypes_header") {
   const char* compiler_option = complete_CO.c_str();
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, TextureTypes_string,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             1, &compiler_option)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, TextureTypes_string, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
   if (!(compileResult == HIPRTC_SUCCESS)) {
     WARN("hiprtcCompileProgram() api failed!!");
     size_t logSize;
@@ -108,14 +106,12 @@ TEST_CASE("Unit_Rtc_TextureTypes_header") {
   void* kernelParam[] = {result_d};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   for (int i = 0; i < n; i++) {
@@ -128,11 +124,11 @@ TEST_CASE("Unit_Rtc_TextureTypes_header") {
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   HIP_CHECK(hipFree(result_d));
-  delete [] result_h;
+  delete[] result_h;
   REQUIRE(true);
 }
 
 /**
-* End doxygen group hiprtcHeaders.
-* @}
-*/
+ * End doxygen group hiprtcHeaders.
+ * @}
+ */

@@ -37,23 +37,19 @@ Testcase Scenarios : hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU
 #include <hip_test_common.hh>
 #include <hip_test_kernels.hh>
 
-__global__ void
-__launch_bounds__(128, 2)
-MyKernel(int N, int *x, int val) {
+__global__ void __launch_bounds__(128, 2) MyKernel(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     x[i] = val;
   }
 }
 
-__global__ void
-__launch_bounds__(64)
-MyKernel_2(int N, int *x, int val) {
+__global__ void __launch_bounds__(64) MyKernel_2(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     x[i] = val;
   }
 }
 
-static bool verify(int N, int *x, int val) {
+static bool verify(int N, int* x, int val) {
   for (int i = 0; i < N; i++) {
     if (x[i] != val) {
       return false;
@@ -65,9 +61,9 @@ static bool verify(int N, int *x, int val) {
 TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
   constexpr size_t N = 10000;
   hipError_t ret;
-  int *x;
+  int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N*sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
@@ -105,9 +101,9 @@ TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_Check") {
 TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check") {
   constexpr size_t N = 10000;
   hipError_t ret;
-  int *x;
+  int* x;
 
-  HIP_CHECK(hipMallocManaged(&x, N*sizeof(int)));
+  HIP_CHECK(hipMallocManaged(&x, N * sizeof(int)));
   REQUIRE(x != nullptr);
 
   SECTION("Passing threadsPerBlock same as kernel launch_bounds") {
@@ -170,4 +166,3 @@ TEST_CASE("Unit_hipLaunchBounds_With_maxThreadsPerBlock_blocksPerCU_Check") {
 
   HIP_CHECK(hipFree(x));
 }
-

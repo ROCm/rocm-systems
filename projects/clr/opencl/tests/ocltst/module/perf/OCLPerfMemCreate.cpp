@@ -65,8 +65,8 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
   test_ = test % NUM_TESTS;
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   useSubBuf_ = (test >= NUM_TESTS);
@@ -76,15 +76,13 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
     failed_ = true;
     return;
   }
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -93,8 +91,7 @@ void OCLPerfMemCreate::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLPerfMemCreate::run(void) {
@@ -112,8 +109,7 @@ void OCLPerfMemCreate::run(void) {
   // Clear destination buffer
   memset(values, 0, BufSize * sizeof(cl_int4));
 
-  size_t bufSize = ((test_ % 2) == 0) ? BufSize * sizeof(cl_int4)
-                                      : BufSizeC * sizeof(cl_int4);
+  size_t bufSize = ((test_ % 2) == 0) ? BufSize * sizeof(cl_int4) : BufSizeC * sizeof(cl_int4);
   size_t iter = ((test_ % 2) == 0) ? Iterations : IterationsC;
 
   if (test_ == 4) {
@@ -128,16 +124,15 @@ void OCLPerfMemCreate::run(void) {
   timer.Start();
 
   for (size_t i = 0; i < iter; ++i) {
-    buffer =
-        _wrapper->clCreateBuffer(context_, flags, bufSize, hostPtr, &error_);
+    buffer = _wrapper->clCreateBuffer(context_, flags, bufSize, hostPtr, &error_);
     bufptr = &buffer;
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     if (useSubBuf_) {
       cl_buffer_region reg;
       reg.origin = 0;
       reg.size = bufSize;
-      subBuf = _wrapper->clCreateSubBuffer(
-          buffer, flags, CL_BUFFER_CREATE_TYPE_REGION, &reg, &error_);
+      subBuf =
+          _wrapper->clCreateSubBuffer(buffer, flags, CL_BUFFER_CREATE_TYPE_REGION, &reg, &error_);
       bufptr = &subBuf;
       CHECK_RESULT((error_ != CL_SUCCESS), "clCreateSubBuffer() failed");
     }
@@ -146,8 +141,8 @@ void OCLPerfMemCreate::run(void) {
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
     size_t gws[1] = {64};
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
     _wrapper->clFinish(cmdQueues_[_deviceId]);

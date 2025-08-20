@@ -46,7 +46,7 @@ class CaptureStream {
   static constexpr size_t bufferSize = 25 * 1024 * 1024;
 
  public:
-  explicit CaptureStream(FILE *original) {
+  explicit CaptureStream(FILE* original) {
     stream = original;
 
     if (pipe(fdPipe, bufferSize, O_TEXT) != 0) {
@@ -105,7 +105,7 @@ struct CaptureStream {
 
   char tempname[13] = "mytestXXXXXX";
 
-  explicit CaptureStream(FILE *original) {
+  explicit CaptureStream(FILE* original) {
     orig_fd = fileno(original);
     saved_fd = dup(orig_fd);
 
@@ -173,12 +173,14 @@ struct CaptureStream {
 };
 #endif
 
-#define DECLARE_DATA()                                                         \
-  const char *msg_short = "Carpe diem.";                                       \
-  const char *msg_long1 = "Lorem ipsum dolor sit amet, consectetur nullam. "   \
-                          "In mollis imperdiet nibh nec ullamcorper.";         \
-  const char *msg_long2 = "Curabitur nec metus sit amet augue vehicula "       \
-                          "ultrices ut id leo. Lorem ipsum dolor sit amet, "   \
-                          "consectetur adipiscing elit amet.";
+#define DECLARE_DATA()                                                                             \
+  const char* msg_short = "Carpe diem.";                                                           \
+  const char* msg_long1 =                                                                          \
+      "Lorem ipsum dolor sit amet, consectetur nullam. "                                           \
+      "In mollis imperdiet nibh nec ullamcorper.";                                                 \
+  const char* msg_long2 =                                                                          \
+      "Curabitur nec metus sit amet augue vehicula "                                               \
+      "ultrices ut id leo. Lorem ipsum dolor sit amet, "                                           \
+      "consectetur adipiscing elit amet.";
 
 #endif  // CATCH_UNIT_RTC_HEADERS_PRINTF_COMMON_H_

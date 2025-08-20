@@ -521,15 +521,11 @@ template <bool global_memory, typename T, size_t... tile_sizes> void BlockTileSy
  *    - HIP_VERSION >= 5.2
  */
 TEMPLATE_TEST_CASE("Unit_Thread_Block_Tile_Sync_Positive_Basic", "", uint8_t, uint16_t, uint32_t) {
-  SECTION("Global memory") {
-    BlockTileSyncTest<true, TestType, 2, 4, 8, 16, 32>();
-  }
-  SECTION("Shared memory") {
-    BlockTileSyncTest<false, TestType, 2, 4, 8, 16, 32>();
-  }
+  SECTION("Global memory") { BlockTileSyncTest<true, TestType, 2, 4, 8, 16, 32>(); }
+  SECTION("Shared memory") { BlockTileSyncTest<false, TestType, 2, 4, 8, 16, 32>(); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

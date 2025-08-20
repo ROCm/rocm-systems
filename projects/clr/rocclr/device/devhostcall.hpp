@@ -155,7 +155,7 @@ class HostcallBuffer {
   /** Mask for accessing the packet index in the tagged pointer. */
   uint64_t index_mask_;
   /** Some services need a device**/
-  const  amd::Device* device_;
+  const amd::Device* device_;
 
   PacketHeader* getHeader(uint64_t ptr) const;
   Payload* getPayload(uint64_t ptr) const;
@@ -166,17 +166,18 @@ class HostcallBuffer {
   void setDoorbell(void* doorbell) { doorbell_ = doorbell; };
   void setDevice(const amd::Device* dptr) { device_ = dptr; };
 
- #if defined(__clang__)
- #if __has_feature(address_sanitizer)
+#if defined(__clang__)
+#if __has_feature(address_sanitizer)
  private:
   device::UriLocator* uri_locator;
+
  public:
   void setUriLocator(device::UriLocator* uri_l) { uri_locator = uri_l; };
- #endif
- #endif
+#endif
+#endif
 };
 
 static_assert(std::is_standard_layout<HostcallBuffer>::value,
               "the hostcall buffer must be useable from other languages");
 
-}// namespace amd
+}  // namespace amd

@@ -194,6 +194,6 @@ TEST_CASE("Unit_ChannelDescriptor_Positive_16BitFloatingPoint") {
 #endif
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

@@ -71,11 +71,11 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   hipTextureObject_t texObj;
   hipDeviceProp_t devProp;
   size_t devPitchA;
-  float *devPtrA;
+  float* devPtrA;
 
   // Initialization
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA,
-                                             SIZE_W*sizeof(float), SIZE_H));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devPtrA), &devPitchA, SIZE_W * sizeof(float),
+                           SIZE_H));
   HIP_CHECK(hipGetDeviceProperties(&devProp, 0));
   memset(&resDesc, 0, sizeof(resDesc));
   memset(&texDesc, 0, sizeof(texDesc));
@@ -100,8 +100,7 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
   SECTION("hipResourceTypePitch2D and devicePtr un-aligned") {
     if (devProp.textureAlignment > UNALIGN_OFFSET) {
       // Populate resource descriptor
-      resDesc.res.pitch2D.devPtr = reinterpret_cast<char *>(devPtrA)
-                                                        + UNALIGN_OFFSET;
+      resDesc.res.pitch2D.devPtr = reinterpret_cast<char*>(devPtrA) + UNALIGN_OFFSET;
       resDesc.res.pitch2D.height = SIZE_H;
       resDesc.res.pitch2D.width = SIZE_W;
       resDesc.res.pitch2D.pitchInBytes = devPitchA;
@@ -252,6 +251,6 @@ TEST_CASE("Unit_hipCreateTextureObject_Pitch2DResource") {
 
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

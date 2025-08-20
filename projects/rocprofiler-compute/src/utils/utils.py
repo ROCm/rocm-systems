@@ -745,7 +745,7 @@ def run_prof(
             config.rocprof_compute_home
             / "rocprof_compute_soc"
             / "profile_configs"
-            / f"counter_defs.yaml",
+            / "counter_defs.yaml",
             "r",
         ) as file:
             counter_defs = yaml.safe_load(file)

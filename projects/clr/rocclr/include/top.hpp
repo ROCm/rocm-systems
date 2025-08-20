@@ -21,9 +21,12 @@
 #ifndef TOP_HPP_
 #define TOP_HPP_
 
-#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__arm) || defined(__arm__) || defined(_M_ARM) || defined(__aarch64__) || defined(_M_ARM64)
+#if defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || defined(__arm) || defined(__arm__) ||   \
+    defined(_M_ARM) || defined(__aarch64__) || defined(_M_ARM64)
 #define ATI_ARCH_ARM
-#elif defined(i386) || defined(__i386) || defined(__i386__) || defined(_M_IX86) || defined(__x86__) || defined(__x86_64) || defined(__x86_64__) || defined(__amd64) || defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64)
+#elif defined(i386) || defined(__i386) || defined(__i386__) || defined(_M_IX86) ||                 \
+    defined(__x86__) || defined(__x86_64) || defined(__x86_64__) || defined(__amd64) ||            \
+    defined(__amd64__) || defined(_M_X64) || defined(_M_AMD64)
 #define ATI_ARCH_X86
 #endif
 
@@ -82,7 +85,7 @@ typedef __int32 ssize_t;
 #else /*!_WIN32*/
 #define SIZE_T_FMT "%zu"
 #define PTR_FMT "%p"
-#define ROCCLR_INIT_PRIORITY(priority) __attribute__ ((init_priority (priority)))
+#define ROCCLR_INIT_PRIORITY(priority) __attribute__((init_priority(priority)))
 #endif /*!_WIN32*/
 
 typedef uint32_t cl_mem_fence_flags;
@@ -198,7 +201,8 @@ class ReferenceCountedObject {
   uint release();
 };
 
-/*@}*/} // namespace amd
+/*@}*/  // namespace amd
+}  // namespace amd
 
 #undef min  // using std::min
 #undef max  // using std::max

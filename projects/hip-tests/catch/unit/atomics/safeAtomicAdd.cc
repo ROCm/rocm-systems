@@ -123,6 +123,6 @@ TEMPLATE_TEST_CASE("Unit_safeAtomicAdd_Positive_Multi_Kernel", "", float, double
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */
