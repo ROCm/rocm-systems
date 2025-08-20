@@ -17,7 +17,7 @@ Profiling options
 For using profiling options for PC sampling the configuration needed are:
 
 * ``--attach-pid``: Should be the process ID of the process of workload's application.
-* ``--attach-duration-msec``: (Optional) The is for setting up the synchronised detach and it's optional. Its unit is in milliseconds. When setting up, the detach will happen adter this time since rocprof starts. For example, setting it to 6000 yields 1 mins.
+* ``--attach-duration-msec``: (Optional) The is for setting up the synchronised detach and it's optional. Its unit is in milliseconds. When setting up, the detach will happen adter this time since rocprof starts. For example, setting it to 60000 yields 1 mins.
 
 **Sample command:**
 
