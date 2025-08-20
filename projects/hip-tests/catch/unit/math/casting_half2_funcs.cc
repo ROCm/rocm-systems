@@ -419,6 +419,6 @@ TEST_CASE("Unit_Device___half22float2_Accuracy_Positive") {
 }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

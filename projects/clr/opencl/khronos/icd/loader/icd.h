@@ -40,53 +40,48 @@
  * type definitions
  */
 
-typedef CL_API_ENTRY cl_int (CL_API_CALL *pfn_clIcdGetPlatformIDs)(
-    cl_uint num_entries, 
-    cl_platform_id *platforms, 
-    cl_uint *num_platforms) CL_API_SUFFIX__VERSION_1_0;
+typedef CL_API_ENTRY cl_int(CL_API_CALL* pfn_clIcdGetPlatformIDs)(
+    cl_uint num_entries, cl_platform_id* platforms,
+    cl_uint* num_platforms) CL_API_SUFFIX__VERSION_1_0;
 
-typedef CL_API_ENTRY cl_int (CL_API_CALL *pfn_clGetPlatformInfo)(
-    cl_platform_id   platform, 
-    cl_platform_info param_name,
-    size_t           param_value_size, 
-    void *           param_value,
-    size_t *         param_value_size_ret) CL_API_SUFFIX__VERSION_1_0;
+typedef CL_API_ENTRY cl_int(CL_API_CALL* pfn_clGetPlatformInfo)(
+    cl_platform_id platform, cl_platform_info param_name, size_t param_value_size,
+    void* param_value, size_t* param_value_size_ret) CL_API_SUFFIX__VERSION_1_0;
 
-typedef CL_API_ENTRY void *(CL_API_CALL *pfn_clGetExtensionFunctionAddress)(
-    const char *function_name)  CL_API_SUFFIX__VERSION_1_0;
+typedef CL_API_ENTRY void*(CL_API_CALL* pfn_clGetExtensionFunctionAddress)(
+    const char* function_name)CL_API_SUFFIX__VERSION_1_0;
 
 typedef struct KHRicdVendorRec KHRicdVendor;
 
-/* 
+/*
  * KHRicdVendor
  *
  * Data for a single ICD vendor platform.
  */
-struct KHRicdVendorRec
-{
-    // the loaded library object (true type varies on Linux versus Windows)
-    void *library;
+struct KHRicdVendorRec {
+  // the loaded library object (true type varies on Linux versus Windows)
+  void* library;
 
-    // the file name of the library
-    char *libName;
+  // the file name of the library
+  char* libName;
 
-    // the extension suffix for this platform
-    char *suffix;
+  // the extension suffix for this platform
+  char* suffix;
 
-    // function pointer to the ICD platform IDs extracted from the library
-    pfn_clGetExtensionFunctionAddress clGetExtensionFunctionAddress;
+  // function pointer to the ICD platform IDs extracted from the library
+  pfn_clGetExtensionFunctionAddress clGetExtensionFunctionAddress;
 
-    // the platform retrieved from clGetIcdPlatformIDsKHR
-    cl_platform_id platform;
+  // the platform retrieved from clGetIcdPlatformIDsKHR
+  cl_platform_id platform;
 
-    // next vendor in the list vendors
-    KHRicdVendor *next;
+  // next vendor in the list vendors
+  KHRicdVendor* next;
 };
 
 // the global state
-extern KHRicdVendor * khrIcdVendors;
+extern KHRicdVendor* khrIcdVendors;
 
-/* 
+/*
  * khrIcd interface
  */
 
@@ -97,7 +92,7 @@ extern KHRicdVendor * khrIcdVendors;
 // API (e.g, getPlatformIDs, etc).
 void khrIcdInitialize(void);
 
-// go through the list of vendors (in /etc/OpenCL.conf or through 
+// go through the list of vendors (in /etc/OpenCL.conf or through
 // the registry) and call khrIcdVendorAdd for each vendor encountered
 // n.b, this call is OS-specific
 void khrIcdOsVendorsEnumerateOnce(void);
@@ -106,83 +101,72 @@ void khrIcdOsVendorsEnumerateOnce(void);
 void khrIcdVendorsEnumerateEnv(void);
 
 // add a vendor's implementation to the list of libraries
-void khrIcdVendorAdd(const char *libraryName);
+void khrIcdVendorAdd(const char* libraryName);
 
 // dynamically load a library.  returns NULL on failure
 // n.b, this call is OS-specific
-void *khrIcdOsLibraryLoad(const char *libraryName);
+void* khrIcdOsLibraryLoad(const char* libraryName);
 
 // get a function pointer from a loaded library.  returns NULL on failure.
 // n.b, this call is OS-specific
-void *khrIcdOsLibraryGetFunctionAddress(void *library, const char *functionName);
+void* khrIcdOsLibraryGetFunctionAddress(void* library, const char* functionName);
 
 // unload a library.
 // n.b, this call is OS-specific
-void khrIcdOsLibraryUnload(void *library);
+void khrIcdOsLibraryUnload(void* library);
 
 // parse properties and determine the platform to use from them
-void khrIcdContextPropertiesGetPlatform(
-    const cl_context_properties *properties, 
-    cl_platform_id *outPlatform);
+void khrIcdContextPropertiesGetPlatform(const cl_context_properties* properties,
+                                        cl_platform_id* outPlatform);
 
 // internal tracing macros
 #if 0
-    #include <stdio.h>
-    #define KHR_ICD_TRACE(...) \
-    do \
-    { \
-        fprintf(stderr, "KHR ICD trace at %s:%d: ", __FILE__, __LINE__); \
-        fprintf(stderr, __VA_ARGS__); \
-    } while (0)
+#include <stdio.h>
+#define KHR_ICD_TRACE(...)                                                                         \
+  do {                                                                                             \
+    fprintf(stderr, "KHR ICD trace at %s:%d: ", __FILE__, __LINE__);                               \
+    fprintf(stderr, __VA_ARGS__);                                                                  \
+  } while (0)
 #ifdef _WIN32
-#define KHR_ICD_WIDE_TRACE(...) \
-    do \
-    { \
-        fwprintf(stderr, L"KHR ICD trace at %hs:%d: ", __FILE__, __LINE__); \
-        fwprintf(stderr, __VA_ARGS__); \
-    } while (0)
+#define KHR_ICD_WIDE_TRACE(...)                                                                    \
+  do {                                                                                             \
+    fwprintf(stderr, L"KHR ICD trace at %hs:%d: ", __FILE__, __LINE__);                            \
+    fwprintf(stderr, __VA_ARGS__);                                                                 \
+  } while (0)
 #else
 #define KHR_ICD_WIDE_TRACE(...)
 #endif
-    #define KHR_ICD_ASSERT(x) \
-    do \
-    { \
-        if (!(x)) \
-        { \
-            fprintf(stderr, "KHR ICD assert at %s:%d: %s failed", __FILE__, __LINE__, #x); \
-        } \
-    } while (0)
+#define KHR_ICD_ASSERT(x)                                                                          \
+  do {                                                                                             \
+    if (!(x)) {                                                                                    \
+      fprintf(stderr, "KHR ICD assert at %s:%d: %s failed", __FILE__, __LINE__, #x);               \
+    }                                                                                              \
+  } while (0)
 #else
-    #define KHR_ICD_TRACE(...)
-    #define KHR_ICD_WIDE_TRACE(...)
-    #define KHR_ICD_ASSERT(x)
+#define KHR_ICD_TRACE(...)
+#define KHR_ICD_WIDE_TRACE(...)
+#define KHR_ICD_ASSERT(x)
 #endif
 
 // if handle is NULL then return invalid_handle_error_code
-#define KHR_ICD_VALIDATE_HANDLE_RETURN_ERROR(handle,invalid_handle_error_code) \
-    do \
-    { \
-        if (!handle) \
-        { \
-            return invalid_handle_error_code; \
-        } \
-    } while (0)
+#define KHR_ICD_VALIDATE_HANDLE_RETURN_ERROR(handle, invalid_handle_error_code)                    \
+  do {                                                                                             \
+    if (!handle) {                                                                                 \
+      return invalid_handle_error_code;                                                            \
+    }                                                                                              \
+  } while (0)
 
-// if handle is NULL then set errcode_ret to invalid_handle_error and return NULL 
+// if handle is NULL then set errcode_ret to invalid_handle_error and return NULL
 // (NULL being an invalid handle)
-#define KHR_ICD_VALIDATE_HANDLE_RETURN_HANDLE(handle,invalid_handle_error) \
-    do \
-    { \
-        if (!handle) \
-        { \
-            if (errcode_ret) \
-            { \
-                *errcode_ret = invalid_handle_error; \
-            } \
-            return NULL; \
-        } \
-    } while (0)
+#define KHR_ICD_VALIDATE_HANDLE_RETURN_HANDLE(handle, invalid_handle_error)                        \
+  do {                                                                                             \
+    if (!handle) {                                                                                 \
+      if (errcode_ret) {                                                                           \
+        *errcode_ret = invalid_handle_error;                                                       \
+      }                                                                                            \
+      return NULL;                                                                                 \
+    }                                                                                              \
+  } while (0)
 
 
 #endif
-

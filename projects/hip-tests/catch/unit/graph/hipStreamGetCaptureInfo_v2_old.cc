@@ -22,15 +22,14 @@ THE SOFTWARE.
 Testcase Scenarios
 ------------------
 Functional:
-1) Start stream capture and get capture info v2. Verify api is success, capture status is hipStreamCaptureStatusActive,
- identifier returned is valid/non-zero, graph object is returned.
-2) When stream capture is in progress, create dependent nodes by creating multistream dependencies and verify the api returns
- valid dependent nodes.
-3) End stream capture and get capture info. Verify api is success, capture status is hipStreamCaptureStatusNone and
- identifier/graph/nodes are not returned by api.
-4) When optional parameters are not passed, make sure api still returns capture status of stream.
-5) Begin capture on hipStreamPerThread, get capture info v2 and validate results.
-6) Perform multiple captures and verify the identifier returned is unique.
+1) Start stream capture and get capture info v2. Verify api is success, capture status is
+hipStreamCaptureStatusActive, identifier returned is valid/non-zero, graph object is returned. 2)
+When stream capture is in progress, create dependent nodes by creating multistream dependencies and
+verify the api returns valid dependent nodes. 3) End stream capture and get capture info. Verify api
+is success, capture status is hipStreamCaptureStatusNone and identifier/graph/nodes are not returned
+by api. 4) When optional parameters are not passed, make sure api still returns capture status of
+stream. 5) Begin capture on hipStreamPerThread, get capture info v2 and validate results. 6) Perform
+multiple captures and verify the identifier returned is unique.
 
 Parameter Validation/Negative:
 1) Capture Status location as nullptr and verify api returns error code.
@@ -55,7 +54,7 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   hipGraphExec_t graphExec{nullptr};
   constexpr unsigned blocks = 512;
   constexpr unsigned threadsPerBlock = 256;
-  const hipGraphNode_t *nodelist{};
+  const hipGraphNode_t* nodelist{};
   size_t Nbytes = N * sizeof(float), numDependencies;
   float *A_d, *C_d;
   float *A_h, *C_h;
@@ -71,7 +70,7 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
 
   // Initialize input buffer
   for (size_t i = 0; i < N; ++i) {
-      A_h[i] = 3.146f + i;  // Pi
+    A_h[i] = 3.146f + i;  // Pi
   }
 
   // Create cross stream dependencies.
@@ -99,8 +98,8 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   unsigned long long capSequenceID = 0;  // NOLINT
   constexpr int numDepsCreated = 2;      // Num of dependencies created
 
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(mstream, &captureStatus,
-                &capSequenceID, &capInfoGraph, &nodelist, &numDependencies));
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(mstream, &captureStatus, &capSequenceID, &capInfoGraph,
+                                       &nodelist, &numDependencies));
 
   // verify capture status is active, sequence id is valid, graph is returned,
   REQUIRE(captureStatus == hipStreamCaptureStatusActive);
@@ -123,8 +122,8 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
     REQUIRE(false);
   }
 
-  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks),
-                              dim3(threadsPerBlock), 0, mstream, A_d, C_d, N);
+  hipLaunchKernelGGL(HipTest::vector_square, dim3(blocks), dim3(threadsPerBlock), 0, mstream, A_d,
+                     C_d, N);
 
   // End capture and verify graph is returned
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, Nbytes, hipMemcpyDeviceToHost, mstream));
@@ -136,8 +135,8 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   capInfoGraph = nullptr;
   numDependencies = 0;
   nodelist = nullptr;
-  HIP_CHECK(hipStreamGetCaptureInfo_v2(mstream, &captureStatus,
-                &capSequenceID, &capInfoGraph, &nodelist, &numDependencies));
+  HIP_CHECK(hipStreamGetCaptureInfo_v2(mstream, &captureStatus, &capSequenceID, &capInfoGraph,
+                                       &nodelist, &numDependencies));
   REQUIRE(captureStatus == hipStreamCaptureStatusNone);
   REQUIRE(capSequenceID == 0);
   REQUIRE(capInfoGraph == nullptr);
@@ -172,8 +171,7 @@ void validateStreamCaptureInfoV2(hipStream_t mstream) {
   // Validate the computation
   for (size_t i = 0; i < N; i++) {
     if (C_h[i] != A_h[i] * A_h[i]) {
-      INFO("A and C not matching at " << i << " C_h[i] " << C_h[i]
-                                           << " A_h[i] " << A_h[i]);
+      INFO("A and C not matching at " << i << " C_h[i] " << C_h[i] << " A_h[i] " << A_h[i]);
       REQUIRE(false);
     }
   }
@@ -216,18 +214,17 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_UniqueID") {
   for (int i = 0; i < numStreams; i++) {
     HIP_CHECK(hipStreamCreate(&streams[i]));
     HIP_CHECK(hipStreamBeginCapture(streams[i], hipStreamCaptureModeGlobal));
-    HIP_CHECK(hipStreamGetCaptureInfo_v2(streams[i], &captureStatus,
-                                 &capSequenceID, nullptr, nullptr, nullptr));
+    HIP_CHECK(hipStreamGetCaptureInfo_v2(streams[i], &captureStatus, &capSequenceID, nullptr,
+                                         nullptr, nullptr));
     REQUIRE(captureStatus == hipStreamCaptureStatusActive);
     REQUIRE(capSequenceID > 0);
     idlist.push_back(capSequenceID);
   }
 
   for (int i = 0; i < numStreams; i++) {
-    for (int j = i+1; j < numStreams; j++) {
+    for (int j = i + 1; j < numStreams; j++) {
       if (idlist[i] == idlist[j]) {
-        INFO("Same identifier returned for stream "
-                                          << i << " and stream " << j);
+        INFO("Same identifier returned for stream " << i << " and stream " << j);
         REQUIRE(false);
       }
     }
@@ -246,12 +243,12 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_UniqueID") {
 TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_ParamValidation") {
   hipError_t ret;
   hipStream_t stream;
-  float *A_d;
+  float* A_d;
   hipGraph_t graph{}, capInfoGraph{};
   hipStreamCaptureStatus captureStatus;
   unsigned long long capSequenceID;  // NOLINT
   size_t numDependencies;
-  const hipGraphNode_t *nodelist{};
+  const hipGraphNode_t* nodelist{};
   constexpr int numBytes{100};
 
   HIP_CHECK(hipMalloc(&A_d, numBytes));
@@ -260,14 +257,14 @@ TEST_CASE("Unit_hipStreamGetCaptureInfo_v2_ParamValidation") {
   HIP_CHECK(hipMemsetAsync(A_d, 0, numBytes, stream));
 
   SECTION("Capture Status location as nullptr") {
-    ret = hipStreamGetCaptureInfo_v2(stream, nullptr,
-                &capSequenceID, &capInfoGraph, &nodelist, &numDependencies);
+    ret = hipStreamGetCaptureInfo_v2(stream, nullptr, &capSequenceID, &capInfoGraph, &nodelist,
+                                     &numDependencies);
     REQUIRE(ret == hipErrorInvalidValue);
   }
 
   SECTION("Stream as nullptr") {
-    ret = hipStreamGetCaptureInfo_v2(nullptr, &captureStatus,
-                &capSequenceID, &capInfoGraph, &nodelist, &numDependencies);
+    ret = hipStreamGetCaptureInfo_v2(nullptr, &captureStatus, &capSequenceID, &capInfoGraph,
+                                     &nodelist, &numDependencies);
     if ((ret != hipErrorUnknown) && (ret != hipErrorStreamCaptureImplicit)) {
       INFO("Ret : " << ret);
       REQUIRE(false);

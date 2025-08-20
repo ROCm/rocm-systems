@@ -33,8 +33,8 @@ THE SOFTWARE.
 #include <vector>
 #include "shfl.hh"
 
-static constexpr auto shfl {
-  R"(
+static constexpr auto shfl{
+    R"(
 template <typename T>
 __global__ void shflUpSum(T* a, int size) {
   T val = a[threadIdx.x];
@@ -66,30 +66,32 @@ __global__ void shflXorSum(T* a, int size) {
 }
 )"};
 
-template <typename T>
-void runTestShflSync(int option) {
+template <typename T> void runTestShflSync(int option) {
   using namespace std;
   hiprtcProgram prog;
-  hiprtcCreateProgram(&prog,      // prog
-                      shfl,       // buffer
+  hiprtcCreateProgram(&prog,           // prog
+                      shfl,            // buffer
                       "shfl_sync.cu",  // name
                       0, nullptr, nullptr);
 
   string str;
-  switch(option) {
-  case 1:
-  str = "shflUpSum<__half>"; break;
-  case 2:
-  str = "shflDownSum<__half>"; break;
-  case 3:
-  str = "shflXorSum<__half>"; break;
-  default:
-  INFO("Options 1,2,3 are supported, but the passed option is: " << option);
-  REQUIRE(false);
+  switch (option) {
+    case 1:
+      str = "shflUpSum<__half>";
+      break;
+    case 2:
+      str = "shflDownSum<__half>";
+      break;
+    case 3:
+      str = "shflXorSum<__half>";
+      break;
+    default:
+      INFO("Options 1,2,3 are supported, but the passed option is: " << option);
+      REQUIRE(false);
   }
 
   hiprtcAddNameExpression(prog, str.c_str());
-  const char* options[] = { "-DHIP_ENABLE_WARP_SYNC_BUILTINS" };
+  const char* options[] = {"-DHIP_ENABLE_WARP_SYNC_BUILTINS"};
   hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, options)};
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
@@ -136,11 +138,13 @@ void runTestShflSync(int option) {
   HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault));
   bool result;
   switch (option) {
-  case 1: //shflUpSum
-  result = compare(a[n - 1], cpuSum); break;
-  case 2: //shflDownSum
-  case 3: //shflXorSum
-  result = compare(a[0], cpuSum); break;
+    case 1:  // shflUpSum
+      result = compare(a[n - 1], cpuSum);
+      break;
+    case 2:  // shflDownSum
+    case 3:  // shflXorSum
+      result = compare(a[0], cpuSum);
+      break;
   }
 
   if (result) {
@@ -151,7 +155,6 @@ void runTestShflSync(int option) {
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-
 }
 
 TEST_CASE("Unit_hiprtc_half_shuffle_sync") {

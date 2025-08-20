@@ -53,20 +53,18 @@ TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Negative") {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width + k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                              0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width,
-                             height, depth), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.extent = make_hipExtent(width , height, depth);
-  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+  myparms.extent = make_hipExtent(width, height, depth);
+  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparms.dstArray = devArray;
   myparms.kind = hipMemcpyHostToDevice;
 
@@ -111,38 +109,28 @@ static bool compareHipExtent(hipExtent hExt1, hipExtent hExt2) {
     return false;
 }
 static bool compareHipPitchedPtr(hipPitchedPtr hpPtr1, hipPitchedPtr hpPtr2) {
-  if ((reinterpret_cast<int *>(hpPtr1.ptr) ==
-       reinterpret_cast<int *>(hpPtr2.ptr))
-       && (hpPtr1.pitch == hpPtr2.pitch)
-       #if HT_AMD
-       && (hpPtr1.xsize == hpPtr2.xsize)
-       /* xsize check below is disabled on nvidia as xsize value
-        * is not being updated properly due to issue with CUDA api */
-       #endif
-       && (hpPtr1.ysize == hpPtr2.ysize))
+  if ((reinterpret_cast<int*>(hpPtr1.ptr) == reinterpret_cast<int*>(hpPtr2.ptr)) &&
+      (hpPtr1.pitch == hpPtr2.pitch)
+#if HT_AMD
+      && (hpPtr1.xsize == hpPtr2.xsize)
+/* xsize check below is disabled on nvidia as xsize value
+ * is not being updated properly due to issue with CUDA api */
+#endif
+      && (hpPtr1.ysize == hpPtr2.ysize))
     return true;
   else
     return false;
 }
 
-static bool memcpyNodeCompare(hipMemcpy3DParms *mNode1,
-                              hipMemcpy3DParms *mNode2) {
-  if (mNode1->srcArray != mNode2->srcArray)
-    return false;
-  if (!compareHipPos(mNode1->srcPos, mNode2->srcPos))
-    return false;
-  if (!compareHipPitchedPtr(mNode1->srcPtr, mNode2->srcPtr))
-    return false;
-  if (mNode1->dstArray != mNode2->dstArray)
-    return false;
-  if (!compareHipPos(mNode1->dstPos, mNode2->dstPos))
-    return false;
-  if (!compareHipPitchedPtr(mNode1->dstPtr, mNode2->dstPtr))
-    return false;
-  if (!compareHipExtent(mNode1->extent, mNode2->extent))
-    return false;
-  if (mNode1->kind != mNode2->kind)
-    return false;
+static bool memcpyNodeCompare(hipMemcpy3DParms* mNode1, hipMemcpy3DParms* mNode2) {
+  if (mNode1->srcArray != mNode2->srcArray) return false;
+  if (!compareHipPos(mNode1->srcPos, mNode2->srcPos)) return false;
+  if (!compareHipPitchedPtr(mNode1->srcPtr, mNode2->srcPtr)) return false;
+  if (mNode1->dstArray != mNode2->dstArray) return false;
+  if (!compareHipPos(mNode1->dstPos, mNode2->dstPos)) return false;
+  if (!compareHipPitchedPtr(mNode1->dstPtr, mNode2->dstPtr)) return false;
+  if (!compareHipExtent(mNode1->extent, mNode2->extent)) return false;
+  if (mNode1->kind != mNode2->kind) return false;
   return true;
 }
 
@@ -161,20 +149,18 @@ TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Functional") {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width + k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                              0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width,
-                             height, depth), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.extent = make_hipExtent(width , height, depth);
-  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+  myparms.extent = make_hipExtent(width, height, depth);
+  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparms.dstArray = devArray;
   myparms.kind = hipMemcpyHostToDevice;
 
@@ -185,8 +171,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Functional") {
 
   SECTION("Get Memcpy Param and verify.") {
     hipMemcpy3DParms m3DGetParams;
-    REQUIRE(hipSuccess == hipGraphMemcpyNodeGetParams(memcpyNode,
-                                                      &m3DGetParams));
+    REQUIRE(hipSuccess == hipGraphMemcpyNodeGetParams(memcpyNode, &m3DGetParams));
     // Validating the result
     REQUIRE(true == memcpyNodeCompare(&myparms, &m3DGetParams));
   }
@@ -204,27 +189,23 @@ TEST_CASE("Unit_hipGraphMemcpyNodeGetParams_Functional") {
     for (int i = 0; i < depth1; i++) {
       for (int j = 0; j < height1; j++) {
         for (int k = 0; k < width1; k++) {
-          hData1[i*width1*height1 + j*width1 + k] = i*width1*height1 +
-                                                    j*width1 + k;
+          hData1[i * width1 * height1 + j * width1 + k] = i * width1 * height1 + j * width1 + k;
         }
       }
     }
-    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(int)*8,
-                                              0, 0, 0, formatKind1);
-    HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc1,
-              make_hipExtent(width1, height1, depth1), hipArrayDefault));
+    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind1);
+    HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc1, make_hipExtent(width1, height1, depth1),
+                               hipArrayDefault));
     memset(&myparms1, 0x0, sizeof(hipMemcpy3DParms));
     myparms1.srcPos = make_hipPos(0, 0, 0);
     myparms1.dstPos = make_hipPos(0, 0, 0);
-    myparms1.extent = make_hipExtent(width1 , height1, depth1);
-    myparms1.srcPtr = make_hipPitchedPtr(hData1, width1 * sizeof(int),
-                                         width1, height1);
+    myparms1.extent = make_hipExtent(width1, height1, depth1);
+    myparms1.srcPtr = make_hipPitchedPtr(hData1, width1 * sizeof(int), width1, height1);
     myparms1.dstArray = devArray1;
     myparms1.kind = hipMemcpyHostToDevice;
 
     REQUIRE(hipSuccess == hipGraphMemcpyNodeSetParams(memcpyNode, &myparms1));
-    REQUIRE(hipSuccess == hipGraphMemcpyNodeGetParams(memcpyNode,
-                                                      &m3DGetParams1));
+    REQUIRE(hipSuccess == hipGraphMemcpyNodeGetParams(memcpyNode, &m3DGetParams1));
     REQUIRE(true == memcpyNodeCompare(&myparms1, &m3DGetParams1));
 
     HIP_CHECK(hipFreeArray(devArray1));

@@ -32,8 +32,8 @@ bool Hsail::LoadLib() {
 #if defined(HSAIL_DYN_DLL)
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loading HSAIL library.");
   static constexpr const char* HsailLibName =
-    LP64_SWITCH(WINDOWS_SWITCH("amdhsail32.dll", "libamdhsail32.so"),
-                WINDOWS_SWITCH("amdhsail64.dll", "libamdhsail64.so"));
+      LP64_SWITCH(WINDOWS_SWITCH("amdhsail32.dll", "libamdhsail32.so"),
+                  WINDOWS_SWITCH("amdhsail64.dll", "libamdhsail64.so"));
   cep_.handle = Os::loadLibrary(HsailLibName);
   if (nullptr == cep_.handle) {
     return false;
@@ -94,5 +94,5 @@ bool Hsail::LoadLib() {
   return true;
 }
 
-}
+}  // namespace amd
 #endif

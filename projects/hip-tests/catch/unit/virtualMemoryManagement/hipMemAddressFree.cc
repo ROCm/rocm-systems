@@ -66,7 +66,7 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
   HIP_CHECK(hipMemAddressReserve(&ptrA, size_mem, 0, 0, 0));
 
   SECTION("nullptr to devptr") {
-    REQUIRE(hipMemAddressFree((hipDeviceptr_t)nullptr, size_mem) == hipErrorInvalidValue);
+    REQUIRE(hipMemAddressFree((hipDeviceptr_t) nullptr, size_mem) == hipErrorInvalidValue);
   }
 
   SECTION("pass zero to size") { REQUIRE(hipMemAddressFree(ptrA, 0) == hipErrorInvalidValue); }
@@ -76,6 +76,6 @@ TEST_CASE("Unit_hipMemAddressFree_negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

@@ -39,7 +39,7 @@ THE SOFTWARE.
 #include <limits.h>
 #include <limits>
 #include <stdint.h>
-#endif // !defined(__HIPCC_RTC__)
+#endif  // !defined(__HIPCC_RTC__)
 
 #pragma push_macro("__DEVICE__")
 #pragma push_macro("__RETURN_TYPE")
@@ -50,34 +50,28 @@ THE SOFTWARE.
 // DOT FUNCTIONS
 #if defined(__clang__) && defined(__HIP__)
 __DEVICE__
-inline
-int amd_mixed_dot(short2 a, short2 b, int c, bool saturate) {
+inline int amd_mixed_dot(short2 a, short2 b, int c, bool saturate) {
   return __ockl_sdot2(get_native_vector(a), get_native_vector(b), c, saturate);
 }
 __DEVICE__
-inline
-uint amd_mixed_dot(ushort2 a, ushort2 b, uint c, bool saturate) {
+inline uint amd_mixed_dot(ushort2 a, ushort2 b, uint c, bool saturate) {
   return __ockl_udot2(get_native_vector(a), get_native_vector(b), c, saturate);
 }
 __DEVICE__
-inline
-int amd_mixed_dot(char4 a, char4 b, int c, bool saturate) {
+inline int amd_mixed_dot(char4 a, char4 b, int c, bool saturate) {
   return __ockl_sdot4(get_native_vector(a), get_native_vector(b), c, saturate);
 }
 __DEVICE__
-inline
-uint amd_mixed_dot(uchar4 a, uchar4 b, uint c, bool saturate) {
+inline uint amd_mixed_dot(uchar4 a, uchar4 b, uint c, bool saturate) {
   return __ockl_udot4(get_native_vector(a), get_native_vector(b), c, saturate);
 }
 __DEVICE__
-inline
-int amd_mixed_dot(int a, int b, int c, bool saturate) {
-    return __ockl_sdot8(a, b, c, saturate);
+inline int amd_mixed_dot(int a, int b, int c, bool saturate) {
+  return __ockl_sdot8(a, b, c, saturate);
 }
 __DEVICE__
-inline
-uint amd_mixed_dot(uint a, uint b, uint c, bool saturate) {
-    return __ockl_udot8(a, b, c, saturate);
+inline uint amd_mixed_dot(uint a, uint b, uint c, bool saturate) {
+  return __ockl_udot8(a, b, c, saturate);
 }
 #endif
 

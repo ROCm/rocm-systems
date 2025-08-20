@@ -51,10 +51,9 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
   ws_ = ws;
 
   void* buffer = dev_->GlbCtx().svmAlloc(sizeof(amd_signal_t), alignof(amd_signal_t),
-                                          CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
+                                         CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS);
   if (!buffer) {
-    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
-            "Failed to create amd_signal_t buffer");
+    ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE, "Failed to create amd_signal_t buffer");
     return false;
   }
   std::memset(buffer, 0, sizeof(amd_signal_t));
@@ -87,9 +86,7 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
     eventInputInfo.pEvent = &event_;
     eventInputInfo.trackingType = Pal::EventTrackingType::ShaderInterrupt;
     Pal::RegisterEventOutputInfo eventOutputInfo = {};
-    result = dev_->iDev()->RegisterEvent(
-      eventInputInfo,
-      &eventOutputInfo);
+    result = dev_->iDev()->RegisterEvent(eventInputInfo, &eventOutputInfo);
     if (result != Pal::Result::Success) {
       ClPrint(amd::LOG_ERROR, amd::LOG_QUEUE,
               "Failed to register SQ event needed for hostcall buffer");
@@ -97,8 +94,7 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
     }
     amdSignal_->event_id = eventOutputInfo.shaderInterrupt.eventId;
     amdSignal_->event_mailbox_ptr = eventOutputInfo.shaderInterrupt.eventMailboxGpuVa;
-    ClPrint(amd::LOG_INFO, amd::LOG_INIT,
-            "Registered SQ event %d with mailbox slot %p",
+    ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Registered SQ event %d with mailbox slot %p",
             amdSignal_->event_id, amdSignal_->event_mailbox_ptr);
 #endif
   }
@@ -120,7 +116,7 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
     };
     ShouldNotReachHere();
     return [](auto ls, auto rs) { return false; };
-  } (c);
+  }(c);
 
   if (ws_ == device::Signal::WaitState::Blocked) {
 #if defined(_WIN32)
@@ -140,7 +136,7 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
     auto start = amd::Os::timeNanos();
     while (true) {
       auto end = amd::Os::timeNanos();
-      auto duration = 1000 * (end - start); // convert to us
+      auto duration = 1000 * (end - start);  // convert to us
       if (duration >= timeout) {
         return amdSignal_->value;
       }
@@ -158,8 +154,6 @@ uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t time
   return -1;
 }
 
-void Signal::Reset(uint64_t value) {
-  amdSignal_->value = value;
-}
+void Signal::Reset(uint64_t value) { amdSignal_->value = value; }
 
-};
+};  // namespace amd::pal

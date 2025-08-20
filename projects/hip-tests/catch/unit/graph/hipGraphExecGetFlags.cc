@@ -40,7 +40,7 @@ THE SOFTWARE.
  */
 TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
   hipGraphExec_t graphExec;
-  unsigned long long flags; // NOLINT
+  unsigned long long flags;  // NOLINT
   constexpr size_t Nbytes = 10 * sizeof(int);
 
   hipGraphNode_t allocNodeA;
@@ -54,14 +54,12 @@ TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
   allocParam.poolProps.allocType = hipMemAllocationTypePinned;
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr,
-                                    0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
   REQUIRE(allocParam.dptr != nullptr);
 
-  HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
-      hipGraphInstantiateFlagAutoFreeOnLaunch));
-  HIP_CHECK_ERROR(hipGraphExecGetFlags(nullptr, &flags),
-                     hipErrorInvalidValue);
+  HIP_CHECK(
+      hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
+  HIP_CHECK_ERROR(hipGraphExecGetFlags(nullptr, &flags), hipErrorInvalidValue);
   HIP_CHECK(hipGraphDestroy(graph));
 }
 
@@ -80,7 +78,7 @@ TEST_CASE("Unit_hipGraphExecGetFlags_Negative") {
  */
 TEST_CASE("Unit_hipGraphExecGetFlags_positive") {
   hipGraphExec_t graphExec;
-  unsigned long long flags; // NOLINT
+  unsigned long long flags;  // NOLINT
   hipGraph_t graph;
   constexpr size_t Nbytes = 10 * sizeof(int);
 
@@ -95,20 +93,18 @@ TEST_CASE("Unit_hipGraphExecGetFlags_positive") {
   allocParam.poolProps.location.id = 0;
   allocParam.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr,
-                                    0, &allocParam));
+  HIP_CHECK(hipGraphAddMemAllocNode(&allocNodeA, graph, nullptr, 0, &allocParam));
   REQUIRE(allocParam.dptr != nullptr);
 
   SECTION("flag is 0") {
-    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
-                 0));
+    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph, 0));
 
     HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
     REQUIRE(flags == 0);
   }
   SECTION("flag is hipGraphInstantiateFlagAutoFreeOnLaunch") {
-    HIP_CHECK(hipGraphInstantiateWithFlags(&graphExec, graph,
-                 hipGraphInstantiateFlagAutoFreeOnLaunch));
+    HIP_CHECK(
+        hipGraphInstantiateWithFlags(&graphExec, graph, hipGraphInstantiateFlagAutoFreeOnLaunch));
 
     HIP_CHECK(hipGraphExecGetFlags(graphExec, &flags));
     REQUIRE(flags == hipGraphInstantiateFlagAutoFreeOnLaunch);
@@ -143,7 +139,6 @@ TEST_CASE("Unit_hipGraphExecGetFlags_positive") {
   HIP_CHECK(hipGraphDestroy(graph));
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
-
+ * End doxygen group GraphTest.
+ * @}
+ */

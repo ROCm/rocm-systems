@@ -672,6 +672,6 @@ TEST_CASE("Unit_hipDrvGraphAddMemsetNode_hipMallocManaged") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

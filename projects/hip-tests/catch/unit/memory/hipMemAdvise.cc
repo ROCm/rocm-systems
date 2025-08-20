@@ -34,7 +34,7 @@ static inline hipMemoryAdvise GetUnsetMemAdvice(const hipMemoryAdvise advice) {
       return hipMemAdviseUnsetPreferredLocation;
     default:
       assert("Invalid hipMemoryAdvise enumerator");
-      return advice; 
+      return advice;
   }
 }
 
@@ -48,7 +48,7 @@ static inline hipMemRangeAttribute GetMemAdviceAttr(const hipMemoryAdvise advice
       return hipMemRangeAttributePreferredLocation;
     default:
       assert("Invalid hipMemoryAdvise enumerator");
-      return static_cast<hipMemRangeAttribute>(-1); 
+      return static_cast<hipMemRangeAttribute>(-1);
   }
 }
 
@@ -151,7 +151,8 @@ TEST_CASE("Unit_hipMemAdvise_Rounding") {
   REQUIRE(device == static_cast<int>(attribute));
   HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute), hipMemRangeAttributeAccessedBy,
                                     alloc.ptr(), 3 * kPageSize));
-  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) == static_cast<int>(attribute));
+  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
+          static_cast<int>(attribute));
 }
 
 TEST_CASE("Unit_hipMemAdvise_Flags_Do_Not_Cause_Prefetch") {

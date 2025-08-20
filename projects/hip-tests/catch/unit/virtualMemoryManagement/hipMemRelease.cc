@@ -50,6 +50,6 @@ TEST_CASE("Unit_hipMemRelease_negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

@@ -50,10 +50,9 @@ template <hip_api_id_t operation_id> class api_callbacks_spawner_t {
     static_assert(operation_id >= HIP_API_ID_FIRST && operation_id <= HIP_API_ID_LAST,
                   "invalid HIP_API operation id");
 
-    if (auto function =
-            amd::activity_prof::report_activity.load(std::memory_order_relaxed);
-        function && (enabled_ = function(ACTIVITY_DOMAIN_HIP_API, operation_id,
-                                         &trace_data_) == 0)) {
+    if (auto function = amd::activity_prof::report_activity.load(std::memory_order_relaxed);
+        function &&
+        (enabled_ = function(ACTIVITY_DOMAIN_HIP_API, operation_id, &trace_data_) == 0)) {
       amd::activity_prof::correlation_id = trace_data_.api_data.correlation_id;
 
       if (trace_data_.phase_enter != nullptr) {

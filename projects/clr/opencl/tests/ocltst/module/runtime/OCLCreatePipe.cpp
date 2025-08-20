@@ -29,9 +29,7 @@ OCLCreatePipe::OCLCreatePipe() { _numSubTests = 1; }
 
 OCLCreatePipe::~OCLCreatePipe() {}
 
-void OCLCreatePipe::open(unsigned int test,
-                         char *units,
-                         double &conversion,
+void OCLCreatePipe::open(unsigned int test, char* units, double& conversion,
                          unsigned int deviceId) {
   _deviceId = deviceId;
 }
@@ -45,19 +43,18 @@ void OCLCreatePipe::run(void) {
   err = _wrapper->clGetPlatformIDs(1, &platform, nullptr);
   CHECK_RESULT(err, "clGetPlatformIDs failed");
 
-  err = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_DEFAULT,
-                                 devices.size(), devices.data(), nullptr);
+  err = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_DEFAULT, devices.size(), devices.data(),
+                                 nullptr);
   CHECK_RESULT(err, "clGetDeviceIDs failed");
 
-  context = _wrapper->clCreateContext(nullptr, 1, &devices[_deviceId],
-                                      nullptr, nullptr, &err);
+  context = _wrapper->clCreateContext(nullptr, 1, &devices[_deviceId], nullptr, nullptr, &err);
   CHECK_RESULT(err, "clCreateContext failed");
 
   constexpr std::array<cl_mem_flags, 3> valid_flags = {
-    CL_MEM_READ_WRITE,
-    CL_MEM_HOST_NO_ACCESS,
+      CL_MEM_READ_WRITE,
+      CL_MEM_HOST_NO_ACCESS,
 
-    CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS,
+      CL_MEM_READ_WRITE | CL_MEM_HOST_NO_ACCESS,
   };
 
   constexpr cl_uint pipe_packet_size = sizeof(int);
@@ -66,8 +63,8 @@ void OCLCreatePipe::run(void) {
   for (cl_mem_flags flags : valid_flags) {
     cl_mem pipe = nullptr;
 
-    pipe = _wrapper->clCreatePipe(context, flags, pipe_packet_size,
-                                  pipe_max_packets, nullptr, &err);
+    pipe =
+        _wrapper->clCreatePipe(context, flags, pipe_packet_size, pipe_max_packets, nullptr, &err);
 
     CHECK_RESULT(err, "clCreatePipe failed with flag %lu", flags);
 
@@ -91,23 +88,22 @@ void OCLCreatePipe::run(void) {
   }
 
   constexpr std::array<cl_mem_flags, 5> invalid_flags = {
-    CL_MEM_READ_ONLY,
-    CL_MEM_WRITE_ONLY,
+      CL_MEM_READ_ONLY,
+      CL_MEM_WRITE_ONLY,
 
-    CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY,
+      CL_MEM_READ_ONLY | CL_MEM_WRITE_ONLY,
 
-    0,
-    ~0UL,
+      0,
+      ~0UL,
   };
 
   for (cl_mem_flags flags : valid_flags) {
     cl_mem pipe = nullptr;
 
-    pipe = _wrapper->clCreatePipe(context, flags, pipe_packet_size,
-                                  pipe_max_packets, nullptr, &err);
+    pipe =
+        _wrapper->clCreatePipe(context, flags, pipe_packet_size, pipe_max_packets, nullptr, &err);
 
-    CHECK_RESULT(err, "clCreatePipe passed when it shouldn't with flag %lu",
-                 flags);
+    CHECK_RESULT(err, "clCreatePipe passed when it shouldn't with flag %lu", flags);
 
     if (err) {
       break;

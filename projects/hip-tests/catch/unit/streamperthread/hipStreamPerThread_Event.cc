@@ -28,7 +28,7 @@ TEST_CASE("Unit_hipStreamPerThread_EventRecord") {
 
 __global__ void update_even_odd(unsigned int N, int* out) {
   for (unsigned int i = 0; i < N; ++i) {
-    if (i%2 == 0) {
+    if (i % 2 == 0) {
       out[i] = 2;
     } else {
       out[i] = 3;
@@ -40,7 +40,7 @@ TEST_CASE("Unit_hipStreamPerThread_EventSynchronize") {
   int* A_d = nullptr;
   unsigned int size = 1000;
 
-  HIP_CHECK(hipHostMalloc(&A_h, size*sizeof(int)));
+  HIP_CHECK(hipHostMalloc(&A_h, size * sizeof(int)));
   HIP_CHECK(hipMalloc(&A_d, size * sizeof(int)));
 
   hipEvent_t start, end;
@@ -52,13 +52,13 @@ TEST_CASE("Unit_hipStreamPerThread_EventSynchronize") {
   HIP_CHECK(hipEventRecord(end, hipStreamPerThread));
 
   HIP_CHECK(hipEventSynchronize(end));
-  HIP_CHECK(hipMemcpy(A_h, A_d, size*sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(A_h, A_d, size * sizeof(int), hipMemcpyDeviceToHost));
 
   // Verify result
   for (unsigned int i = 0; i < size; ++i) {
-    if (i%2 == 0 && A_h[i] != 2)
+    if (i % 2 == 0 && A_h[i] != 2)
       REQUIRE(false);
-    else if (i%2 != 0 && A_h[i] != 3) {
+    else if (i % 2 != 0 && A_h[i] != 3) {
       REQUIRE(false);
     }
   }

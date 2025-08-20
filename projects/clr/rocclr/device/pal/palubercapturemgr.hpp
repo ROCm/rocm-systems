@@ -23,18 +23,16 @@
 #include "device/pal/palcapturemgr.hpp"
 #include "thread/monitor.hpp"
 
-namespace DevDriver
-{
+namespace DevDriver {
 class DevDriverServer;
 }
 
-namespace GpuUtil
-{
+namespace GpuUtil {
 class TraceSession;
 class RenderOpTraceController;
 class CodeObjectTraceSource;
 class QueueTimingsTraceSource;
-}
+}  // namespace GpuUtil
 
 namespace amd::pal {
 
@@ -47,8 +45,8 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
 
   bool Update(Pal::IPlatform* platform) override;
 
-  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel,
-                   size_t x, size_t y, size_t z) override;
+  void PreDispatch(VirtualGPU* gpu, const HSAILKernel& kernel, size_t x, size_t y,
+                   size_t z) override;
 
   void PostDispatch(VirtualGPU* gpu) override;
 
@@ -60,15 +58,15 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
   void WriteBarrierEndMarker(const VirtualGPU* gpu,
                              const Pal::Developer::BarrierData& data) const override;
 
-  bool RegisterTimedQueue(uint32_t queue_id,
-                          Pal::IQueue* iQueue, bool* debug_vmid) const override;
+  bool RegisterTimedQueue(uint32_t queue_id, Pal::IQueue* iQueue, bool* debug_vmid) const override;
 
   Pal::Result TimedQueueSubmit(Pal::IQueue* queue, uint64_t cmdId,
                                const Pal::SubmitInfo& submitInfo) const override;
 
-  uint64_t AddElfBinary(const void* exe_binary, size_t exe_binary_size,
-                        const void* elf_binary, size_t elf_binary_size,
-                        Pal::IGpuMemory* pGpuMemory, size_t offset) override;
+  uint64_t AddElfBinary(const void* exe_binary, size_t exe_binary_size, const void* elf_binary,
+                        size_t elf_binary_size, Pal::IGpuMemory* pGpuMemory,
+                        size_t offset) override;
+
  private:
   UberTraceCaptureMgr(Pal::IPlatform* platform, const Device& device);
   bool Init(Pal::IPlatform* platform);
@@ -86,20 +84,20 @@ class UberTraceCaptureMgr final : public ICaptureMgr {
   void WriteEventWithDimsMarker(const VirtualGPU* gpu, RgpSqttMarkerEventType apiType, uint32_t x,
                                 uint32_t y, uint32_t z) const;
 
-  const Device&                     device_;
-  DevDriver::DevDriverServer*       dev_driver_server_;
-  uint64_t                          global_disp_count_;
+  const Device& device_;
+  DevDriver::DevDriverServer* dev_driver_server_;
+  uint64_t global_disp_count_;
   RgpSqttMarkerUserEventWithString* user_event_;
-  mutable uint32_t                  current_event_id_;
+  mutable uint32_t current_event_id_;
 
-  mutable amd::Monitor              trace_mutex_;
-  GpuUtil::TraceSession*            trace_session_;
+  mutable amd::Monitor trace_mutex_;
+  GpuUtil::TraceSession* trace_session_;
   GpuUtil::RenderOpTraceController* trace_controller_;
-  GpuUtil::CodeObjectTraceSource*   code_object_trace_source_;
+  GpuUtil::CodeObjectTraceSource* code_object_trace_source_;
   GpuUtil::QueueTimingsTraceSource* queue_timings_trace_source_;
 
   PAL_DISALLOW_DEFAULT_CTOR(UberTraceCaptureMgr);
   PAL_DISALLOW_COPY_AND_ASSIGN(UberTraceCaptureMgr);
 };
 
-} // namespace amd::pal
+}  // namespace amd::pal

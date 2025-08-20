@@ -27,9 +27,10 @@
 #include "OCLTestImp.h"
 #include "d3d11.h"
 
-typedef CL_API_ENTRY cl_mem(CL_API_CALL* clGetPlaneFromImageAMD_fn)(
-    cl_context /* context */, cl_mem /* mem */, cl_uint /* plane */,
-    cl_int* /* errcode_ret */);
+typedef CL_API_ENTRY cl_mem(CL_API_CALL* clGetPlaneFromImageAMD_fn)(cl_context /* context */,
+                                                                    cl_mem /* mem */,
+                                                                    cl_uint /* plane */,
+                                                                    cl_int* /* errcode_ret */);
 
 class OCLDX11Common : public OCLTestImp {
  public:
@@ -41,8 +42,7 @@ class OCLDX11Common : public OCLTestImp {
   ///////////////////////
   // virtual interface //
   ///////////////////////
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual unsigned int close(void);
 
  protected:

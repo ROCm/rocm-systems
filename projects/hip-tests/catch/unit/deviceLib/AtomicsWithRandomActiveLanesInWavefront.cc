@@ -503,7 +503,7 @@ static void runFloatTest() {
   bool* dIActiveLanes;
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
   HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
-  
+
   // copy host memory to device to initialize to zero
   HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));
@@ -592,7 +592,7 @@ template <typename T> static void runDivIntTest() {
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dOData), memSize));
   HIP_CHECK(hipMalloc(reinterpret_cast<bool**>(&dIActiveLanes), N * sizeof(bool)));
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&dIDivValues), N * sizeof(T)));
-  
+
   // copy host memory to device to initialize to zero
   HIP_CHECK(hipMemcpy(dOData, hOData, memSize, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(dIActiveLanes, hIActiveLanes, N * sizeof(bool), hipMemcpyHostToDevice));

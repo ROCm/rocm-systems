@@ -29,8 +29,7 @@ class OCLPerfGenoilSiaMiner : public OCLTestImp {
   virtual ~OCLPerfGenoilSiaMiner();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -46,7 +45,7 @@ class OCLPerfGenoilSiaMiner : public OCLTestImp {
 
   // Number of times the GPU kernel is called between updating the command line
   // text
-#define MIN_CPI 1  // Must do one call per update
+#define MIN_CPI 1      // Must do one call per update
 #define MAX_CPI 65536  // 2^16 is a slightly arbitrary max
 #define DEFAULT_CPI 30
 
@@ -64,8 +63,7 @@ class OCLPerfGenoilSiaMiner : public OCLTestImp {
   cl_mem nonceOutmobj_ = NULL;
 
   // More gobal variables the grindNonce needs to access
-  size_t local_item_size =
-      256;  // Size of local work groups. 256 is usually optimal
+  size_t local_item_size = 256;  // Size of local work groups. 256 is usually optimal
   unsigned int blocks_mined = 0;
   unsigned int intensity = DEFAULT_INTENSITY;
   unsigned cycles_per_iter = DEFAULT_CPI;

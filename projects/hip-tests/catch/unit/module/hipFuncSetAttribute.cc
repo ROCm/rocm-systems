@@ -20,12 +20,12 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 
 /**
-* @addtogroup hipFuncSetAttribute
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value)` -
-* Set attributes for a specific function
-*/
+ * @addtogroup hipFuncSetAttribute
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value)` -
+ * Set attributes for a specific function
+ */
 
 /**
  * Test Description
@@ -47,9 +47,7 @@ __global__ void fn(float* px, float* py) {
 
 TEST_CASE("Unit_hipFuncSetAttribute_Basic") {
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&fn),
-                                 hipFuncAttributeMaxDynamicSharedMemorySize,
-                                 0));
+                                hipFuncAttributeMaxDynamicSharedMemorySize, 0));
   HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&fn),
-                               hipFuncAttributePreferredSharedMemoryCarveout,
-                               0));
+                                hipFuncAttributePreferredSharedMemoryCarveout, 0));
 }

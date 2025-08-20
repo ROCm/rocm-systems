@@ -25,7 +25,8 @@ THE SOFTWARE.
  Functional Tests:
    1. Pass multiple device related attributes in the attributes of hipDrvPointerGetAttributes API
       for the device pointer and check the behaviour
-   2. Pass device and host attributes in the attributes of hipDrvPointerGetAttributes API and validate the behaviour
+   2. Pass device and host attributes in the attributes of hipDrvPointerGetAttributes API and
+ validate the behaviour
    3. Pass invalid pointer to hipDrvPointerGetAttributes API and validate the behaviour.
 
  Negative Tests:
@@ -37,7 +38,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 static size_t Nbytes = 0;
-constexpr size_t N {1000000};
+constexpr size_t N{1000000};
 
 /* This testcase verifies Negative Scenarios of
  * hipDrvPointerGetAttributes API */
@@ -51,12 +52,11 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
   int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes,
-                         hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
   unsigned int device_ordinal;
-  int *dev_ptr{nullptr};
-  void *data[2];
+  int* dev_ptr{nullptr};
+  void* data[2];
   data[0] = &dev_ptr;
   data[1] = &device_ordinal;
 
@@ -64,32 +64,34 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Negative") {
                                        HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
 
   SECTION("Passing invalid number to numAttributes") {
-    REQUIRE(hipDrvPointerGetAttributes(0, attributes, data,
-            reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorInvalidValue);
+    REQUIRE(
+        hipDrvPointerGetAttributes(0, attributes, data, reinterpret_cast<hipDeviceptr_t>(A_d)) ==
+        hipErrorInvalidValue);
   }
 
   SECTION("Passing nullptr to attributes") {
-    REQUIRE(hipDrvPointerGetAttributes(2, nullptr, data,
-            reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorInvalidValue);
+    REQUIRE(hipDrvPointerGetAttributes(2, nullptr, data, reinterpret_cast<hipDeviceptr_t>(A_d)) ==
+            hipErrorInvalidValue);
   }
 
   SECTION("Passing nullptr to data") {
-    REQUIRE(hipDrvPointerGetAttributes(2, attributes, nullptr,
-            reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorInvalidValue);
+    REQUIRE(
+        hipDrvPointerGetAttributes(2, attributes, nullptr, reinterpret_cast<hipDeviceptr_t>(A_d)) ==
+        hipErrorInvalidValue);
   }
 
 #if HT_AMD
   SECTION("Passing nullptr to device Pointer") {
     hipDeviceptr_t ptr = 0;
-    REQUIRE(hipDrvPointerGetAttributes(2, attributes, data,
-            ptr) == hipErrorInvalidValue);
+    REQUIRE(hipDrvPointerGetAttributes(2, attributes, data, ptr) == hipErrorInvalidValue);
   }
 #endif
 #if HT_NVIDIA
   SECTION("Passing invalid dependencies") {
     hipPointer_attribute attributes1[] = {HIP_POINTER_ATTRIBUTE_DEVICE_POINTER};
-    REQUIRE(hipDrvPointerGetAttributes(2, attributes1, data,
-            reinterpret_cast<hipDeviceptr_t>(A_d)) == hipErrorInvalidValue);
+    REQUIRE(
+        hipDrvPointerGetAttributes(2, attributes1, data, reinterpret_cast<hipDeviceptr_t>(A_d)) ==
+        hipErrorInvalidValue);
   }
 #endif
 }
@@ -105,19 +107,18 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
   int* A_Pinned_h;
 
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes,
-                         hipHostMallocDefault));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A_Pinned_h), Nbytes, hipHostMallocDefault));
   HIP_CHECK(hipGetDevice(&deviceId));
 
   SECTION("Passing device attributes to device pointer") {
     unsigned int memory_type;
     int device_ordinal;
-    int *dev{nullptr};
-    int *dev_ptr{nullptr};
-    int *dev_ptr1{nullptr};
+    int* dev{nullptr};
+    int* dev_ptr{nullptr};
+    int* dev_ptr1{nullptr};
     unsigned int range_size;
-    int *start_addr{nullptr};
-    void *data[5];
+    int* start_addr{nullptr};
+    void* data[5];
     data[0] = (&memory_type);
     data[1] = (&device_ordinal);
     data[2] = (&dev_ptr);
@@ -125,19 +126,16 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
     data[4] = (&start_addr);
 
     // Device memory
-    hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_MEMORY_TYPE,
-                                         HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
-                                         HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
-                                         HIP_POINTER_ATTRIBUTE_RANGE_SIZE,
-                                         HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR};
-    HIP_CHECK(hipPointerGetAttribute(&dev_ptr1,
-              HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
-              reinterpret_cast<hipDeviceptr_t>(A_d + 100)));
-    HIP_CHECK(hipPointerGetAttribute(&dev,
-	            HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
-              reinterpret_cast<hipDeviceptr_t>(A_d)));
+    hipPointer_attribute attributes[] = {
+        HIP_POINTER_ATTRIBUTE_MEMORY_TYPE, HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL,
+        HIP_POINTER_ATTRIBUTE_DEVICE_POINTER, HIP_POINTER_ATTRIBUTE_RANGE_SIZE,
+        HIP_POINTER_ATTRIBUTE_RANGE_START_ADDR};
+    HIP_CHECK(hipPointerGetAttribute(&dev_ptr1, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(A_d + 100)));
+    HIP_CHECK(hipPointerGetAttribute(&dev, HIP_POINTER_ATTRIBUTE_DEVICE_POINTER,
+                                     reinterpret_cast<hipDeviceptr_t>(A_d)));
     HIP_CHECK(hipDrvPointerGetAttributes(5, attributes, data,
-              reinterpret_cast<hipDeviceptr_t>(A_d + 100)));
+                                         reinterpret_cast<hipDeviceptr_t>(A_d + 100)));
 
     REQUIRE(dev_ptr == dev_ptr1);
 
@@ -150,29 +148,29 @@ TEST_CASE("Unit_hipDrvPtrGetAttributes_Functional") {
 
   SECTION("Passing device and host attributes to device pointer") {
     int device_ordinal;
-    int *host_ptr;
-    void *data[2];
+    int* host_ptr;
+    void* data[2];
     data[0] = (&host_ptr);
     data[1] = (&device_ordinal);
 
     hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_HOST_POINTER,
                                          HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
-    HIP_CHECK(hipDrvPointerGetAttributes(2, attributes, data,
-              reinterpret_cast<hipDeviceptr_t>(A_d)));
+    HIP_CHECK(
+        hipDrvPointerGetAttributes(2, attributes, data, reinterpret_cast<hipDeviceptr_t>(A_d)));
     REQUIRE(host_ptr == nullptr);
     REQUIRE(device_ordinal == deviceId);
   }
 
   SECTION("Passing host related attributes to host pointer") {
     int device_ordinal;
-    void *data[2];
-    int *host_ptr;
+    void* data[2];
+    int* host_ptr;
     data[0] = (&host_ptr);
     data[1] = (&device_ordinal);
     hipPointer_attribute attributes[] = {HIP_POINTER_ATTRIBUTE_HOST_POINTER,
                                          HIP_POINTER_ATTRIBUTE_DEVICE_ORDINAL};
     HIP_CHECK(hipDrvPointerGetAttributes(2, attributes, data,
-              reinterpret_cast<hipDeviceptr_t>(A_Pinned_h)));
+                                         reinterpret_cast<hipDeviceptr_t>(A_Pinned_h)));
     REQUIRE(host_ptr == A_Pinned_h);
     REQUIRE(device_ordinal == deviceId);
   }
