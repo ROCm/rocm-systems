@@ -369,4 +369,4 @@ This information is useful for understanding how many instructions per cycle (IP
 
 .. note::
 
-  The stochastic PC sampling is supported on AMD Instinct MI300, MI350, and MI355.
+  The stochastic PC sampling is supported on AMD Instinct MI300, MI325, MI350, and MI355.
