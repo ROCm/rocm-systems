@@ -71,8 +71,8 @@ void OCLThreadTrace::open(unsigned int test, char* units, double& conversion,
   }
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -83,9 +83,8 @@ void OCLThreadTrace::open(unsigned int test, char* units, double& conversion,
 
   size_t threadTraceEnabled;
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[deviceId], CL_DEVICE_THREAD_TRACE_SUPPORTED_AMD,
-      sizeof(threadTraceEnabled), &threadTraceEnabled, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_THREAD_TRACE_SUPPORTED_AMD,
+                                     sizeof(threadTraceEnabled), &threadTraceEnabled, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   if (!threadTraceEnabled) {
@@ -109,13 +108,11 @@ void OCLThreadTrace::open(unsigned int test, char* units, double& conversion,
   }
 
   clCreateThreadTraceAMD_ =
-      (fnp_clCreateThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress(
-          "clCreateThreadTraceAMD");
+      (fnp_clCreateThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress("clCreateThreadTraceAMD");
   CHECK_RESULT((clCreateThreadTraceAMD_ == 0),
                "clGetExtensionFunctionAddress(clCreateThreadTraceAMD) failed");
-  clGetThreadTraceInfoAMD_ =
-      (fnp_clGetThreadTraceInfoAMD)_wrapper->clGetExtensionFunctionAddress(
-          "clGetThreadTraceInfoAMD");
+  clGetThreadTraceInfoAMD_ = (fnp_clGetThreadTraceInfoAMD)_wrapper->clGetExtensionFunctionAddress(
+      "clGetThreadTraceInfoAMD");
   CHECK_RESULT((clGetThreadTraceInfoAMD_ == 0),
                "clGetExtensionFunctionAddress(clGetThreadTraceInfoAMD) failed");
 
@@ -123,24 +120,21 @@ void OCLThreadTrace::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateThreadTraceAMD() failed");
 
   // Get number of shader engines
-  clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_SE, sizeof(SeNum),
-                           &SeNum, NULL);
+  clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_SE, sizeof(SeNum), &SeNum, NULL);
 
   ttBuf_ = (unsigned int**)malloc(SeNum * sizeof(unsigned int*));
   CHECK_RESULT((ttBuf_ == NULL), "malloc  failed");
 
   memset(ttBuf_, 0, SeNum * sizeof(unsigned int*));
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -151,56 +145,47 @@ void OCLThreadTrace::open(unsigned int test, char* units, double& conversion,
 
   cl_mem buffer;
   for (unsigned int i = 0; i < IOThreadTrace; ++i) {
-    buffer = _wrapper->clCreateBuffer(context_,
-                                      CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
-                                      datasize, ioBuf_[i], &error_);
+    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, datasize,
+                                      ioBuf_[i], &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     buffers_.push_back(buffer);
   }
 
   for (unsigned int i = 0; i < SeNum; ++i) {
-    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, ttBufSize,
-                                      NULL, &error_);
+    buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, ttBufSize, NULL, &error_);
     CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
     buffers_.push_back(buffer);
   }
 
-  clReleaseThreadTraceAMD_ =
-      (fnp_clReleaseThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress(
-          "clReleaseThreadTraceAMD");
+  clReleaseThreadTraceAMD_ = (fnp_clReleaseThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress(
+      "clReleaseThreadTraceAMD");
   CHECK_RESULT((clReleaseThreadTraceAMD_ == 0),
                "clGetExtensionFunctionAddress(clReleaseThreadTraceAMD) failed");
   clRetainThreadTraceAMD_ =
-      (fnp_clRetainThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress(
-          "clRetainThreadTraceAMD");
+      (fnp_clRetainThreadTraceAMD)_wrapper->clGetExtensionFunctionAddress("clRetainThreadTraceAMD");
   CHECK_RESULT((clRetainThreadTraceAMD_ == 0),
                "clGetExtensionFunctionAddress(clRetainThreadTraceAMD) failed");
-  clSetThreadTraceParamAMD_ =
-      (fnp_clSetThreadTraceParamAMD)_wrapper->clGetExtensionFunctionAddress(
-          "clSetThreadTraceParamAMD");
-  CHECK_RESULT(
-      (clSetThreadTraceParamAMD_ == 0),
-      "clGetExtensionFunctionAddress(clSetThreadTraceParamAMD) failed");
-  clEnqueueThreadTraceCommandAMD_ = (fnp_clEnqueueThreadTraceCommandAMD)
-                                        _wrapper->clGetExtensionFunctionAddress(
-                                            "clEnqueueThreadTraceCommandAMD");
-  CHECK_RESULT(
-      (clEnqueueThreadTraceCommandAMD_ == 0),
-      "clGetExtensionFunctionAddress(clEnqueueThreadTraceCommandAMD) failed");
+  clSetThreadTraceParamAMD_ = (fnp_clSetThreadTraceParamAMD)_wrapper->clGetExtensionFunctionAddress(
+      "clSetThreadTraceParamAMD");
+  CHECK_RESULT((clSetThreadTraceParamAMD_ == 0),
+               "clGetExtensionFunctionAddress(clSetThreadTraceParamAMD) failed");
+  clEnqueueThreadTraceCommandAMD_ =
+      (fnp_clEnqueueThreadTraceCommandAMD)_wrapper->clGetExtensionFunctionAddress(
+          "clEnqueueThreadTraceCommandAMD");
+  CHECK_RESULT((clEnqueueThreadTraceCommandAMD_ == 0),
+               "clGetExtensionFunctionAddress(clEnqueueThreadTraceCommandAMD) failed");
   clEnqueueBindThreadTraceBufferAMD_ =
-      (fnp_clEnqueueBindThreadTraceBufferAMD)_wrapper
-          ->clGetExtensionFunctionAddress("clEnqueueBindThreadTraceBufferAMD");
+      (fnp_clEnqueueBindThreadTraceBufferAMD)_wrapper->clGetExtensionFunctionAddress(
+          "clEnqueueBindThreadTraceBufferAMD");
   CHECK_RESULT((clEnqueueBindThreadTraceBufferAMD_ == 0),
                "clGetExtensionFunctionAddress("
                "clEnqueueBindThreadTraceBufferAMD) failed");
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
-static void DumpTraceSI(unsigned int index, cl_ushort* tracePtr,
-                        size_t numOfBytes) {
+static void DumpTraceSI(unsigned int index, cl_ushort* tracePtr, size_t numOfBytes) {
   FILE* outFile;
   char file_name[16] = {0};
   static unsigned int iii = 0;
@@ -243,35 +228,28 @@ void OCLThreadTrace::run(void) {
   for (i = 0; i < SeNum; i++) ttArrBuf[i] = buffers()[IOThreadTrace + i];
 
   cl_event clEvent;
-  error_ = clEnqueueBindThreadTraceBufferAMD_(
-      cmdQueues_[_deviceId], threadTrace_, ttArrBuf, (cl_uint)SeNum, ttBufSize,
-      0, NULL, &clEvent);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clEnqueueBindThreadTraceBufferAMD() failed");
+  error_ = clEnqueueBindThreadTraceBufferAMD_(cmdQueues_[_deviceId], threadTrace_, ttArrBuf,
+                                              (cl_uint)SeNum, ttBufSize, 0, NULL, &clEvent);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueBindThreadTraceBufferAMD() failed");
 
   error_ = clEnqueueThreadTraceCommandAMD_(cmdQueues_[_deviceId], threadTrace_,
-                                           CL_THREAD_TRACE_BEGIN_COMMAND, 0,
-                                           NULL, &clEvent);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clEnqueueThreadTraceCommandAMD() failed");
+                                           CL_THREAD_TRACE_BEGIN_COMMAND, 0, NULL, &clEvent);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueThreadTraceCommandAMD() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, globalWorkSize, localWorkSize,
-                                            0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, globalWorkSize,
+                                            localWorkSize, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   clFinish(cmdQueues_[_deviceId]);
 
   error_ = clEnqueueThreadTraceCommandAMD_(cmdQueues_[_deviceId], threadTrace_,
-                                           CL_THREAD_TRACE_END_COMMAND, 0, NULL,
-                                           &clEvent);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clEnqueueThreadTraceCommandAMD() failed");
+                                           CL_THREAD_TRACE_END_COMMAND, 0, NULL, &clEvent);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueThreadTraceCommandAMD() failed");
 
   ttBufRecordedSizes = (unsigned int*)malloc(sizeof(unsigned int) * SeNum);
   memset(ttBufRecordedSizes, 0, sizeof(unsigned int) * SeNum);
   size_t ttBufRecordedSize;
-  error_ = clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_BUFFERS_SIZE,
-                                    1, NULL, &ttBufRecordedSize);
+  error_ = clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_BUFFERS_SIZE, 1, NULL,
+                                    &ttBufRecordedSize);
   CHECK_RESULT((error_ != CL_SUCCESS), "clGetThreadTraceInfoAMD() failed");
 
   if (ttBufRecordedSize > sizeof(unsigned int) * SeNum) {
@@ -280,9 +258,8 @@ void OCLThreadTrace::run(void) {
     memset(ttBufRecordedSizes, 0, ttBufRecordedSize);
   }
 
-  error_ =
-      clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_BUFFERS_SIZE,
-                               ttBufRecordedSize, ttBufRecordedSizes, NULL);
+  error_ = clGetThreadTraceInfoAMD_(threadTrace_, CL_THREAD_TRACE_BUFFERS_SIZE, ttBufRecordedSize,
+                                    ttBufRecordedSizes, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clGetThreadTraceInfoAMD() failed");
 
   for (i = 0; i < SeNum; ++i) {
@@ -292,9 +269,9 @@ void OCLThreadTrace::run(void) {
 
   for (i = 0; i < SeNum; ++i) {
     if (ttBufRecordedSizes[i] != 0) {
-      error_ = _wrapper->clEnqueueReadBuffer(
-          cmdQueues_[_deviceId], buffers()[IOThreadTrace + i], CL_TRUE, 0,
-          ttBufRecordedSizes[i], ttBuf_[i], 0, NULL, NULL);
+      error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers()[IOThreadTrace + i],
+                                             CL_TRUE, 0, ttBufRecordedSizes[i], ttBuf_[i], 0, NULL,
+                                             NULL);
       CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
 #if DUMPTRACE
       DumpTraceSI(i, (cl_ushort*)ttBuf_[i], ttBufRecordedSizes[i]);
@@ -316,9 +293,7 @@ void OCLThreadTrace::run(void) {
     }
   }
   if (!validRes) {
-    CHECK_RESULT(
-        true,
-        " - Incorrect result for thread trace. no output data was recorded.\n");
+    CHECK_RESULT(true, " - Incorrect result for thread trace. no output data was recorded.\n");
   }
 
   if (ttArrBuf) free(ttArrBuf);
@@ -326,8 +301,7 @@ void OCLThreadTrace::run(void) {
 }
 
 unsigned int OCLThreadTrace::close(void) {
-  if (clReleaseThreadTraceAMD_ && threadTrace_)
-    clReleaseThreadTraceAMD_(threadTrace_);
+  if (clReleaseThreadTraceAMD_ && threadTrace_) clReleaseThreadTraceAMD_(threadTrace_);
 
   if (ioBuf_) {
     for (unsigned i = 0; i < IOThreadTrace; ++i) {

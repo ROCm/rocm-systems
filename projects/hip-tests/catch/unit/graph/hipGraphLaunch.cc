@@ -145,6 +145,6 @@ TEST_CASE("Unit_hipGraphLaunch_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

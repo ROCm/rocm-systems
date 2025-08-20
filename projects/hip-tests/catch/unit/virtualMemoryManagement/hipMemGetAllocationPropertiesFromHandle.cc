@@ -122,6 +122,6 @@ TEST_CASE("Unit_hipMemGetAllocationPropertiesFromHandle_Negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

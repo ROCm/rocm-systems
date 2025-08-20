@@ -55,7 +55,7 @@ __global__ void AssertPassKernel(int* x) {
 
 __global__ void AssertFailKernel(int* x) {
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
-   *x = tid;
+  *x = tid;
   // expected to fail for the even thread indices
   assert(tid % 2 == 1);
 }
@@ -63,7 +63,7 @@ __global__ void AssertFailKernel(int* x) {
 template <bool should_abort> void LaunchAssertKernel() {
   const int num_blocks = 2;
   const int num_threads = 16;
-  int *d_a;
+  int* d_a;
   HIP_CHECK(hipMalloc(&d_a, sizeof(int)));
 
   if constexpr (should_abort) {
@@ -124,6 +124,6 @@ TEST_CASE("Unit_Assert_Positive_Basic_KernelFail") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

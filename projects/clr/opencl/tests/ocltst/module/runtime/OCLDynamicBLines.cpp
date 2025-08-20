@@ -143,12 +143,11 @@ void OCLDynamicBLines::open(unsigned int test, char* units, double& conversion,
 
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION,
-                                     param_size, strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -157,16 +156,14 @@ void OCLDynamicBLines::open(unsigned int test, char* units, double& conversion,
   delete strVersion;
 
   char dbuffer[1024] = {0};
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test],
-                                                 NULL, &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test], NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -178,8 +175,7 @@ void OCLDynamicBLines::open(unsigned int test, char* units, double& conversion,
   kernel2_ = _wrapper->clCreateKernel(program_, "computeBezierLines2", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
 
-  kernel3_ =
-      _wrapper->clCreateKernel(program_, "computeBezierLinePositions", &error_);
+  kernel3_ = _wrapper->clCreateKernel(program_, "computeBezierLinePositions", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel() failed");
 
   cl_mem buffer;
@@ -200,17 +196,16 @@ void OCLDynamicBLines::open(unsigned int test, char* units, double& conversion,
     bLines_[i].reserved = 0;
   }
 
-  buffer =
-      _wrapper->clCreateBuffer(context_, CL_MEM_USE_HOST_PTR,
-                               sizeof(BezierLine) * nLines, bLines_, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, sizeof(BezierLine) * nLines,
+                                    bLines_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 
   hostArray_ = new cl_float2[nLines * (MAX_TESSELLATION + 1)];
   ((unsigned int*)hostArray_)[0] = sizeof(cl_float2);
-  buffer = _wrapper->clCreateBuffer(
-      context_, CL_MEM_USE_HOST_PTR,
-      sizeof(cl_float2) * nLines * MAX_TESSELLATION, hostArray_, &error_);
+  buffer =
+      _wrapper->clCreateBuffer(context_, CL_MEM_USE_HOST_PTR,
+                               sizeof(cl_float2) * nLines * MAX_TESSELLATION, hostArray_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 
@@ -219,18 +214,15 @@ void OCLDynamicBLines::open(unsigned int test, char* units, double& conversion,
   const cl_queue_properties cprops[] = {
       CL_QUEUE_PROPERTIES,
       static_cast<cl_queue_properties>(CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE |
-                                       CL_QUEUE_ON_DEVICE_DEFAULT |
-                                       CL_QUEUE_ON_DEVICE),
+                                       CL_QUEUE_ON_DEVICE_DEFAULT | CL_QUEUE_ON_DEVICE),
       CL_QUEUE_SIZE, queueSize, 0};
-  deviceQueue_ = _wrapper->clCreateCommandQueueWithProperties(
-      context_, devices_[deviceId], cprops, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateCommandQueueWithProperties() failed");
+  deviceQueue_ =
+      _wrapper->clCreateCommandQueueWithProperties(context_, devices_[deviceId], cprops, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLDynamicBLines::run(void) {
@@ -252,8 +244,8 @@ void OCLDynamicBLines::run(void) {
   error_ |= _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_mem), &alloc);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, lws, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -267,8 +259,8 @@ void OCLDynamicBLines::run(void) {
 
   timer.Reset();
   timer.Start();
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, lws, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, lws, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
   timer.Stop();
@@ -293,8 +285,8 @@ void OCLDynamicBLines::run(void) {
   error_ |= _wrapper->clSetKernelArg(kernel2_, 2, sizeof(cl_mem), &alloc);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1,
-                                            NULL, gws, lws, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL, gws, lws, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -304,16 +296,15 @@ void OCLDynamicBLines::run(void) {
     // Readback the new dimension.
     error_ = _wrapper->clSetKernelArg(kernel3_, 0, sizeof(cl_int), &lidx);
     error_ |= _wrapper->clSetKernelArg(kernel3_, 1, sizeof(cl_mem), &buffer);
-    error_ |= _wrapper->clSetKernelArg(kernel3_, 2, sizeof(cl_int),
-                                       &bLines_[lidx].nVertices);
+    error_ |= _wrapper->clSetKernelArg(kernel3_, 2, sizeof(cl_int), &bLines_[lidx].nVertices);
     error_ |= _wrapper->clSetKernelArg(kernel3_, 3, sizeof(cl_mem), &alloc);
     CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
     size_t gwsL[1] = {static_cast<size_t>(bLines_[lidx].nVertices)};
     size_t lwsL[1] = {blockDim};
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel3_,
-                                              1, NULL, gws, lws, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel3_, 1, NULL, gws, lws, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
 

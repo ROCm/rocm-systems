@@ -170,6 +170,6 @@ TEST_CASE("Unit_hipEventDestroy_Verify_Capture") {
 }
 
 /**
-* End doxygen group EventTest.
-* @}
-*/
+ * End doxygen group EventTest.
+ * @}
+ */

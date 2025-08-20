@@ -6,9 +6,9 @@
 #include "hip_test_context.hh"
 
 std::vector<std::unordered_set<std::string>> GCNArchFeatMap = {
-  {"gfx90a", "gfx942", "gfx950"},     // CT_FEATURE_FINEGRAIN_HWSUPPORT
-  {"gfx90a", "gfx942", "gfx950"},     // CT_FEATURE_HMM
-  {"gfx90a", "gfx942", "gfx950"},     // CT_FEATURE_TEXTURES_NOT_SUPPORTED
+    {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_FINEGRAIN_HWSUPPORT
+    {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_HMM
+    {"gfx90a", "gfx942", "gfx950"},  // CT_FEATURE_TEXTURES_NOT_SUPPORTED
 };
 
 #if HT_AMD
@@ -24,7 +24,7 @@ std::string TrimAndGetGFXName(const std::string& full_gfx_name) {
     gfx_name = full_gfx_name.substr(0, pos);
   }
 
-  assert(gfx_name.substr(0,3) == "gfx");
+  assert(gfx_name.substr(0, 3) == "gfx");
   return gfx_name;
 }
 #endif
@@ -32,14 +32,14 @@ std::string TrimAndGetGFXName(const std::string& full_gfx_name) {
 // Check if the GCN Maps
 bool CheckIfFeatSupported(enum CTFeatures test_feat, std::string gcn_arch) {
 #if HT_NVIDIA
-  return true; // returning true since feature check does not exist for NV. 
+  return true;  // returning true since feature check does not exist for NV.
 #elif HT_AMD
   assert(test_feat >= 0 && test_feat < CTFeatures::CT_FEATURE_LAST);
   gcn_arch = TrimAndGetGFXName(gcn_arch);
   assert(gcn_arch != "");
   return (GCNArchFeatMap[test_feat].find(gcn_arch) != GCNArchFeatMap[test_feat].cend());
 #else
-  std::cout<<"Platform has to be either AMD or NVIDIA, asserting..."<<std::endl;
+  std::cout << "Platform has to be either AMD or NVIDIA, asserting..." << std::endl;
   assert(false);
 #endif
 }

@@ -79,6 +79,6 @@ TEST_CASE("Performance_hipMemset") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

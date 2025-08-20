@@ -120,7 +120,8 @@ TEST_CASE("Unit_hipMemPrefetchAsync_Rounding_Behavior") {
   HIP_CHECK(hipMemRangeGetAttribute(&attribute, sizeof(attribute),
                                     hipMemRangeAttributeLastPrefetchLocation, alloc.ptr(),
                                     3 * kPageSize));
-  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) == static_cast<int>(attribute));
+  REQUIRE((rounded_up == 3 * kPageSize ? device : hipInvalidDeviceId) ==
+          static_cast<int>(attribute));
 }
 
 TEST_CASE("Unit_hipMemPrefetchAsync_Negative_Parameters") {

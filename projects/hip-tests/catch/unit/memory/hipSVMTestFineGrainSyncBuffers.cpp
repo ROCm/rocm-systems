@@ -27,22 +27,18 @@
 #define MAX_TARGETS 1024
 
 __global__ void find_targets(unsigned int* image, unsigned int target,
-                             unsigned int* numTargetsFound,
-                             unsigned int* targetLocations) {
+                             unsigned int* numTargetsFound, unsigned int* targetLocations) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int index = 0;
   if (image[i] == target) {
     index = atomicAdd((unsigned int*)numTargetsFound, 1u);
     if (index < MAX_TARGETS) {
-      atomicExch_system((unsigned int *)&targetLocations[index], (unsigned int)i);
+      atomicExch_system((unsigned int*)&targetLocations[index], (unsigned int)i);
     }
   }
 }
 
-void spawnAnalysisTask(int location)
-{
-  printf("found target at location %d\n", location);
-}
+void spawnAnalysisTask(int location) { printf("found target at location %d\n", location); }
 
 /**
 * Test Description
@@ -90,15 +86,16 @@ TEST_CASE("test_svm_fine_grain_sync_buffers") {
   hipEvent_t event;
   HIP_CHECK(hipEventCreate(&event));
   unsigned int *pInputImage, *pNumTargetsFound, *pTargetLocations;
-  HIP_CHECK(hipHostMalloc(&pInputImage, sizeof(unsigned int) * num_pixels, hipHostMallocNonCoherent));
+  HIP_CHECK(
+      hipHostMalloc(&pInputImage, sizeof(unsigned int) * num_pixels, hipHostMallocNonCoherent));
   HIP_CHECK(hipHostMalloc(&pNumTargetsFound, sizeof(unsigned int), hipHostMallocCoherent));
   HIP_CHECK(hipHostMalloc(&pTargetLocations, sizeof(int) * MAX_TARGETS, hipHostMallocCoherent));
   unsigned int targetDescriptor = 777;
   *pNumTargetsFound = 0;
 
   unsigned int i;
-  for(i = 0; i < MAX_TARGETS; i++) pTargetLocations[i] = -1;
-  for(i = 0; i < num_pixels; i++) pInputImage[i] = 0;
+  for (i = 0; i < MAX_TARGETS; i++) pTargetLocations[i] = -1;
+  for (i = 0; i < num_pixels; i++) pInputImage[i] = 0;
   pInputImage[0] = targetDescriptor;
   pInputImage[3] = targetDescriptor;
   pInputImage[num_pixels - 1] = targetDescriptor;
@@ -108,7 +105,7 @@ TEST_CASE("test_svm_fine_grain_sync_buffers") {
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipEventRecord(event, stream));
 
-  i=0;
+  i = 0;
   hipError_t status = hipSuccess;
   unsigned int loc = 0;
   // check for new targets, if found spawn a task to analyze target.
@@ -121,11 +118,10 @@ TEST_CASE("test_svm_fine_grain_sync_buffers") {
     loc = AtomicLoad32(&pTargetLocations[i]);
     if (loc != -1)  // -1 indicates slot not used yet.
     {
-      spawnAnalysisTask(loc); // Do something...
+      spawnAnalysisTask(loc);  // Do something...
       i++;
     }
-  } while (status == hipErrorNotReady ||
-           AtomicLoad32(&pTargetLocations[i]) != -1);
+  } while (status == hipErrorNotReady || AtomicLoad32(&pTargetLocations[i]) != -1);
 
   HIP_CHECK(hipHostFree(pInputImage));
   HIP_CHECK(hipHostFree(pNumTargetsFound));

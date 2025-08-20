@@ -25,7 +25,6 @@ THE SOFTWARE.
 #include <algorithm>
 
 
-
 VkFence VulkanTest::CreateFence() {
   VkFence fence;
   VkFenceCreateInfo fence_create_info = {};
@@ -411,4 +410,3 @@ hipExternalSemaphore_t ImportBinarySemaphore(VulkanTest& vkt) {
 
   return hip_ext_semaphore;
 }
-

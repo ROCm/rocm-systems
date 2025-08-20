@@ -153,26 +153,26 @@ struct _vdi_agent {
   int32_t(CL_API_CALL* GetTime)(vdi_agent* /* agent */, int64_t* /* time_nanos */);
 
   int32_t(CL_API_CALL* SetCallbacks)(vdi_agent* /* agent */,
-                                    const vdi_agent_callbacks* /* callbacks */, size_t /* size */);
+                                     const vdi_agent_callbacks* /* callbacks */, size_t /* size */);
 
 
   int32_t(CL_API_CALL* GetPotentialCapabilities)(vdi_agent* /* agent */,
-                                                vdi_agent_capabilities* /* capabilities */);
+                                                 vdi_agent_capabilities* /* capabilities */);
 
   int32_t(CL_API_CALL* GetCapabilities)(vdi_agent* /* agent */,
-                                       vdi_agent_capabilities* /* capabilities */);
+                                        vdi_agent_capabilities* /* capabilities */);
 
   int32_t(CL_API_CALL* SetCapabilities)(vdi_agent* /* agent */,
-                                       const vdi_agent_capabilities* /* capabilities */,
-                                       vdi_agent_capability_action /* action */);
+                                        const vdi_agent_capabilities* /* capabilities */,
+                                        vdi_agent_capability_action /* action */);
 
 
   int32_t(CL_API_CALL* GetICDDispatchTable)(vdi_agent* /* agent */,
-                                           cl_icd_dispatch_table* /* table */, size_t /* size */);
+                                            cl_icd_dispatch_table* /* table */, size_t /* size */);
 
   int32_t(CL_API_CALL* SetICDDispatchTable)(vdi_agent* /* agent */,
-                                           const cl_icd_dispatch_table* /* table */,
-                                           size_t /* size */);
+                                            const cl_icd_dispatch_table* /* table */,
+                                            size_t /* size */);
 
   /* add Kernel/Program helper functions, etc... */
 };

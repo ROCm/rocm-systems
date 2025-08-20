@@ -21,7 +21,7 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip/hip_cooperative_groups.h>
- 
+
 
 /**
  * @addtogroup coalesced_group thread_block_tile
@@ -37,7 +37,7 @@ constexpr auto total_elem = 1 << 16;
 constexpr auto block_size = 256;
 constexpr auto test_size = 32;
 
-static __global__ void kernel_coalesced_grp(int *mgrpSize, int *mgrpRank) {
+static __global__ void kernel_coalesced_grp(int* mgrpSize, int* mgrpRank) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
   if (id % 2 == 0) {
     coalesced_group threadBlockCGTy = coalesced_threads();
@@ -50,11 +50,9 @@ static __global__ void kernel_coalesced_grp(int *mgrpSize, int *mgrpRank) {
   }
 }
 
-static __global__ void kernel_tiledgrp_threadblk(int *mgrpSize,
-                                                int *mgrpRank) {
+static __global__ void kernel_tiledgrp_threadblk(int* mgrpSize, int* mgrpRank) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
-  thread_block_tile<test_size> tiledGr =
-  tiled_partition<test_size>(this_thread_block());
+  thread_block_tile<test_size> tiledGr = tiled_partition<test_size>(this_thread_block());
   mgrpSize[id] = tiledGr.meta_group_size();
   mgrpRank[id] = tiledGr.meta_group_rank();
 }
@@ -79,19 +77,17 @@ TEST_CASE("Unit_tiled_groups_metagrp_basic") {
   mgrpRank_h = new int[total_elem];
   REQUIRE(mgrpRank_h != nullptr);
 
-  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem*sizeof(int)));
-  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem*sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)));
   SECTION("Parent Group = thread block group") {
-    hipLaunchKernelGGL(kernel_tiledgrp_threadblk, total_elem/block_size,
-                      block_size, 0, 0, mgrpSize_d, mgrpRank_d);
-    HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem*sizeof(int),
-    hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem*sizeof(int),
-    hipMemcpyDeviceToHost));
+    hipLaunchKernelGGL(kernel_tiledgrp_threadblk, total_elem / block_size, block_size, 0, 0,
+                       mgrpSize_d, mgrpRank_d);
+    HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
     for (int i = 0; i < total_elem; i++) {
       REQUIRE(mgrpRank_h[i] >= 0);
-      REQUIRE(mgrpRank_h[i] < (block_size/test_size));
-      REQUIRE(mgrpSize_h[i] == (block_size/test_size));
+      REQUIRE(mgrpRank_h[i] < (block_size / test_size));
+      REQUIRE(mgrpSize_h[i] == (block_size / test_size));
     }
   }
   HIP_CHECK(hipFree(mgrpSize_d));
@@ -119,15 +115,13 @@ TEST_CASE("Unit_coalesced_groups_metagrp_basic") {
   mgrpRank_h = new int[total_elem];
   REQUIRE(mgrpRank_h != nullptr);
 
-  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem*sizeof(int)));
-  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem*sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpSize_d, total_elem * sizeof(int)));
+  HIP_CHECK(hipMalloc(&mgrpRank_d, total_elem * sizeof(int)));
 
-  hipLaunchKernelGGL(kernel_coalesced_grp, total_elem/block_size,
-    block_size, 0, 0, mgrpSize_d, mgrpRank_d);
-  HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem*sizeof(int),
-  hipMemcpyDeviceToHost));
-  HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem*sizeof(int),
-  hipMemcpyDeviceToHost));
+  hipLaunchKernelGGL(kernel_coalesced_grp, total_elem / block_size, block_size, 0, 0, mgrpSize_d,
+                     mgrpRank_d);
+  HIP_CHECK(hipMemcpy(mgrpRank_h, mgrpRank_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(mgrpSize_h, mgrpSize_d, total_elem * sizeof(int), hipMemcpyDeviceToHost));
   for (int i = 0; i < total_elem; i++) {
     REQUIRE(mgrpRank_h[i] == 0);
     REQUIRE(mgrpSize_h[i] == 1);
@@ -139,6 +133,6 @@ TEST_CASE("Unit_coalesced_groups_metagrp_basic") {
 }
 
 /**
-* End doxygen group CooperativeGroupTest.
-* @}
-*/
+ * End doxygen group CooperativeGroupTest.
+ * @}
+ */

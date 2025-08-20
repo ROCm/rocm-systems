@@ -38,7 +38,7 @@ namespace hip {
 void setupGLInteropOnce() {
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
 
-//current context will be read in amdContext->create
+  // current context will be read in amdContext->create
   cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
                                         (cl_context_properties)AMD_PLATFORM,
                                         ROCCLR_HIP_GL_CONTEXT_KHR,
@@ -66,7 +66,8 @@ void setupGLInteropOnce() {
 
 static inline hipError_t hipSetInteropObjects(int num_objects, void** mem_objects,
                                               std::vector<amd::Memory*>& interopObjects) {
-  if ((num_objects == 0 && mem_objects != nullptr) || (num_objects != 0 && mem_objects == nullptr)) {
+  if ((num_objects == 0 && mem_objects != nullptr) ||
+      (num_objects != 0 && mem_objects == nullptr)) {
     return hipErrorUnknown;
   }
 
@@ -179,7 +180,7 @@ static inline GLenum checkForGLError(const amd::Context& amdContext) {
 }
 
 hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsResource_t resource,
-                                      unsigned int arrayIndex, unsigned int mipLevel) {
+                                                unsigned int arrayIndex, unsigned int mipLevel) {
   HIP_INIT_API(hipGraphicsSubResourceGetMappedArray, array, resource, arrayIndex, mipLevel);
 
   amd::Context& amdContext = *(hip::getCurrentDevice()->asContext());
@@ -197,17 +198,18 @@ hipError_t hipGraphicsSubResourceGetMappedArray(hipArray_t* array, hipGraphicsRe
   if (arrayIndex > 0) {
     return hipErrorInvalidValue;
   }
-  amd::Image * view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
+  amd::Image* view = image->createView(amdContext, image->getImageFormat(), nullptr, mipLevel, 0);
 
   hipArray* myarray = new hipArray();
 
-  myarray->data = as_cl<amd::Memory> (view);
+  myarray->data = as_cl<amd::Memory>(view);
 
   myarray->width = view->getWidth();
   myarray->height = view->getHeight();
   myarray->depth = view->getDepth();
 
-  const cl_mem_object_type image_type = hip::getCLMemObjectType(myarray->width, myarray->height, myarray->depth, hipArrayDefault);
+  const cl_mem_object_type image_type =
+      hip::getCLMemObjectType(myarray->width, myarray->height, myarray->depth, hipArrayDefault);
   myarray->type = image_type;
   amd::Image::Format f = image->getImageFormat();
   myarray->Format = hip::getCL2hipArrayFormat(f.image_channel_data_type);
@@ -227,10 +229,10 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
                                       unsigned int flags) {
   HIP_INIT_API(hipGraphicsGLRegisterImage, resource, image, target, flags);
 
-    if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
+  if (!((flags == hipGraphicsRegisterFlagsNone) || (flags & hipGraphicsRegisterFlagsReadOnly) ||
         (flags & hipGraphicsRegisterFlagsWriteDiscard) ||
-          (flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
-            (flags & hipGraphicsRegisterFlagsTextureGather))) {
+        (flags & hipGraphicsRegisterFlagsSurfaceLoadStore) ||
+        (flags & hipGraphicsRegisterFlagsTextureGather))) {
     LogError("invalid parameter \"flags\"");
     HIP_RETURN(hipErrorInvalidValue);
   }
@@ -404,7 +406,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                            0)) { //clFlags)) {
+                                0)) {  // clFlags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -448,8 +450,8 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     // In case target is GL_TEXTURE_BUFFER
     GLint backingBuffer;
     clearGLErrors(amdContext);
-    amdContext.glenv()->glGetTexLevelParameteriv_(
-        glTarget, 0, GL_TEXTURE_BUFFER_DATA_STORE_BINDING, &backingBuffer);
+    amdContext.glenv()->glGetTexLevelParameteriv_(glTarget, 0, GL_TEXTURE_BUFFER_DATA_STORE_BINDING,
+                                                  &backingBuffer);
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       LogWarning("Cannot get backing buffer for GL \"texture buffer\" object");
       HIP_RETURN(hipErrorInvalidValue);
@@ -459,7 +461,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     // Get GL texture format and check if it's compatible with CL format
     clearGLErrors(amdContext);
     amdContext.glenv()->glGetIntegerv_(GL_TEXTURE_BUFFER_FORMAT_EXT,
-                                        reinterpret_cast<GLint*>(&glInternalFormat));
+                                       reinterpret_cast<GLint*>(&glInternalFormat));
     if (GL_NO_ERROR != (glErr = amdContext.glenv()->glGetError_())) {
       LogWarning("Cannot get internal format of \"miplevel\" of GL \"texture\" object");
       HIP_RETURN(hipErrorInvalidValue);
@@ -468,7 +470,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     // Now get CL format from GL format and bytes per pixel
     int iBytesPerPixel = 0;
     if (!amd::getCLFormatFromGL(amdContext, glInternalFormat, &clImageFormat, &iBytesPerPixel,
-                            flags)) {
+                                flags)) {
       LogWarning("\"texture\" format does not map to an appropriate CL image format");
       HIP_RETURN(hipErrorInvalidValue);
     }
@@ -483,7 +485,7 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
     gliTexWidth = size / iBytesPerPixel;
   }
   size_t imageSize = (clType == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? static_cast<size_t>(gliTexHeight)
-                                                              : static_cast<size_t>(gliTexDepth);
+                                                             : static_cast<size_t>(gliTexDepth);
 
   if (!amd::Image::validateDimensions(
           amdContext.devices(), clType, static_cast<size_t>(gliTexWidth),
@@ -495,8 +497,8 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   pImageGL = new (amdContext)
       amd::ImageGL(amdContext, clType, flags, clImageFormat, static_cast<size_t>(gliTexWidth),
-              static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
-              image, 0, glInternalFormat, clGLType, numSamples, target);
+                   static_cast<size_t>(gliTexHeight), static_cast<size_t>(gliTexDepth), glTarget,
+                   image, 0, glInternalFormat, clGLType, numSamples, target);
 
   if (!pImageGL) {
     LogWarning("Cannot create class ImageGL - out of memory?");
@@ -529,7 +531,6 @@ hipError_t hipGraphicsGLRegisterImage(hipGraphicsResource** resource, GLuint ima
 
   *resource = reinterpret_cast<hipGraphicsResource*>(pImageGL);
   HIP_RETURN(hipSuccess);
-
 }
 
 hipError_t hipGraphicsGLRegisterBuffer(hipGraphicsResource** resource, GLuint buffer,
@@ -772,4 +773,4 @@ hipError_t hipGraphicsUnregisterResource(hipGraphicsResource_t resource) {
 
   HIP_RETURN(hipSuccess);
 }
-} // namespace hip
+}  // namespace hip

@@ -30,11 +30,12 @@ Negative-
 5) Pass count as zero, api expected to return error code.
 6) Pass same pointer as source ptr and destination ptr, api expected to return error code.
 7) Pass overlap memory address as source ptr and destination ptr, api expected to return error code.
-7) Pass overlap memory as source ptr and destination ptr where source ptr is ahead of destination ptr, api expected to return error code.
-8) Pass overlap memory as source ptr and destination ptr where destination ptr is ahead of source ptr, api expected to return error code.
-9) If count is more than allocated size for source and destination ptr, api should return error code.
-10) If count is less than allocated size for source and destination ptr, api should return error code.
-11) Change the hipMemcpyKind from H2D to D2H but allocate pointer memory for H2D, api should return error code.
+7) Pass overlap memory as source ptr and destination ptr where source ptr is ahead of destination
+ptr, api expected to return error code. 8) Pass overlap memory as source ptr and destination ptr
+where destination ptr is ahead of source ptr, api expected to return error code. 9) If count is more
+than allocated size for source and destination ptr, api should return error code. 10) If count is
+less than allocated size for source and destination ptr, api should return error code. 11) Change
+the hipMemcpyKind from H2D to D2H but allocate pointer memory for H2D, api should return error code.
 */
 
 #include <hip_test_common.hh>
@@ -53,7 +54,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Functional") {
   int *A_h, *B_h, *C_h;
   size_t NElem{N};
 
-  int *hData = reinterpret_cast<int*>(malloc(Nbytes));
+  int* hData = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(hData != nullptr);
   memset(hData, 0, Nbytes);
 
@@ -71,24 +72,23 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Functional") {
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h,
-                                    Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyH2D_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
 
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2H_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
-  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kernelNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs2[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kernelNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kernelNodeParams.gridDim = dim3(blocks);
   kernelNodeParams.blockDim = dim3(threadsPerBlock);
   kernelNodeParams.sharedMemBytes = 0;
   kernelNodeParams.kernelParams = reinterpret_cast<void**>(kernelArgs2);
   kernelNodeParams.extra = nullptr;
-  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0,
-                                                        &kernelNodeParams));
+  HIP_CHECK(hipGraphAddKernelNode(&kernel_vecAdd, graph, nullptr, 0, &kernelNodeParams));
 
   // Create dependencies
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &kernel_vecAdd, 1));
@@ -98,8 +98,8 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Functional") {
   // Instantiate the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
-  HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2H_C, hData,
-                                        C_d, Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2H_C, hData, C_d, Nbytes,
+                                              hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipGraphLaunch(graphExec, streamForGraph));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
@@ -127,74 +127,66 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams1D_Negative") {
   hipGraph_t graph;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   hipGraphNode_t memcpyD2D;
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2D, graph, nullptr, 0, A_d.ptr(), B_d.ptr(),
-                                    Nbytes, hipMemcpyDeviceToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpyD2D, graph, nullptr, 0, A_d.ptr(), B_d.ptr(), Nbytes,
+                                    hipMemcpyDeviceToDevice));
   // Instantiate the graph
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, NULL, NULL, 0));
 
   SECTION("Pass hGraphExec as nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(nullptr, memcpyD2D, A_d.ptr(),
-                                                      B_d.ptr(), Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(nullptr, memcpyD2D, A_d.ptr(), B_d.ptr(),
+                                                      Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
   SECTION("Pass GraphNode as nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, nullptr, A_d.ptr(),
-                                                      B_d.ptr(), Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, nullptr, A_d.ptr(), B_d.ptr(),
+                                                      Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
   SECTION("Pass destination ptr is nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D,
-                                                      nullptr, B_d.ptr(), Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, nullptr, B_d.ptr(),
+                                                      Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
   SECTION("Pass source ptr is nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(),
-                                                      nullptr, Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(), nullptr,
+                                                      Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
   SECTION("Pass count as zero") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(),
-                                                      B_d.ptr(), 0,
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(), B_d.ptr(), 0,
                                                       hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
-#if HT_AMD // same pointers allowed on nvidia
+#if HT_AMD  // same pointers allowed on nvidia
   SECTION("Pass same pointer as source ptr and destination ptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(),
-                                                      A_d.ptr(), Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(), A_d.ptr(),
+                                                      Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 #endif
 
   SECTION("Pass overlap memory where destination ptr is ahead of source ptr") {
     HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr() + 5,
-                                                      A_d.ptr() , Nbytes,
-                                                      hipMemcpyDeviceToDevice),
+                                                      A_d.ptr(), Nbytes, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 
   SECTION("Pass overlap memory where source ptr is ahead of destination ptr") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D,
-                                                      A_d.ptr(), A_d.ptr() + 5, Nbytes,
-                                                      hipMemcpyDeviceToDevice),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(), A_d.ptr() + 5, Nbytes,
+                                          hipMemcpyDeviceToDevice),
+        hipErrorInvalidValue);
   }
 
   SECTION("Copy more than allocated memory") {
-    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(),
-                                                      B_d.ptr(), Nbytes + 8,
-                                                      hipMemcpyDeviceToDevice),
+    HIP_CHECK_ERROR(hipGraphExecMemcpyNodeSetParams1D(graphExec, memcpyD2D, A_d.ptr(), B_d.ptr(),
+                                                      Nbytes + 8, hipMemcpyDeviceToDevice),
                     hipErrorInvalidValue);
   }
 

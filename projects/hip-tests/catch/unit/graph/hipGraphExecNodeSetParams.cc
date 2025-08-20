@@ -51,7 +51,7 @@ TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters") {
   hipGraphExec_t graphExec;
   hipGraphNode_t node;
   hipGraphNodeParams node_params = {};
-  char *A_d;
+  char* A_d;
   size_t Nbytes = 10 * sizeof(char);
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
@@ -69,20 +69,16 @@ TEST_CASE("Unit_hipGraphExecNodeSetParams_Negative_Parameters") {
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
 
   SECTION("hGraphExec == nullptr") {
-    HIP_CHECK_ERROR(
-        hipGraphExecNodeSetParams(nullptr, node, &node_params),
-        hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecNodeSetParams(nullptr, node, &node_params), hipErrorInvalidValue);
   }
 
   SECTION("node == nullptr") {
-    HIP_CHECK_ERROR(
-        hipGraphExecNodeSetParams(graphExec, nullptr, &node_params),
-        hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecNodeSetParams(graphExec, nullptr, &node_params),
+                    hipErrorInvalidValue);
   }
 
   SECTION("node params == nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecNodeSetParams(graphExec, node, nullptr),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecNodeSetParams(graphExec, node, nullptr), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
@@ -151,6 +147,6 @@ TEST_CASE("Unit_hipGraphExecNodeSetParams_Positive") {
   free(A_h);
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

@@ -79,9 +79,9 @@ TEST_CASE("Unit_hipFreeAsync_Negative_Parameters") {
 }
 
 /**
-* End doxygen group StreamOTest.
-* @}
-*/
+ * End doxygen group StreamOTest.
+ * @}
+ */
 
 /**
  * Test Description
@@ -109,9 +109,8 @@ TEST_CASE("Unit_hipFreeAsync_capturehipFreeAsync") {
 
   // Start Capturing
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&devMem),
-                                   sizeof(int) * rows * cols, memPool,
-                                   stream));
+  HIP_CHECK(hipMallocFromPoolAsync(reinterpret_cast<void**>(&devMem), sizeof(int) * rows * cols,
+                                   memPool, stream));
   HIP_CHECK(hipFreeAsync(devMem, stream));
   // End Capture
   HIP_CHECK(hipStreamEndCapture(stream, &graph));

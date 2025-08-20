@@ -64,4 +64,4 @@ TEST_CASE("Unit_hipTexRefSetFormat_Negative") {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-#endif // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000
+#endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000
