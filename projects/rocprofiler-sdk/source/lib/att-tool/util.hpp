@@ -29,11 +29,21 @@
 
 #include <rocprofiler-sdk/experimental/thread-trace/trace_decoder_types.h>
 #include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 #include "lib/common/logging.hpp"
 
 #include <memory>
 #include <string>
 #include <string_view>
+
+template <>
+struct std::hash<rocprofiler_thread_trace_decoder_pc_t>
+{
+    size_t operator()(const rocprofiler_thread_trace_decoder_pc_t& a) const noexcept
+    {
+        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
+    }
+};
 
 namespace rocprofiler
 {
@@ -70,29 +80,3 @@ struct KernelName
 
 }  // namespace att_wrapper
 }  // namespace rocprofiler
-
-inline constexpr bool
-operator==(const rocprofiler::att_wrapper::pcinfo_t& a,
-           const rocprofiler::att_wrapper::pcinfo_t& b) noexcept
-{
-    return a.addr == b.addr && a.marker_id == b.marker_id;
-}
-
-inline constexpr bool
-operator<(const rocprofiler::att_wrapper::pcinfo_t& a,
-          const rocprofiler::att_wrapper::pcinfo_t& b) noexcept
-{
-    return (a.marker_id == b.marker_id) ? (a.addr < b.addr) : (a.marker_id < b.marker_id);
-}
-
-namespace std
-{
-template <>
-struct hash<rocprofiler::att_wrapper::pcinfo_t>
-{
-    size_t operator()(const rocprofiler::att_wrapper::pcinfo_t& a) const noexcept
-    {
-        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
-    }
-};
-}  // namespace std
