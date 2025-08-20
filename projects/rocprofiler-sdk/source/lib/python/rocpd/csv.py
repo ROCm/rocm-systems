@@ -34,9 +34,8 @@ from . import libpyrocpd
 
 def write_sql_query_to_csv(
     connection: RocpdImportData,
+    config,
     query,
-    output_path,
-    output_file,
     filename="",
     postfix="trace",
 ) -> None:
@@ -53,9 +52,11 @@ def write_sql_query_to_csv(
         return
 
     # call query module to export to csv
-    file_prefix = output_file + "_" if output_file else ""
+    file_prefix = config.output_file + "_" if config.output_file else ""
     file_postfix = "_" + postfix if postfix else ""
-    export_path = os.path.join(output_path, f"{file_prefix}{filename}{file_postfix}.csv")
+    export_path = os.path.join(
+        config.output_path, f"{file_prefix}{filename}{file_postfix}.csv"
+    )
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 
@@ -188,9 +189,7 @@ def write_agent_info_csv(importData, config) -> None:
         FROM "rocpd_info_agent"
     """
 
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "agent_info", ""
-    )
+    write_sql_query_to_csv(importData, config, query, "agent_info", "")
 
 
 def write_kernel_csv(importData, config) -> None:
@@ -242,9 +241,7 @@ def write_kernel_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "kernel"
-    )
+    write_sql_query_to_csv(importData, config, query, "kernel")
 
 
 def write_memory_copy_csv(importData, config) -> None:
@@ -281,9 +278,7 @@ def write_memory_copy_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "memory_copy"
-    )
+    write_sql_query_to_csv(importData, config, query, "memory_copy")
 
 
 def write_memory_allocation_csv(importData, config) -> None:
@@ -324,9 +319,7 @@ def write_memory_allocation_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "memory_allocation"
-    )
+    write_sql_query_to_csv(importData, config, query, "memory_allocation")
 
 
 def write_counters_csv(importData, config) -> None:
@@ -370,9 +363,7 @@ def write_counters_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "counter_collection"
-    )
+    write_sql_query_to_csv(importData, config, query, "counter_collection")
 
 
 def write_scratch_memory_csv(importData, config) -> None:
@@ -405,9 +396,7 @@ def write_scratch_memory_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "scratch_memory"
-    )
+    write_sql_query_to_csv(importData, config, query, "scratch_memory")
 
 
 def write_region_csv(importData, config) -> None:
@@ -430,9 +419,7 @@ def write_region_csv(importData, config) -> None:
         ORDER BY
             guid ASC, start ASC, end DESC
     """
-    write_sql_query_to_csv(
-        importData, query, config.output_path, config.output_file, "region"
-    )
+    write_sql_query_to_csv(importData, config, query, "region")
 
 
 def write_csv(importData, config):
