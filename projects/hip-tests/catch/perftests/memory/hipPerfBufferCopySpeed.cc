@@ -18,40 +18,39 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hipMemcpyAsync hipMemcpyAsync
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpyAsync(void* dst, const void* src, size_t count,
-*                 hipMemcpyKind kind, hipStream_t stream = 0)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyAsync hipMemcpyAsync
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpyAsync(void* dst, const void* src, size_t count,
+ *                 hipMemcpyKind kind, hipStream_t stream = 0)` -
+ * Copies data between host and device.
+ */
 
 #include <hip_test_common.hh>
 
 #define NUM_SIZES 9
 //  4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
-static const unsigned int Sizes[NUM_SIZES] =
-  {4096, 8192, 65536, 262144, 524288, 1048576, 4194304, 16777216, 16777216+10};
+static const unsigned int Sizes[NUM_SIZES] = {4096,    8192,    65536,    262144,       524288,
+                                              1048576, 4194304, 16777216, 16777216 + 10};
 
 static const unsigned int Iterations[2] = {1, 1000};
 
 #define BUF_TYPES 4
 //  16 ways to combine 4 different buffer types
-#define NUM_SUBTESTS (BUF_TYPES*BUF_TYPES)
+#define NUM_SUBTESTS (BUF_TYPES * BUF_TYPES)
 
-static void setData(void *ptr, unsigned int size, char value) {
-  char *ptr2 = reinterpret_cast<char *>(ptr);
-  for (unsigned int i = 0; i < size ; i++) {
+static void setData(void* ptr, unsigned int size, char value) {
+  char* ptr2 = reinterpret_cast<char*>(ptr);
+  for (unsigned int i = 0; i < size; i++) {
     ptr2[i] = value;
   }
 }
 
-static void checkData(void *ptr, unsigned int size, char value) {
-  char *ptr2 = reinterpret_cast<char *>(ptr);
+static void checkData(void* ptr, unsigned int size, char value) {
+  char* ptr2 = reinterpret_cast<char*>(ptr);
   for (unsigned int i = 0; i < size; i++) {
     if (ptr2[i] != value) {
-      INFO("Validation failed at " << i << " Got " << ptr2[i] <<
-                                           " Expected " << value);
+      INFO("Validation failed at " << i << " Got " << ptr2[i] << " Expected " << value);
       REQUIRE(false);
     }
   }
@@ -63,17 +62,17 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
   bool hostMalloc[2] = {false};
   bool hostRegister[2] = {false};
   bool unpinnedMalloc[2] = {false};
-  void *memptr[2] = {NULL};
-  void *alignedmemptr[2] = {NULL};
-  void *srcBuffer = NULL;
-  void *dstBuffer = NULL;
+  void* memptr[2] = {NULL};
+  void* alignedmemptr[2] = {NULL};
+  void* srcBuffer = NULL;
+  void* dstBuffer = NULL;
 
-  int numTests = (p_tests == -1) ? (NUM_SIZES*NUM_SUBTESTS*2 - 1) : p_tests;
+  int numTests = (p_tests == -1) ? (NUM_SIZES * NUM_SUBTESTS * 2 - 1) : p_tests;
   int test = (p_tests == -1) ? 0 : p_tests;
 
-  for ( ; test <= numTests; test++ ) {
+  for (; test <= numTests; test++) {
     unsigned int srcTest = (test / NUM_SIZES) % BUF_TYPES;
-    unsigned int dstTest = (test / (NUM_SIZES*BUF_TYPES)) % BUF_TYPES;
+    unsigned int dstTest = (test / (NUM_SIZES * BUF_TYPES)) % BUF_TYPES;
     bufSize_ = Sizes[test % NUM_SIZES];
     hostMalloc[0] = hostMalloc[1] = false;
     hostRegister[0] = hostRegister[1] = false;
@@ -101,8 +100,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
     if (hostMalloc[0]) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer),
-                              bufSize_, 0));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&srcBuffer), bufSize_, 0));
       setData(srcBuffer, bufSize_, 0xd0);
     } else if (hostRegister[0]) {
       memptr[0] = malloc(bufSize_ + 4096);
@@ -121,8 +119,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     }
 
     if (hostMalloc[1]) {
-      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer),
-                                                       bufSize_, 0));
+      HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&dstBuffer), bufSize_, 0));
     } else if (hostRegister[1]) {
       memptr[1] = malloc(bufSize_ + 4096);
       alignedmemptr[1] = reinterpret_cast<void*>(memptr[1]);
@@ -143,8 +140,7 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     auto all_start = std::chrono::steady_clock::now();
 
     for (unsigned int i = 0; i < numIter; i++) {
-      HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_,
-                               hipMemcpyDefault, NULL));
+      HIP_CHECK(hipMemcpyAsync(dstBuffer, srcBuffer, bufSize_, hipMemcpyDefault, NULL));
     }
     HIP_CHECK(hipDeviceSynchronize());
 
@@ -152,11 +148,11 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     std::chrono::duration<double> elapsed_secs = all_end - all_start;
 
     // read speed in GB/s
-    double perf = (static_cast<double>(bufSize_ * numIter) *
-                   static_cast<double>(1e-09)) / elapsed_secs.count();
+    double perf = (static_cast<double>(bufSize_ * numIter) * static_cast<double>(1e-09)) /
+        elapsed_secs.count();
 
-    const char *strSrc = NULL;
-    const char *strDst = NULL;
+    const char* strSrc = NULL;
+    const char* strDst = NULL;
     if (hostMalloc[0])
       strSrc = "hHM";
     else if (hostRegister[0])
@@ -178,15 +174,15 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
     // Double results when src and dst are both on device
     if ((!hostMalloc[0] && !hostRegister[0] && !unpinnedMalloc[0]) &&
         (!hostMalloc[1] && !hostRegister[1] && !unpinnedMalloc[1]))
-        perf *= 2.0;
+      perf *= 2.0;
     // Double results when src and dst are both in sysmem
     if ((hostMalloc[0] || hostRegister[0] || unpinnedMalloc[0]) &&
         (hostMalloc[1] || hostRegister[1] || unpinnedMalloc[1]))
-        perf *= 2.0;
+      perf *= 2.0;
 
-    INFO("HIPPerfBufferCopySpeed[" << test << "]\t( " << bufSize_ <<
-         ")\ts:" << strSrc << " d:" << strDst << "\ti:" << numIter <<
-         "\t(GB/s) perf\t" << (float)perf);
+    INFO("HIPPerfBufferCopySpeed[" << test << "]\t( " << bufSize_ << ")\ts:" << strSrc
+                                   << " d:" << strDst << "\ti:" << numIter << "\t(GB/s) perf\t"
+                                   << (float)perf);
 
     // Verification
     void* temp = malloc(bufSize_ + 4096);
@@ -224,40 +220,42 @@ static bool hipPerfBufferCopySpeed_test(int p_tests) {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfBufferCopySpeed status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfBufferCopySpeed.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfBufferCopySpeed status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfBufferCopySpeed.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfBufferCopySpeed_test") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
   if (numDevices <= 0) {
-    SUCCEED("Skipped testcase hipPerfBufferCopySpeed as"
-            "there is no device to test.");
+    SUCCEED(
+        "Skipped testcase hipPerfBufferCopySpeed as"
+        "there is no device to test.");
   } else {
     int deviceId = 0;
     HIP_CHECK(hipSetDevice(deviceId));
     hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
 
-    INFO("hipPerfBufferCopySpeed - info: Set device to " << deviceId
-         << " : " << props.name << "Legend: unp - unpinned(malloc),"
-         " hM - hipMalloc(device)\n        hHR - hipHostRegister(pinned),"
-         " hHM - hipHostMalloc(prePinned)\n");
+    INFO("hipPerfBufferCopySpeed - info: Set device to "
+         << deviceId << " : " << props.name
+         << "Legend: unp - unpinned(malloc),"
+            " hM - hipMalloc(device)\n        hHR - hipHostRegister(pinned),"
+            " hHM - hipHostMalloc(prePinned)\n");
 
     REQUIRE(true == hipPerfBufferCopySpeed_test(1));
   }
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

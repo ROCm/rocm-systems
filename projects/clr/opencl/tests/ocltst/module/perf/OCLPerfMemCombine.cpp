@@ -53,8 +53,7 @@ const int numTests = sizeof(testParams) / sizeof(TestParams);
 
 // Generate a kernel that does array loads and stores, which should be combined
 // by MemCombine
-void genCombineVLoadVStores(const char* type, int loopSize, int numCombine,
-                            char* ret) {
+void genCombineVLoadVStores(const char* type, int loopSize, int numCombine, char* ret) {
   sprintf(ret,
           "__kernel void combine_vload_vstores(__global %s"
           " * restrict src, __global %s *result) {\n",
@@ -73,15 +72,12 @@ void genCombineVLoadVStores(const char* type, int loopSize, int numCombine,
   strcat(ret, "  }\n}\n");
 }
 
-void OCLPerfMemCombine::setData(cl_mem buffer, unsigned int bufSize,
-                                unsigned char val) {
+void OCLPerfMemCombine::setData(cl_mem buffer, unsigned int bufSize, unsigned char val) {
   unsigned char* data = (unsigned char*)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[0], buffer, true, CL_MAP_WRITE, 0, bufSize, 0, NULL, NULL,
-      &error_);
+      cmdQueues_[0], buffer, true, CL_MAP_WRITE, 0, bufSize, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < bufSize; ++i) data[i] = val;
 
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[0], buffer, data, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[0], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmdQueues_[0]);
 }
 
@@ -93,11 +89,10 @@ void print1Darray(unsigned char* buffer, unsigned int bufSize) {
   printf("\n");
 }
 
-void OCLPerfMemCombine::checkData(cl_mem buffer, unsigned int bufSize,
-                                  unsigned int limit, unsigned char defVal) {
+void OCLPerfMemCombine::checkData(cl_mem buffer, unsigned int bufSize, unsigned int limit,
+                                  unsigned char defVal) {
   unsigned char* data = (unsigned char*)_wrapper->clEnqueueMapBuffer(
-      cmdQueues_[0], buffer, true, CL_MAP_READ, 0, bufSize, 0, NULL, NULL,
-      &error_);
+      cmdQueues_[0], buffer, true, CL_MAP_READ, 0, bufSize, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < bufSize; i++) {
     unsigned char expected;
     if (i < limit) {
@@ -113,8 +108,7 @@ void OCLPerfMemCombine::checkData(cl_mem buffer, unsigned int bufSize,
     }
   }
 
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[0], buffer, data, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmdQueues_[0], buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmdQueues_[0]);
 }
 
@@ -122,8 +116,7 @@ OCLPerfMemCombine::OCLPerfMemCombine() { _numSubTests = numTests; }
 
 OCLPerfMemCombine::~OCLPerfMemCombine() {}
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLPerfMemCombine::open(unsigned int test, char* units, double& conversion,
@@ -136,13 +129,11 @@ void OCLPerfMemCombine::open(unsigned int test, char* units, double& conversion,
 
   OCLTestImp::open(test, units, conversion, deviceId);
 
-  cl_mem inBuffer =
-      _wrapper->clCreateBuffer(context_, 0, inSize_, NULL, &error_);
+  cl_mem inBuffer = _wrapper->clCreateBuffer(context_, 0, inSize_, NULL, &error_);
   CHECK_RESULT(inBuffer == 0, "clCreateBuffer(inBuffer) failed");
   buffers_.push_back(inBuffer);
 
-  cl_mem outBuffer =
-      _wrapper->clCreateBuffer(context_, 0, outSize_, NULL, &error_);
+  cl_mem outBuffer = _wrapper->clCreateBuffer(context_, 0, outSize_, NULL, &error_);
   CHECK_RESULT(outBuffer == 0, "clCreateBuffer(outBuffer) failed");
   buffers_.push_back(outBuffer);
 
@@ -164,18 +155,15 @@ void OCLPerfMemCombine::createKernel(const char* type, int numCombine) {
   size_t sourceSize[] = {strlen(source)};
   const char* src = &source[0];
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &src, sourceSize,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &src, sourceSize, &error_);
   CHECK_RESULT(error_ != CL_SUCCESS, "clCreateProgramWithSource failed");
 
   /* create a cl program executable for all the devices specified */
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError = _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                               CL_PROGRAM_BUILD_LOG,
+    intError = _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
                                                16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
     return;
@@ -188,13 +176,11 @@ void OCLPerfMemCombine::createKernel(const char* type, int numCombine) {
 
   /*** Set appropriate arguments to the kernel ***/
   /* the input array to the kernel */
-  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                    (void*)&buffers()[0]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&buffers()[0]);
   CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
 
   /* the output array to the kernel */
-  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem),
-                                    (void*)&buffers()[1]);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&buffers()[1]);
   CHECK_RESULT(error_ != CL_SUCCESS, "clSetKernelArg failed");
 }
 
@@ -213,9 +199,8 @@ void OCLPerfMemCombine::run(void) {
     /*
      * Enqueue a kernel run call.
      */
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[0], kernel_, 1, NULL,
-                                              globalThreads, localThreads, 0,
-                                              NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[0], kernel_, 1, NULL, globalThreads,
+                                              localThreads, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
   _wrapper->clFinish(cmdQueues_[0]);

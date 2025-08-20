@@ -25,8 +25,7 @@ THE SOFTWARE.
  * ker_Alloc_MultCodeObj<<<>>> to host and deletes the memory
  * from thread 0.
  */
-extern "C" __global__ void ker_Free_MultCodeObj(int *outputBuf,
-                               int **dev_mem, int test_type) {
+extern "C" __global__ void ker_Free_MultCodeObj(int* outputBuf, int** dev_mem, int test_type) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Check allocated memory in all threads in block before access
   if (*dev_mem == nullptr) {
@@ -35,7 +34,7 @@ extern "C" __global__ void ker_Free_MultCodeObj(int *outputBuf,
   }
 
   if (0 == myId) {
-    for (size_t idx = 0; idx < (blockDim.x*gridDim.x); idx++) {
+    for (size_t idx = 0; idx < (blockDim.x * gridDim.x); idx++) {
       outputBuf[idx] = (*dev_mem)[idx];
     }
     if (test_type == TEST_MALLOC_FREE) {

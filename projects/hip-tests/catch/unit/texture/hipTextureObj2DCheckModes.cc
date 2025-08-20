@@ -28,25 +28,25 @@ THE SOFTWARE.
  * @ingroup TextureTest
  */
 
-template<bool normalizedCoords>
-__global__ void tex2DKernel(float *outputData, hipTextureObject_t textureObject,
-                            int width, int height, float offsetX,
-                            float offsetY) {
+template <bool normalizedCoords>
+__global__ void tex2DKernel(float* outputData, hipTextureObject_t textureObject, int width,
+                            int height, float offsetX, float offsetY) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
-  outputData[y * width + x] = tex2D<float>(textureObject,
-                                           normalizedCoords ? (x + offsetX) / width : x + offsetX,
-                                           normalizedCoords ? (y + offsetY) / height : y + offsetY);
+  outputData[y * width + x] =
+      tex2D<float>(textureObject, normalizedCoords ? (x + offsetX) / width : x + offsetX,
+                   normalizedCoords ? (y + offsetY) / height : y + offsetY);
 #endif
 }
 
-template<hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords>
+template <hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords>
 static void runTest(const int width, const int height, const float offsetX, const float offsetY) {
-  //printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, height=%d, offsetX=%f, offsetY=%f)\n",
-  //     __FUNCTION__, addressMode, filterMode, normalizedCoords, width, height, offsetX, offsetY);
+  // printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, height=%d, offsetX=%f,
+  // offsetY=%f)\n",
+  //      __FUNCTION__, addressMode, filterMode, normalizedCoords, width, height, offsetX, offsetY);
   unsigned int size = width * height * sizeof(float);
-  float *hData = (float*) malloc(size);
+  float* hData = (float*)malloc(size);
   memset(hData, 0, size);
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
@@ -55,12 +55,12 @@ static void runTest(const int width, const int height, const float offsetX, cons
     }
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(
-      32, 0, 0, 0, hipChannelFormatKindFloat);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(32, 0, 0, 0, hipChannelFormatKindFloat);
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
 
-  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float), height, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(float), width * sizeof(float),
+                               height, hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -80,19 +80,19 @@ static void runTest(const int width, const int height, const float offsetX, cons
   hipTextureObject_t textureObject = 0;
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL));
 
-  float *dData = nullptr;
-  HIP_CHECK(hipMalloc((void**) &dData, size));
+  float* dData = nullptr;
+  HIP_CHECK(hipMalloc((void**)&dData, size));
 
   dim3 dimBlock(16, 16, 1);
-  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y -1)/ dimBlock.y, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
 
-  hipLaunchKernelGGL(tex2DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
-                     textureObject, width, height, offsetX, offsetY);
-  HIP_CHECK(hipGetLastError()); 
+  hipLaunchKernelGGL(tex2DKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData, textureObject,
+                     width, height, offsetX, offsetY);
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipDeviceSynchronize());
 
-  float *hOutputData = (float*) malloc(size);
+  float* hOutputData = (float*)malloc(size);
   memset(hOutputData, 0, size);
   HIP_CHECK(hipMemcpy(hOutputData, dData, size, hipMemcpyDeviceToHost));
 
@@ -100,11 +100,11 @@ static void runTest(const int width, const int height, const float offsetX, cons
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
       int index = i * width + j;
-      float expectedValue = getExpectedValue<float, addressMode, filterMode>(width, height,
-                                                    offsetX + j, offsetY + i, hData);
+      float expectedValue = getExpectedValue<float, addressMode, filterMode>(
+          width, height, offsetX + j, offsetY + i, hData);
       if (!hipTextureSamplingVerify<float, filterMode>(hOutputData[index], expectedValue)) {
-        INFO("Mismatch at (" << offsetX + j << ", " << offsetY + i << "):" <<
-             hOutputData[index] << " expected:" << expectedValue);
+        INFO("Mismatch at (" << offsetX + j << ", " << offsetY + i << "):" << hOutputData[index]
+                             << " expected:" << expectedValue);
         result = false;
         goto line1;
       }
@@ -181,6 +181,6 @@ TEST_CASE("Unit_hipTextureObj2DCheckModes") {
 }
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

@@ -26,7 +26,7 @@ THE SOFTWARE.
  * Return flags associated with a stream on stream per thread
  */
 
- /**
+/**
  * Test Description
  * ------------------------
  *  - Basic test to verify that hipStreamGetFlags_spt returns the same
@@ -48,7 +48,7 @@ TEST_CASE("Unit_hipStreamGetFlags_spt_Basic") {
   REQUIRE((returnedFlags & expectedFlag) == expectedFlag);
   HIP_CHECK(hipStreamDestroy(stream));
 }
- /**
+/**
  * Test Description
  * ------------------------
  *  - Tests to verify Negative scenarios for the hipStreamGetFlags_spt API
@@ -67,21 +67,20 @@ TEST_CASE("Unit_hipStreamGetFlags_spt_Negative") {
   HIP_CHECK(hipStreamCreate(&validStream));
 
   SECTION("Nullptr Stream && Valid Flags") {
-    #if HT_AMD
-      HIP_CHECK_ERROR(hipStreamGetFlags_spt(nullptr, &flags), hipSuccess);
-    #elif HT_NVIDIA
-      HIP_CHECK(hipStreamGetFlags_spt(nullptr, &flags));
-    #endif
+#if HT_AMD
+    HIP_CHECK_ERROR(hipStreamGetFlags_spt(nullptr, &flags), hipSuccess);
+#elif HT_NVIDIA
+    HIP_CHECK(hipStreamGetFlags_spt(nullptr, &flags));
+#endif
   }
 
   SECTION("Valid Stream && Nullptr Flags") {
-    HIP_CHECK_ERROR(hipStreamGetFlags_spt(validStream, nullptr),
-                                          hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamGetFlags_spt(validStream, nullptr), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipStreamDestroy(validStream));
 }
- /**
+/**
  * Test Description
  * ------------------------
  *  - Test flag value when streams created with CUMask
@@ -106,6 +105,6 @@ TEST_CASE("Unit_hipStreamGetFlags_spt_StreamsCreatedWithCUMask") {
 #endif
 
 /**
-* End doxygen group StreamTest.
-* @}
-*/
+ * End doxygen group StreamTest.
+ * @}
+ */

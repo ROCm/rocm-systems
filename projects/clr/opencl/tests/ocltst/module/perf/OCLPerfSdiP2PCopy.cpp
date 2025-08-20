@@ -32,8 +32,7 @@
 
 #define NUM_SIZES 5
 // 64KB, 256KB, 1 MB, 4MB, 16 MB
-static const unsigned int Sizes[NUM_SIZES] = {65536, 262144, 1048576, 4194304,
-                                              16777216};
+static const unsigned int Sizes[NUM_SIZES] = {65536, 262144, 1048576, 4194304, 16777216};
 
 OCLPerfSdiP2PCopy::OCLPerfSdiP2PCopy() {
   // If there are two different gpus in the system,
@@ -67,8 +66,7 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT(numPlatforms == 0, "clGetPlatformIDs failed");
   error_ = _wrapper->clGetPlatformIDs(1, &platform, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
-  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL,
-                                    &num_devices);
+  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
   if (num_devices != 2) {
     printf(
         "\nSilent Failure: Two GPUs are required to run OCLPerfSdiP2PCopy "
@@ -76,8 +74,7 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
     silentFailure = true;
     return;
   }
-  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, num_devices,
-                                    devices_, 0);
+  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, num_devices, devices_, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
   if (test >= NUM_SIZES) {
     cl_device_id temp = devices_[0];
@@ -86,12 +83,11 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
   }
   size_t param_size = 0;
   char* strExtensions = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, 0, 0,
-                                     &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strExtensions = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS,
-                                     param_size, strExtensions, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, param_size, strExtensions, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strstr(strExtensions, "cl_amd_bus_addressable_memory") == 0) {
     printf(
@@ -102,12 +98,11 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
     return;
   }
   free(strExtensions);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, 0, 0,
-                                     &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strExtensions = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS,
-                                     param_size, strExtensions, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, param_size, strExtensions, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strstr(strExtensions, "cl_amd_bus_addressable_memory") == 0) {
     printf(
@@ -121,53 +116,42 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
   deviceNames_ = " [";
   param_size = 0;
   char* strDeviceName = 0;
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, 0, 0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strDeviceName = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, param_size,
-                                     strDeviceName, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, param_size, strDeviceName, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   deviceNames_ = deviceNames_ + strDeviceName;
   free(strDeviceName);
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, 0, 0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strDeviceName = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, param_size,
-                                     strDeviceName, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, param_size, strDeviceName, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   deviceNames_ = deviceNames_ + "->";
   deviceNames_ = deviceNames_ + strDeviceName;
   free(strDeviceName);
   deviceNames_ = deviceNames_ + "]";
-  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM,
-                                    (cl_context_properties)platform, 0};
+  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0};
 
-  contexts_[0] =
-      _wrapper->clCreateContext(props, 1, &devices_[0], 0, 0, &error_);
+  contexts_[0] = _wrapper->clCreateContext(props, 1, &devices_[0], 0, 0, &error_);
   CHECK_RESULT(contexts_[0] == 0, "clCreateContext failed");
-  contexts_[1] =
-      _wrapper->clCreateContext(props, 1, &devices_[1], 0, 0, &error_);
+  contexts_[1] = _wrapper->clCreateContext(props, 1, &devices_[1], 0, 0, &error_);
   CHECK_RESULT(contexts_[1] == 0, "clCreateContext failed");
-  cmd_queues_[0] =
-      _wrapper->clCreateCommandQueue(contexts_[0], devices_[0], 0, NULL);
+  cmd_queues_[0] = _wrapper->clCreateCommandQueue(contexts_[0], devices_[0], 0, NULL);
   CHECK_RESULT(cmd_queues_[0] == 0, "clCreateCommandQueue failed");
-  cmd_queues_[1] =
-      _wrapper->clCreateCommandQueue(contexts_[1], devices_[1], 0, NULL);
+  cmd_queues_[1] = _wrapper->clCreateCommandQueue(contexts_[1], devices_[1], 0, NULL);
   CHECK_RESULT(cmd_queues_[1] == 0, "clCreateCommandQueue failed");
-  busAddressableBuff_ = _wrapper->clCreateBuffer(
-      contexts_[0], CL_MEM_BUS_ADDRESSABLE_AMD, bufSize_, 0, &error_);
+  busAddressableBuff_ =
+      _wrapper->clCreateBuffer(contexts_[0], CL_MEM_BUS_ADDRESSABLE_AMD, bufSize_, 0, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  error_ = _wrapper->clEnqueueMakeBuffersResidentAMD(
-      cmd_queues_[0], 1, &busAddressableBuff_, true, &busAddr_, 0, 0, 0);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clEnqueueMakeBuffersResidentAMD failed");
-  extPhysicalBuff_ = _wrapper->clCreateBuffer(
-      contexts_[1], CL_MEM_EXTERNAL_PHYSICAL_AMD, bufSize_, &busAddr_, &error_);
+  error_ = _wrapper->clEnqueueMakeBuffersResidentAMD(cmd_queues_[0], 1, &busAddressableBuff_, true,
+                                                     &busAddr_, 0, 0, 0);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMakeBuffersResidentAMD failed");
+  extPhysicalBuff_ = _wrapper->clCreateBuffer(contexts_[1], CL_MEM_EXTERNAL_PHYSICAL_AMD, bufSize_,
+                                              &busAddr_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  srcBuff_ = _wrapper->clCreateBuffer(contexts_[1], CL_MEM_READ_WRITE, bufSize_,
-                                      0, &error_);
+  srcBuff_ = _wrapper->clCreateBuffer(contexts_[1], CL_MEM_READ_WRITE, bufSize_, 0, &error_);
   CHECK_RESULT(error_ != CL_SUCCESS, "clCreateBuffer failed");
   inputArr_ = (cl_uint*)malloc(bufSize_);
   outputArr_ = (cl_uint*)malloc(bufSize_);
@@ -175,8 +159,8 @@ void OCLPerfSdiP2PCopy::open(unsigned int test, char* units, double& conversion,
     inputArr_[i] = i + 1;
     outputArr_[i] = 0;
   }
-  error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], srcBuff_, CL_TRUE, 0,
-                                          bufSize_, inputArr_, 0, 0, NULL);
+  error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], srcBuff_, CL_TRUE, 0, bufSize_, inputArr_,
+                                          0, 0, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
 }
 
@@ -186,9 +170,8 @@ void OCLPerfSdiP2PCopy::run(void) {
   }
   CPerfCounter timer;
   // Warm up
-  error_ =
-      _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_, extPhysicalBuff_,
-                                    0, 0, bufSize_, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_, extPhysicalBuff_, 0, 0, bufSize_,
+                                         0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueCopyBuffer failed");
   error_ = _wrapper->clFinish(cmd_queues_[1]);
@@ -196,9 +179,8 @@ void OCLPerfSdiP2PCopy::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < NUM_ITER; i++) {
-    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_,
-                                           extPhysicalBuff_, 0, 0, bufSize_, 0,
-                                           NULL, NULL);
+    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_, extPhysicalBuff_, 0, 0,
+                                           bufSize_, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueCopyBuffer failed");
   }
@@ -206,9 +188,8 @@ void OCLPerfSdiP2PCopy::run(void) {
   CHECK_RESULT(error_, "clFinish failed");
   timer.Stop();
   double sec = timer.GetElapsedTime();
-  error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_,
-                                         CL_TRUE, 0, bufSize_, outputArr_, 0, 0,
-                                         NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_, CL_TRUE, 0, bufSize_,
+                                         outputArr_, 0, 0, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
   CHECK_RESULT((memcmp(inputArr_, outputArr_, bufSize_) != 0), "copy failed");
   // Buffer copy bandwidth in GB/s
@@ -235,13 +216,11 @@ unsigned int OCLPerfSdiP2PCopy::close(void) {
   }
   if (cmd_queues_[0]) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queues_[0]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (cmd_queues_[1]) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queues_[1]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (contexts_[0]) {
     error_ = _wrapper->clReleaseContext(contexts_[0]);

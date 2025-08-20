@@ -229,9 +229,7 @@ TEST_CASE("Unit_hipMalloc_ArgumentValidation") {
     REQUIRE(ptr == nullptr);
   }
 
-  SECTION("hipFree() when freeing nullptr") {
-    HIP_CHECK(hipFree(ptr));
-  }
+  SECTION("hipFree() when freeing nullptr") { HIP_CHECK(hipFree(ptr)); }
 
   SECTION("hipMalloc() with invalid argument") {
     HIP_CHECK_ERROR(hipMalloc(nullptr, 100), hipErrorInvalidValue);

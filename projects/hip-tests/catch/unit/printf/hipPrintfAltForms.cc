@@ -38,28 +38,26 @@ __global__ void test_kernel() {
   printf("%-#16.8x\n", 0x42);
 }
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify alternate forms of printf API.
-* Test source
-* ------------------------
-* - catch/unit/printf/hipPrintfAltForms.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify alternate forms of printf API.
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/hipPrintfAltForms.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
 TEST_CASE("Unit_Printf_PrintfAltFormsTsts") {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic,
-                                  hipDeviceAttributeHostNativeAtomicSupported,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
@@ -88,6 +86,6 @@ TEST_CASE("Unit_Printf_PrintfAltFormsTsts") {
   REQUIRE(device_output == reference);
 }
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

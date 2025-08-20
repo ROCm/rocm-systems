@@ -172,6 +172,6 @@ TEST_CASE("Unit_Device_memset_Negative_Parameters_RTC") {
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

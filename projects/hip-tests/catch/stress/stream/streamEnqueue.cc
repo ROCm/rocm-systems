@@ -26,8 +26,7 @@ THE SOFTWARE.
 #include <random>
 #include <thread>
 
-__global__ void addVal(unsigned long long* ptr, size_t index,
-                       unsigned long long val) {
+__global__ void addVal(unsigned long long* ptr, size_t index, unsigned long long val) {
   atomicAdd(ptr + index, val);
 }
 
@@ -70,8 +69,7 @@ TEST_CASE("Stress_StreamEnqueue_DifferentThreads") {
   constexpr size_t maxWork = 10000;
   constexpr size_t maxVal = 10;
 
-  std::uniform_int_distribution<std::mt19937::result_type> genIndex(0,
-                                                           hwThreads - 1);
+  std::uniform_int_distribution<std::mt19937::result_type> genIndex(0, hwThreads - 1);
   std::uniform_int_distribution<std::mt19937::result_type> genWork(0, maxWork);
   std::uniform_int_distribution<std::mt19937::result_type> genVal(0, maxVal);
 
@@ -79,10 +77,10 @@ TEST_CASE("Stress_StreamEnqueue_DifferentThreads") {
     auto iter = genWork(engine);  // Generate work to be done via thread
     for (unsigned long i = 0; i < iter; i++) {
       auto index = genIndex(engine);  // Generate Index to add to
-      auto val = genVal(engine);  // Generate value to add to the destination
+      auto val = genVal(engine);      // Generate value to add to the destination
       hostData[index].data += val;    // Replicate it on host
       addVal<<<1, 1, 0, stream>>>(dPtr, static_cast<size_t>(index),
-            static_cast<unsigned long long>(val));  // And on device
+                                  static_cast<unsigned long long>(val));  // And on device
     }
   };
 
@@ -104,8 +102,8 @@ TEST_CASE("Stress_StreamEnqueue_DifferentThreads") {
   HIP_CHECK(hipStreamDestroy(stream));
 
   auto hPtr = std::make_unique<unsigned long long[]>(hwThreads);
-  HIP_CHECK(hipMemcpy(hPtr.get(), dPtr, sizeof(unsigned long long) * hwThreads,
-            hipMemcpyDeviceToHost));
+  HIP_CHECK(
+      hipMemcpy(hPtr.get(), dPtr, sizeof(unsigned long long) * hwThreads, hipMemcpyDeviceToHost));
 
   HIP_CHECK(hipFree(dPtr));
 
@@ -175,10 +173,8 @@ TEST_CASE("Stress_StreamEnqueue_DifferentThreads_MultiGPU") {
   std::random_device device;
   std::mt19937 engine(device());
 
-  std::uniform_int_distribution<std::mt19937::result_type> genVal(-maxVal,
-                                                           maxVal);
-  std::uniform_int_distribution<std::mt19937::result_type> genStream(0,
-                                              streamPool.size() - 1);
+  std::uniform_int_distribution<std::mt19937::result_type> genVal(-maxVal, maxVal);
+  std::uniform_int_distribution<std::mt19937::result_type> genStream(0, streamPool.size() - 1);
 
 #if HT_NVIDIA
   std::mutex ness;  // On nvidia, current device needs to match stream's device
@@ -225,14 +221,13 @@ TEST_CASE("Stress_StreamEnqueue_DifferentThreads_MultiGPU") {
   for (auto& i : streamPool) {
     HIP_CHECK(hipStreamSynchronize(i));
     auto dResult = std::make_unique<int[]>(size);
-    HIP_CHECK(hipMemcpy(dResult.get(), streamToDeviceMemory[i],
-              sizeof(int) * size, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(dResult.get(), streamToDeviceMemory[i], sizeof(int) * size,
+                        hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(streamToDeviceMemory[i]));
     HIP_CHECK(hipStreamDestroy(i));
     auto res = streamToHostMemory[i].data.load();
     INFO("Matching CPU: " << res << " GPU: " << dResult[0] << " Dev Ptr: "
-    << streamToDeviceMemory[i] << " on Device: " << streamToDeviceIndex[i]);
-    REQUIRE(std::all_of(dResult.get(), dResult.get() + size,
-            [=](int r) { return r == res; }));
+                          << streamToDeviceMemory[i] << " on Device: " << streamToDeviceIndex[i]);
+    REQUIRE(std::all_of(dResult.get(), dResult.get() + size, [=](int r) { return r == res; }));
   }
 }

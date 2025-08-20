@@ -18,9 +18,10 @@ THE SOFTWARE.
 */
 /*
 Testcase Scenarios :
-Unit_hipStreamWaitEvent_Negative - Test unsuccessful hipStreamWaitEvent when either event or flags are invalid
-Unit_hipStreamWaitEvent_Default - Test simple waiting for an event with hipStreamWaitEvent api
-Unit_hipStreamWaitEvent_DifferentStreams - Test waiting for an event on a different stream with hipStreamWaitEvent api
+Unit_hipStreamWaitEvent_Negative - Test unsuccessful hipStreamWaitEvent when either event or flags
+are invalid Unit_hipStreamWaitEvent_Default - Test simple waiting for an event with
+hipStreamWaitEvent api Unit_hipStreamWaitEvent_DifferentStreams - Test waiting for an event on a
+different stream with hipStreamWaitEvent api
 */
 
 #include <hip_test_common.hh>

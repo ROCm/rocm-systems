@@ -289,7 +289,7 @@ class RocProfCompute:
         if sets_info:
             first_set = next(iter(sets_info.keys()))
             print(f"  rocprof-compute profile --set {first_set}  # Profile this set")
-        print(f"  rocprof-compute profile --list-sets        # Show this help")
+        print("  rocprof-compute profile --list-sets        # Show this help")
         print()
 
         sys.exit(0)

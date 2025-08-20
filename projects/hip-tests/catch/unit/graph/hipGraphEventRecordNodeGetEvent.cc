@@ -58,13 +58,9 @@ static void validateEventRecordNodeGetEvent(unsigned flag) {
 TEST_CASE("Unit_hipGraphEventRecordNodeGetEvent_Functional") {
   // Create event nodes with different flags and validate with
   // hipGraphEventRecordNodeGetEvent.
-  SECTION("Flag = hipEventDefault") {
-    validateEventRecordNodeGetEvent(hipEventDefault);
-  }
+  SECTION("Flag = hipEventDefault") { validateEventRecordNodeGetEvent(hipEventDefault); }
 
-  SECTION("Flag = hipEventBlockingSync") {
-    validateEventRecordNodeGetEvent(hipEventBlockingSync);
-  }
+  SECTION("Flag = hipEventBlockingSync") { validateEventRecordNodeGetEvent(hipEventBlockingSync); }
 
   SECTION("Flag = hipEventDisableTiming") {
     validateEventRecordNodeGetEvent(hipEventDisableTiming);

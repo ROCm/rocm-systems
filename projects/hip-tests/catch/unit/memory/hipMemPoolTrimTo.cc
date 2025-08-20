@@ -47,8 +47,7 @@
 TEST_CASE("Unit_hipMemPoolTrimTo_Negative_Parameter") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
-  checkMempoolSupported(device_id)
-  size_t trim_size = 1024;
+  checkMempoolSupported(device_id) size_t trim_size = 1024;
 
   SECTION("Passing nullptr to mem_pool") {
     HIP_CHECK_ERROR(hipMemPoolTrimTo(nullptr, trim_size), hipErrorInvalidValue);
@@ -70,8 +69,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Negative_Parameter") {
 TEST_CASE("Unit_hipMemPoolTrimTo_Positive_Basic") {
   int device_id = 0;
   HIP_CHECK(hipSetDevice(device_id));
-  checkMempoolSupported(device_id)
-  unsigned int *notified = nullptr;
+  checkMempoolSupported(device_id) unsigned int* notified = nullptr;
   HIP_CHECK(hipHostMalloc(&notified, sizeof(unsigned int)));
   *notified = 0;
 
@@ -153,10 +151,9 @@ static bool thread_results[NUMBER_OF_THREADS];
 /**
  * Local function to test hipMemPoolAttrReleaseThreshold.
  */
-static bool checkhipMemPoolTrimTo(hipStream_t stream, int N,
-                                int dev = 0) {
+static bool checkhipMemPoolTrimTo(hipStream_t stream, int N, int dev = 0) {
   streamMemAllocTest testObj(N);
-  size_t byte_size = N*sizeof(int);
+  size_t byte_size = N * sizeof(int);
   // assign memory to host pointers
   testObj.createHostBufferWithData();
   // Create mempool in current device
@@ -167,13 +164,11 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N,
   pool_props.location.type = hipMemLocationTypeDevice;
   HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
   uint64_t setThreshold = UINT64_MAX;
-  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold,
-                                   &setThreshold));
+  HIP_CHECK(hipMemPoolSetAttribute(mem_pool, hipMemPoolAttrReleaseThreshold, &setThreshold));
   testObj.useCommonMempool(mem_pool);
   for (int iter = 1; iter <= LAUNCH_ITERATIONS; iter++) {
     // Set different min_bytes_to_hold for each iteration
-    size_t min_bytes_to_hold =
-    (byte_size * 3 * (LAUNCH_ITERATIONS - iter))/LAUNCH_ITERATIONS;
+    size_t min_bytes_to_hold = (byte_size * 3 * (LAUNCH_ITERATIONS - iter)) / LAUNCH_ITERATIONS;
     HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
     // assign memory to device pointers
     testObj.allocFromMempool(stream);
@@ -206,8 +201,8 @@ static bool checkhipMemPoolTrimTo(hipStream_t stream, int N,
  */
 TEST_CASE("Unit_hipMemPoolTrimTo_VaryingMinBytesToHold") {
   checkMempoolSupported(0)
-  // create a stream
-  hipStream_t stream;
+      // create a stream
+      hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   constexpr int N = 1 << 20;
   REQUIRE(true == checkhipMemPoolTrimTo(stream, N));
@@ -232,8 +227,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
     WARN("Number of GPUs insufficient for test");
   } else {
     for (int dev = 0; dev < numDevices; dev++) {
-      checkMempoolSupported(dev)
-      HIP_CHECK(hipSetDevice(dev));
+      checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
       // create a stream
       hipStream_t stream;
       HIP_CHECK(hipStreamCreate(&stream));
@@ -247,8 +241,7 @@ TEST_CASE("Unit_hipMemPoolTrimTo_MGpuVaryingMinBytesToHold") {
  * Local Thread Functions
  */
 static void thread_Test(hipStream_t stream, int N, int threadNum) {
-  thread_results[threadNum] =
-  checkhipMemPoolTrimTo(stream, N, false);
+  thread_results[threadNum] = checkhipMemPoolTrimTo(stream, N, false);
 }
 
 /**
@@ -263,8 +256,8 @@ static void thread_Test(hipStream_t stream, int N, int threadNum) {
  */
 TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
   checkMempoolSupported(0)
-  // create a stream
-  constexpr int N = 1 << 20;
+      // create a stream
+      constexpr int N = 1 << 20;
   std::vector<std::thread> tests;
   hipStream_t stream[NUMBER_OF_THREADS];
   // Initialize and create streams
@@ -274,11 +267,10 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
   }
   // Spawn the test threads
   for (int idx = 0; idx < NUMBER_OF_THREADS; idx++) {
-    tests.push_back(std::thread(thread_Test, stream[idx],
-                                N, idx));
+    tests.push_back(std::thread(thread_Test, stream[idx], N, idx));
   }
   // Wait for all threads to complete
-  for (std::thread &t : tests) {
+  for (std::thread& t : tests) {
     t.join();
   }
   // Wait for thread and destroy stream
@@ -290,6 +282,6 @@ TEST_CASE("Unit_hipMemPoolTrimTo_Multithreaded") {
 }
 
 /**
-* End doxygen group StreamOTest.
-* @}
-*/
+ * End doxygen group StreamOTest.
+ * @}
+ */

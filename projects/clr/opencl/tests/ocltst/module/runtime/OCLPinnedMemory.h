@@ -30,8 +30,7 @@ class OCLPinnedMemory : public OCLTestImp {
   OCLPinnedMemory();
   ~OCLPinnedMemory();
 
-  void open(unsigned int test, char* units, double& conversion,
-            unsigned int deviceId) override;
+  void open(unsigned int test, char* units, double& conversion, unsigned int deviceId) override;
   void run() override;
   unsigned int close() override;
 

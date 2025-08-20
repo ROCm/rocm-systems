@@ -34,9 +34,7 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Unit_hipHostFree_InvalidMemory") {
-  SECTION("Nullptr") {
-    HIP_CHECK(hipHostFree(nullptr));
-  }
+  SECTION("Nullptr") { HIP_CHECK(hipHostFree(nullptr)); }
 
   SECTION("Invalid ptr") {
     void* invalid_ptr;

@@ -18,9 +18,8 @@ THE SOFTWARE.
 */
 
 /* HIT_START
- * BUILD_CMD: hipPerfModuleLoad %hc -I%S/../../src %S/%s %S/../../src/test_common.cpp -o %T/%t EXCLUDE_HIP_PLATFORM nvidia
- * TEST: %t
- * HIT_END
+ * BUILD_CMD: hipPerfModuleLoad %hc -I%S/../../src %S/%s %S/../../src/test_common.cpp -o %T/%t
+ * EXCLUDE_HIP_PLATFORM nvidia TEST: %t HIT_END
  */
 
 #include "test_common.h"
@@ -35,24 +34,22 @@ THE SOFTWARE.
 
 #include <dirent.h>
 
-//List of Download files
-std::unordered_map<std::string, bool> TL_contents {
-  {"Kernels.so", true},
-  {"TensileLibrary.yaml", true},
-  {"TensileLibrary_gfx803.co", true},
-  {"TensileLibrary_gfx900.co", true},
-  {"TensileLibrary_gfx906.co", true},
-  {"TensileLibrary_gfx908.co", true},
-  {"kernel_names.txt", true}
-};
+// List of Download files
+std::unordered_map<std::string, bool> TL_contents{{"Kernels.so", true},
+                                                  {"TensileLibrary.yaml", true},
+                                                  {"TensileLibrary_gfx803.co", true},
+                                                  {"TensileLibrary_gfx900.co", true},
+                                                  {"TensileLibrary_gfx906.co", true},
+                                                  {"TensileLibrary_gfx908.co", true},
+                                                  {"kernel_names.txt", true}};
 
 bool GetDirectoryContents(std::unordered_map<std::string, bool>& dir_contents) {
   DIR* dir = nullptr;
   struct dirent* ent = nullptr;
 
-  //Open Current Directory
+  // Open Current Directory
   if ((dir = opendir(".")) == 0) {
-    std::cout<<"Failed to open current working directory, check permissions"<<std::endl;
+    std::cout << "Failed to open current working directory, check permissions" << std::endl;
     return false;
   }
 
@@ -68,16 +65,16 @@ bool GetDirectoryContents(std::unordered_map<std::string, bool>& dir_contents) {
 bool ContentsAvailable() {
   std::unordered_map<std::string, bool> dir_contents;
 
-  //Get recent directory contents
-  if(!GetDirectoryContents(dir_contents)) {
-    std::cout<<"Failed to get directory Contents"<<std::endl;
+  // Get recent directory contents
+  if (!GetDirectoryContents(dir_contents)) {
+    std::cout << "Failed to get directory Contents" << std::endl;
     return false;
   }
 
-  //If the Tensile Library content is not present, then fail
+  // If the Tensile Library content is not present, then fail
   for (auto& TL_elem : TL_contents) {
     if (dir_contents.end() == dir_contents.find(TL_elem.first)) {
-      std::cout<<"Failed to find the Tensile Library file: "<<TL_elem.first<<std::endl;
+      std::cout << "Failed to find the Tensile Library file: " << TL_elem.first << std::endl;
       return false;
     }
   }
@@ -85,8 +82,8 @@ bool ContentsAvailable() {
 }
 
 bool DownloadContents() {
-  //Download the contents from TC repo
-  std::cout<<"Downloading conents .... "<<std::endl;
+  // Download the contents from TC repo
+  std::cout << "Downloading conents .... " << std::endl;
   std::string wget_str = "wget -nH -q -N -r -np -R \" index.html* \" --cut-dirs=3 ";
   wget_str += "http://ocltc-backup.amd.com/hiptest/TensileLibrary/";
   system(wget_str.c_str());
@@ -97,35 +94,35 @@ bool DownloadContents() {
 bool PreProcessContents() {
   // If Contents already available no other action needed
   if (ContentsAvailable()) {
-    std::cout<<"Contents already available"<<std::endl;
+    std::cout << "Contents already available" << std::endl;
     return true;
   }
 
   // Download the TL(Tensile Library) contents from TC
   if (!DownloadContents()) {
-    std::cout<<"Failed to download contents"<<std::endl;
+    std::cout << "Failed to download contents" << std::endl;
     return false;
   }
 
-  //Check if downloaded contents are available
+  // Check if downloaded contents are available
   if (!ContentsAvailable()) {
-    std::cout<<"Failed to find TL contents even after download in CWD"<<std::endl;
+    std::cout << "Failed to find TL contents even after download in CWD" << std::endl;
     return false;
   }
 
   return true;
 }
 
-//Get Tensile Library File name, changes wrt target
+// Get Tensile Library File name, changes wrt target
 bool getTLFileName(int device_id, std::string& tlf_name) {
   hipDeviceProp_t props;
   HIPCHECK(hipGetDeviceProperties(&props, device_id));
   std::string archName = props.gcnArchName;
   if (archName.size() <= 3) {
-    std::cout<<"ArchName too small, Exiting"<<std::endl;
+    std::cout << "ArchName too small, Exiting" << std::endl;
     HIPASSERT(false);
   }
-  archName = archName.substr(3, (archName.size()-1));
+  archName = archName.substr(3, (archName.size() - 1));
 
   tlf_name = "TensileLibrary_gfx" + archName;
   tlf_name += ".co";
@@ -133,59 +130,58 @@ bool getTLFileName(int device_id, std::string& tlf_name) {
 }
 
 bool RunTest(int device_id) {
+  std::cout << "For Device: " << device_id << std::endl;
 
-  std::cout<<"For Device: "<<device_id<<std::endl;
-
-  //Get Tensile Library File name, changes wrt target
+  // Get Tensile Library File name, changes wrt target
   std::string tlf_name;
   if (!getTLFileName(device_id, tlf_name)) {
     return false;
   }
 
-  //Measure Time taken for hipModuleLoad
+  // Measure Time taken for hipModuleLoad
   hipModule_t Module;
   auto mload_clock_start = std::chrono::steady_clock::now();
   HIPCHECK(hipModuleLoad(&Module, tlf_name.c_str()));
   auto mload_clock_stop = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::nano> mload_duration = (mload_clock_stop - mload_clock_start);
-  std::cout<<"Time taken for hipModuleLoad : " <<std::chrono::duration_cast<std::chrono::nanoseconds>
-    (mload_duration).count()<<" nanoseconds "<<std::endl;
+  std::cout << "Time taken for hipModuleLoad : "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(mload_duration).count()
+            << " nanoseconds " << std::endl;
 
-  //Read kernels from a pre-populated text file
+  // Read kernels from a pre-populated text file
   std::string kernel_file_name = "kernel_names.txt";
   std::ifstream kernel_file(kernel_file_name);
   if (!kernel_file.is_open()) {
-     std::cout<<"Failed to open Kernel File: "<<kernel_file_name<<std::endl;
-     return false;
+    std::cout << "Failed to open Kernel File: " << kernel_file_name << std::endl;
+    return false;
   }
 
   std::string kernel_line;
   std::vector<std::string> kernel_vec;
   while (std::getline(kernel_file, kernel_line)) {
-    kernel_line.erase(std::remove(kernel_line.begin(), kernel_line.end(), '\r'),
-                      kernel_line.end());
+    kernel_line.erase(std::remove(kernel_line.begin(), kernel_line.end(), '\r'), kernel_line.end());
     kernel_vec.push_back(kernel_line);
   }
 
-  //Measure the first hipModuleGetFunction
+  // Measure the first hipModuleGetFunction
   hipFunction_t hfunc = nullptr;
   auto mgetf_clock_start = std::chrono::steady_clock::now();
   HIPCHECK(hipModuleGetFunction(&hfunc, Module, kernel_vec[0].c_str()));
   auto mgetf_clock_stop = std::chrono::steady_clock::now();
   std::chrono::duration<double, std::nano> mgetf_duration = (mgetf_clock_stop - mgetf_clock_start);
-  std::cout<<"Time taken to fetch a function via hipModuleGetFunction : "
-    <<std::chrono::duration_cast<std::chrono::nanoseconds>
-    (mgetf_duration).count()<<" nanoseconds "<<std::endl;
+  std::cout << "Time taken to fetch a function via hipModuleGetFunction : "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(mgetf_duration).count()
+            << " nanoseconds " << std::endl;
 
-  //Measure the second hipModuleGetFunction
+  // Measure the second hipModuleGetFunction
   hfunc = nullptr;
   mgetf_clock_start = std::chrono::steady_clock::now();
   HIPCHECK(hipModuleGetFunction(&hfunc, Module, kernel_vec[0].c_str()));
   mgetf_clock_stop = std::chrono::steady_clock::now();
   mgetf_duration = (mgetf_clock_stop - mgetf_clock_start);
-  std::cout<<"Time taken fetch the same function via hipModuleGetFunction : "
-    <<std::chrono::duration_cast<std::chrono::nanoseconds>
-    (mgetf_duration).count()<<" nanoseconds "<<std::endl;
+  std::cout << "Time taken fetch the same function via hipModuleGetFunction : "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(mgetf_duration).count()
+            << " nanoseconds " << std::endl;
 
   double all_duration = 0;
   for (auto& kernel : kernel_vec) {
@@ -199,29 +195,30 @@ bool RunTest(int device_id) {
 
   if (kernel_vec.size() > 0) {
     std::cout << "Time taken for Average hipModuleGetFunction : "
-      << (static_cast<double>(all_duration) / static_cast<double>(kernel_vec.size()))<<" nanoseconds "<<std::endl;
+              << (static_cast<double>(all_duration) / static_cast<double>(kernel_vec.size()))
+              << " nanoseconds " << std::endl;
   }
 
-  std::cout<<std::endl<<std::endl;
+  std::cout << std::endl << std::endl;
 
   HIPCHECK(hipModuleUnload(Module));
   return true;
 }
-#endif //__unix__
+#endif  //__unix__
 
 int main() {
   bool test_passed = true;
 
   do {
 #ifdef __unix__
-    //Preprocess contents for the test
+    // Preprocess contents for the test
     if (!PreProcessContents()) {
-      std::cout<<"Failed in PreProcessContents step"<<std::endl;
+      std::cout << "Failed in PreProcessContents step" << std::endl;
       test_passed = false;
       break;
     }
 
-    //Run the test for all devices
+    // Run the test for all devices
     int num_devices = 0;
     HIPCHECK(hipGetDeviceCount(&num_devices));
     for (int dev_idx = 0; dev_idx < num_devices; ++dev_idx) {
@@ -231,9 +228,9 @@ int main() {
       }
     }
 #else
-    std::cout<<"Detected non-linux Os. Skipping the test"<<std::endl;
-#endif // __unix__
-  } while(0);
+    std::cout << "Detected non-linux Os. Skipping the test" << std::endl;
+#endif  // __unix__
+  } while (0);
 
   if (test_passed) {
     passed();
@@ -241,4 +238,3 @@ int main() {
 
   return 0;
 }
-

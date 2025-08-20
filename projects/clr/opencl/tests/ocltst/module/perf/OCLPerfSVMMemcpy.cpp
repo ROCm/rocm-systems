@@ -47,10 +47,8 @@ static size_t sizeList[NUM_SIZES] = {
 };
 
 #if defined(CL_VERSION_2_0)
-static const cl_svm_mem_flags srcFlagList[NUM_SRC_FLAGS] = {CL_MEM_READ_WRITE,
-                                                            CL_MEM_READ_ONLY};
-static const cl_svm_mem_flags dstFlagList[NUM_DST_FLAGS] = {CL_MEM_READ_WRITE,
-                                                            CL_MEM_WRITE_ONLY};
+static const cl_svm_mem_flags srcFlagList[NUM_SRC_FLAGS] = {CL_MEM_READ_WRITE, CL_MEM_READ_ONLY};
+static const cl_svm_mem_flags dstFlagList[NUM_DST_FLAGS] = {CL_MEM_READ_WRITE, CL_MEM_WRITE_ONLY};
 static const cl_svm_mem_flags FGFlags[NUM_FG_FLAGS] = {
     0,
     CL_MEM_SVM_FINE_GRAIN_BUFFER,
@@ -66,16 +64,14 @@ OCLPerfSVMMemcpy::OCLPerfSVMMemcpy() {
 
 OCLPerfSVMMemcpy::~OCLPerfSVMMemcpy() {}
 
-void OCLPerfSVMMemcpy::open(unsigned int test, char *units, double &conversion,
+void OCLPerfSVMMemcpy::open(unsigned int test, char* units, double& conversion,
                             unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
 #if defined(CL_VERSION_2_0)
-  FGSystem_ =
-      (test >= (NUM_SIZES * NUM_SRC_FLAGS * NUM_DST_FLAGS * NUM_FG_FLAGS));
-  testFGFlag_ =
-      (test / (NUM_SIZES * NUM_DST_FLAGS * NUM_SRC_FLAGS)) % (NUM_FG_FLAGS);
+  FGSystem_ = (test >= (NUM_SIZES * NUM_SRC_FLAGS * NUM_DST_FLAGS * NUM_FG_FLAGS));
+  testFGFlag_ = (test / (NUM_SIZES * NUM_DST_FLAGS * NUM_SRC_FLAGS)) % (NUM_FG_FLAGS);
   testSrcFlag_ = (test / (NUM_SIZES * NUM_DST_FLAGS)) % (NUM_SRC_FLAGS);
   testDstFlag_ = (test / NUM_SIZES) % (NUM_DST_FLAGS);
   testSize_ = test % NUM_SIZES;
@@ -89,8 +85,7 @@ void OCLPerfSVMMemcpy::open(unsigned int test, char *units, double &conversion,
                    // support coarse grain SVM
     testDescString = "Coarse Grain Buffer  NOT supported. Test Skipped.";
     return;
-  } else if ((testFGFlag_ > 0) &&
-             (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER) == 0) {
+  } else if ((testFGFlag_ > 0) && (caps & CL_DEVICE_SVM_FINE_GRAIN_BUFFER) == 0) {
     skip_ = true;  // No support for fine grain buffer SVM
     testDescString = "Fine Grain Buffer NOT supported. Test Skipped.";
     return;
@@ -105,8 +100,8 @@ void OCLPerfSVMMemcpy::open(unsigned int test, char *units, double &conversion,
   }
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -122,9 +117,8 @@ void OCLPerfSVMMemcpy::open(unsigned int test, char *units, double &conversion,
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfSVMMemcpy::run(void) {
   if (skip_) {
@@ -148,40 +142,37 @@ void OCLPerfSVMMemcpy::run(void) {
   size_t lws[1] = {64};
 
   if (!FGSystem_) {
-    src = (cl_uint *)clSVMAlloc(context_, srcFlags, bufSize, 0);
+    src = (cl_uint*)clSVMAlloc(context_, srcFlags, bufSize, 0);
     CHECK_RESULT(src == 0, "Allocation failed");
-    dst = (cl_uint *)clSVMAlloc(context_, dstFlags, bufSize, 0);
+    dst = (cl_uint*)clSVMAlloc(context_, dstFlags, bufSize, 0);
     CHECK_RESULT(dst == 0, "Allocation failed");
   } else {  // FGSystem_ == true
-    src = (cl_uint *)malloc(bufSize);
-    dst = (cl_uint *)malloc(bufSize);
+    src = (cl_uint*)malloc(bufSize);
+    dst = (cl_uint*)malloc(bufSize);
   }
 
   timer.Reset();
   timer.Start();
   for (size_t i = 0; i < iter; ++i) {
-    clEnqueueSVMMemcpy(cmdQueues_[_deviceId], false, dst, src, bufSize, 0, NULL,
-                       NULL);
+    clEnqueueSVMMemcpy(cmdQueues_[_deviceId], false, dst, src, bufSize, 0, NULL, NULL);
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
   timer.Stop();
 
   if (!FGSystem_) {
-    clSVMFree(context_, (void *)src);
-    clSVMFree(context_, (void *)dst);
+    clSVMFree(context_, (void*)src);
+    clSVMFree(context_, (void*)dst);
   } else {  // FGSystem_ = true
     free(src);
     free(dst);
   }
 
   char pSrcFlags[5];
-  pSrcFlags[0] =
-      (testSrcFlag_ == 0 || testSrcFlag_ == 1) ? 'R' : '_';  // CL_MEM_READ_ONLY
-  pSrcFlags[1] = (testSrcFlag_ == 0) ? 'W' : '_';  // CL_MEM_WRITE_ONLY
-  pSrcFlags[2] = (testFGFlag_ == 1 || testFGFlag_ == 2)
-                     ? 'F'
-                     : '_';  // CL_MEM_SVM_FINE_GRAIN_BUFFER
-  pSrcFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';  // CL_MEM_SVM_ATOMICS
+  pSrcFlags[0] = (testSrcFlag_ == 0 || testSrcFlag_ == 1) ? 'R' : '_';  // CL_MEM_READ_ONLY
+  pSrcFlags[1] = (testSrcFlag_ == 0) ? 'W' : '_';                       // CL_MEM_WRITE_ONLY
+  pSrcFlags[2] =
+      (testFGFlag_ == 1 || testFGFlag_ == 2) ? 'F' : '_';  // CL_MEM_SVM_FINE_GRAIN_BUFFER
+  pSrcFlags[3] = (testFGFlag_ == 2) ? 'A' : '_';           // CL_MEM_SVM_ATOMICS
   pSrcFlags[4] = '\0';
 
   char pDstFlags[5];
@@ -194,16 +185,13 @@ void OCLPerfSVMMemcpy::run(void) {
   char buf[256];
 
   if (FGSystem_) {
-    SNPRINTF(buf, sizeof(buf),
-             "Fine Grain System   SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
+    SNPRINTF(buf, sizeof(buf), "Fine Grain System   SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
              (int)bufSize / 1024, pSrcFlags, pDstFlags);
   } else if (testFGFlag_ == 0) {
-    SNPRINTF(buf, sizeof(buf),
-             "Coarse Grain Buffer SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
+    SNPRINTF(buf, sizeof(buf), "Coarse Grain Buffer SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
              (int)bufSize / 1024, pSrcFlags, pDstFlags);
   } else {
-    SNPRINTF(buf, sizeof(buf),
-             "Fine Grain Buffer   SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
+    SNPRINTF(buf, sizeof(buf), "Fine Grain Buffer   SVMMemcpy (GB/s) for %6d KB, from:%4s to:%4s",
              (int)bufSize / 1024, pSrcFlags, pDstFlags);
   }
 

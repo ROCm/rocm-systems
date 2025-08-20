@@ -40,8 +40,8 @@ OCLGetQueueThreadID::OCLGetQueueThreadID() {
 
 OCLGetQueueThreadID::~OCLGetQueueThreadID() {}
 
-void OCLGetQueueThreadID::open(unsigned int test, char* units,
-                               double& conversion, unsigned int deviceId) {
+void OCLGetQueueThreadID::open(unsigned int test, char* units, double& conversion,
+                               unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
 
@@ -54,22 +54,19 @@ void OCLGetQueueThreadID::open(unsigned int test, char* units,
   }
 
   cl_mem buffer;
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                    sizeof(cl_uint), NULL, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, sizeof(cl_uint), NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 }
 
-static void CL_CALLBACK notify_callback(cl_event event,
-                                        cl_int event_command_exec_status,
+static void CL_CALLBACK notify_callback(cl_event event, cl_int event_command_exec_status,
                                         void* user_data) {
 #if defined(__linux__)
   pthread_t id = (pthread_t)user_data;
   pthread_t handle = pthread_self();
 #else
   HMODULE module = GetModuleHandle("kernel32.dll");
-  GetThreadId getThreadId =
-      reinterpret_cast<GetThreadId>(GetProcAddress(module, "GetThreadId"));
+  GetThreadId getThreadId = reinterpret_cast<GetThreadId>(GetProcAddress(module, "GetThreadId"));
   if (NULL == getThreadId) {
     return;
   }
@@ -91,16 +88,13 @@ void OCLGetQueueThreadID::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateUserEvent() failed");
 
   cl_uint initVal[2] = {5, 10};
-  error_ = _wrapper->clGetCommandQueueInfo(cmdQueues_[_deviceId],
-                                           CL_QUEUE_THREAD_HANDLE_AMD,
+  error_ = _wrapper->clGetCommandQueueInfo(cmdQueues_[_deviceId], CL_QUEUE_THREAD_HANDLE_AMD,
                                            sizeof(void*), &handle, NULL);
-  error_ = _wrapper->clEnqueueWriteBuffer(cmdQueues_[_deviceId], buffers()[0],
-                                          false, 0, sizeof(cl_uint),
-                                          &initVal[0], 1, &userEvent, &clEvent);
+  error_ = _wrapper->clEnqueueWriteBuffer(cmdQueues_[_deviceId], buffers()[0], false, 0,
+                                          sizeof(cl_uint), &initVal[0], 1, &userEvent, &clEvent);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueWriteBuffer() failed");
 
-  error_ = _wrapper->clSetEventCallback(clEvent, CL_SUBMITTED, notify_callback,
-                                        handle);
+  error_ = _wrapper->clSetEventCallback(clEvent, CL_SUBMITTED, notify_callback, handle);
 
   clSetUserEventStatus(userEvent, CL_COMPLETE);
 

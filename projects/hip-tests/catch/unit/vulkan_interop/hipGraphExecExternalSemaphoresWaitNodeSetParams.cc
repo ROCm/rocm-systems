@@ -173,16 +173,19 @@ TEST_CASE("Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_
   HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
 
   SECTION("pGraphExec == nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecExternalSemaphoresWaitNodeSetParams(nullptr, node, &node_params), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecExternalSemaphoresWaitNodeSetParams(nullptr, node, &node_params),
+                    hipErrorInvalidValue);
   }
 
   SECTION("node == nullptr") {
     HIP_CHECK_ERROR(
-        hipGraphExecExternalSemaphoresWaitNodeSetParams(graph_exec, nullptr, &node_params), hipErrorInvalidValue);
+        hipGraphExecExternalSemaphoresWaitNodeSetParams(graph_exec, nullptr, &node_params),
+        hipErrorInvalidValue);
   }
 
   SECTION("params == nullptr") {
-    HIP_CHECK_ERROR(hipGraphExecExternalSemaphoresWaitNodeSetParams(graph_exec, node, nullptr), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGraphExecExternalSemaphoresWaitNodeSetParams(graph_exec, node, nullptr),
+                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipDestroyExternalSemaphore(hip_ext_semaphore));
@@ -191,6 +194,6 @@ TEST_CASE("Unit_hipGraphExecExternalSemaphoresWaitNodeSetParams_Vulkan_Negative_
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

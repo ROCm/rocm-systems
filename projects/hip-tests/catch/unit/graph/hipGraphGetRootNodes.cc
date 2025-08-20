@@ -22,7 +22,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_kernels.hh>
- 
+
 
 #include "graph_dependency_common.hh"
 
@@ -180,7 +180,7 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Positive_CapturedStream") {
   HIP_CHECK(hipGraphGetRootNodes(graph, nodes, &numRootNodes));
   REQUIRE(numRootNodes == expectedRootNodes);
 
-#if HT_NVIDIA // EXSWHTEC-225
+#if HT_NVIDIA  // EXSWHTEC-225
   // Verify root nodes have correct type.
   hipGraphNodeType nodeType;
   HIP_CHECK(hipGraphNodeGetType(nodes[0], &nodeType));
@@ -267,6 +267,6 @@ TEST_CASE("Unit_hipGraphGetRootNodes_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

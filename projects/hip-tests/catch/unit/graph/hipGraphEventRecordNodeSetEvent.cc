@@ -156,13 +156,9 @@ TEST_CASE("Unit_hipGraphEventRecordNodeSetEvent_SetEventProperty") {
  * Scenario 1: Validate Set Get test for all Event flags
  */
 TEST_CASE("Unit_hipGraphEventRecordNodeSetEvent_SetGet") {
-  SECTION("Flag = hipEventDefault") {
-    validateEventRecordNodeSetEvent(hipEventDefault);
-  }
+  SECTION("Flag = hipEventDefault") { validateEventRecordNodeSetEvent(hipEventDefault); }
 
-  SECTION("Flag = hipEventBlockingSync") {
-    validateEventRecordNodeSetEvent(hipEventBlockingSync);
-  }
+  SECTION("Flag = hipEventBlockingSync") { validateEventRecordNodeSetEvent(hipEventBlockingSync); }
 
   SECTION("Flag = hipEventDisableTiming") {
     validateEventRecordNodeSetEvent(hipEventDisableTiming);
@@ -212,9 +208,7 @@ TEST_CASE("Unit_hipGraphEventRecordNodeSetEvent_Negative") {
     HIP_CHECK(hipFree(A_d));
   }
 
-  SECTION("input node is event wait node") {
-    setEventWaitNode();
-  }
+  SECTION("input node is event wait node") { setEventWaitNode(); }
 
   SECTION("input node is uninitialized node") {
     hipGraphNode_t node_uninit{};

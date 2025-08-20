@@ -58,10 +58,9 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
 
   size_t pitch;
   hipDeviceptr_t devMemSrc;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void **>(&devMemSrc), &pitch,
-                           width, height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height));
 
-  char *hostMemDst = new char[N];
+  char* hostMemDst = new char[N];
   REQUIRE(hostMemDst != nullptr);
   for (int i = 0; i < N; i++) {
     hostMemDst[i] = 0;
@@ -81,8 +80,8 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
   initialMemsetParams.height = height;
   initialMemsetParams.value = value;
 
-  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0,
-                                     &initialMemsetParams, context));
+  HIP_CHECK(
+      hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &initialMemsetParams, context));
 
   // Prepare memcpyNode
   ::std::vector<hipGraphNode_t> memcpyNodeDependencies;
@@ -105,9 +104,8 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
   memcpyParams.Height = height;
   memcpyParams.Depth = 1;
 
-  HIP_CHECK(hipDrvGraphAddMemcpyNode(
-      &memcpyNode, graph, memcpyNodeDependencies.data(),
-      memcpyNodeDependencies.size(), &memcpyParams, context));
+  HIP_CHECK(hipDrvGraphAddMemcpyNode(&memcpyNode, graph, memcpyNodeDependencies.data(),
+                                     memcpyNodeDependencies.size(), &memcpyParams, context));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
@@ -127,8 +125,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
   newMemsetParams.value = value + 1;
 
   // Update with new memset node params
-  HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode,
-                                               &newMemsetParams, context));
+  HIP_CHECK(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, &newMemsetParams, context));
 
   for (int i = 0; i < N; i++) {
     hostMemDst[i] = 0;
@@ -143,7 +140,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_BasicPositive") {
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(reinterpret_cast<void *>(devMemSrc)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)));
   delete[] hostMemDst;
   HIP_CHECK(hipCtxDestroy(context));
 }
@@ -173,8 +170,7 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
 
   size_t pitch;
   hipDeviceptr_t devMemSrc;
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void **>(&devMemSrc), &pitch,
-                           width, height));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&devMemSrc), &pitch, width, height));
 
   // Prepare memset node
   hipMemsetParams memsetParams{};
@@ -186,25 +182,21 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
   memsetParams.value = value;
 
   hipGraphNode_t memsetNode;
-  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0,
-                                     &memsetParams, context));
+  HIP_CHECK(hipDrvGraphAddMemsetNode(&memsetNode, graph, nullptr, 0, &memsetParams, context));
 
   hipGraphExec_t graphExec;
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
   SECTION("Invalid Graph Exec") {
-    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(nullptr, memsetNode,
-                                                       &memsetParams, context),
+    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(nullptr, memsetNode, &memsetParams, context),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Node") {
-    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, nullptr,
-                                                       &memsetParams, context),
+    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, nullptr, &memsetParams, context),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid Node params") {
-    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode,
-                                                       nullptr, context),
+    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, nullptr, context),
                     hipErrorInvalidValue);
   }
   SECTION("Invalid destination address in Node params") {
@@ -216,13 +208,12 @@ TEST_CASE("Unit_hipDrvGraphExecMemsetNodeSetParams_Negative") {
     memsetParams.height = height;
     memsetParams.value = value;
 
-    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode,
-                                                       nullptr, context),
+    HIP_CHECK_ERROR(hipDrvGraphExecMemsetNodeSetParams(graphExec, memsetNode, nullptr, context),
                     hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphExecDestroy(graphExec));
   HIP_CHECK(hipGraphDestroy(graph));
-  HIP_CHECK(hipFree(reinterpret_cast<void *>(devMemSrc)));
+  HIP_CHECK(hipFree(reinterpret_cast<void*>(devMemSrc)));
   HIP_CHECK(hipCtxDestroy(context));
 }
