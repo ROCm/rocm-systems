@@ -201,6 +201,18 @@ storage_parser::consume_storage()
                 invoke_callbacks(header.type, _pmc_event_with_sample);
                 break;
             }
+            case entry_type::ompt:
+            {
+                ompt_region_sample _ompt_region_sample;
+                parse_data(
+                    sample.data(), _ompt_region_sample.name,
+                    _ompt_region_sample.thread_id, _ompt_region_sample.correlation_id,
+                    _ompt_region_sample.start_timestamp,
+                    _ompt_region_sample.end_timestamp, _ompt_region_sample.call_stack,
+                    _ompt_region_sample.args_str, _ompt_region_sample.extdata);
+                invoke_callbacks(header.type, _ompt_region_sample);
+                break;
+            }
             default: break;
         }
     }

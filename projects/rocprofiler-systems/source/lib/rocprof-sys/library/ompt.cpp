@@ -25,13 +25,20 @@
 #include "core/config.hpp"
 #include "core/debug.hpp"
 #include "core/defines.hpp"
+#include "core/trace_cache/buffer_storage.hpp"
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
 #include <timemory/defines.h>
 
 #if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
 
 #    include "binary/link_map.hpp"
 #    include "core/components/fwd.hpp"
+#    include "core/rocpd/data_processor.hpp"
+#    include "core/rocpd/json.hpp"
+#    include "core/trace_cache/cache_manager.hpp"
 #    include "library/components/category_region.hpp"
 #    include "library/tracing.hpp"
 
@@ -58,6 +65,92 @@ using api_t = tim::project::rocprofsys;
 
 namespace rocprofsys
 {
+namespace
+{
+void
+cache_category()
+{
+    trace_cache::get_metadata_registry().add_string(trait::name<category::ompt>::value);
+}
+
+void
+cache_thread_info(size_t tid)
+{
+    const auto& _thread_info = thread_info::get(tid, SequentTID);
+    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", tid);
+    if(!_thread_info)
+    {
+        ROCPROFSYS_WARNING(3, "No valid thread info for tid=%li\n", tid);
+        trace_cache::get_metadata_registry().add_thread_info(
+            { getppid(), getpid(), tid, 0, 0, "{}" });
+        return;
+    }
+
+    trace_cache::get_metadata_registry().add_thread_info(
+        { getppid(), getpid(),
+          static_cast<size_t>(_thread_info->index_data->system_value),
+          static_cast<uint32_t>(_thread_info->get_start()),
+          static_cast<uint32_t>(_thread_info->get_stop()), "{}" });
+}
+
+void
+cache_track(int64_t tid, const std::string& track_name)
+{
+    const auto& _thread_info = thread_info::get(tid, SequentTID);
+    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", tid);
+    if(!_thread_info) return;
+
+    size_t thread_id = _thread_info->index_data->system_value;
+
+    trace_cache::get_metadata_registry().add_track({ track_name, thread_id, "{}" });
+}
+
+const std::string
+format_event_args(const tim::openmp::argument_array_t& args)
+{
+    std::string args_str;
+    if(args.empty())
+    {
+        return args_str;
+    }
+
+    auto pos{ 0 };
+    std::for_each(args.begin(), args.end(),
+                  [&](const tim::openmp::labeled_argument& arg) {
+                      const auto*       delimiter = ";;";
+                      std::stringstream ss;
+                      ss << pos++ << delimiter << arg.type << delimiter
+                         << std::string(arg.label) << delimiter << arg.value << delimiter;
+                      args_str.append(ss.str());
+                  });
+
+    return args_str;
+}
+
+void
+cache_ompt_region(std::string name, uint64_t thread_id, uint64_t correlation_id,
+                  uint64_t start_timestamp, uint64_t end_timestamp,
+                  std::string call_stack, std::string args_str, std::string extdata)
+
+{
+    trace_cache::get_buffer_storage().store(trace_cache::entry_type::ompt, name.c_str(),
+                                            thread_id, correlation_id, start_timestamp,
+                                            end_timestamp, call_stack.c_str(),
+                                            args_str.c_str(), extdata.c_str());
+}
+
+const std::string
+get_call_stack(const tim::openmp::context_info& _ctx_info)
+{
+    auto call_stack = ::rocpd::json::create();
+
+    call_stack->set("file", _ctx_info.file);
+    call_stack->set("line_info", _ctx_info.line);
+
+    return call_stack->to_string();
+}
+
+}  // namespace
 namespace component
 {
 struct ompt : comp::base<ompt, void>
@@ -82,7 +175,12 @@ struct ompt : comp::base<ompt, void>
     {
         category_region<category::ompt>::start<tim::quirk::timemory>(m_prefix);
 
-        auto     _ts = tracing::now();
+        auto _ts = tracing::now();
+        if(get_use_rocpd())
+        {
+            auto ctx_hash                 = compute_context_hash(_ctx_info);
+            get_timestamp_map()[ctx_hash] = _ts;
+        }
         uint64_t _cid =
             (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
         auto _annotate = [&](::perfetto::EventContext ctx) {
@@ -113,9 +211,33 @@ struct ompt : comp::base<ompt, void>
     {
         category_region<category::ompt>::stop<tim::quirk::timemory>(m_prefix);
 
-        auto     _ts = tracing::now();
+        auto _ts = tracing::now();
+
         uint64_t _cid =
             (_ctx_info.target_arguments) ? _ctx_info.target_arguments->host_op_id : 0;
+
+        if(get_use_rocpd())
+        {
+            auto  ctx_hash = compute_context_hash(_ctx_info);
+            auto& _ctx_map = get_timestamp_map();
+            auto  _it      = _ctx_map.find(ctx_hash);
+
+            if(_it != _ctx_map.end())
+            {
+                auto        _start_ts = _it->second;
+                auto        _thrd_id  = extract_thread_num_from_args(_ctx_info.arguments);
+                const auto& _thread_info = thread_info::get(_thrd_id, SequentTID);
+                auto        _call_stack  = get_call_stack(_ctx_info);
+                auto        _args        = format_event_args(_ctx_info.arguments);
+
+                cache_thread_info(_thrd_id);
+                cache_ompt_region(
+                    ((_ctx_info.func.empty()) ? std::string(m_prefix) : _ctx_info.func),
+                    static_cast<size_t>(_thread_info->index_data->system_value), _cid,
+                    _start_ts, _ts, _call_stack, _args, "{}");
+            }
+        }
+
         auto _annotate = [&](::perfetto::EventContext ctx) {
             if(config::get_perfetto_annotations())
             {
@@ -177,6 +299,66 @@ struct ompt : comp::base<ompt, void>
 
 private:
     std::string_view m_prefix = {};
+
+    std::unordered_map<uint64_t, uint64_t>& get_timestamp_map() const
+    {
+        static thread_local std::unordered_map<uint64_t, uint64_t> map;
+        return map;
+    }
+
+    uint64_t compute_context_hash(const context_info_t& _ctx_info) const
+    {
+        std::hash<std::string> string_hasher;
+        std::hash<uint64_t>    uint64_hasher;
+
+        uint64_t           hash       = 0;
+        constexpr uint64_t hash_magic = 0x9e3779b9;
+
+        auto combine_hash = [&hash](uint64_t value) {
+            hash ^= value + hash_magic + (hash << 6) + (hash >> 2);
+        };
+
+        if(_ctx_info.target_arguments)
+        {
+            combine_hash(uint64_hasher(_ctx_info.target_arguments->host_op_id));
+            combine_hash(uint64_hasher(_ctx_info.target_arguments->target_id));
+        }
+
+        if(!_ctx_info.label.empty())
+        {
+            combine_hash(string_hasher(std::string(_ctx_info.label)));
+        }
+
+        if(!_ctx_info.func.empty())
+        {
+            combine_hash(string_hasher(_ctx_info.func));
+        }
+
+        uint64_t thread_id = extract_thread_num_from_args(_ctx_info.arguments);
+        if(thread_id != 0)
+        {
+            combine_hash(uint64_hasher(thread_id));
+        }
+
+        if(!m_prefix.empty())
+        {
+            combine_hash(string_hasher(std::string(m_prefix)));
+        }
+
+        return hash;
+    }
+
+    uint64_t extract_thread_num_from_args(const tim::openmp::argument_array_t& args) const
+    {
+        for(const auto& arg : args)
+        {
+            if(arg.label == "thread_num")
+            {
+                return static_cast<uint64_t>(std::stoull(arg.value));
+            }
+        }
+        return 0;
+    }
 };
 }  // namespace component
 }  // namespace rocprofsys
@@ -219,6 +401,11 @@ setup()
     tim::auto_lock_t lk{ tim::type_mutex<ompt_handle_t>() };
     f_bundle = std::make_unique<ompt_bundle_t>("rocprofsys/ompt",
                                                quirk::config<quirk::auto_start>{});
+
+    if(get_use_rocpd())
+    {
+        cache_category();
+    }
 }
 
 void
@@ -435,6 +622,17 @@ tool_initialize(ompt_function_lookup_t lookup, int initial_device_num,
                             component::ompt::record(
                                 _name, id, beg_time, end_time, _thrd_id, _targ_id,
                                 tim::openmp::context_info{ _name, nullptr, _ctx_info });
+
+                            if(get_use_rocpd())
+                            {
+                                cache_thread_info(_thrd_id);
+                                cache_track(_thrd_id,
+                                            JOIN("", "OMPT Kernel Submit - Thread [ ",
+                                                 _thrd_id, " ]")
+                                                .c_str());
+                                cache_ompt_region(_name, _thrd_id, id, beg_time, end_time,
+                                                  "", format_event_args(_ctx_info), "");
+                            }
                         }
                         else if(_record->type == ompt_callback_target_data_op)
                         {
@@ -462,6 +660,17 @@ tool_initialize(ompt_function_lookup_t lookup, int initial_device_num,
                             component::ompt::record(
                                 _opname, id, beg_time, end_time, _thrd_id, _targ_id,
                                 tim::openmp::context_info{ _name, nullptr, _ctx_info });
+
+                            if(get_use_rocpd())
+                            {
+                                cache_thread_info(_thrd_id);
+                                cache_track(_thrd_id,
+                                            JOIN("", "OMPT Target Data Op - Thread [ ",
+                                                 _thrd_id, " ]")
+                                                .c_str());
+                                cache_ompt_region(_name, _thrd_id, id, beg_time, end_time,
+                                                  "", format_event_args(_ctx_info), "");
+                            }
                         }
 
                         ROCPROFSYS_VERBOSE(

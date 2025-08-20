@@ -255,48 +255,49 @@ rocpd_post_processing::get_memory_allocate_callback() const
 }
 #endif
 
+#if ROCPROFSYS_USE_ROCM > 0
+static rocprofiler_sdk::function_args_t
+process_event_args(const std::string& arg_str)
+{
+    rocprofiler_sdk::function_args_t args;
+    const std::string                delimiter = ";;";
+
+    auto split = [](const std::string& str, const std::string& delimiter) {
+        std::vector<std::string> tokens;
+        size_t                   start = 0;
+        size_t                   end   = str.find(delimiter);
+
+        while(end != std::string::npos)
+        {
+            tokens.push_back(str.substr(start, end - start));
+            start = end + delimiter.length();
+            end   = str.find(delimiter, start);
+        }
+        return tokens;
+    };
+
+    auto tokens = split(arg_str, delimiter);
+
+    // Ensure the number of tokens is a multiple of 4
+    if(tokens.size() % 4 != 0)
+    {
+        throw std::invalid_argument("Malformed argument string.");
+    }
+
+    for(auto it = tokens.begin(); it != tokens.end(); it += 4)
+    {
+        rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
+                                               *(it + 1), *(it + 2), *(it + 3) };
+        args.push_back(arg);
+    }
+
+    return args;
+}
+#endif
+
 postprocessing_callback
 rocpd_post_processing::get_region_callback() const
 {
-    [[maybe_unused]] auto parse_args = []([[maybe_unused]] const std::string& arg_str) {
-#if ROCPROFSYS_USE_ROCM > 0
-        rocprofiler_sdk::function_args_t args;
-        const std::string                delimiter = ";;";
-
-        auto split = [](const std::string& str, const std::string& _delimiter) {
-            std::vector<std::string> tokens;
-            size_t                   start = 0;
-            size_t                   end   = str.find(_delimiter);
-
-            while(end != std::string::npos)
-            {
-                tokens.push_back(str.substr(start, end - start));
-                start = end + _delimiter.length();
-                end   = str.find(_delimiter, start);
-            }
-
-            return tokens;
-        };
-
-        auto tokens = split(arg_str, delimiter);
-
-        // Ensure the number of tokens is a multiple of 4
-        if(tokens.size() % 4 != 0)
-        {
-            throw std::invalid_argument("Malformed argument string.");
-        }
-
-        for(auto it = tokens.begin(); it != tokens.end(); it += 4)
-        {
-            rocprofiler_sdk::argument_info arg = { static_cast<uint32_t>(std::stoi(*it)),
-                                                   *(it + 1), *(it + 2), *(it + 3) };
-            args.push_back(arg);
-        }
-
-        return args;
-#endif
-    };
-
     return [&]([[maybe_unused]] const storage_parsed_type_base& parsed) {
 #if ROCPROFSYS_USE_ROCM > 0
         auto  _rs            = static_cast<const struct region_sample&>(parsed);
@@ -322,7 +323,7 @@ rocpd_post_processing::get_region_callback() const
             data_processor.insert_event(category_primary_key, stack_id, parent_stack_id,
                                         correlation_id, _rs.call_stack.c_str());
 
-        auto args = parse_args(_rs.args_str);
+        auto args = process_event_args(_rs.args_str);
         for(const auto& arg : args)
         {
             data_processor.insert_args(event_primary_key, arg.arg_number,
@@ -334,6 +335,46 @@ rocpd_post_processing::get_region_callback() const
                                      _rs.start_timestamp, _rs.end_timestamp,
                                      name_primary_key, event_primary_key);
 #endif
+    };
+}
+
+postprocessing_callback
+rocpd_post_processing::get_ompt_callback() const
+{
+    return [&](const storage_parsed_type_base& parsed) {
+        auto  _rs            = static_cast<const struct ompt_region_sample&>(parsed);
+        auto& data_processor = get_data_processor();
+        auto& n_info         = node_info::get_instance();
+        auto  process        = m_metadata.get_process_info();
+        auto  thread_primary_key =
+            data_processor.map_thread_id_to_primary_key(_rs.thread_id);
+
+        auto _name            = _rs.name;
+        auto name_primary_key = data_processor.insert_string(_name.c_str());
+
+        auto category_primary_key =
+            data_processor.insert_string(trait::name<category::ompt>::value);
+
+        size_t stack_id        = 0;
+        size_t parent_stack_id = _rs.correlation_id;
+        size_t correlation_id  = 0;
+
+        auto event_primary_key =
+            data_processor.insert_event(category_primary_key, stack_id, parent_stack_id,
+                                        correlation_id, _rs.call_stack.c_str());
+#if ROCPROFSYS_USE_ROCM > 0
+        auto args = process_event_args(_rs.args_str);
+        for(const auto& arg : args)
+        {
+            data_processor.insert_args(event_primary_key, arg.arg_number,
+                                       arg.arg_type.c_str(), arg.arg_name.c_str(),
+                                       arg.arg_value.c_str());
+        }
+#endif
+
+        data_processor.insert_region(
+            n_info.id, process.pid, thread_primary_key, _rs.start_timestamp,
+            _rs.end_timestamp, name_primary_key, event_primary_key, _rs.extdata.c_str());
     };
 }
 
@@ -399,6 +440,7 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_in_time_sample_callback());
     parser.register_type_callback(entry_type::pmc_event_with_sample,
                                   get_pmc_event_with_sample_callback());
+    parser.register_type_callback(entry_type::ompt, get_ompt_callback());
     ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
 #endif
 }
