@@ -1,5 +1,4 @@
 # ROCm Systems Profiler: Application profiling, tracing, and analysis
- 
 [![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml)
 [![OpenSUSE 15.x with GCC](https://github.com/ROCm/rocprofiler-systems/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/opensuse.yml)
 [![RedHat Linux (GCC, Python, ROCm)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/redhat.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/redhat.yml)
