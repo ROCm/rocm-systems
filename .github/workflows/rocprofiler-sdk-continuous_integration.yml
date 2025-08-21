@@ -513,7 +513,6 @@ jobs:
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=OFF
-          -DOPENMP_GPU_TARGETS=''
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm'
           -DPython3_EXECUTABLE=$(which python3)
