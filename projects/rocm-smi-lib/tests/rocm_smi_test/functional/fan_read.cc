@@ -102,14 +102,13 @@ void TestFanRead::Run(void) {
         std::cout << "\t**Current Fan Speed: ";
       }
       err = rsmi_dev_fan_speed_get(i, 0, &val_i64);
-      if (err == RSMI_STATUS_NOT_SUPPORTED) {
+      if (err == RSMI_STATUS_NOT_SUPPORTED || err == RSMI_STATUS_UNEXPECTED_DATA) {
           IF_VERB(STANDARD) {
-            std::cout << "\t**" <<  ": " <<
-                               "Not supported on this machine" << std::endl;
+            std::cout << "\t** Not supported on this machine" << std::endl;
           }
-          return;
+        return;
       } else {
-        CHK_ERR_ASRT(err)
+        CHK_ERR_ASRT(err);
       }
 
 
