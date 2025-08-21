@@ -113,7 +113,7 @@ jobs:
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
       with:
         sparse-checkout: |
@@ -373,7 +373,7 @@ jobs:
         make prefix=/usr all -j 32
         make prefix=/usr install
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
       with:
         sparse-checkout: |
@@ -605,7 +605,7 @@ jobs:
         tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
 
-    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register
+    - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime
       uses: actions/checkout@v5
       with:
         sparse-checkout: |
