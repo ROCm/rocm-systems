@@ -1,4 +1,4 @@
-name: Validate PR desription
+name: Validate HIP PR description
 
 on:
   pull_request:
