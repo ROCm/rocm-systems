@@ -29,8 +29,7 @@ class OCLPerfImageMapUnmap : public OCLTestImp {
   virtual ~OCLPerfImageMapUnmap();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -49,10 +48,8 @@ class OCLPerfImageMapUnmap : public OCLTestImp {
   bool srcImage_;
   bool dstImage_;
   unsigned int numIter;
-  void setData(void* ptr, unsigned int pitch, unsigned int size,
-               unsigned int value);
-  void checkData(void* ptr, unsigned int pitch, unsigned int size,
-                 unsigned int value);
+  void setData(void* ptr, unsigned int pitch, unsigned int size, unsigned int value);
+  void checkData(void* ptr, unsigned int pitch, unsigned int size, unsigned int value);
 };
 
 #endif  // _OCL_ImageMapUnmap_H_

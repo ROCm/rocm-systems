@@ -87,7 +87,9 @@ def update_analysis_config():
                         data_source_config["metric_table"]["metric"],
                         gfx_version,
                     )
-                new_panel_config["Panel Config"]["data source"].append(data_source_config)
+                new_panel_config["Panel Config"]["data source"].append(
+                    data_source_config
+                )
             # Write panel config to file
             filename = Path(
                 TARGET_DIR.joinpath(gfx_version, f"{panel_id}_{panel_title}.yaml")
@@ -134,9 +136,9 @@ def update_sets_config():
             }
 
             for metric_id in sets["metric"][gfx_version]:
-                current_set["metric"].append(
-                    {metric_id: METRIC_ID_TO_NAME_MAP[gfx_version][str(metric_id)]}
-                )
+                current_set["metric"].append({
+                    metric_id: METRIC_ID_TO_NAME_MAP[gfx_version][str(metric_id)]
+                })
 
             new_sets["sets"].append(current_set)
 

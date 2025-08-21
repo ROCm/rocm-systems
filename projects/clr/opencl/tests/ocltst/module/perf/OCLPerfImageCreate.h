@@ -29,19 +29,18 @@ class OCLPerfImageCreate : public OCLTestImp {
   virtual ~OCLPerfImageCreate();
 
  public:
-  virtual void open(unsigned int test, char *units, double &conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
-  virtual void setData(void *ptr, unsigned int size, unsigned int value);
+  virtual void setData(void* ptr, unsigned int size, unsigned int value);
 
   cl_command_queue cmd_queue_;
-  cl_mem *outBuffer_;
+  cl_mem* outBuffer_;
 
   unsigned int bufSize_;
   unsigned int bufnum_;
   unsigned int numIter;
-  char *memptr;
+  char* memptr;
   unsigned int memSize;
   unsigned int testId_;
 

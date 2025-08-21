@@ -45,20 +45,17 @@ unsigned int Sizes[NUM_SIZES] = {WIDTH * HEIGHT * 4};
 #define KERNEL_CODE(...) #__VA_ARGS__
 const static char* strKernel = KERNEL_CODE(
 \n __kernel void ResizeVerticalFilter(
-    const __global uint* inputImage, const unsigned int inputColumns,
-    const unsigned int inputRows, __local uint* inputImageCache,
-    const int numCachedPixels, __global uint* dst) {
+    const __global uint* inputImage, const unsigned int inputColumns, const unsigned int inputRows,
+    __local uint* inputImageCache, const int numCachedPixels, __global uint* dst) {
   const unsigned int startY = get_group_id(1) * get_local_size(1);
   float scale = 0.5f;
   const float support = 0.5f;
-  const int cacheRangeStartY =
-      max((int)((startY + 0.5f) / 1.0f + support + 0.5f), (int)(0));
-  const int cacheRangeEndY =
-      min((int)(cacheRangeStartY + numCachedPixels), (int)inputRows);
+  const int cacheRangeStartY = max((int)((startY + 0.5f) / 1.0f + support + 0.5f), (int)(0));
+  const int cacheRangeEndY = min((int)(cacheRangeStartY + numCachedPixels), (int)inputRows);
   const unsigned int x = get_global_id(0);
-  event_t e = async_work_group_strided_copy(
-      inputImageCache, inputImage + cacheRangeStartY * inputColumns + x,
-      cacheRangeEndY - cacheRangeStartY, inputColumns, 0);
+  event_t e = async_work_group_strided_copy(inputImageCache,
+                                            inputImage + cacheRangeStartY * inputColumns + x,
+                                            cacheRangeEndY - cacheRangeStartY, inputColumns, 0);
   wait_group_events(1, &e);
 
   if (get_local_id(1) == 0) {
@@ -78,12 +75,11 @@ OCLPerfVerticalFetch::OCLPerfVerticalFetch() {
 
 OCLPerfVerticalFetch::~OCLPerfVerticalFetch() {}
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
-void OCLPerfVerticalFetch::open(unsigned int test, char* units,
-                                double& conversion, unsigned int deviceId) {
+void OCLPerfVerticalFetch::open(unsigned int test, char* units, double& conversion,
+                                unsigned int deviceId) {
   error_ = CL_SUCCESS;
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
@@ -94,8 +90,7 @@ void OCLPerfVerticalFetch::open(unsigned int test, char* units,
   dstBuffer_ = 0;
   cl_ulong loopCnt = nBytes / (16 * sizeof(cl_uint));
   cl_uint maxCUs;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                     CL_DEVICE_MAX_COMPUTE_UNITS,
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_MAX_COMPUTE_UNITS,
                                      sizeof(cl_uint), &maxCUs, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   wgs = 64;
@@ -185,16 +180,14 @@ void OCLPerfVerticalFetch::open(unsigned int test, char* units,
   Sizes[0] = width * height * sizeof(int);
   nBytes = Sizes[0];
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -206,30 +199,26 @@ void OCLPerfVerticalFetch::open(unsigned int test, char* units,
   if (memLoc == CL_MEM_USE_HOST_PTR) {
     ptr_ = malloc(nBytes);
   }
-  srcBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY | memLoc,
-                                        nBytes, ptr_, &error_);
+  srcBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY | memLoc, nBytes, ptr_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer(srcBuffer) failed");
   void* mem;
   mem = _wrapper->clEnqueueMapBuffer(cmdQueues_[_deviceId], srcBuffer_, CL_TRUE,
-                                     CL_MAP_READ | CL_MAP_WRITE, 0, nBytes, 0,
-                                     NULL, NULL, &error_);
+                                     CL_MAP_READ | CL_MAP_WRITE, 0, nBytes, 0, NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   for (unsigned int i = 0; i < nBytes / sizeof(cl_uint); ++i) {
     reinterpret_cast<cl_uint*>(mem)[i] = inputData;
   }
 
-  dstBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY,
-                                        sizeof(cl_uint), NULL, &error_);
+  dstBuffer_ =
+      _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, sizeof(cl_uint), NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer(dstBuffer) failed");
-  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], srcBuffer_, mem, 0,
-                                    NULL, NULL);
+  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], srcBuffer_, mem, 0, NULL, NULL);
   mem = _wrapper->clEnqueueMapBuffer(cmdQueues_[_deviceId], dstBuffer_, CL_TRUE,
-                                     CL_MAP_READ | CL_MAP_WRITE, 0,
-                                     sizeof(cl_uint), 0, NULL, NULL, &error_);
+                                     CL_MAP_READ | CL_MAP_WRITE, 0, sizeof(cl_uint), 0, NULL, NULL,
+                                     &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   memset(mem, 0, sizeof(cl_uint));
-  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], dstBuffer_, mem, 0,
-                                    NULL, NULL);
+  _wrapper->clEnqueueUnmapMemObject(cmdQueues_[_deviceId], dstBuffer_, mem, 0, NULL, NULL);
 
   error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), &srcBuffer_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
@@ -237,20 +226,16 @@ void OCLPerfVerticalFetch::open(unsigned int test, char* units,
   error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_uint), (void*)&width);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&height);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_uint), (void*)&height);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clSetKernelArg(kernel_, 3,
-                                    numCachedPixels_ * sizeof(cl_uint), 0);
+  error_ = _wrapper->clSetKernelArg(kernel_, 3, numCachedPixels_ * sizeof(cl_uint), 0);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint),
-                                    (void*)&numCachedPixels_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint), (void*)&numCachedPixels_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_mem), (void*)&dstBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 5, sizeof(cl_mem), (void*)&dstBuffer_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 }
 
@@ -262,8 +247,8 @@ void OCLPerfVerticalFetch::run(void) {
   CPerfCounter timer;
 
   // warm up
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, dim,
-                                            NULL, gws, lws, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, dim, NULL, gws, lws, 0,
+                                            NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
 
@@ -275,9 +260,8 @@ void OCLPerfVerticalFetch::run(void) {
   }
 
   memset(memResult, 0, sizeof(cl_uint));
-  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], dstBuffer_,
-                                         CL_FALSE, 0, sizeof(cl_uint),
-                                         memResult, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], dstBuffer_, CL_FALSE, 0,
+                                         sizeof(cl_uint), memResult, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueReadBuffer dstBuffer_ failed!");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -295,9 +279,8 @@ void OCLPerfVerticalFetch::run(void) {
   double sec2 = 0;
   cl_event* events = new cl_event[nIter];
   for (unsigned int i = 0; i < nIter; i++) {
-    error_ =
-        _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, dim,
-                                         NULL, gws, lws, 0, NULL, &events[i]);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, dim, NULL, gws, lws,
+                                              0, NULL, &events[i]);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
     _wrapper->clFinish(cmdQueues_[_deviceId]);
   }
@@ -305,11 +288,11 @@ void OCLPerfVerticalFetch::run(void) {
   timer.Stop();
   for (unsigned int i = 0; i < nIter; i++) {
     cl_ulong startTime = 0, endTime = 0;
-    error_ = _wrapper->clGetEventProfilingInfo(
-        events[i], CL_PROFILING_COMMAND_START, sizeof(cl_ulong), &startTime, 0);
+    error_ = _wrapper->clGetEventProfilingInfo(events[i], CL_PROFILING_COMMAND_START,
+                                               sizeof(cl_ulong), &startTime, 0);
     CHECK_RESULT(error_, "clGetEventProfilingInfo failed");
-    error_ = _wrapper->clGetEventProfilingInfo(
-        events[i], CL_PROFILING_COMMAND_END, sizeof(cl_ulong), &endTime, 0);
+    error_ = _wrapper->clGetEventProfilingInfo(events[i], CL_PROFILING_COMMAND_END,
+                                               sizeof(cl_ulong), &endTime, 0);
     CHECK_RESULT(error_, "clGetEventProfilingInfo failed");
 
     _wrapper->clReleaseEvent(events[i]);
@@ -324,8 +307,7 @@ void OCLPerfVerticalFetch::run(void) {
   _perfInfo = (float)perf2;
   float perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf),
-           " (%8d bytes, %s) i:%4d Wall time Perf: %.2f (GB/s)", nBytes,
+  SNPRINTF(buf, sizeof(buf), " (%8d bytes, %s) i:%4d Wall time Perf: %.2f (GB/s)", nBytes,
            mem_type_, nIter, perfInfo);
   testDescString = buf;
 }
@@ -334,14 +316,12 @@ unsigned int OCLPerfVerticalFetch::close(void) {
   if (!skip_) {
     if (srcBuffer_) {
       error_ = _wrapper->clReleaseMemObject(srcBuffer_);
-      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                             "clReleaseMemObject(srcBuffer_) failed");
+      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(srcBuffer_) failed");
     }
 
     if (dstBuffer_) {
       error_ = _wrapper->clReleaseMemObject(dstBuffer_);
-      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                             "clReleaseMemObject(srcBuffer_) failed");
+      CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(srcBuffer_) failed");
     }
   }
   if (ptr_ != nullptr) {

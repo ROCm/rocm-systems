@@ -42,8 +42,9 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   INFO("hipDeviceAttributeVirtualMemoryManagementSupported: " << vmm);
 
   if (vmm == 0) {
-    SUCCEED("GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
-           "attribute. Hence skipping the testing with Pass result.\n");
+    SUCCEED(
+        "GPU 0 doesn't support hipDeviceAttributeVirtualMemoryManagement "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
 
@@ -54,7 +55,8 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp, hipMemAllocationGranularityRecommended));
+  HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
+                                           hipMemAllocationGranularityRecommended));
 
   size_t size = 4 * 1024;
   void* reservedAddress{nullptr};
@@ -78,7 +80,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   HIP_CHECK(hipMemset(reservedAddress, value, size));
   HIP_CHECK(hipMemcpy(&values[0], reservedAddress, size, hipMemcpyDeviceToHost));
 
-  for (size_t i=0; i < size; ++i) {
+  for (size_t i = 0; i < size; ++i) {
     REQUIRE(values[i] == value);
   }
 
@@ -87,4 +89,3 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   HIP_CHECK(hipMemRelease(gaHandle));
   HIP_CHECK(hipMemAddressFree(reservedAddress, size));
 }
-

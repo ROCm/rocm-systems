@@ -92,8 +92,8 @@ static void runMipMapTest(unsigned int width, unsigned int height, unsigned int 
   dim3 dimBlock(16, 16, 1);
   dim3 dimGrid(width / dimBlock.x, height / dimBlock.y, 1);
 
-  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData,
-    width, height, mipmap_level);
+  hipLaunchKernelGGL(tex2DKernel, dim3(dimGrid), dim3(dimBlock), 0, 0, dData, width, height,
+                     mipmap_level);
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipDeviceSynchronize());
 
@@ -154,8 +154,9 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Positive_Check") {
     }
   }
 #else
-  SUCCEED("Mipmaps are Supported only on windows on devices with image support,"
-    " skipping the test.");
+  SUCCEED(
+      "Mipmaps are Supported only on windows on devices with image support,"
+      " skipping the test.");
 #endif
 }
 
@@ -220,13 +221,14 @@ TEST_CASE("Unit_hipTextureMipmapRef2D_Negative_Parameters") {
 
   HIP_CHECK(hipFreeMipmappedArray(mip_array_ptr));
 #else
-  SUCCEED("Mipmaps are Supported only on windows on devices with image support,"
-    " skipping the test.");
+  SUCCEED(
+      "Mipmaps are Supported only on windows on devices with image support,"
+      " skipping the test.");
 #endif
 }
 #endif
 
 /**
-* End doxygen group TextureTest.
-* @}
-*/
+ * End doxygen group TextureTest.
+ * @}
+ */

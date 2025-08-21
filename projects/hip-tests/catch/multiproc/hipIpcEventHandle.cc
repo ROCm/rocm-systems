@@ -34,8 +34,8 @@ THE SOFTWARE.
  * This opaque handle may be copied into other processes and opened with hipIpcOpenEventHandle.
  */
 
-#define BUF_SIZE        4096
-#define MAX_DEVICES     16
+#define BUF_SIZE 4096
+#define MAX_DEVICES 16
 
 
 typedef struct ipcEventInfo {
@@ -60,7 +60,7 @@ typedef struct ipcBarrier {
   Get device count and list down devices with
   P2P access with Device 0.
 */
-void getDevices(ipcDevices_t *devices) {
+void getDevices(ipcDevices_t* devices) {
   pid_t pid = fork();
 
   if (!pid) {
@@ -70,9 +70,9 @@ void getDevices(ipcDevices_t *devices) {
     HIP_CHECK(hipGetDeviceCount(&devCnt));
 
     if (devCnt < 2) {
-        devices->count = 0;
-        WARN("Count less than expected number of devices");
-        exit(EXIT_SUCCESS);
+      devices->count = 0;
+      WARN("Count less than expected number of devices");
+      exit(EXIT_SUCCESS);
     }
 
     // Device 0
@@ -85,27 +85,26 @@ void getDevices(ipcDevices_t *devices) {
 
     int canPeerAccess_0i, canPeerAccess_i0;
     for (i = 1; i < devCnt; i++) {
-        HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_0i, 0, i));
-        HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_i0, i, 0));
+      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_0i, 0, i));
+      HIP_CHECK(hipDeviceCanAccessPeer(&canPeerAccess_i0, i, 0));
 
-        if (canPeerAccess_0i * canPeerAccess_i0) {
-            devices->ordinals[i] = i;
-            INFO("Two-way peer access is available between GPU"
-            << devices->ordinals[0] <<" and GPU"
-            << devices->ordinals[devices->count]);
-            devices->count += 1;
-        }
+      if (canPeerAccess_0i * canPeerAccess_i0) {
+        devices->ordinals[i] = i;
+        INFO("Two-way peer access is available between GPU" << devices->ordinals[0] << " and GPU"
+                                                            << devices->ordinals[devices->count]);
+        devices->count += 1;
+      }
     }
 
     exit(EXIT_SUCCESS);
   } else {
-      int status;
-      waitpid(pid, &status, 0);
-      HIP_ASSERT(!status);
+    int status;
+    waitpid(pid, &status, 0);
+    HIP_ASSERT(!status);
   }
 }
 
-static ipcBarrier_t *g_Barrier{};
+static ipcBarrier_t* g_Barrier{};
 static bool g_procSense;
 static int g_processCnt;
 
@@ -121,11 +120,11 @@ void processBarrier() {
 
   } else {
     while (g_Barrier->sense == g_procSense) {
-        if (!g_Barrier->allExit) {
-          sched_yield();
-        } else {
-          exit(EXIT_FAILURE);
-        }
+      if (!g_Barrier->allExit) {
+        sched_yield();
+      } else {
+        exit(EXIT_FAILURE);
+      }
     }
   }
 
@@ -133,9 +132,9 @@ void processBarrier() {
 }
 
 
-__global__ void computeKernel(int *dst, int *src, int num) {
-    int idx = blockIdx.x * blockDim.x + threadIdx.x;
-    dst[idx] = src[idx] / num;
+__global__ void computeKernel(int* dst, int* src, int num) {
+  int idx = blockIdx.x * blockDim.x + threadIdx.x;
+  dst[idx] = src[idx] / num;
 }
 
 /*
@@ -144,14 +143,14 @@ __global__ void computeKernel(int *dst, int *src, int num) {
  * and records event.
  * 3) Process 0 synchronizes event and validates the resulting buffer.
  */
-void runMultiProcKernel(ipcEventInfo_t *shmEventInfo, int index) {
-  int *d_ptr;
+void runMultiProcKernel(ipcEventInfo_t* shmEventInfo, int index) {
+  int* d_ptr;
   int hData[BUF_SIZE]{};
   unsigned int seed = time(nullptr);
 
   // Randomize data before computation
   for (int i = 0; i < BUF_SIZE; i++) {
-      hData[i] = rand_r(&seed);
+    hData[i] = rand_r(&seed);
   }
 
   HIP_CHECK(hipSetDevice(shmEventInfo[index].device));
@@ -162,8 +161,7 @@ void runMultiProcKernel(ipcEventInfo_t *shmEventInfo, int index) {
 
     HIP_CHECK(hipMalloc(&d_ptr, BUF_SIZE * g_processCnt * sizeof(int)));
     HIP_CHECK(hipIpcGetMemHandle(&shmEventInfo[0].memHandle, d_ptr));
-    HIP_CHECK(hipMemcpy(d_ptr, hData,
-                          BUF_SIZE * sizeof(int), hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(d_ptr, hData, BUF_SIZE * sizeof(int), hipMemcpyHostToDevice));
 
     // Barrier 1: Process0 will wait for all processes to create event handles,
     // signals device memory creation.
@@ -181,40 +179,38 @@ void runMultiProcKernel(ipcEventInfo_t *shmEventInfo, int index) {
       HIP_CHECK(hipEventSynchronize(event[i]));
     }
 
-    HIP_CHECK(hipMemcpy(h_results, d_ptr + BUF_SIZE,
-        BUF_SIZE * (g_processCnt - 1) * sizeof(int), hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(h_results, d_ptr + BUF_SIZE, BUF_SIZE * (g_processCnt - 1) * sizeof(int),
+                        hipMemcpyDeviceToHost));
 
     // Barrier 3: Process0 signals event usage is done.
     processBarrier();
     HIP_CHECK(hipFree(d_ptr));
     for (int n = 1; n < g_processCnt; n++) {
-        for (int i = 0; i < BUF_SIZE; i++) {
-            if (hData[i]/(n + 1) != h_results[(n-1) * BUF_SIZE + i]) {
-                WARN("Data validation error at index " << i << " n" << n);
-                g_Barrier->allExit = true;
-                exit(EXIT_FAILURE);
-            }
+      for (int i = 0; i < BUF_SIZE; i++) {
+        if (hData[i] / (n + 1) != h_results[(n - 1) * BUF_SIZE + i]) {
+          WARN("Data validation error at index " << i << " n" << n);
+          g_Barrier->allExit = true;
+          exit(EXIT_FAILURE);
         }
+      }
     }
     for (int i = 1; i < g_processCnt; i++) {
       HIP_CHECK(hipEventDestroy(event[i]));
     }
   } else {
     hipEvent_t event;
-    HIP_CHECK(hipEventCreateWithFlags(&event,
-                               hipEventDisableTiming | hipEventInterprocess));
+    HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
     HIP_CHECK(hipIpcGetEventHandle(&shmEventInfo[index].eventHandle, event));
 
     // Barrier 1 : wait until proc 0 initializes device memory,
     // signals event creation.
     processBarrier();
-    HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void **>(&d_ptr),
-                                               shmEventInfo[0].memHandle,
-                                   hipIpcMemLazyEnablePeerAccess));
+    HIP_CHECK(hipIpcOpenMemHandle(reinterpret_cast<void**>(&d_ptr), shmEventInfo[0].memHandle,
+                                  hipIpcMemLazyEnablePeerAccess));
     const dim3 threads(512, 1);
     const dim3 blocks(BUF_SIZE / threads.x, 1);
-    hipLaunchKernelGGL(computeKernel, dim3(blocks), dim3(threads), 0, 0,
-                                    d_ptr + index *BUF_SIZE, d_ptr, index + 1);
+    hipLaunchKernelGGL(computeKernel, dim3(blocks), dim3(threads), 0, 0, d_ptr + index * BUF_SIZE,
+                       d_ptr, index + 1);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipEventRecord(event));
 
@@ -243,10 +239,10 @@ void runMultiProcKernel(ipcEventInfo_t *shmEventInfo, int index) {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipIpcEventHandle_Functional") {
-  ipcDevices_t *shmDevices;
-  ipcEventInfo_t *shmEventInfo;
-  shmDevices = reinterpret_cast<ipcDevices_t *> (mmap(NULL, sizeof(*shmDevices),
-                    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
+  ipcDevices_t* shmDevices;
+  ipcEventInfo_t* shmEventInfo;
+  shmDevices = reinterpret_cast<ipcDevices_t*>(
+      mmap(NULL, sizeof(*shmDevices), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
   REQUIRE(MAP_FAILED != shmDevices);
 
   getDevices(shmDevices);
@@ -259,8 +255,8 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
   g_processCnt = (shmDevices->count > MAX_DEVICES) ? MAX_DEVICES : shmDevices->count;
 
   // Barrier is used to synchronize processes created.
-  g_Barrier = reinterpret_cast<ipcBarrier_t *> (mmap(NULL, sizeof(*g_Barrier),
-                   PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
+  g_Barrier = reinterpret_cast<ipcBarrier_t*>(
+      mmap(NULL, sizeof(*g_Barrier), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
   REQUIRE(MAP_FAILED != g_Barrier);
   memset(g_Barrier, 0, sizeof(*g_Barrier));
 
@@ -268,9 +264,9 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
   g_procSense = 0;
 
   // shared memory for Event and memHandle Info
-  shmEventInfo = reinterpret_cast<ipcEventInfo_t *>(mmap(NULL,
-                                          g_processCnt * sizeof(*shmEventInfo),
-                    PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, 0, 0));
+  shmEventInfo = reinterpret_cast<ipcEventInfo_t*>(mmap(NULL, g_processCnt * sizeof(*shmEventInfo),
+                                                        PROT_READ | PROT_WRITE,
+                                                        MAP_SHARED | MAP_ANONYMOUS, 0, 0));
   REQUIRE(MAP_FAILED != shmEventInfo);
 
   // initialize shared memory
@@ -279,14 +275,14 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
   int index = 0;
 
   for (int i = 1; i < g_processCnt; i++) {
-      int pid = fork();
+    int pid = fork();
 
-      if (!pid) {
-          index = i;
-          break;
-      } else {
-          shmEventInfo[i].pid = pid;
-      }
+    if (!pid) {
+      index = i;
+      break;
+    } else {
+      shmEventInfo[i].pid = pid;
+    }
   }
 
   shmEventInfo[index].device = shmDevices->ordinals[index];
@@ -297,9 +293,9 @@ TEST_CASE("Unit_hipIpcEventHandle_Functional") {
   // Cleanup
   if (index == 0) {
     for (int i = 1; i < g_processCnt; i++) {
-        int status;
-        waitpid(shmEventInfo[i].pid, &status, 0);
-        HIP_ASSERT(WIFEXITED(status));
+      int status;
+      waitpid(shmEventInfo[i].pid, &status, 0);
+      HIP_ASSERT(WIFEXITED(status));
     }
   }
 }
@@ -341,8 +337,7 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
   hipEvent_t event;
   hipIpcEventHandle_t eventHandle;
   hipError_t ret;
-  HIP_CHECK(hipEventCreateWithFlags(&event,
-                             hipEventDisableTiming | hipEventInterprocess));
+  HIP_CHECK(hipEventCreateWithFlags(&event, hipEventDisableTiming | hipEventInterprocess));
 #if HT_AMD
   // Test disabled for nvidia due to segfault with cuda api
   SECTION("Get event handle with eventHandle(nullptr)") {
@@ -371,8 +366,7 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
     HIP_CHECK(hipEventCreateWithFlags(&eventNoIpc, hipEventDisableTiming));
 
     ret = hipIpcGetEventHandle(&eventHandle, eventNoIpc);
-    if ((ret != hipErrorInvalidResourceHandle) &&
-       (ret != hipErrorInvalidConfiguration)) {
+    if ((ret != hipErrorInvalidResourceHandle) && (ret != hipErrorInvalidConfiguration)) {
       INFO("Error returned : " << ret);
       REQUIRE(false);
     }

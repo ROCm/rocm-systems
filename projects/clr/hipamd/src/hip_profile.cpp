@@ -39,4 +39,4 @@ hipError_t hipProfilerStop() {
 
   HIP_RETURN(hipErrorNotSupported);
 }
-} //namespace hip
+}  // namespace hip

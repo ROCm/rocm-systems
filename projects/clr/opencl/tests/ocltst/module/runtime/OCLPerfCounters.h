@@ -26,8 +26,7 @@ class OCLPerfCounters : public OCLTestImp {
   virtual ~OCLPerfCounters();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
   std::string shader_;
