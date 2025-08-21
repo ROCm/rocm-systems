@@ -76,12 +76,22 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
 
   HIP_CHECK(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, attrsIdxs, numAttrs, &failIdx,
                                 stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  // validation
   for (int i = 0; i < count; i++) {
     HIP_CHECK(hipMemcpy(hostPtr[i], dstPtr[i], size, hipMemcpyDeviceToHost));
     for (int j = 0; j < size; j++) {
       REQUIRE(hostPtr[i][j] == 'b');
     }
   }
+
+  // Clean up
+  for (int i = 0; i < count; i++) {
+    HIP_CHECK(hipFree(srcPtr[i]));
+    HIP_CHECK(hipFree(dstPtr[i]));
+  }
+  delete[] hostPtr;
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 #endif
 /**
@@ -164,6 +174,12 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
                     hipErrorInvalidValue);
   }
 #endif
+  // Clean up
+  for (int i = 0; i < count; i++) {
+    HIP_CHECK(hipFree(srcPtr[i]));
+    HIP_CHECK(hipFree(dstPtr[i]));
+  }
+  HIP_CHECK(hipStreamDestroy(stream));
 }
 /**
  * End doxygen group MemoryTest.
