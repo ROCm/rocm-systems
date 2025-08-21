@@ -132,6 +132,13 @@ typedef struct hip_Memcpy2D {
 } hip_Memcpy2D;
 #endif  // !defined(__HIPCC_RTC__)
 /**
+ * Struct representing array memory requirements.
+ */
+typedef struct hipArrayMemoryRequirements {
+  size_t alignment;
+  size_t size;
+} hipArrayMemoryRequirements;
+/**
  * HIP mipmapped array
  */
 typedef struct hipMipmappedArray {
