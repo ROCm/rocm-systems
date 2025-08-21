@@ -1023,11 +1023,24 @@ class AMDSMILogger():
                     amdgpu_version = "N/A".ljust(8)
             else:
                 amdgpu_version = str(driver_version['driver_version'])[:8].ljust(8)
+        fw_pldm_version = str(output['version_info']['fw pldm version'])
+        vbios_version = str(output['version_info']['vbios version'])
 
         # print GPU info
         print(default_line_1)
         print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
-        print("| Platform: {0:20.20s} {1:46s}|".format(str(self.helpers.os_info()), ""))
+
+        # adjust format depending on whether vbios or fw pldm version is present
+        if vbios_version != "N/A" and fw_pldm_version != "N/A":
+            print("| VBIOS version: {0:22s}  {1:12s}  FW PLDM: {2:15s}|".format(vbios_version, "", fw_pldm_version))
+        elif vbios_version != "N/A" and fw_pldm_version == "N/A":
+            print("| VBIOS version: {0:22s}  {1:37s} |".format(vbios_version, ""))
+        elif fw_pldm_version != "N/A" and vbios_version == "N/A":
+            print("| FW PLDM: {0:15s}  {1:50s} |".format(fw_pldm_version, ""))
+        else:
+            pass  # Both VBIOS and FW PLDM versions are "N/A" so skip this line
+
+        print("| Platform: {0:25.25s} {1:41s}|".format(str(self.helpers.os_info()), ""))
         print(default_line_2)
         print("| BDF                        GPU-Name | Mem-Uti   Temp   UEC       Power-Usage |")
         print("| GPU  HIP-ID  OAM-ID  Partition-Mode | GFX-Uti    Fan               Mem-Usage |")

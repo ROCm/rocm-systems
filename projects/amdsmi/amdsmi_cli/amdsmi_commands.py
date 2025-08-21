@@ -6992,6 +6992,8 @@ class AMDSMICommands():
         processors = amdsmi_interface.amdsmi_get_processor_handles()
         version_info = {"amd-smi": "N/A",
                         "amdgpu version": "N/A",
+                        "fw pldm version": "N/A",
+                        "vbios version": "N/A",
                         "rocm version": (False, "N/A")}
         version_info['rocm version'] = amdsmi_interface.amdsmi_get_rocm_version()
         try:
@@ -6999,6 +7001,23 @@ class AMDSMICommands():
         except amdsmi_exception.AmdSmiLibraryException as e:
             version_info["amdgpu version"] = "N/A"
             logging.debug("Failed to get driver info for gpu: %s", e.get_error_info())
+        try:
+            fw_info = amdsmi_interface.amdsmi_get_fw_info(processors[0])
+            for fw in fw_info['fw_list']:
+                if "pldm" in fw.keys():
+                    version_info['fw pldm version'] = fw['pldm']
+                    # we only need to find one of them
+                    break
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            version_info['fw pldm version'] = "N/A"
+            logging.debug("Failed to get fw pldm info for gpu: %s", e.get_error_info())
+        try:
+            version_info['vbios version'] = amdsmi_interface.amdsmi_get_gpu_vbios_info(processors[0])["version"]
+            if version_info['vbios version'] == "":
+                version_info['vbios version'] = "N/A"
+        except amdsmi_exception.AmdSmiLibraryException as e:
+            version_info['vbios version'] = "N/A"
+            logging.debug("Failed to get vbios info for gpu: %s", e.get_error_info())
 
         version_info["amd-smi"] = f'{__version__}'
 
