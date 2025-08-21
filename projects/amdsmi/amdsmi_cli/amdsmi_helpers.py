@@ -1471,7 +1471,6 @@ class AMDSMIHelpers():
                 break
             if args.folder:
                 self.dump_cper_entries(args.folder, entries, cper_data, device_handle, args.file_limit)
-                break
             else:
                 self.display_cper_files_generated(entries, device_handle, args.folder)
         if num_entries == 0 and not args.follow:
