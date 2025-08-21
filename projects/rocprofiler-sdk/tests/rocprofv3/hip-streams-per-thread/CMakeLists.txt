@@ -36,13 +36,14 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
 set(hip-stream-env "${PRELOAD_ENV}")
+set(NUM_THREADS 9)
 
 add_test(
     NAME rocprofv3-test-hip-streams-per-thread-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -s -d
         ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json pftrace csv
-        --log-level env -- $<TARGET_FILE:hip-streams-per-thread>)
+        --log-level env -- $<TARGET_FILE:hip-streams-per-thread> ${NUM_THREADS})
 
 set_tests_properties(
     rocprofv3-test-hip-streams-per-thread-execute
