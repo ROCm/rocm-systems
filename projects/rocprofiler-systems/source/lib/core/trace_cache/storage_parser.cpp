@@ -212,6 +212,19 @@ storage_parser::consume_storage()
                            _amd_smi_sample.temperature, _amd_smi_sample.mem_usage,
                            _amd_smi_sample.xcp_activity);
                 invoke_callbacks(header.type, _amd_smi_sample);
+                break;
+            }
+            case entry_type::cpu_freq_sample:
+            {
+                cpu_freq_sample _cpu_freq_sample;
+                parse_data(sample.data(), _cpu_freq_sample.timestamp,
+                           _cpu_freq_sample.page_rss, _cpu_freq_sample.virt_mem_usage,
+                           _cpu_freq_sample.peak_rss,
+                           _cpu_freq_sample.context_switch_count,
+                           _cpu_freq_sample.page_faults, _cpu_freq_sample.user_mode_time,
+                           _cpu_freq_sample.kernel_mode_time, _cpu_freq_sample.freqs);
+                invoke_callbacks(header.type, _cpu_freq_sample);
+                break;
             }
             default: break;
         }

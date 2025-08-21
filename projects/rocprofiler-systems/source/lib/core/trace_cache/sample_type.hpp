@@ -209,6 +209,19 @@ struct amd_smi_sample : storage_parsed_type_base
     std::vector<uint8_t> xcp_activity;
 };
 
+struct cpu_freq_sample : storage_parsed_type_base
+{
+    size_t               timestamp;
+    int64_t              page_rss;
+    int64_t              virt_mem_usage;
+    int64_t              peak_rss;
+    int64_t              context_switch_count;
+    int64_t              page_faults;
+    int64_t              user_mode_time;
+    int64_t              kernel_mode_time;
+    std::vector<uint8_t> freqs;
+};
+
 enum class entry_type : uint32_t
 {
     in_time_sample        = 0x0000,
@@ -220,6 +233,7 @@ enum class entry_type : uint32_t
     memory_alloc = 0x0005,
 #endif
     amd_smi_sample   = 0x0006,
+    cpu_freq_sample  = 0x0007,
     fragmented_space = 0xFFFF
 };
 }  // namespace trace_cache

@@ -517,6 +517,77 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         }
     };
 }
+postprocessing_callback
+rocpd_post_processing::get_cpu_freq_sample_callback() const
+{
+    struct core_freq_sample
+    {
+        size_t id;
+        float  value;
+    };
+
+    auto deserialize_freqs = [](std::vector<uint8_t>& data) {
+        std::vector<core_freq_sample> result;
+        size_t                        offset = 0;
+
+        while(offset != data.size())
+        {
+            core_freq_sample core_sample;
+            core_sample.id = *reinterpret_cast<size_t*>(data.data() + offset);
+            offset += sizeof(size_t);
+            core_sample.value = *reinterpret_cast<float*>(data.data() + offset);
+            offset += sizeof(float);
+            result.push_back(core_sample);
+        }
+        return result;
+    };
+
+    return [&](const storage_parsed_type_base& parsed) {
+        auto _cpu_freq_sample = static_cast<const struct cpu_freq_sample&>(parsed);
+
+        auto&       data_processor   = get_data_processor();
+        const auto* _name            = trait::name<category::cpu_freq>::value;
+        auto        name_primary_key = data_processor.insert_string(_name);
+        auto        event_id = data_processor.insert_event(name_primary_key, 0, 0, 0);
+
+        auto device_id = 0;
+
+        auto& agent_mngr = agent_manager::get_instance();
+        auto  base_id =
+            agent_mngr.get_agent_by_type_index(device_id, agent_type::CPU).base_id;
+
+        auto insert_event_and_sample = [&](const char* name, double value) {
+            data_processor.insert_pmc_event(event_id, base_id, name, value);
+            data_processor.insert_sample(name, _cpu_freq_sample.timestamp, event_id);
+        };
+
+        insert_event_and_sample(trait::name<category::process_page>::value,
+                                _cpu_freq_sample.page_rss);
+        insert_event_and_sample(trait::name<category::process_virt>::value,
+                                _cpu_freq_sample.virt_mem_usage);
+        insert_event_and_sample(trait::name<category::process_peak>::value,
+                                _cpu_freq_sample.peak_rss);
+        insert_event_and_sample(trait::name<category::process_context_switch>::value,
+                                _cpu_freq_sample.context_switch_count);
+        insert_event_and_sample(trait::name<category::process_page_fault>::value,
+                                _cpu_freq_sample.page_faults);
+        insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
+                                _cpu_freq_sample.user_mode_time);
+        insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
+                                _cpu_freq_sample.kernel_mode_time);
+
+        auto get_track_name = [](const auto& cpu_id) {
+            return std::string(trait::name<category::cpu_freq>::value) + " [" +
+                   std::to_string(cpu_id) + "]";
+        };
+
+        auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
+        for(const auto& core : core_freq_samples)
+        {
+            insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
+        }
+    };
+}
 
 rocpd_post_processing::rocpd_post_processing(metadata_registry& md)
 : m_metadata(md)
@@ -544,6 +615,8 @@ rocpd_post_processing::register_parser_callback([[maybe_unused]] storage_parser&
                                   get_pmc_event_with_sample_callback());
     parser.register_type_callback(entry_type::amd_smi_sample,
                                   get_amd_smi_sample_callback());
+    parser.register_type_callback(entry_type::cpu_freq_sample,
+                                  get_cpu_freq_sample_callback());
     ROCPROFSYS_DEBUG("Buffer parser callbacks are registered..");
 #endif
 }
