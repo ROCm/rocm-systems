@@ -96,6 +96,7 @@ set(TEST_SRC
     hipMemcpy3DPeer.cc
     hipMemcpy3DPeerAsync.cc
     hipMemcpy3DBatchAsync.cc
+    hipMemcpyBatchAsync.cc
     )
 
 if(UNIX)
