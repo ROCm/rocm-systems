@@ -379,7 +379,7 @@ jobs:
         sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
         sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
         dnf clean all
-        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel libsqlite3x-devel elfutils-devel
 
     - name: Install Latest ROCm (LLVM & OpenMP-SDK) RHEL 9.5
       if: ${{ matrix.os == 'rhel-9.5' }}
@@ -392,7 +392,7 @@ jobs:
         sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo
         sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo
         dnf clean all
-        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        dnf install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel libsqlite3x-devel elfutils-devel
 
     - name: Install Latest ROCm (LLVM & OpenMP-SDK) SLES 15.6
       if: ${{ matrix.os == 'sles-15.6' }}
@@ -403,7 +403,7 @@ jobs:
         sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo
         sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo
         zypper --gpg-auto-import-keys refresh
-        zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel
+        zypper install -y rocm-openmp-sdk rocm-llvm-devel rccl-devel rocdecode-devel rocjpeg-devel sqlite3-devel
 
     - name: Install Latest Nightly ROCm using TheRock Tarballs
       shell: bash
@@ -500,7 +500,6 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run:
         source rocprofiler-sdk/bin/activate;
-        python3 -m pipx ensurepath; source ~/.bashrc;
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=~/.local/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:/usr/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
