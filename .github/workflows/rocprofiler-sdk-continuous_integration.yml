@@ -350,9 +350,9 @@ jobs:
       if: ${{ matrix.os == 'rhel-8.8' }}
       shell: bash
       run: |
-        wget https://www.kernel.org/pub/software/scm/git/git-2.9.5.tar.xz
-        tar -xf git-2.9.5.tar.xz
-        cd git-2.9.5
+        wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz
+        tar -xf git-2.51.0.tar.xz
+        cd git-2.51.0
         rm -rf /etc/yum.repos.d/redhat-partner.repo
         dnf clean all
         dnf install -y perl-ExtUtils-MakeMaker
