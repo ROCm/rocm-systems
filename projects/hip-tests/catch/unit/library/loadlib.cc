@@ -42,13 +42,13 @@ static std::vector<char> compile_using_hiprtc(const std::string& code, std::stri
 
 TEST_CASE("Unit_hip_library_load_rtc") {
   constexpr size_t size = 32;
-  std::string kernel1 =
+  const std::string kernel1 =
       "extern \"C\" __global__ void add_kernel(float* out, float*a, float*b) { size_t i = "
       "threadIdx.x; out[i] = a[i] + b[i]; }\n";
-  std::string kernel2 =
+  const std::string kernel2 =
       "extern \"C\" __global__ void sub_kernel(float* out, float*a, float*b) { size_t i = "
       "threadIdx.x; out[i] = a[i] - b[i]; }\n";
-  std::string kernel3 =
+  const std::string kernel3 =
       "extern \"C\" __global__ void mul_kernel(float* out, float*a, float*b) { size_t i = "
       "threadIdx.x; out[i] = a[i] * b[i]; }\n";
 
