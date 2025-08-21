@@ -650,17 +650,17 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
   hipFunction_t func = nullptr;
   int deviceId = hip::Stream::DeviceId(stream);
 
-  if (PlatformState::instance().IsValidLibraryFunction(
-          reinterpret_cast<const hipKernel_t>(const_cast<void*>(hostFunction)))) {
-    func = reinterpret_cast<hipFunction_t>(const_cast<void*>(hostFunction));
-  } else {
-    hipError_t hip_error = PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
-    if ((hip_error != hipSuccess) || (func == nullptr)) {
-      if (hip_error == hipErrorNoBinaryForGpu) {
-        return hip_error;
-      } else {
-        return hipErrorInvalidDeviceFunction;
-      }
+  hipError_t hip_error =
+      PlatformState::instance().getStatFunc(&func, hostFunction, deviceId);
+  if ((hip_error != hipSuccess) || (func == nullptr)) {
+    if (PlatformState::instance().IsValidLibraryFunction(
+            reinterpret_cast<const hipKernel_t>(
+                const_cast<void *>(hostFunction)))) {
+      func = reinterpret_cast<hipFunction_t>(const_cast<void *>(hostFunction));
+    } else if (hip_error == hipErrorNoBinaryForGpu) {
+      return hip_error;
+    } else {
+      return hipErrorInvalidDeviceFunction;
     }
   }
 
