@@ -500,6 +500,16 @@ static __global__ void float_to_fp6(__amd_floatx32_storage_t* in, __amd_floatx32
   }
 }
 
+static __global__ void float_to_fp6_sr(__amd_floatx32_storage_t* in, __amd_floatx32_storage_t* out,
+                                       __amd_fp6_interpretation_t interpret, unsigned int round,
+                                       __amd_scale_t scale = 0) {
+  int i = threadIdx.x;
+  if (i == 0) {
+    auto fp6 = __amd_cvt_floatx32_to_fp6x32_sr_scale(*in, interpret, round, scale);
+    *out = __amd_cvt_fp6x32_to_floatx32_scale(fp6, interpret, scale);
+  }
+}
+
 static __global__ void bf16_to_fp6(__amd_floatx32_storage_t* in, __amd_floatx32_storage_t* out,
                                    __amd_fp6_interpretation_t interpret, __amd_scale_t scale = 0) {
   if (threadIdx.x == 0) {
@@ -537,8 +547,8 @@ static __global__ void float_halves_to_fp6(__amd_floatx32_storage_t* in,
   if (threadIdx.x == 0) {
     __amd_floatx16_storage_t fpx16_1, fpx16_2;
     for (size_t i = 0; i < 16; i++) {
-      fpx16_1[i] = (*in)[i * 2];
-      fpx16_2[i] = (*in)[i * 2 + 1];
+      fpx16_1[i] = (*in)[i];
+      fpx16_2[i] = (*in)[i + 16];
     }
     auto fp6 = __amd_cvt_floatx16_floatx16_to_fp6x32_scale(fpx16_1, fpx16_2, interpret, scale);
     *out = __amd_cvt_fp6x32_to_floatx32_scale(fp6, interpret, scale);
@@ -587,8 +597,56 @@ static __global__ void fp16_to_fp6_sr(__amd_floatx32_storage_t* in, __amd_floatx
   }
 }
 
+static __global__ void floatx16_to_fp6(__amd_floatx32_storage_t* in, __amd_floatx32_storage_t* out,
+                                       __amd_fp6_interpretation_t interpret,
+                                       __amd_scale_t scale = 0) {
+  if (threadIdx.x == 0) {
+    union floatx_union {
+      __amd_floatx32_storage_t fpx32;
+      __amd_floatx16_storage_t fpx16[2];
+    };
+    floatx_union u_in, u_out;
+    u_in.fpx32 = *in;
+
+    auto r1 = __amd_cvt_floatx16_to_fp6x16_scale(u_in.fpx16[0], interpret, scale);
+    auto r2 = __amd_cvt_floatx16_to_fp6x16_scale(u_in.fpx16[1], interpret, scale);
+
+    u_out.fpx16[0] = __amd_cvt_fp6x16_to_floatx16_scale(r1, interpret, scale);
+    u_out.fpx16[1] = __amd_cvt_fp6x16_to_floatx16_scale(r2, interpret, scale);
+
+    for (size_t i = 0; i < 32; i++) {
+      (*out)[i] = u_out.fpx32[i];
+    }
+  }
+}
+
+static __global__ void floatx16_to_fp6_sr(__amd_floatx32_storage_t* in,
+                                          __amd_floatx32_storage_t* out,
+                                          __amd_fp6_interpretation_t interpret, unsigned int round,
+                                          __amd_scale_t scale = 0) {
+  if (threadIdx.x == 0) {
+    union floatx_union {
+      __amd_floatx32_storage_t fpx32;
+      __amd_floatx16_storage_t fpx16[2];
+    };
+    floatx_union u_in, u_out;
+    u_in.fpx32 = *in;
+
+    auto r1 = __amd_cvt_floatx16_to_fp6x16_sr_scale(u_in.fpx16[0], interpret, round, scale);
+    auto r2 = __amd_cvt_floatx16_to_fp6x16_sr_scale(u_in.fpx16[1], interpret, round, scale);
+
+    u_out.fpx16[0] = __amd_cvt_fp6x16_to_floatx16_scale(r1, interpret, scale);
+    u_out.fpx16[1] = __amd_cvt_fp6x16_to_floatx16_scale(r2, interpret, scale);
+
+    for (size_t i = 0; i < 32; i++) {
+      (*out)[i] = u_out.fpx32[i];
+    }
+  }
+}
+
 TEST_CASE("Unit_amd_ocp_fp6") {
-  __amd_floatx32_storage_t fpx32, *d_in;
+  __amd_floatx32_storage_t fpx32, out;
+  __amd_floatx32_storage_t *d_in = nullptr, *d_out = nullptr;
   float iter = 0.0f;
   for (size_t i = 0; i < 32; i++) {
     iter++;
@@ -597,223 +655,200 @@ TEST_CASE("Unit_amd_ocp_fp6") {
       iter = 0.0f;
     }
   }
+
   HIP_CHECK(hipMalloc(&d_in, sizeof(__amd_floatx32_storage_t)));
+  HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
   HIP_CHECK(hipMemcpy(d_in, &fpx32, sizeof(__amd_floatx32_storage_t), hipMemcpyHostToDevice));
 
   SECTION("float to fp6 E2M3") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     float_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("bf16 to fp6 E2M3") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     bf16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("fp16 to fp6 E2M3") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     fp16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("float halves to fp6 E2M3") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     float_halves_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("floatx32 to fp6 E2M3") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     floatx32_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
-  SECTION("float to fp6 E2M3 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
-    float_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
+  SECTION("floatx16 to fp6 E2M3") {
+    floatx16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
+    }
+  }
+
+  SECTION("float to fp6 E2M3 sr") {
+    __amd_scale_t scale = 1;
+    float_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < 32; i++) {
+      INFO("In: " << fpx32[i] << " out: " << out[i] << " idx:" << i);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("bf16 to fp6 E2M3 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
     __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     bf16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
-  SECTION("fp16 to fp6 E2M3 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
+  SECTION("fpf16 to fp6 E2M3 sr") {
     __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     fp16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
+  }
+
+  SECTION("floatx16 to fp6 E2M3 sr") {
+    __amd_scale_t scale = 1;
+    floatx16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E2M3, 0, scale);
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < 32; i++) {
+      INFO("In: " << fpx32[i] << " out: " << out[i]);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+    }
   }
 
   SECTION("float to fp6 E3M2") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     float_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("bf16 to fp6 E3M2") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     bf16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("fp16 to fp6 E3M2") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     fp16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("float halves to fp6 E3M2") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     float_halves_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("floatx32 to fp6 E3M2") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     floatx32_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
     }
-    HIP_CHECK(hipFree(d_out));
+  }
+
+  SECTION("floatx16 to fp6 E3M2") {
+    floatx16_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2);
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < 32; i++) {
+      INFO("In: " << fpx32[i] << " out: " << out[i]);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 1.0f);
+    }
   }
 
   SECTION("float to fp6 E3M2 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
     __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
-    float_to_fp6<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
+    float_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
   SECTION("bf16 to fp6 E3M2 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
     __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     bf16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
       CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
-  SECTION("fp16 to fp6 E3M2 sr") {
-    __amd_floatx32_storage_t* d_out;
-    __amd_floatx32_storage_t out;
+  SECTION("fpf16 to fp6 E3M2 sr") {
     __amd_scale_t scale = 1;
-    HIP_CHECK(hipMalloc(&d_out, sizeof(__amd_floatx32_storage_t)));
     fp16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
     HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
     for (size_t i = 0; i < 32; i++) {
       INFO("In: " << fpx32[i] << " out: " << out[i]);
-      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f); // Max error range
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
     }
-    HIP_CHECK(hipFree(d_out));
   }
 
+  SECTION("floatx16 to fp6 E3M2 sr") {
+    __amd_scale_t scale = 1;
+    floatx16_to_fp6_sr<<<1, 32>>>(d_in, d_out, __AMD_OCP_E3M2, 0, scale);
+    HIP_CHECK(hipMemcpy(&out, d_out, sizeof(__amd_floatx32_storage_t), hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < 32; i++) {
+      INFO("In: " << fpx32[i] << " out: " << out[i]);
+      CHECK(std::fabs(fpx32[i] - out[i]) <= 3.0f);
+    }
+  }
+
+  HIP_CHECK(hipFree(d_out));
   HIP_CHECK(hipFree(d_in));
 }
 
