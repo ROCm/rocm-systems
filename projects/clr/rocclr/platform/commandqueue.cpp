@@ -36,12 +36,13 @@ namespace amd {
 
 HostQueue::HostQueue(Context& context, Device& device, cl_command_queue_properties props,
                      uint queueRTCUs, Priority priority, const std::vector<uint32_t>& cuMask)
-    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs,
-                   priority, cuMask),
+    : CommandQueue(context, device, props, device.info().queueProperties_, queueRTCUs, priority,
+                   cuMask),
       lastEnqueueCommand_(nullptr),
       head_(nullptr),
       tail_(nullptr),
-      isActive_(false) {
+      isActive_(false),
+      sync_policy_(amd::SyncPolicy::Auto) {
   if (GPU_FORCE_QUEUE_PROFILING) {
     properties().set(CL_QUEUE_PROFILING_ENABLE);
   }
@@ -72,20 +73,21 @@ bool HostQueue::terminate() {
       if (lastCommand != nullptr) {
         // Check if CPU batch wasn't flushed for completion with the last command
         if (GetSubmissionBatch() != nullptr) {
-            auto command = new Marker(*this, false);
-            if (command != nullptr) {
-              ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to ensure finish");
-              command->enqueue();
-              lastCommand = command;
-            }
+          auto command = new Marker(*this, false);
+          if (command != nullptr) {
+            ClPrint(LOG_DEBUG, LOG_CMD, "Marker queued to ensure finish");
+            command->enqueue();
+            lastCommand->release();
+            lastCommand = command;
+          }
         }
         if (device_.gpu_error_ == CL_SUCCESS) {
-	  lastCommand->awaitCompletion();
+          lastCommand->awaitCompletion();
         }
         // Note that if lastCommand isn't a marker, it may not be lastEnqueueCommand_ now
         // after lastCommand->awaitCompletion() is called.
         if (lastEnqueueCommand_ != nullptr) {
-          lastEnqueueCommand_ ->release(); // lastEnqueueCommand_ should be a marker
+          lastEnqueueCommand_->release();  // lastEnqueueCommand_ should be a marker
           lastEnqueueCommand_ = nullptr;
         }
         lastCommand->release();
@@ -173,6 +175,9 @@ void HostQueue::finish(bool cpu_wait) {
         (vdev()->QueuedAsyncHandlers().load() > DEBUG_HIP_BLOCK_SYNC)) {
       cpu_wait = true;
     }
+  } else {
+    // Force CPU wait for OpenCL, since the tests may check OCL command status after finish
+    cpu_wait = true;
   }
 
   size_t batchSize = GetSubmissionBatchSize();
@@ -194,9 +199,10 @@ void HostQueue::finish(bool cpu_wait) {
     }
     command->enqueue();
   }
+
   // Check HW status of the ROCcrl event. Note: not all ROCclr modes support HW status
   static constexpr bool kWaitCompletion = true;
-  if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion)) {
+  if (cpu_wait || !device().IsHwEventReady(command->event(), kWaitCompletion, GetSyncPolicy())) {
     ClPrint(LOG_DEBUG, LOG_CMD,
             "No HW event or batch size is less than %zu, "
             "await command completion",
@@ -260,8 +266,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
         // Runtime has to flush the current batch only if the dependent wait is blocking
         if (it->command().status() != CL_COMPLETE) {
           ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) %p awaiting event: %p",
-                  amd::activity_prof::getOclCommandKindString(command->type()),
-                  command, it);
+                  amd::activity_prof::getOclCommandKindString(command->type()), command, it);
           virtualDevice->flush(head, true);
           tail = head = NULL;
           dependencyFailed |= !it->awaitCompletion();
@@ -283,8 +288,7 @@ void HostQueue::loop(device::VirtualDevice* virtualDevice) {
     }
 
     ClPrint(LOG_DEBUG, LOG_CMD, "Command (%s) submitted: %p",
-            amd::activity_prof::getOclCommandKindString(command->type()),
-            command);
+            amd::activity_prof::getOclCommandKindString(command->type()), command);
 
     command->setStatus(CL_SUBMITTED);
 

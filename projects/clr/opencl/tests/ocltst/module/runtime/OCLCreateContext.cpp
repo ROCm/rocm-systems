@@ -30,34 +30,33 @@ OCLCreateContext::OCLCreateContext() { _numSubTests = 1; }
 
 OCLCreateContext::~OCLCreateContext() {}
 
-void OCLCreateContext::open(unsigned int test, char *units, double &conversion,
+void OCLCreateContext::open(unsigned int test, char* units, double& conversion,
                             unsigned int deviceId) {
   _crcword = 0;
   conversion = 1.0f;
   _deviceId = deviceId;
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLCreateContext::run(void) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
 
   int error = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error != CL_SUCCESS, "clGetPlatformIDs failed");
     for (unsigned i = 0; i < numPlatforms; ++i) {
       char pbuf[100];
-      error = _wrapper->clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR,
-                                          sizeof(pbuf), pbuf, NULL);
+      error =
+          _wrapper->clGetPlatformInfo(platforms[i], CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf, NULL);
       if (!strcmp(pbuf, "Advanced Micro Devices, Inc.")) {
         platform = platforms[i];
         break;
@@ -73,22 +72,19 @@ void OCLCreateContext::run(void) {
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
   /* Get the number of requested devices */
-  error = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL,
-                                   &num_devices);
+  error = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
   CHECK_RESULT(error != CL_SUCCESS, "clGetDeviceIDs failed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, num_devices,
-                                   devices, NULL);
+  error = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, num_devices, devices, NULL);
   CHECK_RESULT(error != CL_SUCCESS, "clGetDeviceIDs failed");
 
   device = devices[0];
 
-  cl_context gContext = _wrapper->clCreateContext(
-      NULL, 1, &device, notify_callback, NULL, &error);
+  cl_context gContext = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error);
   CHECK_RESULT(gContext == 0, "clCreateContext failed");
 
   error = _wrapper->clReleaseContext(gContext);

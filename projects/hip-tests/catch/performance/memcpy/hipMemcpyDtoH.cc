@@ -28,21 +28,19 @@ THE SOFTWARE.
 class MemcpyDtoHBenchmark : public Benchmark<MemcpyDtoHBenchmark> {
  public:
   void operator()(void* dst, const hipDeviceptr_t& src, size_t size) {
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemcpyDtoH(dst, src, size));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemcpyDtoH(dst, src, size)); }
   }
 };
 
-static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type, size_t size) {
+static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type,
+                         size_t size) {
   MemcpyDtoHBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(GetAllocationSectionName(host_allocation_type));
 
   LinearAllocGuard<int> device_allocation(device_allocation_type, size);
   LinearAllocGuard<int> host_allocation(host_allocation_type, size);
-  benchmark.Run(host_allocation.ptr(),
-                reinterpret_cast<hipDeviceptr_t>(device_allocation.ptr()),
+  benchmark.Run(host_allocation.ptr(), reinterpret_cast<hipDeviceptr_t>(device_allocation.ptr()),
                 size);
 }
 

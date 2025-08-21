@@ -23,9 +23,9 @@
 #include <hip/hip_runtime_api.h>
 #include <utils.hh>
 #include "hipSVMCommon.h"
-//#define DEBUG_ATOMIC  // To provide additional data for debugging
+// #define DEBUG_ATOMIC  // To provide additional data for debugging
 #ifdef DEBUG_ATOMIC
-//#define DEBUG_ATOMIC_PRINT_THREAD
+// #define DEBUG_ATOMIC_PRINT_THREAD
 #endif
 
 typedef struct BinNode {
@@ -38,10 +38,9 @@ typedef struct BinNode {
   struct BinNode* pNext;
 } BinNode;
 
-__global__ void build_hash_table_on_device(unsigned int* input, size_t inputSize,
-                                          BinNode* pNodes,
-                                          unsigned int* pNumNodes, unsigned int numBins,
-                                          unsigned int dev) {
+__global__ void build_hash_table_on_device(unsigned int* input, size_t inputSize, BinNode* pNodes,
+                                           unsigned int* pNumNodes, unsigned int numBins,
+                                           unsigned int dev) {
   size_t i = blockIdx.x * blockDim.x + threadIdx.x;
   if (i >= inputSize) return;
 
@@ -61,28 +60,26 @@ __global__ void build_hash_table_on_device(unsigned int* input, size_t inputSize
   do {
     next = old;
     // Use CAS to ensure atomic operation
-    //pNew->pNext =  (BinNode*)next;
+    // pNew->pNext =  (BinNode*)next;
     atomicExch((unsigned long long*)&(pNew->pNext), next);
-    old = atomicCAS_system((unsigned long long *)&(pNodes[b].pNext), next,
-                           (unsigned long long )pNew);
+    old = atomicCAS_system((unsigned long long*)&(pNodes[b].pNext), next, (unsigned long long)pNew);
   } while (old != next);
 #ifdef DEBUG_ATOMIC_PRINT_THREAD
-  printf("k%u: i=%zu, n=%u, pNew=%p(n=%2u, d=%u, i=%4u, value=%4u, next=%p), pNodes[%u]=%p,"
-      " old=%p, input[%zu]=%u\n", dev, i, n,
-      pNew, pNew->n, pNew->d, pNew->i, pNew->value, pNew->pNext, b, &pNodes[b], (void*)old,
-      i, input[i]);
+  printf(
+      "k%u: i=%zu, n=%u, pNew=%p(n=%2u, d=%u, i=%4u, value=%4u, next=%p), pNodes[%u]=%p,"
+      " old=%p, input[%zu]=%u\n",
+      dev, i, n, pNew, pNew->n, pNew->d, pNew->i, pNew->value, pNew->pNext, b, &pNodes[b],
+      (void*)old, i, input[i]);
 #else
   (void)dev;
 #endif
 }
 
 void build_hash_table_on_host(unsigned int* input, size_t inputSize, BinNode* pNodes,
-                              unsigned int* pNumNodes, unsigned int numBins,
-                              unsigned int dev) {
+                              unsigned int* pNumNodes, unsigned int numBins, unsigned int dev) {
   // wait until we see some activity from a device (try to run host side simultaneously).
   while (numBins == AtomicLoad32(pNumNodes));
-  for(unsigned int i = 0; i < inputSize; i++)
-  {
+  for (unsigned int i = 0; i < inputSize; i++) {
     unsigned int n = AtomicFetchAdd32(pNumNodes, 1u);
     BinNode* pNew = &pNodes[n];
     unsigned int b = input[i] % numBins;
@@ -96,22 +93,21 @@ void build_hash_table_on_host(unsigned int* input, size_t inputSize, BinNode* pN
     do {
       AtomicExchange64(&(pNew->pNext), next);
       // always inserting at head of list
-    } while (!AtomicCompareExchange64(&(pNodes[b].pNext), &next,
-                                                (BinNode*)pNew));
+    } while (!AtomicCompareExchange64(&(pNodes[b].pNext), &next, (BinNode*)pNew));
 #ifdef DEBUG_ATOMIC_PRINT_THREAD
-      fprintf(stderr,
-        "k%u: i=%u, n=%u, pNew=%p(n=%2u, d=%u, i=%4u, value=%4u, next=%p), pNodes[%u]=%p, "
-        "input[%u]=%u\n",
-        dev, i, n, pNew, pNew->n, pNew->d, pNew->i, pNew->value, pNew->pNext, b, &pNodes[b],
-        i, input[i]);
+    fprintf(stderr,
+            "k%u: i=%u, n=%u, pNew=%p(n=%2u, d=%u, i=%4u, value=%4u, next=%p), pNodes[%u]=%p, "
+            "input[%u]=%u\n",
+            dev, i, n, pNew, pNew->n, pNew->d, pNew->i, pNew->value, pNew->pNext, b, &pNodes[b], i,
+            input[i]);
 #else
     (void)dev;
 #endif
   }
 }
 
-void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int num_devices,
-  unsigned int numBins, size_t num_pixels) {
+void launch_kernels_and_verify(std::vector<hipStream_t>& streams, unsigned int num_devices,
+                               unsigned int numBins, size_t num_pixels) {
   unsigned int* pInputImage = nullptr;
   BinNode* pNodes = nullptr;
   unsigned int* pNumNodes = nullptr;
@@ -122,13 +118,13 @@ void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int n
   HIP_CHECK(hipHostMalloc(&pNumNodes, sizeof(unsigned int), hipHostMallocCoherent));
 
   *pNumNodes = numBins;  // using the first numBins nodes to hold the list heads.
-  for(unsigned int i = 0; i < numBins; i++) pNodes[i].pNext = nullptr;
-  for(unsigned int i = 0; i < num_pixels; i++) pInputImage[i] = i;
+  for (unsigned int i = 0; i < numBins; i++) pNodes[i].pNext = nullptr;
+  for (unsigned int i = 0; i < num_pixels; i++) pInputImage[i] = i;
 
   // Get all the devices going simultaneously, each device (and the host) will insert
   // all the pixels.
-  for(unsigned int d=0; d < num_devices; d++)
-  {
+  for (unsigned int d = 0; d < num_devices; d++) {
+    HIP_CHECK(hipSetDevice(d));
     build_hash_table_on_device<<<(num_pixels + 255) / 256, 256, 0, streams[d]>>>(
         pInputImage, num_pixels, pNodes, pNumNodes, numBins, d);
     HIP_CHECK(hipGetLastError());
@@ -141,7 +137,8 @@ void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int n
     threads.push_back(std::thread(
         [](hipStream_t s) {
           HIP_CHECK(hipStreamSynchronize(s));  // To workarround batch dispatching on Windows
-        }, streams[d]));
+        },
+        streams[d]));
   }
   std::for_each(threads.begin(), threads.end(), [](std::thread& t) { t.join(); });
 
@@ -152,40 +149,38 @@ void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int n
   HIP_CHECK(hipSetDevice(0));
   unsigned int num_items = 0;
   // check correctness of each bin in the hash table.
-  for(unsigned int i = 0; i < numBins; i++)
-  {
-    BinNode *pNode = pNodes[i].pNext;
+  for (unsigned int i = 0; i < numBins; i++) {
+    BinNode* pNode = pNodes[i].pNext;
     unsigned int num_items_bin = 0;
     unsigned int total_num_items_bin =
         (num_pixels % numBins <= i) ? (num_pixels / numBins) : (num_pixels / numBins + 1);
     total_num_items_bin *= (num_devices + 1);  // The item number of the list in i-th bin
-    while(pNode)
-    {
+    while (pNode) {
 #ifdef DEBUG_ATOMIC_PRINT_THREAD
       fprintf(stderr, "v%u/%u: %u, pNode=%p(n=%2u, d=%u, i=%4u, value=%4u, next=%p)\n", i, numBins,
               num_items_bin, pNode, pNode->n, pNode->d, pNode->i, pNode->value, pNode->pNext);
 #endif
-      if((pNode->value % numBins) != i)
-      {
+      if ((pNode->value % numBins) != i) {
         fprintf(stderr,
-                "Something went wrong at i=%u, item is in wrong hash bucket:" \
-                "pNode->value=%u, numBins=%u\n",  i, pNode->value, numBins);
+                "Something went wrong at i=%u, item is in wrong hash bucket:"
+                "pNode->value=%u, numBins=%u\n",
+                i, pNode->value, numBins);
         REQUIRE(false);
       }
       num_items++;
       num_items_bin++;
       if (num_items_bin > total_num_items_bin) {
         fprintf(stderr,
-                "Something went wrong at i=%u/%u, num_items_bin(%u)>total_num_items_bin(%u)\n",
-                i, numBins, num_items_bin, total_num_items_bin);
+                "Something went wrong at i=%u/%u, num_items_bin(%u)>total_num_items_bin(%u)\n", i,
+                numBins, num_items_bin, total_num_items_bin);
         REQUIRE(false);
       }
       pNode = pNode->pNext;
     }
     if (num_items_bin != total_num_items_bin) {
       fprintf(stderr,
-              "Something went wrong at i=%u/%u, num_items_bin(%u)!=total_num_items_bin(%u)\n",
-              i, numBins, num_items_bin, total_num_items_bin);
+              "Something went wrong at i=%u/%u, num_items_bin(%u)!=total_num_items_bin(%u)\n", i,
+              numBins, num_items_bin, total_num_items_bin);
     }
   }
   HIP_CHECK(hipHostFree(pInputImage));
@@ -193,11 +188,10 @@ void launch_kernels_and_verify(std::vector<hipStream_t> &streams, unsigned int n
   HIP_CHECK(hipHostFree(pNumNodes));
 
   // each device and the host inserted all of the pixels, check that none are missing.
-  if (num_items != total_items)
-  {
+  if (num_items != total_items) {
     fprintf(stderr, "The hash table is not correct, num items %u != expected num items: %u\n",
             num_items, total_items);
-    REQUIRE(false); // test did not pass
+    REQUIRE(false);  // test did not pass
   }
   REQUIRE(true);
 }
@@ -237,7 +231,7 @@ TEST_CASE("test_svm_fine_grain_memory_consistency") {
   int num_devices = 0;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
 
-  for(int id = 0; id < num_devices; id++) {
+  for (int id = 0; id < num_devices; id++) {
     int pcieAtomic = 0;
     HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, id));
     if (!pcieAtomic) {

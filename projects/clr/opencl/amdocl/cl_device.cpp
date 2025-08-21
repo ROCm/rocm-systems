@@ -127,7 +127,8 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
       value = "Advanced Micro Devices, Inc.";
       break;
     case CL_PLATFORM_EXTENSIONS:
-      value = "cl_khr_icd "
+      value =
+          "cl_khr_icd "
 #ifdef _WIN32
           "cl_khr_d3d10_sharing "
           "cl_khr_d3d11_sharing "
@@ -136,7 +137,7 @@ RUNTIME_ENTRY(cl_int, clGetPlatformInfo,
           "cl_amd_event_callback "
 #if defined(WITH_COMPILER_LIB)
           "cl_amd_offline_devices "
-#endif // defined(WITH_COMPILER_LIB)
+#endif  // defined(WITH_COMPILER_LIB)
           ;
       break;
     case CL_PLATFORM_ICD_SUFFIX_KHR:
@@ -402,8 +403,9 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         CASE(CL_DEVICE_SIMD_INSTRUCTION_WIDTH_AMD, simdInstructionWidth_);
         CASE(CL_DEVICE_WAVEFRONT_WIDTH_AMD, wavefrontWidth_);
       case CL_DEVICE_GLOBAL_MEM_CHANNELS_AMD: {
-            cl_uint globalMemChannels = as_amd(device)->info().vramBusBitWidth_ / 32;
-            return amd::clGetInfo(globalMemChannels, param_value_size, param_value, param_value_size_ret);
+        cl_uint globalMemChannels = as_amd(device)->info().vramBusBitWidth_ / 32;
+        return amd::clGetInfo(globalMemChannels, param_value_size, param_value,
+                              param_value_size_ret);
       }
         CASE(CL_DEVICE_GLOBAL_MEM_CHANNEL_BANKS_AMD, globalMemChannelBanks_);
         CASE(CL_DEVICE_GLOBAL_MEM_CHANNEL_BANK_WIDTH_AMD, globalMemChannelBankWidth_);
@@ -445,7 +447,7 @@ RUNTIME_ENTRY(cl_int, clGetDeviceInfo,
         }
         return CL_SUCCESS;
       }
-      CASE(CL_DEVICE_PCIE_ID_AMD, pcieDeviceId_);
+        CASE(CL_DEVICE_PCIE_ID_AMD, pcieDeviceId_);
 #define CL_DEVICE_NUMERIC_VERSION 0x105E
       case CL_DEVICE_NUMERIC_VERSION: {
         std::string driverVersion = as_amd(device)->info().driverVersion_;

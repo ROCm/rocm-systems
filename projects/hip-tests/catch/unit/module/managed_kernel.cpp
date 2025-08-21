@@ -19,6 +19,4 @@ THE SOFTWARE.
 #include "hip/hip_runtime.h"
 __managed__ int x = 10;
 
-extern "C" __global__ void GPU_func() {
-  x++;
-}
+extern "C" __global__ void GPU_func() { x++; }

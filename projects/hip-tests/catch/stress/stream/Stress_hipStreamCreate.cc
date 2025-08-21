@@ -26,40 +26,39 @@ THE SOFTWARE.
 
 namespace hipStreamCreateStressTest {
 __global__ void kernel_do_nothing() {
-    // do nothing
+  // do nothing
 }
 
 int stream_seq[TOTALSEQ][4] = {
-                         {0, 1, 2, 0} ,  // Launch0->Launch1->Launch2->Sync0
-                         {0, 2, 1, 0} ,  // Launch0->Launch2->Launch1->Sync0
-                         {1, 0, 2, 0} ,  // Launch1->Launch0->Launch2->Sync0
-                         {1, 2, 0, 0} ,  // Launch1->Launch2->Launch0->Sync0
-                         {2, 0, 1, 0} ,  // Launch2->Launch0->Launch1->Sync0
-                         {2, 1, 0, 0} ,  // Launch2->Launch1->Launch0->Sync0
-                         {0, 1, 2, 1} ,  // Launch0->Launch1->Launch2->Sync1
-                         {0, 2, 1, 1} ,  // Launch0->Launch2->Launch1->Sync1
-                         {1, 0, 2, 1} ,  // Launch1->Launch0->Launch2->Sync1
-                         {1, 2, 0, 1} ,  // Launch1->Launch2->Launch0->Sync1
-                         {2, 0, 1, 1} ,  // Launch2->Launch0->Launch1->Sync1
-                         {2, 1, 0, 1} ,  // Launch2->Launch1->Launch0->Sync1
-                         {0, 1, 2, 2} ,  // Launch0->Launch1->Launch2->Sync2
-                         {0, 2, 1, 2} ,  // Launch0->Launch2->Launch1->Sync2
-                         {1, 0, 2, 2} ,  // Launch1->Launch0->Launch2->Sync2
-                         {1, 2, 0, 2} ,  // Launch1->Launch2->Launch0->Sync2
-                         {2, 0, 1, 2} ,  // Launch2->Launch0->Launch1->Sync2
-                         {2, 1, 0, 2}    // Launch2->Launch1->Launch0->Sync2
-                        };
+    {0, 1, 2, 0},  // Launch0->Launch1->Launch2->Sync0
+    {0, 2, 1, 0},  // Launch0->Launch2->Launch1->Sync0
+    {1, 0, 2, 0},  // Launch1->Launch0->Launch2->Sync0
+    {1, 2, 0, 0},  // Launch1->Launch2->Launch0->Sync0
+    {2, 0, 1, 0},  // Launch2->Launch0->Launch1->Sync0
+    {2, 1, 0, 0},  // Launch2->Launch1->Launch0->Sync0
+    {0, 1, 2, 1},  // Launch0->Launch1->Launch2->Sync1
+    {0, 2, 1, 1},  // Launch0->Launch2->Launch1->Sync1
+    {1, 0, 2, 1},  // Launch1->Launch0->Launch2->Sync1
+    {1, 2, 0, 1},  // Launch1->Launch2->Launch0->Sync1
+    {2, 0, 1, 1},  // Launch2->Launch0->Launch1->Sync1
+    {2, 1, 0, 1},  // Launch2->Launch1->Launch0->Sync1
+    {0, 1, 2, 2},  // Launch0->Launch1->Launch2->Sync2
+    {0, 2, 1, 2},  // Launch0->Launch2->Launch1->Sync2
+    {1, 0, 2, 2},  // Launch1->Launch0->Launch2->Sync2
+    {1, 2, 0, 2},  // Launch1->Launch2->Launch0->Sync2
+    {2, 0, 1, 2},  // Launch2->Launch0->Launch1->Sync2
+    {2, 1, 0, 2}   // Launch2->Launch1->Launch0->Sync2
+};
 
 /**
  * Scenario: This test extends the DTEST introduced for SWDEV-238360 to test
  * all the possible scenarios mentioned under comments section
  * in SWDEV-237846.
-*/
+ */
 
-void testhipStreamCreate(int *stream_sequence) {
-  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__,
-         stream_sequence[0], stream_sequence[1], stream_sequence[2],
-         stream_sequence[3]);
+void testhipStreamCreate(int* stream_sequence) {
+  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__, stream_sequence[0],
+         stream_sequence[1], stream_sequence[2], stream_sequence[3]);
   // Streams
   hipStream_t stream[3];
   stream[0] = 0;
@@ -69,15 +68,12 @@ void testhipStreamCreate(int *stream_sequence) {
   for (int k = 0; k < NUM_ITER; ++k) {
     // Sync
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[0]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[1]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[2]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[0]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[1]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[2]]));
     // Sync stream 1
     HIP_CHECK(hipStreamSynchronize(stream[stream_sequence[3]]));
   }
@@ -90,12 +86,10 @@ void testhipStreamCreate(int *stream_sequence) {
  * Scenario: This test extends the above test by using 2 streams
  * (of highest and lowest priority) created using hipStreamCreateWithPriority
  * along with the default stream.
-*/
-void testhipStreamCreatePriority(int *stream_sequence,
-                                 unsigned int flag) {
-  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__,
-         stream_sequence[0], stream_sequence[1], stream_sequence[2],
-         stream_sequence[3]);
+ */
+void testhipStreamCreatePriority(int* stream_sequence, unsigned int flag) {
+  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__, stream_sequence[0],
+         stream_sequence[1], stream_sequence[2], stream_sequence[3]);
   // Streams
   hipStream_t stream[3];
   stream[0] = 0;
@@ -106,23 +100,18 @@ void testhipStreamCreatePriority(int *stream_sequence,
     printf("Exiting test since priorities are not supported \n");
     return;
   }
-  HIP_CHECK(hipStreamCreateWithPriority(&stream[1],
-          flag, priority_high));
-  HIP_CHECK(hipStreamCreateWithPriority(&stream[2],
-          flag, priority_low));
+  HIP_CHECK(hipStreamCreateWithPriority(&stream[1], flag, priority_high));
+  HIP_CHECK(hipStreamCreateWithPriority(&stream[2], flag, priority_low));
   // Run test loop
   for (int k = 0; k < NUM_ITER; ++k) {
     // Sync
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[0]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[1]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[2]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[0]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[1]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[2]]));
     // Sync stream 1
     HIP_CHECK(hipStreamSynchronize(stream[stream_sequence[3]]));
   }
@@ -134,12 +123,10 @@ void testhipStreamCreatePriority(int *stream_sequence,
 /**
  * Scenario: This test extends the above test by using 2 streams
  * created using hipStreamCreateWithFlags along with the default stream.
-*/
-void testhipStreamCreateFlags(int *stream_sequence,
-                              unsigned int flag) {
-  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__,
-         stream_sequence[0], stream_sequence[1], stream_sequence[2],
-         stream_sequence[3]);
+ */
+void testhipStreamCreateFlags(int* stream_sequence, unsigned int flag) {
+  printf("%s: Testing sequence %d->%d->%d->sync(%d) \n", __func__, stream_sequence[0],
+         stream_sequence[1], stream_sequence[2], stream_sequence[3]);
   // Streams
   hipStream_t stream[3];
   stream[0] = 0;
@@ -149,15 +136,12 @@ void testhipStreamCreateFlags(int *stream_sequence,
   for (int k = 0; k < NUM_ITER; ++k) {
     // Sync
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[0]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[1]]));
-    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing,
-             dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
-             stream[stream_sequence[2]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[0]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[1]]));
+    HIP_CHECK(hipLaunchKernel((const void*)kernel_do_nothing, dim3(1, 1, 1), dim3(1, 1, 1), NULL, 0,
+                              stream[stream_sequence[2]]));
     // Sync stream 1
     HIP_CHECK(hipStreamSynchronize(stream[stream_sequence[3]]));
   }
@@ -171,33 +155,32 @@ void testhipStreamCreateFlags(int *stream_sequence,
 TEST_CASE("Stress_hipStreamCreate_SyncTest") {
   printf("hipStreamCreate stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
-    hipStreamCreateStressTest::testhipStreamCreate(
-            hipStreamCreateStressTest::stream_seq[i]);
+    hipStreamCreateStressTest::testhipStreamCreate(hipStreamCreateStressTest::stream_seq[i]);
   }
 }
 
 TEST_CASE("Stress_hipStreamCreatePriority_SyncTest") {
   printf("hipStreamCreateWithPriority(hipStreamDefault) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
-    hipStreamCreateStressTest::testhipStreamCreatePriority(
-            hipStreamCreateStressTest::stream_seq[i], hipStreamDefault);
+    hipStreamCreateStressTest::testhipStreamCreatePriority(hipStreamCreateStressTest::stream_seq[i],
+                                                           hipStreamDefault);
   }
   printf("hipStreamCreateWithPriority(hipStreamNonBlocking) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
-    hipStreamCreateStressTest::testhipStreamCreatePriority(
-            hipStreamCreateStressTest::stream_seq[i], hipStreamNonBlocking);
+    hipStreamCreateStressTest::testhipStreamCreatePriority(hipStreamCreateStressTest::stream_seq[i],
+                                                           hipStreamNonBlocking);
   }
 }
 
 TEST_CASE("Stress_hipStreamCreateWithFlags_SyncTest") {
   printf("hipStreamCreateWithFlags(hipStreamDefault) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
-    hipStreamCreateStressTest::testhipStreamCreateFlags(
-            hipStreamCreateStressTest::stream_seq[i], hipStreamDefault);
+    hipStreamCreateStressTest::testhipStreamCreateFlags(hipStreamCreateStressTest::stream_seq[i],
+                                                        hipStreamDefault);
   }
   printf("hipStreamCreateWithFlags(hipStreamNonBlocking) stress test:\n");
   for (int i = 0; i < TOTALSEQ; i++) {
-    hipStreamCreateStressTest::testhipStreamCreateFlags(
-            hipStreamCreateStressTest::stream_seq[i], hipStreamNonBlocking);
+    hipStreamCreateStressTest::testhipStreamCreateFlags(hipStreamCreateStressTest::stream_seq[i],
+                                                        hipStreamNonBlocking);
   }
 }

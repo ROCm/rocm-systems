@@ -15,6 +15,7 @@ on:
       - '!projects/rocprofiler-sdk/source/docs/**'
       - '!projects/rocprofiler-sdk/*.md'
       - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
   pull_request:
     paths:
       - 'projects/rocprofiler-sdk/**'
@@ -22,6 +23,7 @@ on:
       - '!projects/rocprofiler-sdk/source/docs/**'
       - '!projects/rocprofiler-sdk/*.md'
       - '!projects/rocprofiler-sdk/**/README.md'
+      - '.github/workflows/rocprofiler-sdk-code_coverage.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -58,11 +60,11 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300']
+        runner: ['mi300a']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    runs-on: rocprofiler-mi3xx
+    runs-on: rocprofiler-mi300a
 
     # define this for container
     env:

@@ -41,8 +41,7 @@ TEST_CASE("Stress_hipHostMalloc_MaxAllocation") {
   INFO("Max Allocation of " << memFree << " bytes!");
   while (hipHostMalloc(&d_ptr, memFree) != hipSuccess && memFree > 1) {
     counter++;
-    INFO("Attempt to allocate " << memFree << \
-    " bytes out of " << devMemFree << "bytes Failed!");
+    INFO("Attempt to allocate " << memFree << " bytes out of " << devMemFree << "bytes Failed!");
     memFree >>= 1;          // reduce the memory to be allocated by half
     REQUIRE(counter <= 2);  // Make sure that we are atleast able to allocate
     // 1/4th of max memory
@@ -50,8 +49,7 @@ TEST_CASE("Stress_hipHostMalloc_MaxAllocation") {
 
   HIP_CHECK(hipMemset(d_ptr, 1, memFree));
   HIP_CHECK(hipDeviceSynchronize());  // Flush caches
-  REQUIRE(std::all_of(d_ptr, d_ptr + memFree,
-         [](unsigned char n) { return n == 1; }));
+  REQUIRE(std::all_of(d_ptr, d_ptr + memFree, [](unsigned char n) { return n == 1; }));
   HIP_CHECK(hipHostFree(d_ptr));
 }
 
@@ -67,8 +65,7 @@ TEST_CASE("Stress_hipHostMalloc_MaxAllocation_AllGpu") {
     // Get available GPU memory and total GPU memory
     HIP_CHECK(hipSetDevice(dev));
     HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-    size_t allocsize = maxGpuMem +
-           ((maxGpuMem*ADDITIONAL_MEMORY_PERCENT)/100);
+    size_t allocsize = maxGpuMem + ((maxGpuMem * ADDITIONAL_MEMORY_PERCENT) / 100);
     // Get free host In bytes
     size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
     if (allocsize < hostMemFree) {

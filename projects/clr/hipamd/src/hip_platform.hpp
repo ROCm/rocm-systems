@@ -34,7 +34,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 // Unique file descriptor class
 struct UniqueFD {
   UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-           : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
+      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
 
   const std::string fpath_;        //!< File path of this unique file
   const amd::Os::FileDesc fdesc_;  //!< File Descriptor
@@ -63,6 +63,7 @@ class PlatformState {
   hipError_t unloadModule(hipModule_t hmod);
   bool isValidDynFunc(const void* hfunc);
   hipError_t getDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
+  hipError_t getFuncCount(unsigned int* count, hipModule_t hmod);
   hipError_t getDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
                              size_t* size_ptr);
   hipError_t getDynTexRef(const char* hostVar, hipModule_t hmod, textureReference** texRef);
@@ -119,7 +120,7 @@ class PlatformState {
   bool initialized_{false};
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
 
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_; //!< Unique File Desc Map
+  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map
 
   void* dynamicLibraryHandle_{nullptr};
 };

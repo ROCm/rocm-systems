@@ -34,8 +34,7 @@ class OCLGLTexture : public OCLGLCommon {
   OCLGLTexture();
   virtual ~OCLGLTexture();
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void);
   virtual unsigned int close(void);
 
@@ -46,28 +45,22 @@ class OCLGLTexture : public OCLGLCommon {
   GLuint inGLTexture_;
   GLuint outGLTexture_;
   bool testRender_;
-  template <typename T>
-  bool runTextureTest(GLint internalFormat, GLenum format, GLenum type);
+  template <typename T> bool runTextureTest(GLint internalFormat, GLenum format, GLenum type);
 };
 
 template <typename T>
-bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
-                                  GLenum type) {
+bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format, GLenum type) {
   cl_mem image;
-  inDataGL_ =
-      malloc(c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
-  outDataGL_ =
-      malloc(c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
+  inDataGL_ = malloc(c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
+  outDataGL_ = malloc(c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
 
   // Initialize input data with random values
   T* inputIterator = (T*)inDataGL_;
-  for (unsigned int i = 0;
-       i < c_imageWidth * c_imageHeight * c_elementsPerPixel; i++) {
+  for (unsigned int i = 0; i < c_imageWidth * c_imageHeight * c_elementsPerPixel; i++) {
     inputIterator[i] = (T)(rand() % 255);
   }
   // Initialize output data with zeros
-  memset(outDataGL_, 0,
-         c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
+  memset(outDataGL_, 0, c_imageWidth * c_imageHeight * c_elementsPerPixel * sizeof(T));
 
   // Generate and Bind in & out OpenGL textures
   glGenTextures(1, &inGLTexture_);
@@ -77,21 +70,21 @@ bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, (GLsizei)c_imageWidth,
-               (GLsizei)c_imageHeight, 0, format, type, inDataGL_);
+  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, (GLsizei)c_imageWidth, (GLsizei)c_imageHeight, 0,
+               format, type, inDataGL_);
 
   glBindTexture(GL_TEXTURE_2D, outGLTexture_);
   glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, (GLsizei)c_imageWidth,
-               (GLsizei)c_imageHeight, 0, format, type, outDataGL_);
+  glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, (GLsizei)c_imageWidth, (GLsizei)c_imageHeight, 0,
+               format, type, outDataGL_);
 
   glFinish();
 
   // Create input buffer from GL input texture
-  image = _wrapper->clCreateFromGLTexture(
-      context_, CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0, inGLTexture_, &error_);
+  image = _wrapper->clCreateFromGLTexture(context_, CL_MEM_READ_ONLY, GL_TEXTURE_2D, 0,
+                                          inGLTexture_, &error_);
   if (error_ != CL_SUCCESS) {
     printf("Unable to create input buffer from GL texture (%d)", error_);
     return false;
@@ -99,8 +92,8 @@ bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
   buffers_.push_back(image);
 
   // Create output buffer from GL output texture
-  image = _wrapper->clCreateFromGLTexture(
-      context_, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, outGLTexture_, &error_);
+  image = _wrapper->clCreateFromGLTexture(context_, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0,
+                                          outGLTexture_, &error_);
   if (error_ != CL_SUCCESS) {
     printf("Unable to create output buffer from GL texture (%d)", error_);
     return false;
@@ -110,8 +103,7 @@ bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
 
   // Assign args
   for (unsigned int i = 0; i < buffers_.size(); i++) {
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, i, sizeof(cl_mem), &buffers()[i]);
+    error_ = _wrapper->clSetKernelArg(kernel_, i, sizeof(cl_mem), &buffers()[i]);
     if (error_ != CL_SUCCESS) {
       printf("clSetKernelArg() failed (%d)", error_);
       return false;
@@ -124,29 +116,28 @@ bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
       GLuint FrameBufferName = 0;
       glGenFramebuffers(1, &FrameBufferName);
       glBindFramebuffer(GL_FRAMEBUFFER, FrameBufferName);
-      glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, inGLTexture_,
-                           0);
+      glFramebufferTexture(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, inGLTexture_, 0);
       glClearColor(.5f, 1.f, 1.0f, 0);
       glClear(GL_COLOR_BUFFER_BIT);
       glFinish();
     }
 
-    error_ = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 2,
-                                                 &buffers()[0], 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 2, &buffers()[0], 0, NULL, NULL);
     if (error_ != CL_SUCCESS) {
       printf("Unable to acquire GL objects (%d)", error_);
       return false;
     }
 
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     if (error_ != CL_SUCCESS) {
       printf("clEnqueueNDRangeKernel() failed (%d)", error_);
       return false;
     }
 
-    error_ = _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 2,
-                                                 &buffers()[0], 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 2, &buffers()[0], 0, NULL, NULL);
     if (error_ != CL_SUCCESS) {
       printf("clEnqueueReleaseGLObjects failed (%d)", error_);
       return false;
@@ -190,20 +181,19 @@ bool OCLGLTexture::runTextureTest(GLint internalFormat, GLenum format,
     default:
       return false;
   }
-  for (unsigned int i = 0;
-       i < c_imageWidth * c_imageHeight * c_elementsPerPixel; i++) {
+  for (unsigned int i = 0; i < c_imageWidth * c_imageHeight * c_elementsPerPixel; i++) {
     if (testRender_) {
       if (outputIterator[i] != color) {
         std::cout << "Element " << i
-                  << " in output texture is incorrect! (internal format = "
-                  << internalFormat << "\n\t expected:" << inputIterator[i]
+                  << " in output texture is incorrect! (internal format = " << internalFormat
+                  << "\n\t expected:" << inputIterator[i]
                   << " differs from actual clear color:" << color << std::endl;
         return false;
       }
     } else if (inputIterator[i] != outputIterator[i]) {
       std::cout << "Element " << i
-                << " in output texture is incorrect! (internal format = "
-                << internalFormat << "\n\t expected:" << inputIterator[i]
+                << " in output texture is incorrect! (internal format = " << internalFormat
+                << "\n\t expected:" << inputIterator[i]
                 << " differs from actual: " << outputIterator[i] << std::endl;
       return false;
     }

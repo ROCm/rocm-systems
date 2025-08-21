@@ -18,20 +18,19 @@
  */
 
 /**
-* @addtogroup hipMemcpyKernel hipMemcpyKernel
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
-* Copies data between host and device.
-*/
+ * @addtogroup hipMemcpyKernel hipMemcpyKernel
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpy(void* dst, const void* src, size_t count, hipMemcpyKind kind)` -
+ * Copies data between host and device.
+ */
 
 #include <hip_test_common.hh>
 
 #define SIMPLY_ASSIGN 0
 #define USE_HIPTEST_SETNUMBLOCKS 0
 
-template<class T>
-__global__ void vec_fill(T *x, T coef, int N) {
+template <class T> __global__ void vec_fill(T* x, T coef, int N) {
   const int istart = threadIdx.x + blockIdx.x * blockDim.x;
   const int ishift = blockDim.x * gridDim.x;
   for (int i = istart; i < N; i += ishift) {
@@ -51,8 +50,7 @@ __device__ void print_log(int i, int value, int expected) {
   printf("failed at %d: val=%d, expected=%d\n", i, value, expected);
 }
 
-template<class T>
-__global__ void vec_verify(T *x, T coef, int N) {
+template <class T> __global__ void vec_verify(T* x, T coef, int N) {
   const int istart = threadIdx.x + blockIdx.x * blockDim.x;
   const int ishift = blockDim.x * gridDim.x;
   for (int i = istart; i < N; i += ishift) {
@@ -68,20 +66,17 @@ __global__ void vec_verify(T *x, T coef, int N) {
   }
 }
 
-template<class T>
-__global__ void daxpy(T *__restrict__ x, T *__restrict__ y,
-    const T coef, int Niter, int N) {
+template <class T>
+__global__ void daxpy(T* __restrict__ x, T* __restrict__ y, const T coef, int Niter, int N) {
   const int istart = threadIdx.x + blockIdx.x * blockDim.x;
   const int ishift = blockDim.x * gridDim.x;
   for (int iter = 0; iter < Niter; ++iter) {
     T iv = coef * iter;
-    for (int i = istart; i < N; i += ishift)
-      y[i] = iv * x[i] + y[i];
+    for (int i = istart; i < N; i += ishift) y[i] = iv * x[i] + y[i];
   }
 }
 
-template<class T>
-class hipPerfMemFill {
+template <class T> class hipPerfMemFill {
  private:
   static constexpr int NUM_START = 27;
   static constexpr int NUM_SIZE = 4;
@@ -96,26 +91,20 @@ class hipPerfMemFill {
  public:
   hipPerfMemFill() {
     for (int i = 0; i < NUM_SIZE; i++) {
-       // 128M, 256M, 512M, 1024M
+      // 128M, 256M, 512M, 1024M
       totalSizes_[i] = 1ull << (i + NUM_START);
     }
   }
 
-  ~hipPerfMemFill() { }
+  ~hipPerfMemFill() {}
 
-  bool supportLargeBar() {
-    return props_.isLargeBar != 0;
-  }
+  bool supportLargeBar() { return props_.isLargeBar != 0; }
 
-  bool supportManagedMemory() {
-    return props_.managedMemory != 0;
-  }
+  bool supportManagedMemory() { return props_.managedMemory != 0; }
 
-  const T getCoefficient(double val) {
-    return static_cast<T>(val);
-  }
+  const T getCoefficient(double val) { return static_cast<T>(val); }
 
-  void setHostBuffer(T *A, T val, size_t size) {
+  void setHostBuffer(T* A, T val, size_t size) {
     size_t len = size / sizeof(T);
     for (int i = 0; i < len; i++) {
       A[i] = val;
@@ -138,33 +127,29 @@ class hipPerfMemFill {
     HIP_CHECK(hipGetDeviceProperties(&props_, deviceId));
     blocksPerCU_ = props_.multiProcessorCount * 4;
 
-    std::cout << "Info: running on device: id: " << deviceId << ", bus: 0x"
-        << props_.pciBusID << " " << props_.name << " with "
-        << props_.multiProcessorCount << " CUs, large bar: "
-        << supportLargeBar() << ", managed memory: " << supportManagedMemory()
-        << ", DeviceMallocFinegrained: " << supportDeviceMallocFinegrained()
-        << std::endl;
+    std::cout << "Info: running on device: id: " << deviceId << ", bus: 0x" << props_.pciBusID
+              << " " << props_.name << " with " << props_.multiProcessorCount
+              << " CUs, large bar: " << supportLargeBar()
+              << ", managed memory: " << supportManagedMemory()
+              << ", DeviceMallocFinegrained: " << supportDeviceMallocFinegrained() << std::endl;
     return true;
   }
 
   void log_host(const char* title, double GBytes, double sec) {
-    std::cout << title << " [" << std::setw(7) << GBytes << " GB]: cost "
-              << std::setw(10) << sec << " s in bandwidth " << std::setw(10)
-              << GBytes / sec << " [GB/s]" << std::endl;
+    std::cout << title << " [" << std::setw(7) << GBytes << " GB]: cost " << std::setw(10) << sec
+              << " s in bandwidth " << std::setw(10) << GBytes / sec << " [GB/s]" << std::endl;
   }
 
-  void log_kernel(const char* title, double GBytes, double sec,
-                                     double sec_hv, double sec_kv) {
-    std::cout << title << " [" << std::setw(7) << GBytes << " GB]: cost "
-              << std::setw(10) << sec << " s in bandwidth " << std::setw(10)
-              << GBytes / sec << " [GB/s]" << ", hostVerify cost "
-              << std::setw(10) << sec_hv << " s in bandwidth " << std::setw(10)
-              << GBytes / sec_hv << " [GB/s]" << ", kernelVerify cost "
-              << std::setw(10) << sec_kv << " s in bandwidth " << std::setw(10)
-              << GBytes / sec_kv << " [GB/s]" << std::endl;
+  void log_kernel(const char* title, double GBytes, double sec, double sec_hv, double sec_kv) {
+    std::cout << title << " [" << std::setw(7) << GBytes << " GB]: cost " << std::setw(10) << sec
+              << " s in bandwidth " << std::setw(10) << GBytes / sec << " [GB/s]"
+              << ", hostVerify cost " << std::setw(10) << sec_hv << " s in bandwidth "
+              << std::setw(10) << GBytes / sec_hv << " [GB/s]" << ", kernelVerify cost "
+              << std::setw(10) << sec_kv << " s in bandwidth " << std::setw(10) << GBytes / sec_kv
+              << " [GB/s]" << std::endl;
   }
 
-  void hostFill(size_t size, T *data, T coef, double *sec) {
+  void hostFill(size_t size, T* data, T coef, double* sec) {
     size_t num = size / sizeof(T);  // Size of elements
     auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < num; ++i) {
@@ -179,29 +164,29 @@ class hipPerfMemFill {
     *sec = diff.count();
   }
 
-  void kernelFill(size_t size, T *data, T coef, double *sec) {
+  void kernelFill(size_t size, T* data, T coef, double* sec) {
     size_t num = size / sizeof(T);  // Size of elements
     unsigned blocks = setNumBlocks(num);
 
     // kernel will be loaded first time
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks),
-                           dim3(threadsPerBlock_), 0, 0, data, 0, num);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
+                       data, 0, num);
     HIP_CHECK(hipDeviceSynchronize());
 
     auto start = std::chrono::steady_clock::now();
 
     for (int iter = 0; iter < NUM_ITER; ++iter) {
-      hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks),
-                             dim3(threadsPerBlock_), 0, 0, data, coef, num);
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_fill<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
+                         data, coef, num);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> diff = end - start;  // in second
-    *sec = diff.count() / NUM_ITER;  // in second
+    *sec = diff.count() / NUM_ITER;                    // in second
   }
 
-  void hostVerify(size_t size, T *data, T coef, double *sec) {
+  void hostVerify(size_t size, T* data, T coef, double* sec) {
     size_t num = size / sizeof(T);  // Size of elements
     auto start = std::chrono::steady_clock::now();
     for (int i = 0; i < num; ++i) {
@@ -224,27 +209,27 @@ class hipPerfMemFill {
     *sec = diff.count();
   }
 
-  void kernelVerify(size_t size, T *data, T coef, double *sec) {
+  void kernelVerify(size_t size, T* data, T coef, double* sec) {
     size_t num = size / sizeof(T);  // Size of elements
     unsigned blocks = setNumBlocks(num);
 
     // kernel will be loaded first time
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks),
-                       dim3(threadsPerBlock_), 0, 0, data, coef, num);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
+                       data, coef, num);
     HIP_CHECK(hipDeviceSynchronize());
 
     // Now all data verified. The following is to test bandwidth.
     auto start = std::chrono::steady_clock::now();
 
     for (int iter = 0; iter < NUM_ITER; ++iter) {
-      hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks),
-                             dim3(threadsPerBlock_), 0, 0, data, coef, num);
+      hipLaunchKernelGGL(HIP_KERNEL_NAME(vec_verify<T>), dim3(blocks), dim3(threadsPerBlock_), 0, 0,
+                         data, coef, num);
     }
     HIP_CHECK(hipDeviceSynchronize());
 
     auto end = std::chrono::steady_clock::now();
     std::chrono::duration<double> diff = end - start;  // in second
-    *sec = diff.count() / NUM_ITER;  // in second
+    *sec = diff.count() / NUM_ITER;                    // in second
   }
 
   bool testLargeBarDeviceMemoryHostFill(size_t size) {
@@ -254,7 +239,7 @@ class hipPerfMemFill {
 
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A;
+    T* A;
     HIP_CHECK(hipMalloc(&A, size));
     double sec = 0;
     hostFill(size, A, coef_, &sec);  // Cpu can access device mem in LB
@@ -285,7 +270,7 @@ class hipPerfMemFill {
     }
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A;
+    T* A;
     HIP_CHECK(hipMallocManaged(&A, size));
     double sec = 0;
     hostFill(size, A, coef_, &sec);  // Cpu can access HMM mem
@@ -301,7 +286,7 @@ class hipPerfMemFill {
     }
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A;
+    T* A;
     HIP_CHECK(hipMallocManaged(&A, size));
 
     double sec = 0, sec_hv = 0, sec_kv = 0;
@@ -340,7 +325,7 @@ class hipPerfMemFill {
 
   bool testHostMemoryHostFill(size_t size, unsigned int flags) {
     double GBytes = static_cast<double>(size) / NUM_1GB;
-    T *A;
+    T* A;
     HIP_CHECK(hipHostMalloc(&A, size, flags));
     double sec = 0;
     hostFill(size, A, coef_, &sec);
@@ -353,8 +338,8 @@ class hipPerfMemFill {
   bool testHostMemoryKernelFill(size_t size, unsigned int flags) {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A;
-    HIP_CHECK(hipHostMalloc(reinterpret_cast<void **>(&A), size, flags));
+    T* A;
+    HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&A), size, flags));
     double sec = 0, sec_hv = 0, sec_kv = 0;
     kernelFill(size, A, coef_, &sec);
     hostVerify(size, A, coef_, &sec_hv);
@@ -400,10 +385,11 @@ class hipPerfMemFill {
   /* This function should be via device attribute query*/
   bool supportDeviceMallocFinegrained() {
 #ifdef __HIP_PLATFORM_AMD__
-    T *A = nullptr;
+    T* A = nullptr;
     hipError_t err;
-    err = hipExtMallocWithFlags(reinterpret_cast<void**>(&A), sizeof(T),
-                                hipDeviceMallocFinegrained);
+
+    err =
+        hipExtMallocWithFlags(reinterpret_cast<void**>(&A), sizeof(T), hipDeviceMallocFinegrained);
     if (err || !A) {
       return false;
     }
@@ -415,7 +401,7 @@ class hipPerfMemFill {
   }
 
   unsigned int setNumBlocks(size_t size) {
-    size_t num = size/sizeof(T);
+    size_t num = size / sizeof(T);
 
 #if USE_HIPTEST_SETNUMBLOCKS
     return HipTest::setNumBlocks(blocksPerCU_, threadsPerBlock_, num);
@@ -428,12 +414,11 @@ class hipPerfMemFill {
   bool testExtDeviceMemoryHostFill(size_t size, unsigned int flags) {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A = nullptr;
-    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void **>(&A),
-                                    size, flags));
+    T* A = nullptr;
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags));
     if (!A) {
-      std::cout << "failed hipExtMallocWithFlags() with size =" <<
-                   size << " flags="<< std::hex << flags << std::endl;
+      std::cout << "failed hipExtMallocWithFlags() with size =" << size << " flags=" << std::hex
+                << flags << std::endl;
       return false;
     }
 
@@ -448,12 +433,11 @@ class hipPerfMemFill {
   bool testExtDeviceMemoryKernelFill(size_t size, unsigned int flags) {
     double GBytes = static_cast<double>(size) / NUM_1GB;
 
-    T *A = nullptr;
-    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void **>(&A),
-                                    size, flags));
+    T* A = nullptr;
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A), size, flags));
     if (!A) {
-      std::cout << "failed hipExtMallocWithFlags() with size =" <<
-                   size << " flags=" << std::hex << flags << std::endl;
+      std::cout << "failed hipExtMallocWithFlags() with size =" << size << " flags=" << std::hex
+                << flags << std::endl;
       return false;
     }
 
@@ -470,20 +454,16 @@ class hipPerfMemFill {
   }
 
   bool testExtDeviceMemory() {
-    std::cout << "Test fine grained device memory host filling"
-        << std::endl;
+    std::cout << "Test fine grained device memory host filling" << std::endl;
     for (int i = 0; i < NUM_SIZE; i++) {
-      if (!testExtDeviceMemoryHostFill(totalSizes_[i],
-                                       hipDeviceMallocFinegrained)) {
+      if (!testExtDeviceMemoryHostFill(totalSizes_[i], hipDeviceMallocFinegrained)) {
         return false;
       }
     }
 
-    std::cout << "Test fine grained device memory kernel filling"
-        << std::endl;
+    std::cout << "Test fine grained device memory kernel filling" << std::endl;
     for (int i = 0; i < NUM_SIZE; i++) {
-      if (!testExtDeviceMemoryKernelFill(totalSizes_[i],
-                                         hipDeviceMallocFinegrained)) {
+      if (!testExtDeviceMemoryKernelFill(totalSizes_[i], hipDeviceMallocFinegrained)) {
         return false;
       }
     }
@@ -521,16 +501,16 @@ class hipPerfMemFill {
 };
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipPerfMemFill status.
-* Test source
-* ------------------------
-*  - perftests/memory/hipPerfMemFill.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 5.6
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipPerfMemFill status.
+ * Test source
+ * ------------------------
+ *  - perftests/memory/hipPerfMemFill.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.6
+ */
 
 TEST_CASE("Perf_hipPerfMemFill_test") {
   std::cout << "Test int" << std::endl;
@@ -545,6 +525,6 @@ TEST_CASE("Perf_hipPerfMemFill_test") {
 }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

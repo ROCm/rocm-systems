@@ -20,29 +20,26 @@ THE SOFTWARE.
 #include <iostream>
 #include <cassert>
 #include <vector>
-#define HIP_CHECK(error)\
-{\
-  hipError_t localError = error;\
-  if ((localError != hipSuccess) && \
-      (localError != hipErrorPeerAccessAlreadyEnabled)) {\
-    printf("error: '%s'(%d) from %s at %s:%d\n", \
-           hipGetErrorString(localError), \
-            localError, #error, __FUNCTION__, __LINE__);\
-    exit(0);\
-  }\
-}
-#define HIPRTC_CHECK(error) \
-  {                        \
-    auto localError = error; \
-    if (localError != HIPRTC_SUCCESS) { \
-      printf("error: '%s'(%d) from %s at %s:%d\n", \
-             hiprtcGetErrorString(localError), localError, \
-             #error, __FUNCTION__, __LINE__); \
-      exit(0); \
-    } \
+#define HIP_CHECK(error)                                                                           \
+  {                                                                                                \
+    hipError_t localError = error;                                                                 \
+    if ((localError != hipSuccess) && (localError != hipErrorPeerAccessAlreadyEnabled)) {          \
+      printf("error: '%s'(%d) from %s at %s:%d\n", hipGetErrorString(localError), localError,      \
+             #error, __FUNCTION__, __LINE__);                                                      \
+      exit(0);                                                                                     \
+    }                                                                                              \
   }
-static constexpr auto ptrdiff_Kernel_String {
-R"(
+#define HIPRTC_CHECK(error)                                                                        \
+  {                                                                                                \
+    auto localError = error;                                                                       \
+    if (localError != HIPRTC_SUCCESS) {                                                            \
+      printf("error: '%s'(%d) from %s at %s:%d\n", hiprtcGetErrorString(localError), localError,   \
+             #error, __FUNCTION__, __LINE__);                                                      \
+      exit(0);                                                                                     \
+    }                                                                                              \
+  }
+static constexpr auto ptrdiff_Kernel_String{
+    R"(
 extern "C"
 __global__ void ptrdiff_Kernel(unsigned int *res, int platformVar) {
   #if __HIPRTC_PTRDIFF_T_IS_LONG_LONG__
@@ -64,8 +61,8 @@ int main(int argc, char** argv) {
   }
   std::string kernel_name = "ptrdiff_Kernel";
   const char* kername = kernel_name.c_str();
-  unsigned int *result_h;
-  unsigned int *result_d;
+  unsigned int* result_h;
+  unsigned int* result_d;
   unsigned int Nbytes = sizeof(unsigned int);
   result_h = new unsigned int;
   *result_h = 0;
@@ -87,16 +84,14 @@ int main(int argc, char** argv) {
     compiler_options[1] = "-D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__=1";
   } else if ((macro == "HIPRTC_PTRDIFF_T_IS_LONG_LONG") && (macroVal == 0)) {
     compiler_options[1] = "-D__HIPRTC_PTRDIFF_T_IS_LONG_LONG__=0";
-    #ifdef __linux__
-      platformVar = 1;
-    #endif
+#ifdef __linux__
+    platformVar = 1;
+#endif
   }
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String,
-                                   kername, 0, NULL, NULL));
-  hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                             2, compiler_options)};
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog, ptrdiff_Kernel_String, kername, 0, NULL, NULL));
+  hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
 
-    if (!(compileResult == HIPRTC_SUCCESS)) {
+  if (!(compileResult == HIPRTC_SUCCESS)) {
     printf("hiprtcCompileProgram() api failed!!");
     size_t logSize;
     HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
@@ -111,14 +106,12 @@ int main(int argc, char** argv) {
   void* kernelParam[] = {result_d, reinterpret_cast<void*>(platformVar)};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
   hipModule_t module;
   hipFunction_t function;
   HIP_CHECK(hipModuleLoadData(&module, codec.data()));
   HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                  kernel_parameter));
+  HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
   if (*result_h != 1) {

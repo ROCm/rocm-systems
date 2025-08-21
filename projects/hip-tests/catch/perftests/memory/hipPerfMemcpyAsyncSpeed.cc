@@ -17,12 +17,6 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
-// Quiet pesky warnings
-#ifdef WIN_OS
-#define SNPRINTF sprintf_s
-#else
-#define SNPRINTF snprintf
-#endif
 
 #define NUM_SIZES 6
 // 256 Bytes, 512 Bytes, 1024 Bytes, 2048 Bytes, 3072 Bytes, 4096 Bytes
@@ -38,9 +32,9 @@ void checkData(void* ptr, unsigned int size, char value) {
   char* ptr2 = (char*)ptr;
   for (unsigned int i = 0; i < size; i++) {
     if (ptr2[i] != value) {
-      printf("Data validation failed at %d!  Got 0x%08x\n", i, ptr2[i]);
-      printf("Expected 0x%08x\n", value);
-      printf("Data validation failed!");
+      CONSOLE_PRINT("Data validation failed at %d!  Got 0x%08x\n", i, ptr2[i]);
+      CONSOLE_PRINT("Expected 0x%08x\n", value);
+      CONSOLE_PRINT("Data validation failed!");
       break;
     }
   }
@@ -50,7 +44,7 @@ bool extraWarmup = true;
 TEST_CASE("Perf_hipPerfMemcpyAsyncSpeed_test") {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  printf("Set device to %d : %s\n", 0, props.name);
+  CONSOLE_PRINT("Set device to %d : %s\n", 0, props.name);
   HIP_CHECK(hipSetDevice(0));
 
   unsigned int bufSize_;
@@ -66,9 +60,9 @@ TEST_CASE("Perf_hipPerfMemcpyAsyncSpeed_test") {
     int test = 0;
     uint32_t kMaxSize = (t == 0) ? 128 * 1024 * 1024 : 1024 * 1024 * 1024;
     if (t < 2) {
-      printf("----- Global buffer (MiB): %d\n", kMaxSize / (1024 * 1024));
+      CONSOLE_PRINT("\n----- Global buffer (MiB): %d", kMaxSize / (1024 * 1024));
     } else {
-      printf("----- Same buffer copy repeat\n");
+      CONSOLE_PRINT("\n----- Same buffer copy repeat");
     }
     for (; test <= numTests; test++) {
       bufSize_ = Sizes[test % NUM_SIZES];
@@ -131,12 +125,11 @@ TEST_CASE("Perf_hipPerfMemcpyAsyncSpeed_test") {
       // Double results when src and dst are both on device
       perf *= 2.0;
       char buf[256];
-      SNPRINTF(buf, sizeof(buf),
-               "hipMemcpyAsync[%d]\t(%8d bytes)\ts:%s d:%s\ti:%4d\t(GB/s) "
-               "perf\t%.2f, time per iter(us):\t%.1f, time per iter CPU (us):\t%.1f",
-               test, bufSize_, strSrc, strDst, numIter, (float)perf,
-               sec.count() / numIter * 1000 * 1000, sec_cpu.count() / numIter * 1000 * 1000);
-      printf("%s\n", buf);
+      CONSOLE_PRINT(
+          "hipMemcpyAsync[%d]\t(%8d bytes)\ts:%s d:%s\ti:%4d\t(GB/s) "
+          "perf\t%.2f, time per iter(us):\t%.1f, time per iter CPU (us):\t%.1f",
+          test, bufSize_, strSrc, strDst, numIter, (float)perf, sec.count() / numIter * 1000 * 1000,
+          sec_cpu.count() / numIter * 1000 * 1000);
 
       // Verification
       void* temp = malloc(bufSize_ + 4096);

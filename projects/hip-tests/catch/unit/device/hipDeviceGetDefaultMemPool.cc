@@ -93,6 +93,6 @@ TEST_CASE("Unit_hipDeviceGetDefaultMemPool_Negative_Parameters") {
 }
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

@@ -17,6 +17,7 @@ You can utilize the ROCprofiler-SDK to develop a tool for profiling and tracing 
 
 The code is open and hosted at `<https://github.com/ROCm/rocprofiler-sdk>`_.
 
+ROCprofiler-SDK uses a companion library called AQLprofile that generates profiling command packets (AQL/PM4) for performance counters and SQ thread trace. See the `AQLprofile docs` for more info.
 
 The documentation is structured as follows:
 

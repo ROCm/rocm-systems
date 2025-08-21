@@ -90,8 +90,7 @@ TEST_CASE("Unit_hipTexRefGetFormat_Negative") {
   HIP_CHECK(hipTexRefSetFormat(tex_ref, format_set, num_channels));
 
 #if HT_AMD
-  HIP_CHECK_ERROR(hipTexRefGetFormat(&format_get, &num_channels, nullptr),
-                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipTexRefGetFormat(&format_get, &num_channels, nullptr), hipErrorInvalidValue);
 #else
   HIP_CHECK_ERROR(hipTexRefGetFormat(&format_get, &num_channels, nullptr),
                   hipErrorInvalidResourceHandle);
@@ -100,4 +99,4 @@ TEST_CASE("Unit_hipTexRefGetFormat_Negative") {
   HIP_CHECK(hipModuleUnload(module));
 }
 
-#endif // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000
+#endif  // __HIP_PLATFORM_AMD__ || CUDA_VERSION < CUDA_12000

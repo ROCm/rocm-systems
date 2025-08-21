@@ -18,22 +18,22 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hiprtc_MathConstants_HeaderTst hiprtc_MathConstants_HeaderTst
-* @{
-* @ingroup hiprtcHeaders
-* `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
-*                                  int numOptions,
-*                                  const char** options);` -
-* These test cases are target including various header file in kernel
-* string and compile using the api mentioned above.
-*/
+ * @addtogroup hiprtc_MathConstants_HeaderTst hiprtc_MathConstants_HeaderTst
+ * @{
+ * @ingroup hiprtcHeaders
+ * `hiprtcResult hiprtcCompileProgram(hiprtcProgram prog,
+ *                                  int numOptions,
+ *                                  const char** options);` -
+ * These test cases are target including various header file in kernel
+ * string and compile using the api mentioned above.
+ */
 
 #include <hip/hiprtc.h>
 #include <hip/hip_runtime.h>
 #include <hip_test_common.hh>
 
-static constexpr auto mathConstants_string {
-R"(
+static constexpr auto mathConstants_string{
+    R"(
 extern "C"
 __global__ void mathConstants(float *res) {
   // single precision constants
@@ -135,22 +135,22 @@ __global__ void mathConstants(float *res) {
 }
 )"};
 /**
-* Test Description
-* ------------------------
-*  - Functional Test for API - hiprtcCompileProgram
-*    1) To test working of "hip/hip_math_constants.h"  header inside kernel string
-* Test source
-* ------------------------
-*  - unit/rtc/hiprtc_MathConstants_HeaderTst.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - Functional Test for API - hiprtcCompileProgram
+ *    1) To test working of "hip/hip_math_constants.h"  header inside kernel string
+ * Test source
+ * ------------------------
+ *  - unit/rtc/hiprtc_MathConstants_HeaderTst.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_Rtc_MathConstants_header") {
   std::string kernel_name = "mathConstants";
   const char* kername = kernel_name.c_str();
-  float *result_h;
-  float *result_d;
+  float* result_h;
+  float* result_d;
   int n = 93;
   float Nbytes = n * sizeof(float);
   result_h = new float[n];
@@ -171,11 +171,9 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
       compiler_options[0] = compiler_option;
       compiler_options[1] = "";
     }
-    HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathConstants_string,
-                                     kername, 0, NULL, NULL));
+    HIPRTC_CHECK(hiprtcCreateProgram(&prog, mathConstants_string, kername, 0, NULL, NULL));
     if (scenario == 0) {
-      hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                                 1, &compiler_option)};
+      hiprtcResult compileResult{hiprtcCompileProgram(prog, 1, &compiler_option)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
         WARN("hiprtcCompileProgram() api failed!!");
         size_t logSize;
@@ -186,8 +184,7 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
         REQUIRE(false);
       }
     } else {
-      hiprtcResult compileResult{hiprtcCompileProgram(prog,
-                                 2, compiler_options)};
+      hiprtcResult compileResult{hiprtcCompileProgram(prog, 2, compiler_options)};
       if (!(compileResult == HIPRTC_SUCCESS)) {
         WARN("hiprtcCompileProgram() api failed!!");
         size_t logSize;
@@ -205,18 +202,16 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
     void* kernelParam[] = {result_d};
     auto size = sizeof(kernelParam);
     void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                                HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                                HIP_LAUNCH_PARAM_END};
+                                HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
     hipModule_t module;
     hipFunction_t function;
     HIP_CHECK(hipModuleLoadData(&module, codec.data()));
     HIP_CHECK(hipModuleGetFunction(&function, module, kername));
-    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr,
-                                    kernel_parameter));
+    HIP_CHECK(hipModuleLaunchKernel(function, 1, 1, 1, 1, 1, 1, 0, 0, nullptr, kernel_parameter));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(result_h, result_d, Nbytes, hipMemcpyDeviceToHost));
     for (int i = 0; i < n; i++) {
-    if (result_h[i] != 1.0f) {
+      if (result_h[i] != 1.0f) {
         WARN("FAIL for " << i << " iteration");
         WARN(result_h[i]);
         REQUIRE(false);
@@ -226,11 +221,11 @@ TEST_CASE("Unit_Rtc_MathConstants_header") {
     HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
   }
   HIP_CHECK(hipFree(result_d));
-  delete [] result_h;
+  delete[] result_h;
   REQUIRE(true);
 }
 
 /**
-* End doxygen group hiprtcHeaders.
-* @}
-*/
+ * End doxygen group hiprtcHeaders.
+ * @}
+ */

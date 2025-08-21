@@ -906,6 +906,10 @@ class Runtime {
   };
   std::map<const void*, MappedHandle> mapped_handle_map_;  // Indexed by VA
 
+  AddressHandle* VMemoryFindReservedAddressHandle(const void* va);
+  hsa_status_t VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
+                              uint32_t* num_agents_accessible, hsa_agent_t** accessible);
+
   hsa_status_t VMemoryMapAllowAccess(const void *va,
                                      hsa_access_permission_t perm,
                                      const hsa_agent_t *agents,

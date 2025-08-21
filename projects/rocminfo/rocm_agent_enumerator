@@ -117,7 +117,7 @@ def readFromTargetLstFile():
   # locate target.lst using environment variable or
   # it should be placed at the same directory with this script
   target_lst_path = os.environ.get("ROCM_TARGET_LST");
-  if target_lst_path == None:
+  if target_lst_path is None:
     target_lst_path = os.path.join(CWD, "target.lst")
   if os.path.isfile(target_lst_path):
     target_lst_file = open(target_lst_path, 'r')

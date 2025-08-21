@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -19,14 +19,14 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 
-#define MEM_SIZE (1024*1024*32)
+#define MEM_SIZE (1024 * 1024 * 32)
 #define SEED 5
 
 constexpr unsigned int MAX_THREAD_CNT = 10;
 
 __global__ void copy_kernl(int* devPtr) {
   for (int i = 0; i < MEM_SIZE; ++i) {
-    devPtr[i] = (i+1) + SEED;
+    devPtr[i] = (i + 1) + SEED;
   }
 }
 
@@ -46,8 +46,8 @@ TEST_CASE("Unit_hipStreamPerThread_Basic") {
   /*
    hipStreamPerThread is an implicit stream which works independent of null stream.
    Null stream synchronize will account hipStreamPerThread into account.
-   test scenario: Launch kernel + Async mem copy on hipStreamPerThread and call synchronize on null stream.
-   Result : Null stream synchronize should sync hipStreamPerThread as well
+   test scenario: Launch kernel + Async mem copy on hipStreamPerThread and call synchronize on null
+   stream. Result : Null stream synchronize should sync hipStreamPerThread as well
    */
   copy_kernl<<<1, 1, 0, hipStreamPerThread>>>(devMem);
 
@@ -56,21 +56,20 @@ TEST_CASE("Unit_hipStreamPerThread_Basic") {
   HIP_CHECK(hipStreamSynchronize(0));
 
   // validate result
-  for (int i = MEM_SIZE-1; i >= 0; --i) {
-    CHECK(hostMem[i] == (i+1+SEED));
+  for (int i = MEM_SIZE - 1; i >= 0; --i) {
+    CHECK(hostMem[i] == (i + 1 + SEED));
   }
 
   // Clean-up
   HIP_CHECK(hipHostFree(hostMem));
   HIP_CHECK(hipFree(devMem));
-
 }
 
 TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
-  for (auto &th : threads) {
-    th = std::thread([](){HIP_CHECK(hipStreamQuery(hipStreamPerThread));});
+  for (auto& th : threads) {
+    th = std::thread([]() { HIP_CHECK(hipStreamQuery(hipStreamPerThread)); });
   }
 
   for (auto& th : threads) {
@@ -113,7 +112,7 @@ TEST_CASE("Unit_hipStreamPerThread_MemcpyAsync") {
   int* A_h = nullptr;
   int* A_d = nullptr;
 
-  HIP_CHECK(hipHostMalloc(&A_h, ele_size*sizeof(int)));
+  HIP_CHECK(hipHostMalloc(&A_h, ele_size * sizeof(int)));
   HIP_CHECK(hipMalloc(&A_d, ele_size * sizeof(int)));
 
   for (unsigned int i = 0; i < ele_size; ++i) {
@@ -127,12 +126,16 @@ TEST_CASE("Unit_hipStreamPerThread_MemcpyAsync") {
     A_h[i] = 0;
   }
 
-  HIP_CHECK(hipMemcpyAsync(A_h, A_d, ele_size * sizeof(int), hipMemcpyDeviceToHost,
-                           hipStreamPerThread));
+  HIP_CHECK(
+      hipMemcpyAsync(A_h, A_d, ele_size * sizeof(int), hipMemcpyDeviceToHost, hipStreamPerThread));
   HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
 
   // Verify result
   for (unsigned int i = 0; i < ele_size; ++i) {
     REQUIRE(A_h[i] == 123);
   }
+
+  // Clean-up
+  HIP_CHECK(hipHostFree(A_h));
+  HIP_CHECK(hipFree(A_d));
 }

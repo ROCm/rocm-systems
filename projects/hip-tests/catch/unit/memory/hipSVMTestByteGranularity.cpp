@@ -48,8 +48,7 @@ __global__ void sum_neighbor_locations(char* a, unsigned int num_devices,
   for (unsigned int j = 0; j < num_devices; j++) {
     sum += a[i + j];  // add my neighbors to the right
   }
-  if (sum != expected_sum)
-    atomicAdd_system(error_count, 1u); // like opencl atomic_inc()
+  if (sum != expected_sum) atomicAdd_system(error_count, 1u);  // like opencl atomic_inc()
 }
 
 /**
@@ -97,24 +96,24 @@ TEST_CASE("test_svm_byte_granularity") {
   HIP_CHECK(hipHostMalloc(&pA, sizeof(char) * num_elements, hipHostMallocNonCoherent));
   unsigned int** error_counts = (unsigned int**)malloc(sizeof(void*) * num_devices);
 
-  for(unsigned int i=0; i < num_devices; i++) {
+  for (unsigned int i = 0; i < num_devices; i++) {
     // hipHostMallocCoherent means CL_MEM_SVM_FINE_GRAIN_BUFFER + CL_MEM_SVM_ATOMICS
     // We need atomic inc among different GPUs
     HIP_CHECK(hipHostMalloc(&error_counts[i], sizeof(unsigned int) * num_elements,
                             hipHostMallocCoherent));
     *error_counts[i] = 0;
   }
-  for(int i = 0; i < num_elements; i++) pA[i] = -1;
+  for (int i = 0; i < num_elements; i++) pA[i] = -1;
 
   // get all the devices going simultaneously
-  for(unsigned int d = 0; d < num_devices; d++)  // device ids starting at 1.
+  for (unsigned int d = 0; d < num_devices; d++)  // device ids starting at 1.
   {
+    HIP_CHECK(hipSetDevice(d));
     write_owned_locations<<<num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host, d);
     HIP_CHECK(hipGetLastError());
   }
   unsigned int host_id = num_devices;  // host code will take the id above the devices.
-  for(unsigned int i = num_devices; i < num_elements; i+= num_devices_plus_host)
-    pA[i] = host_id;
+  for (unsigned int i = num_devices; i < num_elements; i += num_devices_plus_host) pA[i] = host_id;
 
   for (unsigned int d = 0; d < num_devices; d++) {
     HIP_CHECK(hipStreamSynchronize(streams[d]));
@@ -123,10 +122,10 @@ TEST_CASE("test_svm_byte_granularity") {
   // now check that each device can see the byte writes made by the other devices.
   // adjusted so sum_neighbor_locations doesn't read past end of buffer
   size_t adjusted_num_elements = num_elements - num_devices;
-  for(unsigned int d = 0; d < num_devices; d++)
-  {
+  for (unsigned int d = 0; d < num_devices; d++) {
+    HIP_CHECK(hipSetDevice(d));
     sum_neighbor_locations<<<adjusted_num_elements, 1, 0, streams[d]>>>(pA, num_devices_plus_host,
-                                                                     error_counts[d]);
+                                                                        error_counts[d]);
     HIP_CHECK(hipGetLastError());
   }
 
@@ -134,18 +133,17 @@ TEST_CASE("test_svm_byte_granularity") {
     HIP_CHECK(hipStreamSynchronize(streams[d]));
   }
   // see if any of the devices found errors
-  for(unsigned int d = 0; d < num_devices; d++) {
+  for (unsigned int d = 0; d < num_devices; d++) {
     if (*error_counts[d] > 0) {
       fprintf(stderr, "*error_counts[%u] = %u\n", d, *error_counts[d]);
       REQUIRE(false);
     }
   }
-  unsigned int expected = (num_devices_plus_host * (num_devices_plus_host - 1))/2;
+  unsigned int expected = (num_devices_plus_host * (num_devices_plus_host - 1)) / 2;
   // check that host can see the byte writes made by the devices.
-  for(unsigned int i = 0; i < num_elements - num_devices_plus_host; i++)
-  {
+  for (unsigned int i = 0; i < num_elements - num_devices_plus_host; i++) {
     unsigned int sum = 0;
-    for(unsigned int j = 0; j < num_devices_plus_host; j++) sum += pA[i+j];
+    for (unsigned int j = 0; j < num_devices_plus_host; j++) sum += pA[i + j];
     if (sum != expected) {
       fprintf(stderr, "[%u]: sum %u != expected %u", i, sum, expected);
       REQUIRE(false);

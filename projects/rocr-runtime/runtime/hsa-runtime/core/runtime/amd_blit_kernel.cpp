@@ -678,7 +678,7 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
       std::atomic_thread_fence(std::memory_order_release);
       queue_buffer[(write_index)&queue_bitmask_].header = kBarrierPacketHeader;
 
-      LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
+      LogPrint(HSA_AMD_LOG_FLAG_AQL,
       "HWq=%p, id=%lu, Barrier Header = "
       "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
       "dep_signal=[0x%zx 0x%zx 0x%zx 0x%zx 0x%zx], completion_signal=0x%zx "
@@ -693,12 +693,12 @@ hsa_status_t BlitKernel::SubmitLinearCopyCommand(
                     HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
       extractAqlBits(kBarrierPacketHeader, HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE,
                     HSA_PACKET_HEADER_WIDTH_SCRELEASE_FENCE_SCOPE),
-      barrier_packet.dep_signal[0].handle, 
+      barrier_packet.dep_signal[0].handle,
       barrier_packet.dep_signal[1].handle,
       barrier_packet.dep_signal[2].handle,
-      barrier_packet.dep_signal[3].handle, 
+      barrier_packet.dep_signal[3].handle,
       barrier_packet.dep_signal[4].handle,
-      barrier_packet.completion_signal.handle, 
+      barrier_packet.completion_signal.handle,
       queue_->LoadReadIndexRelaxed(), write_index);
 
       ++write_index;
@@ -900,7 +900,7 @@ void BlitKernel::PopulateQueue(uint64_t index, uint64_t code_handle, void* args,
   __atomic_store_n(&(queue_buffer[index & queue_bitmask_].full_header),
                     kDispatchPacketHeader | packet.setup << 16, __ATOMIC_RELEASE);
 
-  LogPrint(HSA_AMD_LOG_FLAG_BLIT_KERNEL_PKTS,
+  LogPrint(HSA_AMD_LOG_FLAG_AQL,
     "HWq=%p, id=%lu, Dispatch Header = "
     "0x%x (type=%d, barrier=%d, acquire=%d, release=%d), "
     "setup=%d, grid=[%zu, %zu, %zu], workgroup=[%zu, %zu, %zu], private_seg_size=%zu, "

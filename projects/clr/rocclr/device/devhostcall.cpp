@@ -48,9 +48,7 @@ PacketHeader* HostcallBuffer::getHeader(uint64_t ptr) const {
   return headers_ + (ptr & index_mask_);
 }
 
-Payload* HostcallBuffer::getPayload(uint64_t ptr) const {
-  return payloads_ + (ptr & index_mask_);
-}
+Payload* HostcallBuffer::getPayload(uint64_t ptr) const { return payloads_ + (ptr & index_mask_); }
 
 static uint32_t setControlField(uint32_t control, uint8_t offset, uint8_t width, uint32_t value) {
   uint32_t mask = ~(((1 << width) - 1) << offset);
@@ -73,7 +71,8 @@ static uint32_t resetReadyFlag(uint32_t control) {
  */
 typedef void (*HostcallFunctionCall)(uint64_t* output, const uint64_t* input);
 
-static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* payload, const amd::Device &dev) {
+static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* payload,
+                          const amd::Device& dev) {
   switch (service) {
     case SERVICE_FUNCTION_CALL: {
       uint64_t output[2];
@@ -94,6 +93,7 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
       if (payload[0]) {
         amd::Memory* mem = amd::MemObjMap::FindMemObj(reinterpret_cast<void*>(payload[0]));
         if (mem) {
+          const_cast<amd::Device*>(&dev)->RemoveHostcallMemory(mem);
           amd::MemObjMap::RemoveMemObj(reinterpret_cast<void*>(payload[0]));
           mem->release();
         } else {
@@ -102,14 +102,15 @@ static void handlePayload(MessageHandler& messages, uint32_t service, uint64_t* 
         }
       } else {
         amd::Context& ctx = dev.context();
-        amd::Buffer* buf = new(ctx) amd::Buffer(ctx, CL_MEM_READ_WRITE, payload[1], NULL,
-                                               (payload[1]  == 2 * Mi) ? 2 * Mi : 0);
+        amd::Buffer* buf = new (ctx) amd::Buffer(ctx, CL_MEM_READ_WRITE, payload[1], NULL,
+                                                 (payload[1] == 2 * Mi) ? 2 * Mi : 0);
         uint64_t va = 0;
         if (buf) {
           if (buf->create()) {
             device::Memory* dm = buf->getDeviceMemory(dev);
             va = dm->virtualAddress();
             amd::MemObjMap::AddMemObj(reinterpret_cast<void*>(va), buf);
+            const_cast<amd::Device*>(&dev)->TrackHostcallMemory(buf);
           } else {
             buf->release();
           }
@@ -129,7 +130,8 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
   // device will continue pushing on the stack while we process the packets that
   // we have grabbed.
 
-  uint64_t ready_stack = std::atomic_exchange_explicit(&ready_stack_, static_cast<uint64_t>(0), std::memory_order_acquire);
+  uint64_t ready_stack = std::atomic_exchange_explicit(&ready_stack_, static_cast<uint64_t>(0),
+                                                       std::memory_order_acquire);
   if (!ready_stack) {
     return;
   }
@@ -151,7 +153,7 @@ void HostcallBuffer::processPackets(MessageHandler& messages) {
 #if __has_feature(address_sanitizer)
     if (service == SERVICE_SANITIZER) {
       handleSanitizerService(payload, activemask, device_, uri_locator);
-      //activemask zeroed to avoid subsequent handling for each work-item.
+      // activemask zeroed to avoid subsequent handling for each work-item.
       activemask = 0;
     }
 #endif
@@ -228,7 +230,7 @@ class HostcallListener {
   std::set<const amd::Device*> devices_;
 #if defined(__clang__)
 #if __has_feature(address_sanitizer)
-   device::UriLocator* urilocator = nullptr;
+  device::UriLocator* urilocator = nullptr;
 #endif
 #endif
   class Thread : public amd::Thread {
@@ -263,14 +265,12 @@ class HostcallListener {
   void removeBuffer(HostcallBuffer* buffer);
 
   /* \brief Return true if no buffers are registered.
-  */
-  bool idle() const {
-    return buffers_.empty();
-  }
+   */
+  bool idle() const { return buffers_.empty(); }
 
   void terminate();
-  bool initSignal(const amd::Device &dev);
-  bool initDevice(const amd::Device &dev);
+  bool initSignal(const amd::Device& dev);
+  bool initDevice(const amd::Device& dev);
 };
 
 HostcallListener* hostcallListener = nullptr;
@@ -278,12 +278,7 @@ extern amd::Monitor listenerLock;
 constexpr static uint64_t kTimeoutFloor = K * K * 4;
 constexpr static uint64_t kTimeoutCeil = K * K * 16;
 static struct Init {
-  enum class State {
-    kDefault = 0,
-    kInit,
-    kDestroy,
-    kExit
-  };
+  enum class State { kDefault = 0, kInit, kDestroy, kExit };
   volatile State state = State::kDefault;
   ~Init() {
     if (state == State::kInit) {
@@ -291,7 +286,8 @@ static struct Init {
       // @note: Under Linux thread destruction can be delayed and
       // ROCR may crash in a wait for event occasionally. Hence, runtime needs
       // an early exit. The logic isn't required for Windows.
-      while (IS_LINUX && (state == State::kDestroy)) {}
+      while (IS_LINUX && (state == State::kDestroy)) {
+      }
     }
   }
 } kHostThreadActive;
@@ -370,7 +366,7 @@ void HostcallListener::removeBuffer(HostcallBuffer* buffer) {
   buffers_.erase(buffer);
 }
 
-bool HostcallListener::initSignal(const amd::Device &dev) {
+bool HostcallListener::initSignal(const amd::Device& dev) {
   doorbell_ = dev.createSignal();
   initDevice(dev);
 #if defined(__clang__)
@@ -394,7 +390,7 @@ bool HostcallListener::initSignal(const amd::Device &dev) {
   return true;
 }
 
-bool HostcallListener::initDevice(const amd::Device &dev) {
+bool HostcallListener::initDevice(const amd::Device& dev) {
   // Create only one signal per device
   // This is to avoid conflicts when n signals are created for n HIP streams per device
   if (devices_.count(&dev) == 0) {
@@ -408,10 +404,10 @@ bool HostcallListener::initDevice(const amd::Device &dev) {
     }
     devices_.insert(&dev);
   }
-return true;
+  return true;
 }
 
-bool enableHostcalls(const amd::Device &dev, void* bfr, uint32_t numPackets) {
+bool enableHostcalls(const amd::Device& dev, void* bfr, uint32_t numPackets) {
   auto buffer = reinterpret_cast<HostcallBuffer*>(bfr);
   buffer->initialize(numPackets);
   buffer->setDevice(&dev);
@@ -429,15 +425,16 @@ bool enableHostcalls(const amd::Device &dev, void* bfr, uint32_t numPackets) {
     ClPrint(amd::LOG_INFO, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
             "Launched hostcall listener at %p", hostcallListener);
   }
-// For PAL, create one signal per device (inside hostcallListener->initDevice(dev)) whose pointer is stored in this hostcall buffer
-// For ROCr, create only one signal across all devices (inside hostcallListener->initSignal(dev)) whose pointer is stored in every hostcall buffer
+// For PAL, create one signal per device (inside hostcallListener->initDevice(dev)) whose pointer is
+// stored in this hostcall buffer For ROCr, create only one signal across all devices (inside
+// hostcallListener->initSignal(dev)) whose pointer is stored in every hostcall buffer
 #if defined(WITH_PAL_DEVICE)
   else if (!hostcallListener->initDevice(dev)) {
     ClPrint(amd::LOG_ERROR, (amd::LOG_INIT | amd::LOG_QUEUE | amd::LOG_RESOURCE),
             "failed to initialize device for hostcall");
     return false;
   }
-#endif // defined(WITH_PAL_DEVICE)
+#endif  // defined(WITH_PAL_DEVICE)
   hostcallListener->addBuffer(buffer);
   ClPrint(amd::LOG_INFO, amd::LOG_QUEUE, "Registered hostcall buffer %p with listener %p", buffer,
           hostcallListener);
@@ -461,4 +458,4 @@ void disableHostcalls(void* bfr) {
     ClPrint(amd::LOG_INFO, amd::LOG_INIT, "Terminated hostcall listener");
   }
 }
-}// namespace amd
+}  // namespace amd
