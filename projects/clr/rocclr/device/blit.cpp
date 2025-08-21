@@ -31,8 +31,8 @@ HostBlitManager::HostBlitManager(VirtualDevice& vDev, Setup setup)
     : BlitManager(setup), vDev_(vDev), dev_(vDev.device()) {}
 
 bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
-                                 const amd::Coord3D& origin, const amd::Coord3D& size,
-                                 bool entire, amd::CopyMetadata copyMetadata) const {
+                                 const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                 amd::CopyMetadata copyMetadata) const {
   // Map the device memory to CPU visible
   void* src = srcMemory.cpuMap(vDev_, Memory::CpuReadOnly);
   if (NULL == src) {
@@ -148,8 +148,8 @@ bool HostBlitManager::readImage(device::Memory& srcMemory, void* dstHost,
 }
 
 bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory,
-                                  const amd::Coord3D& origin, const amd::Coord3D& size,
-                                  bool entire, amd::CopyMetadata copyMetadata) const {
+                                  const amd::Coord3D& origin, const amd::Coord3D& size, bool entire,
+                                  amd::CopyMetadata copyMetadata) const {
   uint flags = 0;
   if (entire) {
     flags = Memory::CpuWriteOnly;
@@ -722,20 +722,23 @@ void HostBlitManager::FillBufferInfo::PackInfo(const device::Memory& memory, siz
                                                std::vector<FillBufferInfo>& packed_info) {
   // 1. Validate input arguments
   guarantee(fill_size >= pattern_size, "Pattern Size: %u cannot be greater than fill size: %u \n",
-                                        pattern_size, fill_size);
+            pattern_size, fill_size);
 
   // 2. Calculate the next closest dword aligned address for faster processing
   size_t dst_addr = memory.virtualAddress() + fill_origin;
   size_t aligned_dst_addr = amd::alignUp(dst_addr, kExtendedSize);
-  guarantee(aligned_dst_addr >= dst_addr, "Aligned address: %u cannot be greater than destination"
-                                          "address :%u \n", aligned_dst_addr, dst_addr);
+  guarantee(aligned_dst_addr >= dst_addr,
+            "Aligned address: %u cannot be greater than destination"
+            "address :%u \n",
+            aligned_dst_addr, dst_addr);
 
   // 3. If given address is not aligned calculate head and tail size.
   size_t head_size = std::min(aligned_dst_addr - dst_addr, fill_size);
   size_t aligned_size = ((fill_size - head_size) / kExtendedSize) * kExtendedSize;
   size_t tail_size = (fill_size - head_size) % kExtendedSize;
-  guarantee((head_size + aligned_size + tail_size) <= fill_size, "Head size, aligned size & tail"
-                                                          "size together cannot cross fill size");
+  guarantee((head_size + aligned_size + tail_size) <= fill_size,
+            "Head size, aligned size & tail"
+            "size together cannot cross fill size");
 
   // 4. Fill the head, aligned, tail info if they exist.
   if (head_size > 0) {

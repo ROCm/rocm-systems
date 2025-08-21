@@ -41,7 +41,8 @@ static bool check_if_all(uint64_t predicate_mask, uint64_t active_mask, size_t p
   return true;
 }
 
-__global__ void kernel_all(uint64_t* const out, const uint64_t* const active_masks, uint64_t predicate) {
+__global__ void kernel_all(uint64_t* const out, const uint64_t* const active_masks,
+                           uint64_t predicate) {
   if (deactivate_thread(active_masks)) {
     return;
   }
@@ -119,16 +120,12 @@ TEST_CASE("Unit_Warp_Vote_All_Positive_Basic") {
     return;
   }
 
-  SECTION("Warp Vote All with specified active mask") {
-    WarpAll().run(false);
-  }
+  SECTION("Warp Vote All with specified active mask") { WarpAll().run(false); }
 
-  SECTION("Warp Vote All with random active mask") {
-    WarpAll().run(true);
-  }
+  SECTION("Warp Vote All with random active mask") { WarpAll().run(true); }
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

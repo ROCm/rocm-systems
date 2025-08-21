@@ -41,7 +41,7 @@ static __global__ void kerTestDeviceMalloc(size_t size) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
-    dev_common_ptr = reinterpret_cast<char*> (malloc(size));
+    dev_common_ptr = reinterpret_cast<char*>(malloc(size));
     if (dev_common_ptr == nullptr) {
       printf("Device Allocation Failed! \n");
       return;
@@ -67,13 +67,13 @@ static __global__ void kerTestDeviceWrite() {
  * This kernel frees the memory chunk allocated in kernel
  * kerTestDeviceMalloc using free().
  */
-static __global__ void kerTestDeviceFree(int *result) {
+static __global__ void kerTestDeviceFree(int* result) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
     if (dev_common_ptr != nullptr) {
       *result = 1;
-      for (int idx = 0; idx < (BLOCKSIZE*GRIDSIZE); idx++) {
+      for (int idx = 0; idx < (BLOCKSIZE * GRIDSIZE); idx++) {
         if (*(dev_common_ptr + myId) != SCHAR_MAX) {
           *result = 0;
           break;
@@ -105,13 +105,13 @@ static __global__ void kerTestDeviceNew(size_t size) {
  * This kernel frees the memory chunk allocated in kernel
  * kerTestDeviceNew using delete operator.
  */
-static __global__ void kerTestDeviceDelete(int *result) {
+static __global__ void kerTestDeviceDelete(int* result) {
   int myId = threadIdx.x + blockDim.x * blockIdx.x;
   // Allocate
   if (myId == 0) {
     if (dev_common_ptr != nullptr) {
       *result = 1;
-      for (int idx = 0; idx < (BLOCKSIZE*GRIDSIZE); idx++) {
+      for (int idx = 0; idx < (BLOCKSIZE * GRIDSIZE); idx++) {
         if (*(dev_common_ptr + myId) != SCHAR_MAX) {
           *result = 0;
           break;
@@ -140,7 +140,7 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
   childpid = fork();
   if (childpid > 0) {  // Parent
     close(fd[1]);
-    int *result_d{nullptr};
+    int* result_d{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     // Allocate in parent
     if (testmalloc) {
@@ -185,7 +185,7 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     HIP_CHECK(hipFree(result_d));
   } else if (!childpid) {  // Child
     // Wait for hipDeviceSetLimit() completion in parent.
-    int *result_d{nullptr};
+    int* result_d{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     close(fd[0]);
     // Allocate in child
@@ -230,7 +230,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
   bool testResult = false;
   pid_t childpid;
   int testResultChild = 0;
-  size_t size = BLOCKSIZE*GRIDSIZE;
+  size_t size = BLOCKSIZE * GRIDSIZE;
   // create pipe descriptors
   pipe(fd);
   // fork process
@@ -239,7 +239,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     close(fd[1]);
     int *result_d{nullptr}, *result_h{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
-    result_h = reinterpret_cast<int*> (malloc(sizeof(int)));
+    result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in parent
     if (testmalloc) {
@@ -257,8 +257,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     }
     HIP_CHECK(hipDeviceSynchronize());
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int),
-              hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
     if (*result_h == 0) {
       testResult = false;
     } else {
@@ -282,7 +281,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     close(fd[0]);
     int *result_d{nullptr}, *result_h{nullptr};
     HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
-    result_h = reinterpret_cast<int*> (malloc(sizeof(int)));
+    result_h = reinterpret_cast<int*>(malloc(sizeof(int)));
     REQUIRE(result_h != nullptr);
     // Allocate in child
     if (testmalloc) {
@@ -300,8 +299,7 @@ static bool testDeviceMemMulProc(bool testmalloc) {
     }
     HIP_CHECK(hipDeviceSynchronize());
     *result_h = 0;
-    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int),
-              hipMemcpyDefault));
+    HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int), hipMemcpyDefault));
     // send the value on the write-descriptor:
     write(fd[1], result_h, sizeof(int));
     // close the write descriptor:

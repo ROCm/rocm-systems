@@ -122,16 +122,19 @@ inline static hiprtcResult hiprtcVersion(int* major, int* minor) {
 
 typedef nvrtcProgram hiprtcProgram;
 
-inline static hiprtcResult hiprtcAddNameExpression(hiprtcProgram prog, const char* name_expression) {
+inline static hiprtcResult hiprtcAddNameExpression(hiprtcProgram prog,
+                                                   const char* name_expression) {
   return nvrtcResultTohiprtcResult(nvrtcAddNameExpression(prog, name_expression));
 }
 
-inline static hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions, const char** options) {
+inline static hiprtcResult hiprtcCompileProgram(hiprtcProgram prog, int numOptions,
+                                                const char** options) {
   return nvrtcResultTohiprtcResult(nvrtcCompileProgram(prog, numOptions, options));
 }
 
-inline static hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src, const char* name,
-                                 int numHeaders, const char** headers, const char** includeNames) {
+inline static hiprtcResult hiprtcCreateProgram(hiprtcProgram* prog, const char* src,
+                                               const char* name, int numHeaders,
+                                               const char** headers, const char** includeNames) {
   return nvrtcResultTohiprtcResult(
       nvrtcCreateProgram(prog, src, name, numHeaders, headers, includeNames));
 }
@@ -141,7 +144,7 @@ inline static hiprtcResult hiprtcDestroyProgram(hiprtcProgram* prog) {
 }
 
 inline static hiprtcResult hiprtcGetLoweredName(hiprtcProgram prog, const char* name_expression,
-                                  const char** lowered_name) {
+                                                const char** lowered_name) {
   return nvrtcResultTohiprtcResult(nvrtcGetLoweredName(prog, name_expression, lowered_name));
 }
 

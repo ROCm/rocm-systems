@@ -28,8 +28,7 @@ class OCLGLDepthBuffer : public OCLGLCommon {
   OCLGLDepthBuffer();
   virtual ~OCLGLDepthBuffer();
   static const unsigned int c_dimSize = 128;
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void);
   virtual unsigned int close(void);
 

@@ -67,9 +67,7 @@ hipError_t Stream::EndCapture() {
 }
 
 // ================================================================================================
-bool Stream::Create() {
-  return create();
-}
+bool Stream::Create() { return create(); }
 
 // ================================================================================================
 void Stream::Destroy(hip::Stream* stream, bool forceDestroy) {
@@ -106,16 +104,14 @@ bool isValid(hipStream_t& stream) {
 }
 
 // ================================================================================================
-int Stream::DeviceId() const {
-  return device_->deviceId();
-}
+int Stream::DeviceId() const { return device_->deviceId(); }
 
 // ================================================================================================
 int Stream::DeviceId(const hipStream_t hStream) {
   // Copying locally into non-const variable just to get const away
   hipStream_t inputStream = hStream;
   if (!hip::isValid(inputStream)) {
-    //return invalid device id
+    // return invalid device id
     return -1;
   }
   bool isNullOrLegacyStream = (hStream == nullptr || hStream == hipStreamLegacy);
@@ -181,9 +177,9 @@ void CL_CALLBACK ihipStreamCallback(cl_event event, cl_int command_exec_status, 
 }
 
 // ================================================================================================
-static hipError_t ihipStreamCreate(hipStream_t* stream,
-                                  unsigned int flags, hip::Stream::Priority priority,
-                                  const std::vector<uint32_t>& cuMask = {}) {
+static hipError_t ihipStreamCreate(hipStream_t* stream, unsigned int flags,
+                                   hip::Stream::Priority priority,
+                                   const std::vector<uint32_t>& cuMask = {}) {
   if (flags != hipStreamDefault && flags != hipStreamNonBlocking) {
     return hipErrorInvalidValue;
   }
@@ -191,8 +187,7 @@ static hipError_t ihipStreamCreate(hipStream_t* stream,
 
   if (hStream == nullptr) {
     return hipErrorOutOfMemory;
-  }
-  else if (!hStream->Create()) {
+  } else if (!hStream->Create()) {
     hip::Stream::Destroy(hStream);
     return hipErrorOutOfMemory;
   }
@@ -206,13 +201,13 @@ static hipError_t ihipStreamCreate(hipStream_t* stream,
 
 stream_per_thread::stream_per_thread() {
   m_streams.resize(g_devices.size());
-  for (auto &stream : m_streams) {
+  for (auto& stream : m_streams) {
     stream = nullptr;
   }
 }
 
 stream_per_thread::~stream_per_thread() {
-  for (auto &stream:m_streams) {
+  for (auto& stream : m_streams) {
     if (stream != nullptr && hip::isValid(stream)) {
       hip::Stream::Destroy(reinterpret_cast<hip::Stream*>(stream));
       stream = nullptr;
@@ -226,15 +221,15 @@ hipStream_t stream_per_thread::get() {
   // This is to make sure m_streams is not empty
   if (m_streams.empty()) {
     m_streams.resize(g_devices.size());
-    for (auto &stream : m_streams) {
+    for (auto& stream : m_streams) {
       stream = nullptr;
     }
   }
   // There is a scenario where hipResetDevice destroys stream per thread
   // hence isValid check is required to make sure only valid stream is used
   if (m_streams[currDev] == nullptr || !hip::isValid(m_streams[currDev])) {
-    hipError_t status = ihipStreamCreate(&m_streams[currDev], hipStreamDefault,
-                                         hip::Stream::Priority::Normal);
+    hipError_t status =
+        ihipStreamCreate(&m_streams[currDev], hipStreamDefault, hip::Stream::Priority::Normal);
     if (status != hipSuccess) {
       DevLogError("Stream creation failed");
     }
@@ -266,7 +261,7 @@ hipStream_t getPerThreadDefaultStream() {
 }
 
 // ================================================================================================
-hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) {
+hipError_t hipStreamCreateWithFlags(hipStream_t* stream, unsigned int flags) {
   HIP_INIT_API(hipStreamCreateWithFlags, stream, flags);
 
   if (stream == nullptr) {
@@ -277,7 +272,7 @@ hipError_t hipStreamCreateWithFlags(hipStream_t *stream, unsigned int flags) {
 }
 
 // ================================================================================================
-hipError_t hipStreamCreate(hipStream_t *stream) {
+hipError_t hipStreamCreate(hipStream_t* stream) {
   HIP_INIT_API(hipStreamCreate, stream);
 
   if (stream == nullptr) {
@@ -417,8 +412,8 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
       g_allCapturingStreams.erase(g_it);
     }
   }
-  const auto& l_it = std::find(hip::tls.capture_streams_.begin(),
-                      hip::tls.capture_streams_.end(), s);
+  const auto& l_it =
+      std::find(hip::tls.capture_streams_.begin(), hip::tls.capture_streams_.end(), s);
   if (l_it != hip::tls.capture_streams_.end()) {
     hip::tls.capture_streams_.erase(l_it);
   }
@@ -429,7 +424,7 @@ hipError_t hipStreamDestroy(hipStream_t stream) {
 
 // ================================================================================================
 void WaitThenDecrementSignal(hipStream_t stream, hipError_t status, void* user_data) {
-  CallbackData* data =  reinterpret_cast<CallbackData*>(user_data);
+  CallbackData* data = reinterpret_cast<CallbackData*>(user_data);
   int offset = data->previous_read_index % IPC_SIGNALS_PER_EVENT;
   while (data->shmem->read_index < data->previous_read_index + IPC_SIGNALS_PER_EVENT &&
          data->shmem->signal[offset] != 0) {
@@ -458,8 +453,8 @@ hipError_t hipStreamWaitEvent_common(hipStream_t stream, hipEvent_t event, unsig
   hip::Stream* eventStream = reinterpret_cast<hip::Stream*>(eventStreamHandle);
   if (eventStream != nullptr && eventStream->IsEventCaptured(event) == true) {
     ClPrint(amd::LOG_INFO, amd::LOG_API,
-          "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
-          event);
+            "[hipGraph] Current capture node StreamWaitEvent on stream : %p, Event %p", stream,
+            event);
     if (waitStream == nullptr) {
       return hipErrorInvalidHandle;
     }
@@ -680,7 +675,8 @@ hipError_t hipExtStreamCreateWithCUMask(hipStream_t* stream, uint32_t cuMaskSize
 
   const std::vector<uint32_t> cuMaskv(cuMask, cuMask + cuMaskSize);
 
-  HIP_RETURN(ihipStreamCreate(stream, hipStreamDefault, hip::Stream::Priority::Normal, cuMaskv), *stream);
+  HIP_RETURN(ihipStreamCreate(stream, hipStreamDefault, hip::Stream::Priority::Normal, cuMaskv),
+             *stream);
 }
 
 // ================================================================================================
@@ -727,8 +723,7 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
 
   // find the minimum cuMaskSize required to present the CU mask bit-array in a patch of 32 bits
   // and return error if the cuMaskSize argument is less than cuMaskSizeRequired
-  uint32_t cuMaskSizeRequired = info.maxComputeUnits_ / 32 +
-    ((info.maxComputeUnits_ % 32) ? 1 : 0);
+  uint32_t cuMaskSizeRequired = info.maxComputeUnits_ / 32 + ((info.maxComputeUnits_ % 32) ? 1 : 0);
 
   if (cuMaskSize < cuMaskSizeRequired) {
     HIP_RETURN(hipErrorInvalidValue);
@@ -763,11 +758,11 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
       std::copy(defaultCUMask.begin(), defaultCUMask.end(), cuMask);
     }
   } else {
-  // if the stream is not null then get the stream's CU mask and return one of the below cases
-  // case1 if globalCUMask_ is defined then return the AND of globalCUMask_ and stream's CU mask
-  // case2 if globalCUMask_ is not defined then retuen AND of defaultCUMask and stream's CU mask
-  // in both cases above if stream's CU mask is empty then either globalCUMask_ (for case1)
-  // or defaultCUMask(for case2) will be returned
+    // if the stream is not null then get the stream's CU mask and return one of the below cases
+    // case1 if globalCUMask_ is defined then return the AND of globalCUMask_ and stream's CU mask
+    // case2 if globalCUMask_ is not defined then retuen AND of defaultCUMask and stream's CU mask
+    // in both cases above if stream's CU mask is empty then either globalCUMask_ (for case1)
+    // or defaultCUMask(for case2) will be returned
     std::vector<uint32_t> streamCUMask;
     streamCUMask = reinterpret_cast<hip::Stream*>(stream)->GetCUMask();
     std::vector<uint32_t> mask = {};
@@ -780,7 +775,7 @@ hipError_t hipExtStreamGetCUMask(hipStream_t stream, uint32_t cuMaskSize, uint32
         mask.push_back(streamCUMask[i] & defaultCUMask[i]);
       }
       // check to make sure after ANDing streamCUMask (custom-defined) with global CU mask,
-      //we have non-zero mask, oterwise just return either globalCUMask_ or defaultCUMask
+      // we have non-zero mask, oterwise just return either globalCUMask_ or defaultCUMask
       bool zeroCUMask = true;
       for (auto m : mask) {
         if (m != 0) {
@@ -822,7 +817,7 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
 }
 // ================================================================================================
 hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
-                                 const hipStreamAttrValue *value) {
+                                 const hipStreamAttrValue* value) {
   HIP_INIT_API(hipStreamSetAttribute, stream, attr, value);
   hipError_t status = hipSuccess;
   if (value == nullptr) {
@@ -861,7 +856,7 @@ hipError_t hipStreamSetAttribute(hipStream_t stream, hipStreamAttrID attr,
 }
 
 hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
-                                 hipStreamAttrValue *value_out) {
+                                 hipStreamAttrValue* value_out) {
   HIP_INIT_API(hipStreamGetAttribute, stream, attr, value_out);
 
   if (value_out == nullptr) {
@@ -876,7 +871,7 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   hip::Stream* s = reinterpret_cast<hip::Stream*>(stream);
 
-  switch(attr) {
+  switch (attr) {
     case hipStreamAttributeSynchronizationPolicy: {
       value_out->syncPolicy = static_cast<hipSynchronizationPolicy>(s->GetSyncPolicy());
       break;
@@ -892,4 +887,4 @@ hipError_t hipStreamGetAttribute(hipStream_t stream, hipStreamAttrID attr,
 
   HIP_RETURN(hipSuccess);
 }
-} // hip namespace
+}  // namespace hip

@@ -59,11 +59,9 @@ size_t D3D11Object::getResourceByteSize() {
 }
 
 cl_uint D3D11Object::getMiscFlag() {
-  if ((objDesc_.dxgiFormat_ == DXGI_FORMAT_NV12) ||
-      (objDesc_.dxgiFormat_ == DXGI_FORMAT_P010)) {
+  if ((objDesc_.dxgiFormat_ == DXGI_FORMAT_NV12) || (objDesc_.dxgiFormat_ == DXGI_FORMAT_P010)) {
     return 1;
-  }
-  else if (objDesc_.dxgiFormat_ == DXGI_FORMAT_YUY2) {
+  } else if (objDesc_.dxgiFormat_ == DXGI_FORMAT_YUY2) {
     return 3;
   }
   return 0;
@@ -77,8 +75,7 @@ int D3D11Object::initD3D11Object(const Context& amdContext, ID3D11Resource* pRes
 
   // Check if this ressource has already been used for interop
   for (const auto& it : resources_) {
-    if (it.first == (void*)pRes && it.second.first == subres &&
-        it.second.second == plane) {
+    if (it.first == (void*)pRes && it.second.first == subres && it.second.second == plane) {
       return CL_INVALID_D3D11_RESOURCE_KHR;
     }
   }
@@ -373,7 +370,8 @@ bool D3D11Object::copyOrigToShared() {
   }
   assert(pD3D11ResOrig_ != nullptr);
   // Any usage source can be read by GPU
-  pImmediateContext->CopySubresourceRegion(pD3D11Res_, 0, 0, 0, 0, pD3D11ResOrig_, subRes_, nullptr);
+  pImmediateContext->CopySubresourceRegion(pD3D11Res_, 0, 0, 0, 0, pD3D11ResOrig_, subRes_,
+                                           nullptr);
 
   // Flush D3D queues and make sure D3D stuff is finished
   {
@@ -407,7 +405,8 @@ bool D3D11Object::copySharedToOrig() {
     return false;
   }
   assert(pD3D11ResOrig_);
-  pImmediateContext->CopySubresourceRegion(pD3D11ResOrig_, subRes_, 0, 0, 0, pD3D11Res_, 0, nullptr);
+  pImmediateContext->CopySubresourceRegion(pD3D11ResOrig_, subRes_, 0, 0, 0, pD3D11Res_, 0,
+                                           nullptr);
   pImmediateContext->Release();
 
   d3dDev->Release();
@@ -453,7 +452,6 @@ void Image3DD3D11::initDeviceMemory() {
       reinterpret_cast<DeviceMemory*>(reinterpret_cast<char*>(this) + sizeof(Image3DD3D11));
   memset(deviceMemories_, 0, context_().devices().size() * sizeof(DeviceMemory));
 }
-
 
 
 //
@@ -585,11 +583,11 @@ size_t D3D11Object::getElementBytes(DXGI_FORMAT dxgiFmt, cl_uint plane) {
       }
       break;
     case DXGI_FORMAT_P010:
-        bytesPerPixel = 2;
-        if (plane == 1) {
-            bytesPerPixel = 4;
-        }
-        break;
+      bytesPerPixel = 2;
+      if (plane == 1) {
+        bytesPerPixel = 4;
+      }
+      break;
     default:
       bytesPerPixel = 0;
       _ASSERT(FALSE);
@@ -957,12 +955,12 @@ cl_image_format D3D11Object::getCLFormatFromDXGI(DXGI_FORMAT dxgiFmt, cl_uint pl
       }
       break;
     case DXGI_FORMAT_P010:
-        fmt.image_channel_order = CL_R;
-        fmt.image_channel_data_type = CL_UNSIGNED_INT16;
-        if (plane == 1) {
-            fmt.image_channel_order = CL_RG;
-        }
-        break;
+      fmt.image_channel_order = CL_R;
+      fmt.image_channel_data_type = CL_UNSIGNED_INT16;
+      if (plane == 1) {
+        fmt.image_channel_order = CL_RG;
+      }
+      break;
     default:
       _ASSERT(FALSE);
       break;

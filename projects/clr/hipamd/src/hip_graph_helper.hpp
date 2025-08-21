@@ -114,12 +114,12 @@ hipError_t ihipMemcpyAtoAValidate(hipArray_t srcArray, hipArray_t dstArray, amd:
 hipError_t ihipMemcpyHtoAValidate(const void* srcHost, hipArray_t dstArray, amd::Coord3D& srcOrigin,
                                   amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
                                   size_t srcRowPitch, size_t srcSlicePitch, amd::Image*& dstImage,
-                                  size_t &start);
+                                  size_t& start);
 
 hipError_t ihipMemcpyAtoHValidate(hipArray_t srcArray, void* dstHost, amd::Coord3D& srcOrigin,
                                   amd::Coord3D& dstOrigin, amd::Coord3D& copyRegion,
                                   size_t dstRowPitch, size_t dstSlicePitch, amd::Image*& srcImage,
-                                  size_t &start);
+                                  size_t& start);
 
 hipError_t ihipGraphMemsetParams_validate(const hipMemsetParams* pNodeParams);
 

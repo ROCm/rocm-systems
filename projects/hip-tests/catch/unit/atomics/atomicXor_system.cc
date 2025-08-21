@@ -109,6 +109,6 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_system_Positive_Peer_GPUs_Scattered_Addresses
 }
 
 /**
-* End doxygen group AtomicsTest.
-* @}
-*/
+ * End doxygen group AtomicsTest.
+ * @}
+ */

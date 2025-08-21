@@ -53,15 +53,14 @@ Settings::Settings() {
   // Disable image DMA by default (ROCM runtime doesn't support it)
   imageDMA_ = false;
 
-  stagedXferSize_ = flagIsDefault(GPU_STAGING_BUFFER_SIZE)
-      ? 1 * Mi : GPU_STAGING_BUFFER_SIZE * Mi;
+  stagedXferSize_ = flagIsDefault(GPU_STAGING_BUFFER_SIZE) ? 1 * Mi : GPU_STAGING_BUFFER_SIZE * Mi;
 
   // Initialize transfer buffer size to 1MB by default
   xferBufSize_ = 1024 * Ki;
 
   pinnedXferSize_ = GPU_PINNED_XFER_SIZE * Mi;
-  pinnedMinXferSize_ = flagIsDefault(GPU_PINNED_MIN_XFER_SIZE)
-    ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
+  pinnedMinXferSize_ =
+      flagIsDefault(GPU_PINNED_MIN_XFER_SIZE) ? 1 * Mi : GPU_PINNED_MIN_XFER_SIZE * Mi;
 
   sdmaCopyThreshold_ = GPU_FORCE_BLIT_COPY_SIZE * Ki;
 
@@ -85,8 +84,8 @@ Settings::Settings() {
   rocr_backend_ = true;
 
   cpu_wait_for_signal_ = !AMD_DIRECT_DISPATCH;
-  cpu_wait_for_signal_ = (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ?
-                          ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
+  cpu_wait_for_signal_ =
+      (!flagIsDefault(ROC_CPU_WAIT_FOR_SIGNAL)) ? ROC_CPU_WAIT_FOR_SIGNAL : cpu_wait_for_signal_;
   system_scope_signal_ = ROC_SYSTEM_SCOPE_SIGNAL;
 
   // Use coarse grain system memory for kernel arguments by default (to keep GPU cache)
@@ -102,10 +101,8 @@ Settings::Settings() {
 }
 
 // ================================================================================================
-bool Settings::create(bool fullProfile, const amd::Isa& isa,
-                      bool enableXNACK, bool coop_groups,
+bool Settings::create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups,
                       bool isXgmi, bool hasValidHDPFlush) {
-
   uint32_t gfxipMajor = isa.versionMajor();
   uint32_t gfxipMinor = isa.versionMinor();
   uint32_t gfxStepping = isa.versionStepping();
@@ -165,8 +162,8 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
   }
 
   if ((gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10) ||
-     ((gfxipMajor == 9 && gfxipMinor >= 4 &&
-      (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
+      ((gfxipMajor == 9 && gfxipMinor >= 4 &&
+        (gfxStepping == 0 || gfxStepping == 1 || gfxStepping == 2)))) {
     // Enable Barrier Value packet is only for MI2XX/300
     barrier_value_packet_ = true;
   }
@@ -174,13 +171,13 @@ bool Settings::create(bool fullProfile, const amd::Isa& isa,
   setKernelArgImpl(isa, isXgmi, hasValidHDPFlush);
 
   if (gfxipMajor >= 10) {
-     enableWave32Mode_ = true;
-     enableWgpMode_ = GPU_ENABLE_WGP_MODE;
-     if (gfxipMinor == 1) {
-       // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
-       // TODO: This should be updated when ROCr support custom pitch
-       imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
-     }
+    enableWave32Mode_ = true;
+    enableWgpMode_ = GPU_ENABLE_WGP_MODE;
+    if (gfxipMinor == 1) {
+      // GFX10.1 HW doesn't support custom pitch. Enable double copy workaround
+      // TODO: This should be updated when ROCr support custom pitch
+      imageBufferWar_ = GPU_IMAGE_BUFFER_WAR;
+    }
   }
 
   if (!flagIsDefault(GPU_ENABLE_WAVE32_MODE)) {
@@ -238,7 +235,6 @@ void Settings::override() {
 
 // ================================================================================================
 void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidHDPFlush) {
-
   const uint32_t gfxipMajor = isa.versionMajor();
   const uint32_t gfxipMinor = isa.versionMinor();
   const uint32_t gfxStepping = isa.versionStepping();
@@ -248,8 +244,7 @@ void Settings::setKernelArgImpl(const amd::Isa& isa, bool isXgmi, bool hasValidH
   const bool isGfx90a = (gfxipMajor == 9 && gfxipMinor == 0 && gfxStepping == 10);
   const bool isPreGfx908 =
       (gfxipMajor < 9) || ((gfxipMajor == 9) && (gfxipMinor == 0) && (gfxStepping < 8));
-  const bool isGfx101x =
-      (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
+  const bool isGfx101x = (gfxipMajor == 10) && ((gfxipMinor == 0) || (gfxipMinor == 1));
 
   auto kernelArgImpl = KernelArgImpl::HostKernelArgs;
 
