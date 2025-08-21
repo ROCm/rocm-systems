@@ -338,6 +338,30 @@ rocpd_post_processing::get_region_callback() const
 }
 
 postprocessing_callback
+rocpd_post_processing::get_backtrace_sample_callback() const
+{
+    return [&](const storage_parsed_type_base& parsed) {
+        auto  _bts           = static_cast<const struct backtrace_region_sample&>(parsed);
+        auto& data_processor = get_data_processor();
+        auto& n_info         = node_info::get_instance();
+        auto  process        = m_metadata.get_process_info();
+        auto  thread_primary_key =
+            data_processor.map_thread_id_to_primary_key(_bts.thread_id);
+        auto name_primary_key     = data_processor.insert_string(_bts.name.c_str());
+        auto category_primary_key = data_processor.insert_string(_bts.category.c_str());
+
+        auto event_primary_key = data_processor.insert_event(
+            category_primary_key, 0, 0, 0, _bts.call_stack.c_str(),
+            _bts.line_info.c_str(), _bts.extdata.c_str());
+
+        data_processor.insert_region(n_info.id, process.pid, thread_primary_key,
+                                     _bts.start_timestamp, _bts.end_timestamp,
+                                     name_primary_key, event_primary_key);
+        data_processor.insert_sample(_bts.track_name.c_str(), _bts.start_timestamp,
+                                     event_primary_key);
+    };
+}
+postprocessing_callback
 rocpd_post_processing::get_in_time_sample_callback() const
 {
     return [&](const storage_parsed_type_base& parsed) {

@@ -32,6 +32,7 @@
 #include "core/rocpd/json.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -44,6 +45,8 @@
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
 
+#include <cstdint>
+#include <ostream>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -306,6 +309,119 @@ rocpd_insert_region(size_t thread_id, size_t start_time, size_t end_time, size_t
     data_processor.insert_region(n_info.id, getpid(), thread_id, start_time, end_time,
                                  name_id, event_id);
     data_processor.insert_sample(track, start_time, event_id);
+}
+
+thread_local const bundle_t* last_sample     = nullptr;
+thread_local bool            is_first_sample = true;
+
+void
+cache_timer_sampling_data(int64_t _tid, const bundle_t& _sample)
+{
+    const auto* _bt_time = _sample.get<backtrace_timestamp>();
+    const auto* _bt_data = _sample.get<backtrace>();
+
+    if(!_bt_time || !_bt_data || _bt_data->empty()) return;
+
+    const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    if(!_thread_info) return;
+
+    uint64_t thread_id = _thread_info->index_data->system_value;
+
+    // Handle interval calculation for timer sampling
+    if(!is_first_sample && last_sample)
+    {
+        const auto* _last_bt_time = last_sample->get<backtrace_timestamp>();
+
+        if(_last_bt_time && _bt_time->get_tid() == _tid)
+        {
+            uint64_t interval_start = _last_bt_time->get_timestamp();
+            uint64_t interval_end   = _bt_time->get_timestamp();
+
+            auto        stack = backtrace::filter_and_patch(_bt_data->get());
+            const auto& track_name =
+                get_category_track_name<category::timer_sampling>(_tid);
+            // Store each stack frame as a separate region
+            for(const auto& entry : stack)
+            {
+                std::string call_stack = generate_call_stack_json(entry);
+                std::string line_info  = generate_line_info_json(entry);
+                auto        name       = demangle(entry.name);
+                // Store to trace cache
+                trace_cache::get_buffer_storage().store(
+                    trace_cache::entry_type::backtrace_region_sample,
+                    static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING), thread_id,
+                    track_name.c_str(), name.c_str(), interval_start, interval_end,
+                    call_stack.c_str(), line_info.c_str(), "{}");
+            }
+        }
+    }
+}
+
+void
+cache_overflow_sampling_data(int64_t _tid, const bundle_t& _sample)
+{
+    const auto* _bt_time = _sample.get<backtrace_timestamp>();
+    const auto* _cc_data = _sample.get<callchain>();
+
+    if(!_bt_time || !_cc_data || _cc_data->empty()) return;
+
+    const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    if(!_thread_info) return;
+
+    uint64_t thread_id = _thread_info->index_data->system_value;
+
+    uint64_t last_call_ts   = 0;
+    uint64_t perf_ts_offset = 0;
+
+    auto callchain_data = callchain::filter_and_patch(_cc_data->get());
+
+    for(const auto& [ts, stack] : callchain_data)
+    {
+        if(last_call_ts == 0)
+        {
+            last_call_ts   = ts;
+            perf_ts_offset = (_bt_time->get_timestamp() - ts);
+            continue;
+        }
+
+        // Calculate interval for this overflow sample
+        uint64_t    interval_start = last_call_ts + perf_ts_offset;
+        uint64_t    interval_end   = ts + perf_ts_offset;
+        const auto& track_name =
+            get_category_track_name<category::overflow_sampling>(_tid);
+        for(const auto& entry : stack)
+        {
+            std::string call_stack = generate_call_stack_json(entry);
+            std::string line_info  = generate_line_info_json(entry);
+
+            auto name = demangle(entry.name);
+            // Store to trace cache
+            trace_cache::get_buffer_storage().store(
+                trace_cache::entry_type::backtrace_region_sample,
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING), thread_id,
+                track_name.c_str(), name.c_str(), interval_start, interval_end,
+                call_stack.c_str(), line_info.c_str(), "{}");
+        }
+
+        last_call_ts = ts;
+    }
+}
+
+void
+cache_sampling_data(int64_t _tid, const bundle_t& _sample, bool is_timer_sample)
+{
+    if(is_timer_sample)
+    {
+        cache_timer_sampling_data(_tid, _sample);
+    }
+    else
+    {
+        cache_overflow_sampling_data(_tid, _sample);
+    }
+
+    // Update tracking for next sample
+    last_sample     = &_sample;
+    is_first_sample = false;
 }
 
 auto&
@@ -875,6 +991,44 @@ configure(bool _setup, int64_t _tid)
         rocpd_initialize_thread_info(_tid);
         rocpd_init_track(_tid);
 
+        _sampler->set_sample_callback([_tid, &_signal_types](
+                                          int64_t tid, const auto& sample, int signum) {
+            // Determine if this is timer or overflow sampling
+            bool is_timer_sample = true;  // Default to timer
+
+            if(_signal_types && !_signal_types->empty())
+            {
+                // Check signal type to determine sampling type
+                int overflow_sig = get_sampling_overflow_signal();
+                int realtime_sig = get_sampling_realtime_signal();
+                int cputime_sig  = get_sampling_cputime_signal();
+
+                if(signum == overflow_sig)
+                {
+                    is_timer_sample = false;
+                }
+                else if(signum == realtime_sig || signum == cputime_sig)
+                {
+                    is_timer_sample = true;
+                }
+                else
+                {
+                    // Fallback: check sample content
+                    auto* _cc_data = sample.template get<callchain>();
+                    auto* _bt_data = sample.template get<backtrace>();
+
+                    // If has callchain but no backtrace, likely overflow
+                    if(_cc_data && !_cc_data->empty() && (!_bt_data || _bt_data->empty()))
+                    {
+                        is_timer_sample = false;
+                    }
+                }
+            }
+
+            // Call your caching function immediately
+            cache_sampling_data(tid, sample, is_timer_sample);
+        });
+
         *_running = true;
         sampling::get_sampler_init(_tid)->sample();
         start_duration_thread();
@@ -1150,7 +1304,7 @@ post_process()
 
             if(get_use_perfetto()) post_process_perfetto(i, _timer_data, _overflow_data);
             if(get_use_timemory()) post_process_timemory(i, _timer_data, _overflow_data);
-            if(get_use_rocpd()) post_process_rocpd(i, _timer_data, _overflow_data);
+            // if(get_use_rocpd()) post_process_rocpd(i, _timer_data, _overflow_data);
         }
         else
         {

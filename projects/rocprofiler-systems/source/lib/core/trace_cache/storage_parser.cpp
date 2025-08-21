@@ -201,6 +201,20 @@ storage_parser::consume_storage()
                 invoke_callbacks(header.type, _pmc_event_with_sample);
                 break;
             }
+            case entry_type::backtrace_region_sample:
+            {
+                backtrace_region_sample _backtrace_region_sample;
+                parse_data(
+                    sample.data(), _backtrace_region_sample.type,
+                    _backtrace_region_sample.thread_id,
+                    _backtrace_region_sample.track_name, _backtrace_region_sample.name,
+                    _backtrace_region_sample.start_timestamp,
+                    _backtrace_region_sample.end_timestamp,
+                    _backtrace_region_sample.category,
+                    _backtrace_region_sample.call_stack,
+                    _backtrace_region_sample.line_info, _backtrace_region_sample.extdata);
+                invoke_callbacks(header.type, _backtrace_region_sample);
+            }
             default: break;
         }
     }
