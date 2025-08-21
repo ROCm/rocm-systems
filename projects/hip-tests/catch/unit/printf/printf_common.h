@@ -34,7 +34,7 @@ struct CaptureStream {
 
   char tempname[13] = "mytestXXXXXX";
 
-  explicit CaptureStream(FILE *original) {
+  explicit CaptureStream(FILE* original) {
     orig_fd = fileno(original);
     saved_fd = dup(orig_fd);
 
@@ -55,8 +55,7 @@ struct CaptureStream {
   }
 
   void restoreStream() {
-    if (saved_fd == -1)
-      return;
+    if (saved_fd == -1) return;
     fflush(nullptr);
     if (dup2(saved_fd, orig_fd) == -1) {
       error(0, errno, "Error");
@@ -69,9 +68,7 @@ struct CaptureStream {
     saved_fd = -1;
   }
 
-  const char *getTempFilename() {
-    return (const char*)tempname;
-  }
+  const char* getTempFilename() { return (const char*)tempname; }
 
   std::ifstream getCapturedData() {
     restoreStream();
@@ -86,21 +83,24 @@ struct CaptureStream {
       assert(false);
     }
   }
-  std::string gulp(std::ifstream &input) {
-  std::string retval;
-  input.seekg(0, std::ios_base::end);
-  retval.resize(input.tellg());
-  input.seekg(0, std::ios_base::beg);
-  input.read(&retval[0], retval.size());
-  input.close();
-  return retval;
+  std::string gulp(std::ifstream& input) {
+    std::string retval;
+    input.seekg(0, std::ios_base::end);
+    retval.resize(input.tellg());
+    input.seekg(0, std::ios_base::beg);
+    input.read(&retval[0], retval.size());
+    input.close();
+    return retval;
   }
 };
-extern const char *msg_short;
-extern const char *msg_long1;
-extern const char *msg_long2;
+extern const char* msg_short;
+extern const char* msg_long1;
+extern const char* msg_long2;
 
-__device__ const char *msg_short_dev = "Carpe diem.";
-__device__ const char *msg_long1_dev = "Lorem ipsum dolor sit amet, consectetur nullam. In mollis imperdiet nibh nec ullamcorper.";  // NOLINT
-__device__ const char *msg_long2_dev = "Curabitur nec metus sit amet augue vehicula ultrices ut id leo. Lorem ipsum dolor sit amet, consectetur adipiscing elit amet.";  // NOLINT
+__device__ const char* msg_short_dev = "Carpe diem.";
+__device__ const char* msg_long1_dev =
+    "Lorem ipsum dolor sit amet, consectetur nullam. In mollis imperdiet nibh nec ullamcorper.";  // NOLINT
+__device__ const char* msg_long2_dev =
+    "Curabitur nec metus sit amet augue vehicula ultrices ut id leo. Lorem ipsum dolor sit amet, "
+    "consectetur adipiscing elit amet.";  // NOLINT
 #endif

@@ -68,8 +68,8 @@ TEST_CASE("Unit_hipMemcpyAsync_Positive_Synchronization_Behavior") {
   }
 
   SECTION("Device memory to device Memory No CU") {
-    MemcpyDtoDSyncBehavior(std::bind(hipMemcpyAsync, _1, _2, _3, hipMemcpyDeviceToDeviceNoCU,
-                            nullptr),false);
+    MemcpyDtoDSyncBehavior(
+        std::bind(hipMemcpyAsync, _1, _2, _3, hipMemcpyDeviceToDeviceNoCU, nullptr), false);
   }
 
   SECTION("Host memory to host memory") {

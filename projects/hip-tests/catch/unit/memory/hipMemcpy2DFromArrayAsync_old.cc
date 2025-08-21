@@ -48,32 +48,27 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Basic") {
 
   HIP_CHECK(hipSetDevice(0));
   hipArray_t A_d{nullptr};
-  size_t width{sizeof(float)*NUM_W};
+  size_t width{sizeof(float) * NUM_W};
   float *A_h{nullptr}, *hData{nullptr};
   hipStream_t stream;
 
   // Initialization of variables
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &A_h, &hData, nullptr,
-                             width*NUM_H, false);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &hData, nullptr, width * NUM_H,
+                             false);
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-  HipTest::setDefaultData<float>(width*NUM_H, A_h, hData, nullptr);
+  HipTest::setDefaultData<float>(width * NUM_H, A_h, hData, nullptr);
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width,
-                                    width, NUM_H,
-                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
   SECTION("Calling hipMemcpy2DFromArrayAsync() with user declared stream obj") {
-    HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d,
-                                   0, 0, width, NUM_H,
-                                   hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost,
+                                        stream));
     HIP_CHECK(hipStreamSynchronize(stream));
   }
   SECTION("Calling hipMemcpy2DFromArrayAsync() with hipStreamPerThread") {
-    HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d,
-                                   0, 0, width, NUM_H,
-                                   hipMemcpyDeviceToHost, hipStreamPerThread));
+    HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost,
+                                        hipStreamPerThread));
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
   }
   REQUIRE(HipTest::checkArray(A_h, hData, NUM_W, NUM_H) == true);
@@ -81,8 +76,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Basic") {
   // Cleaning the memory
   HIP_CHECK(hipFreeArray(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             A_h, hData, nullptr, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
 }
 
 /*
@@ -94,26 +88,22 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_ExtentValidation") {
 
   HIP_CHECK(hipSetDevice(0));
   hipArray_t A_d{nullptr};
-  size_t width{sizeof(float)*NUM_W};
+  size_t width{sizeof(float) * NUM_W};
   float *A_h{nullptr}, *hData{nullptr}, *valData{nullptr};
   hipStream_t stream;
 
   // Initialization of variables
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &A_h, &hData, nullptr,
-                             width*NUM_H, false);
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             nullptr, &valData, nullptr,
-                             width*NUM_H, false);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &hData, nullptr, width * NUM_H,
+                             false);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, nullptr, &valData, nullptr, width * NUM_H,
+                             false);
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
   HIP_CHECK(hipStreamCreate(&stream));
 
   SECTION("Destination width is 0") {
-    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, 0, A_d,
-                                      0, 0, NUM_W*sizeof(float),
-                                      NUM_H, hipMemcpyDeviceToHost, stream)
-                                      != hipSuccess);
+    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, 0, A_d, 0, 0, NUM_W * sizeof(float), NUM_H,
+                                      hipMemcpyDeviceToHost, stream) != hipSuccess);
   }
   // hipMemcpy2DFromArrayAsync API would return success for
   // width and height as 0
@@ -124,12 +114,9 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_ExtentValidation") {
   //   with height 0(copy will not be performed)
   // 3 validating hData<-->A_h which will not be equal as copy is not done.
   SECTION("Height is 0") {
-    HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0,
-                               A_h, width, width,
-                               NUM_H, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy2DFromArrayAsync(hData, width, A_d,
-                                   0, 0, NUM_W*sizeof(float),
-                                   0, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width, width, NUM_H, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy2DFromArrayAsync(hData, width, A_d, 0, 0, NUM_W * sizeof(float), 0,
+                                        hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     REQUIRE(HipTest::checkArray(hData, valData, NUM_W, NUM_H) == true);
   }
@@ -143,12 +130,9 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_ExtentValidation") {
   // 3 validating hData<-->A_h which will not be equal as copy is not done.
 
   SECTION("Width is 0") {
-    HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0,
-                               A_h, width, width,
-                               NUM_H, hipMemcpyHostToDevice));
-    HIP_CHECK(hipMemcpy2DFromArrayAsync(hData, width, A_d,
-                                        0, 0, 0,
-                                        NUM_H, hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width, width, NUM_H, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy2DFromArrayAsync(hData, width, A_d, 0, 0, 0, NUM_H, hipMemcpyDeviceToHost,
+                                        stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     REQUIRE(HipTest::checkArray(hData, valData, NUM_W, NUM_H) == true);
   }
@@ -156,10 +140,8 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_ExtentValidation") {
   // Cleaning the memory
   HIP_CHECK(hipFreeArray(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             A_h, hData, nullptr, false);
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             nullptr, valData, nullptr, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, nullptr, valData, nullptr, false);
 }
 /*
  * This Scenario Verifies hipMemcpy2DFromArrayAsync API by copying the
@@ -176,28 +158,25 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu") {
   HIP_CHECK(hipSetDevice(0));
   hipArray_t A_d{nullptr};
   constexpr auto def_val{10};
-  size_t width{sizeof(float)*NUM_W};
+  size_t width{sizeof(float) * NUM_W};
   float *A_h{nullptr}, *PinnMem{nullptr};
   hipStream_t stream;
 
   // Initialization of variables
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &A_h, nullptr, nullptr,
-                             width*NUM_H, false);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, nullptr, nullptr, width * NUM_H,
+                             false);
   HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&PinnMem), width * NUM_H));
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-  HipTest::setDefaultData<float>(width*NUM_H, A_h, nullptr, nullptr);
-  for (int i = 0; i < NUM_W*NUM_H; i++) {
+  HipTest::setDefaultData<float>(width * NUM_H, A_h, nullptr, nullptr);
+  for (int i = 0; i < NUM_W * NUM_H; i++) {
     PinnMem[i] = def_val + i;
   }
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, PinnMem,
-                               width, width, NUM_H, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d,
-                                      0, 0, width, NUM_H,
-                                      hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, PinnMem, width, width, NUM_H, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0, 0, width, NUM_H, hipMemcpyDeviceToHost,
+                                      stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   REQUIRE(HipTest::checkArray(A_h, PinnMem, NUM_W, NUM_H) == true);
 
@@ -205,8 +184,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_PinnedHostMemSameGpu") {
   HIP_CHECK(hipFreeArray(A_d));
   HIP_CHECK(hipHostFree(PinnMem));
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             A_h, nullptr, nullptr, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
 }
 /*
  * This Scenario Verifies hipMemcpy2DFromArrayAsync API by copying the
@@ -229,28 +207,25 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem") {
     if (canAccessPeer) {
       HIP_CHECK(hipSetDevice(0));
       hipArray_t A_d{nullptr};
-      size_t width{sizeof(float)*NUM_W};
+      size_t width{sizeof(float) * NUM_W};
       float *A_h{nullptr}, *E_h{nullptr};
       hipStream_t stream;
       HIP_CHECK(hipStreamCreate(&stream));
 
       // Initialization of variables
-      HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-          &A_h, nullptr, nullptr,
-          width*NUM_H, false);
+      HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, nullptr, nullptr, width * NUM_H,
+                                 false);
       hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
       HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-      HipTest::setDefaultData<float>(width*NUM_H, A_h, nullptr, nullptr);
+      HipTest::setDefaultData<float>(width * NUM_H, A_h, nullptr, nullptr);
       HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&E_h), width * NUM_H));
-      for (int i = 0; i < NUM_W*NUM_H; i++) {
+      for (int i = 0; i < NUM_W * NUM_H; i++) {
         E_h[i] = def_val + i;
       }
 
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width,
-                                   width, NUM_H, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, width, width, NUM_H, hipMemcpyHostToDevice));
       HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMemcpy2DFromArrayAsync(E_h, width, A_d,
-                                          0, 0, width, NUM_H,
+      HIP_CHECK(hipMemcpy2DFromArrayAsync(E_h, width, A_d, 0, 0, width, NUM_H,
                                           hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
       REQUIRE(HipTest::checkArray(A_h, E_h, NUM_W, NUM_H) == true);
@@ -259,8 +234,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDevicePinnedHostMem") {
       HIP_CHECK(hipFreeArray(A_d));
       HIP_CHECK(hipHostFree(E_h));
       HIP_CHECK(hipStreamDestroy(stream));
-      HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                                 A_h, nullptr, nullptr, false);
+      HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, nullptr, nullptr, false);
     } else {
       SUCCEED("Device Does not have P2P capability");
     }
@@ -291,25 +265,22 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange") {
     if (canAccessPeer) {
       HIP_CHECK(hipSetDevice(0));
       hipArray_t A_d{nullptr};
-      size_t width{sizeof(float)*NUM_W};
+      size_t width{sizeof(float) * NUM_W};
       float *A_h{nullptr}, *hData{nullptr};
       hipStream_t stream;
 
       // Initialization of variables
-      HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-          &A_h, &hData, nullptr,
-          width*NUM_H, false);
+      HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &hData, nullptr, width * NUM_H,
+                                 false);
       hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
       HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-      HipTest::setDefaultData<float>(width*NUM_H, A_h, hData, nullptr);
+      HipTest::setDefaultData<float>(width * NUM_H, A_h, hData, nullptr);
 
       HIP_CHECK(hipSetDevice(1));
       HIP_CHECK(hipStreamCreate(&stream));
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width,
-                                   NUM_H, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
-      HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d,
-                                          0, 0, width, NUM_H,
+      HIP_CHECK(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0, 0, width, NUM_H,
                                           hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
       REQUIRE(HipTest::checkArray(A_h, hData, NUM_W, NUM_H) == true);
@@ -317,8 +288,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_multiDeviceContextChange") {
       // Cleaning the memory
       HIP_CHECK(hipFreeArray(A_d));
       HIP_CHECK(hipStreamDestroy(stream));
-      HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                                 A_h, hData, nullptr, false);
+      HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
     } else {
       SUCCEED("Device Does not have P2P capability");
     }
@@ -334,75 +304,65 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_Negative") {
 
   HIP_CHECK(hipSetDevice(0));
   hipArray_t A_d{nullptr};
-  size_t width{sizeof(float)*NUM_W};
+  size_t width{sizeof(float) * NUM_W};
   float *A_h{nullptr}, *hData{nullptr};
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
   // Initialization of variables
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &A_h, &hData, nullptr,
-                             width*NUM_H, false);
-  HipTest::setDefaultData<float>(width*NUM_H, A_h, hData, nullptr);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &hData, nullptr, width * NUM_H,
+                             false);
+  HipTest::setDefaultData<float>(width * NUM_H, A_h, hData, nullptr);
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
 
   SECTION("Nullptr to destination") {
-    REQUIRE(hipMemcpy2DFromArrayAsync(nullptr, width, A_d,
-                                      0, 0, width, NUM_H,
-                                      hipMemcpyDeviceToHost,
-                                      stream) != hipSuccess);
+    REQUIRE(hipMemcpy2DFromArrayAsync(nullptr, width, A_d, 0, 0, width, NUM_H,
+                                      hipMemcpyDeviceToHost, stream) != hipSuccess);
   }
 
   SECTION("Nullptr to source") {
-    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, nullptr,
-                                      0, 0, width, NUM_H,
-                                      hipMemcpyDeviceToHost,
-                                      stream) != hipSuccess);
+    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, nullptr, 0, 0, width, NUM_H,
+                                      hipMemcpyDeviceToHost, stream) != hipSuccess);
   }
 
   SECTION("Passing offset more than 0") {
-    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 1,
-                                      1, width, NUM_H,
-                                      hipMemcpyDeviceToHost,
+    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 1, 1, width, NUM_H, hipMemcpyDeviceToHost,
                                       stream) != hipSuccess);
   }
 
   SECTION("Passing array more than allocated") {
-    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0,
-                                      0, width+2, NUM_H+2,
-                                      hipMemcpyDeviceToHost,
-                                      stream) != hipSuccess);
+    REQUIRE(hipMemcpy2DFromArrayAsync(A_h, width, A_d, 0, 0, width + 2, NUM_H + 2,
+                                      hipMemcpyDeviceToHost, stream) != hipSuccess);
   }
 
   // Cleaning of Memory
   HIP_CHECK(hipFreeArray(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             A_h, hData, nullptr, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, hData, nullptr, false);
 }
 
 /**
-* Test Description
-* ------------------------
-*  - This testcase copies the data from host to device and launches
-*  hipMemcpy2DFromArrayAsync within the graph to trigger
-*  capturehipMemcpy2DFromArrayAsync internal api and verifies data in host.
-* Test source
-* ------------------------
-*  - unit/memory/hipMemcpy2DFromArrayAsync_old.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.0
-*/
+ * Test Description
+ * ------------------------
+ *  - This testcase copies the data from host to device and launches
+ *  hipMemcpy2DFromArrayAsync within the graph to trigger
+ *  capturehipMemcpy2DFromArrayAsync internal api and verifies data in host.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemcpy2DFromArrayAsync_old.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
 TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_capturehipMemcpy2DFromArrayAsync") {
   CHECK_IMAGE_SUPPORT
   int rows, cols;
   rows = GENERATE(3, 4, 100);
   cols = GENERATE(3, 4, 100);
   // Allocate and initialize host memory
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * rows * cols));
   for (int i = 0; i < rows; i++) {
     for (int j = 0; j < cols; j++) {
       A_h[i * cols + j] = i * cols + j;
@@ -411,8 +371,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_capturehipMemcpy2DFromArrayAsync") {
   hipArray_t A_d = nullptr;
   hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, cols, rows, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, cols * sizeof(int),
-                               cols * sizeof(int), rows,
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, A_h, cols * sizeof(int), cols * sizeof(int), rows,
                                hipMemcpyHostToDevice));
 
   hipGraph_t graph{nullptr};
@@ -422,8 +381,7 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_capturehipMemcpy2DFromArrayAsync") {
 
   // Start Capturing
   HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
-  HIP_CHECK(hipMemcpy2DFromArrayAsync(B_h, sizeof(int) * cols, A_d, 0, 0,
-                                      sizeof(int) * cols, rows,
+  HIP_CHECK(hipMemcpy2DFromArrayAsync(B_h, sizeof(int) * cols, A_d, 0, 0, sizeof(int) * cols, rows,
                                       hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamEndCapture(stream, &graph));
   // End Capture
@@ -445,4 +403,3 @@ TEST_CASE("Unit_hipMemcpy2DFromArrayAsync_capturehipMemcpy2DFromArrayAsync") {
   free(A_h);
   free(B_h);
 }
-

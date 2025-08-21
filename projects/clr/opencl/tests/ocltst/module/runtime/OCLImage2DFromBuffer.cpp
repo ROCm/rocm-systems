@@ -49,9 +49,9 @@ const static char strKernel[] =
     "}                                                                         "
     "                             \n";
 
-typedef CL_API_ENTRY cl_mem(CL_API_CALL *clConvertImageAMD_fn)(
-    cl_context context, cl_mem image, const cl_image_format *image_format,
-    cl_int *errcode_ret);
+typedef CL_API_ENTRY cl_mem(CL_API_CALL* clConvertImageAMD_fn)(cl_context context, cl_mem image,
+                                                               const cl_image_format* image_format,
+                                                               cl_int* errcode_ret);
 
 clConvertImageAMD_fn clConvertImageAMD;
 
@@ -63,8 +63,8 @@ OCLImage2DFromBuffer::OCLImage2DFromBuffer() : OCLTestImp() {
 
 OCLImage2DFromBuffer::~OCLImage2DFromBuffer() {}
 
-void OCLImage2DFromBuffer::open(unsigned int test, char *units,
-                                double &conversion, unsigned int deviceId) {
+void OCLImage2DFromBuffer::open(unsigned int test, char* units, double& conversion,
+                                unsigned int deviceId) {
   buffer = clImage2DOriginal = clImage2D = clImage2DOut = NULL;
   done_ = false;
   pitchAlignment = 0;
@@ -77,8 +77,8 @@ void OCLImage2DFromBuffer::open(unsigned int test, char *units,
   if (_errorFlag) return;
 
   cl_device_type deviceType;
-  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE,
-                                     sizeof(deviceType), &deviceType, NULL);
+  error_ = _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_TYPE, sizeof(deviceType),
+                                     &deviceType, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "CL_DEVICE_TYPE failed");
 
   if (!(deviceType & CL_DEVICE_TYPE_GPU)) {
@@ -89,8 +89,8 @@ void OCLImage2DFromBuffer::open(unsigned int test, char *units,
 
   cl_bool imageSupport;
   size_t size;
-  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE_SUPPORT,
-                            sizeof(imageSupport), &imageSupport, &size);
+  _wrapper->clGetDeviceInfo(devices_[deviceId], CL_DEVICE_IMAGE_SUPPORT, sizeof(imageSupport),
+                            &imageSupport, &size);
   if (!imageSupport) {
     testDescString = "Image not supported, skipping this test! ";
     done_ = true;
@@ -98,9 +98,8 @@ void OCLImage2DFromBuffer::open(unsigned int test, char *units,
   }
 
   if (_openTest >= 4) {
-    clConvertImageAMD =
-        (clConvertImageAMD_fn)clGetExtensionFunctionAddressForPlatform(
-            platform_, "clConvertImageAMD");
+    clConvertImageAMD = (clConvertImageAMD_fn)clGetExtensionFunctionAddressForPlatform(
+        platform_, "clConvertImageAMD");
     if (clConvertImageAMD == NULL) {
       testDescString = "clConvertImageAMD not found!\n";
       done_ = true;
@@ -130,21 +129,19 @@ void OCLImage2DFromBuffer::AllocateOpenCLImage() {
 
   size_t size = 0;
   pitchAlignment = 0;
-  status = _wrapper->clGetDeviceInfo(devices_[_deviceId],
-                                     CL_DEVICE_IMAGE_PITCH_ALIGNMENT,
+  status = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_IMAGE_PITCH_ALIGNMENT,
                                      sizeof(cl_uint), &pitchAlignment, &size);
 
   if (pitchAlignment != 0) {
     pitchAlignment--;
   }
 
-  const unsigned int requiredPitch =
-      ((imageWidth + pitchAlignment) & ~pitchAlignment);
+  const unsigned int requiredPitch = ((imageWidth + pitchAlignment) & ~pitchAlignment);
   const unsigned int pitch = (!pitchTest) ? requiredPitch : imageWidth;
   const size_t bufferSize = pitch * imageHeight;
   CHECK_RESULT(bufferSize == 0, "ERROR: calculated image size is zero");
 
-  unsigned char *sourceData = new unsigned char[bufferSize];
+  unsigned char* sourceData = new unsigned char[bufferSize];
 
   // init data
   for (unsigned int y = 0; y < imageHeight; y++) {
@@ -154,89 +151,51 @@ void OCLImage2DFromBuffer::AllocateOpenCLImage() {
       }
     }
   }
-  buffer = _wrapper->clCreateBuffer(context_,
-                                    CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE,
-                                    bufferSize, sourceData, &status);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, bufferSize,
+                                    sourceData, &status);
 
   {
     // testing clConvertImageAMD
     if (_openTest == 4 || _openTest == 5) {
       const cl_image_format format = {CL_R, CL_UNSIGNED_INT8};
 #if defined(CL_VERSION_2_0)
-      const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                  imageWidth,
-                                  imageHeight,
-                                  0,
-                                  0,
-                                  pitch,
-                                  0,
-                                  0,
-                                  0,
-                                  {buffer}};
+      const cl_image_desc desc = {
+          CL_MEM_OBJECT_IMAGE2D, imageWidth, imageHeight, 0, 0, pitch, 0, 0, 0, {buffer}};
 #else
-      const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                  imageWidth,
-                                  imageHeight,
-                                  0,
-                                  0,
-                                  pitch,
-                                  0,
-                                  0,
-                                  0,
-                                  buffer};
+      const cl_image_desc desc = {
+          CL_MEM_OBJECT_IMAGE2D, imageWidth, imageHeight, 0, 0, pitch, 0, 0, 0, buffer};
 #endif
-      clImage2DOriginal = _wrapper->clCreateImage(
-          context_, CL_MEM_READ_WRITE, &format, &desc, NULL, &status);
+      clImage2DOriginal =
+          _wrapper->clCreateImage(context_, CL_MEM_READ_WRITE, &format, &desc, NULL, &status);
       CHECK_RESULT(status != CL_SUCCESS, "clCreateImage() failed");
 
       const cl_image_format formatRGBA = {CL_RGBA, CL_UNSIGNED_INT8};
 
-      clImage2D =
-          clConvertImageAMD(context_, clImage2DOriginal, &formatRGBA, &status);
+      clImage2D = clConvertImageAMD(context_, clImage2DOriginal, &formatRGBA, &status);
       CHECK_RESULT(status != CL_SUCCESS, "clConvertImageAMD() failed");
 
       cl_mem fishyBuffer = 0;
-      status = clGetImageInfo(clImage2D, CL_IMAGE_BUFFER, sizeof(fishyBuffer),
-                              &fishyBuffer, 0);
-      CHECK_RESULT(status != CL_SUCCESS,
-                   "clGetImageInfo(CL_IMAGE_BUFFER) failed");
-      CHECK_RESULT(fishyBuffer != buffer,
-                   "clGetImageInfo() failed, buffer != fishyBuffer");
+      status = clGetImageInfo(clImage2D, CL_IMAGE_BUFFER, sizeof(fishyBuffer), &fishyBuffer, 0);
+      CHECK_RESULT(status != CL_SUCCESS, "clGetImageInfo(CL_IMAGE_BUFFER) failed");
+      CHECK_RESULT(fishyBuffer != buffer, "clGetImageInfo() failed, buffer != fishyBuffer");
     } else {
       const cl_image_format format = {CL_RGBA, CL_UNSIGNED_INT8};
 #if defined(CL_VERSION_2_0)
-      const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                  imageWidth / 4,
-                                  imageHeight,
-                                  0,
-                                  0,
-                                  pitch,
-                                  0,
-                                  0,
-                                  0,
-                                  {buffer}};
+      const cl_image_desc desc = {
+          CL_MEM_OBJECT_IMAGE2D, imageWidth / 4, imageHeight, 0, 0, pitch, 0, 0, 0, {buffer}};
 #else
-      const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                  imageWidth / 4,
-                                  imageHeight,
-                                  0,
-                                  0,
-                                  pitch,
-                                  0,
-                                  0,
-                                  0,
-                                  buffer};
+      const cl_image_desc desc = {
+          CL_MEM_OBJECT_IMAGE2D, imageWidth / 4, imageHeight, 0, 0, pitch, 0, 0, 0, buffer};
 #endif
 
-      clImage2D = _wrapper->clCreateImage(context_, CL_MEM_READ_WRITE, &format,
-                                          &desc, NULL, &status);
+      clImage2D =
+          _wrapper->clCreateImage(context_, CL_MEM_READ_WRITE, &format, &desc, NULL, &status);
     }
 
     // testing pitch alignment correct check in the runtime
     if (pitchTest) {
       CHECK_RESULT(requiredPitch != pitch &&
-                       (clImage2D != NULL ||
-                        status != CL_INVALID_IMAGE_FORMAT_DESCRIPTOR),
+                       (clImage2D != NULL || status != CL_INVALID_IMAGE_FORMAT_DESCRIPTOR),
                    "AllocateOpenCLImage() failed: (clImage2D!=NULL || "
                    "status!=CL_INVALID_IMAGE_FORMAT_DESCRIPTOR) <=> (%p, %x)",
                    clImage2D, status);
@@ -252,30 +211,14 @@ void OCLImage2DFromBuffer::AllocateOpenCLImage() {
   {
     const cl_image_format format = {CL_RGBA, CL_UNSIGNED_INT8};
 #if defined(CL_VERSION_2_0)
-    const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                imageWidth / 4,
-                                imageHeight,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                {NULL}};
+    const cl_image_desc desc = {
+        CL_MEM_OBJECT_IMAGE2D, imageWidth / 4, imageHeight, 0, 0, 0, 0, 0, 0, {NULL}};
 #else
-    const cl_image_desc desc = {CL_MEM_OBJECT_IMAGE2D,
-                                imageWidth / 4,
-                                imageHeight,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                0,
-                                NULL};
+    const cl_image_desc desc = {
+        CL_MEM_OBJECT_IMAGE2D, imageWidth / 4, imageHeight, 0, 0, 0, 0, 0, 0, NULL};
 #endif
-    clImage2DOut = _wrapper->clCreateImage(context_, CL_MEM_READ_WRITE, &format,
-                                           &desc, NULL, &status);
+    clImage2DOut =
+        _wrapper->clCreateImage(context_, CL_MEM_READ_WRITE, &format, &desc, NULL, &status);
   }
   CHECK_RESULT(clImage2D == NULL, "AllocateOpenCLImage() failed");
 }
@@ -283,13 +226,13 @@ void OCLImage2DFromBuffer::AllocateOpenCLImage() {
 void OCLImage2DFromBuffer::testReadImage(cl_mem image) {
   cl_int status = 0;
   size_t bufferSize = imageWidth * imageHeight;
-  unsigned char *dstData = new unsigned char[bufferSize];
+  unsigned char* dstData = new unsigned char[bufferSize];
 
   size_t origin[] = {0, 0, 0};
   size_t region[] = {imageWidth / 4, imageHeight, 1};
 
-  status = clEnqueueReadImage(cmdQueues_[_deviceId], image, 1, origin, region,
-                              0, 0, dstData, 0, 0, 0);
+  status =
+      clEnqueueReadImage(cmdQueues_[_deviceId], image, 1, origin, region, 0, 0, dstData, 0, 0, 0);
 
   ::clFinish(cmdQueues_[_deviceId]);
 
@@ -297,10 +240,8 @@ void OCLImage2DFromBuffer::testReadImage(cl_mem image) {
     for (unsigned int x = 0; x < imageWidth / 4; x++) {
       for (unsigned int p = 0; p < 4; p++) {
         if (*(dstData + y * imageWidth + x * 4 + p) != p) {
-          CHECK_RESULT(
-              true,
-              "CheckCLImage: *(dstData+y*imageWidth+x*4+p)!=p => %i != %i",
-              *(dstData + y * imageWidth + x * 4 + p), p);
+          CHECK_RESULT(true, "CheckCLImage: *(dstData+y*imageWidth+x*4+p)!=p => %i != %i",
+                       *(dstData + y * imageWidth + x * 4 + p), p);
           goto cleanup;
         }
       }
@@ -345,10 +286,9 @@ void OCLImage2DFromBuffer::CopyOpenCLImage(cl_mem clImageSrc) {
   size_t globalThreads[] = {imageWidth / 4, imageHeight};
   size_t localThreads[] = {blockSizeX, blockSizeY};
 
-  status = clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL,
-                                  globalThreads, NULL, 0, NULL, 0);
-  CHECK_RESULT((status != CL_SUCCESS),
-               "CopyOpenCLImage() failed at clEnqueueNDRangeKernel");
+  status = clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 2, NULL, globalThreads, NULL, 0,
+                                  NULL, 0);
+  CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clEnqueueNDRangeKernel");
 
   status = clFinish(cmdQueues_[_deviceId]);
   CHECK_RESULT((status != CL_SUCCESS), "CopyOpenCLImage() failed at clFinish");
@@ -358,26 +298,22 @@ void OCLImage2DFromBuffer::CompileKernel() {
   cl_int status = 0;
 
   size_t kernelSize = sizeof(strKernel);
-  const char *strs = (const char *)&strKernel[0];
+  const char* strs = (const char*)&strKernel[0];
 
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strs,
-                                                 &kernelSize, &status);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strs, &kernelSize, &status);
 
-  status = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL,
-                                    NULL, NULL);
+  status = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], NULL, NULL, NULL);
   if (status != CL_SUCCESS) {
     if (status == CL_BUILD_PROGRAM_FAILURE) {
       cl_int logStatus;
       size_t buildLogSize = 0;
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                        CL_PROGRAM_BUILD_LOG, buildLogSize,
-                                        NULL, &buildLogSize);
+      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
+                                        buildLogSize, NULL, &buildLogSize);
       std::string buildLog;
       buildLog.resize(buildLogSize);
 
-      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                        CL_PROGRAM_BUILD_LOG, buildLogSize,
-                                        &buildLog[0], NULL);
+      logStatus = clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG,
+                                        buildLogSize, &buildLog[0], NULL);
       printf("%s", buildLog.c_str());
     }
     return;
@@ -386,9 +322,8 @@ void OCLImage2DFromBuffer::CompileKernel() {
   kernel_ = _wrapper->clCreateKernel(program_, "image2imageCopy", &status);
 
   size_t kernel2DWorkGroupSize = 0;
-  status = clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId],
-                                    CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t),
-                                    &kernel2DWorkGroupSize, 0);
+  status = clGetKernelWorkGroupInfo(kernel_, devices_[_deviceId], CL_KERNEL_WORK_GROUP_SIZE,
+                                    sizeof(size_t), &kernel2DWorkGroupSize, 0);
 
   if ((blockSizeX * blockSizeY) > kernel2DWorkGroupSize) {
     if (blockSizeX > kernel2DWorkGroupSize) {

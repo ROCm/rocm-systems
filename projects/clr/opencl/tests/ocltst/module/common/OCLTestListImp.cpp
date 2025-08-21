@@ -33,9 +33,7 @@ unsigned int OCL_CALLCONV OCLTestList_TestCount(void) { return TestListCount; }
 //  OCLTestList_TestLibVersion - retrieve the version of test lib in the testing
 //  module
 //
-unsigned int OCL_CALLCONV OCLTestList_TestLibVersion(void) {
-  return TestLibVersion;
-}
+unsigned int OCL_CALLCONV OCLTestList_TestLibVersion(void) { return TestLibVersion; }
 
 //
 //  OCLTestList_TestLibName - retrieve the name of test library

@@ -64,7 +64,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
 
   SECTION("Host to Device") { Memcpy3DHtoDSyncBehavior(Memcpy3DWrapper<async>, false); }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Device to Pageable Host") {
     Memcpy3DDtoHPageableSyncBehavior(Memcpy3DWrapper<async>, true);
   }
@@ -76,7 +76,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Synchronization_Behavior") {
 
   SECTION("Device to Device") { Memcpy3DDtoDSyncBehavior(Memcpy3DWrapper<async>, false); }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-233
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-233
   SECTION("Host to Host") { Memcpy3DHtoHSyncBehavior(Memcpy3DWrapper<async>, true); }
 #endif
 }
@@ -93,7 +93,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Positive_Array") {
 
   constexpr bool async = true;
   SECTION("Array from/to Host") { Memcpy3DArrayHostShell<async>(Memcpy3DWrapper<async>); }
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-238
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-238
   SECTION("Array from/to Device") { Memcpy3DArrayDeviceShell<async>(Memcpy3DWrapper<async>); }
 #endif
 }
@@ -120,7 +120,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
                       hipErrorInvalidValue);
     }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-239
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-239
     SECTION("dst_ptr.pitch < width") {
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = extent.width - 1;
@@ -154,7 +154,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
                       hipErrorInvalidValue);
     }
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-237
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-237
     SECTION("extent.width + dst_pos.x > dst_ptr.pitch") {
       hipPos invalid_pos = dst_pos;
       invalid_pos.x = dst_ptr.pitch - extent.width + 1;
@@ -198,7 +198,7 @@ TEST_CASE("Unit_hipMemcpy3DAsync_Negative_Parameters") {
     }
 #endif
 
-#if HT_NVIDIA // Disabled on AMD due to defect - EXSWHTEC-234
+#if HT_NVIDIA  // Disabled on AMD due to defect - EXSWHTEC-234
     SECTION("Invalid MemcpyKind") {
       HIP_CHECK_ERROR(Memcpy3DWrapper<async>(dst_ptr, dst_pos, src_ptr, src_pos, extent,
                                              static_cast<hipMemcpyKind>(-1)),

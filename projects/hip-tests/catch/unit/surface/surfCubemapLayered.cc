@@ -340,6 +340,6 @@ TEMPLATE_TEST_CASE("Unit_surfCubemapLayered_Positive_ReadWrite", "", char, uchar
 }
 
 /**
-* End doxygen group SurfaceTest.
-* @}
-*/
+ * End doxygen group SurfaceTest.
+ * @}
+ */

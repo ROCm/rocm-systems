@@ -23,6 +23,7 @@ def main():
         sys.exit(1)
 
     pr_numbers = [p.strip() for p in pr_list.split(",") if p.strip()]
+    conflicted_prs = []  # 🔹 Track PRs with merge conflicts
 
     # 2) Init local repo and configure Git user
     repo = Repo(os.getcwd())
@@ -53,39 +54,35 @@ def main():
         is_draft = pr.draft
         author   = pr.user.login
 
-        # Build a clean branch name
         tclean   = target.replace("/", "_")
         src_clean= subrepo.replace("/", "_")
         branch   = f"import/{tclean}/{src_clean}/pr-{pr_num}"
 
-        # 5a) Checkout new branch (delete/recreate if exists)
         try:
             run(f"git checkout -b {branch}")
         except subprocess.CalledProcessError:
             run(f"git branch -D {branch}")
             run(f"git checkout -b {branch}")
 
-        # 5b) Pull in the subtree
         try:
             run(f"git subtree pull --prefix={prefix} {head_url} {head_ref}")
         except subprocess.CalledProcessError:
-            print(f"ERROR: subtree pull failed for PR #{pr_num}, skipping.")
+            print(f"❌ Merge conflict: subtree pull failed for PR #{pr_num}, skipping.")
+            conflicted_prs.append(pr_num)  # 🔹 Track the failed PR
+            run(f"git merge --abort || true")  # Clean up merge state if needed
+            run(f"git reset --hard")  # Ensure clean state
             run(f"git checkout {target}")
             continue
 
-        # 5c) Push the branch up
         run(f"git push origin {branch}")
 
-        # 5d) Build the PR body with footer
         footer = (
             "\n\n---\n"
-            f"🔁 Imported from [{upstream}#{pr_num}]"
-              f"(https://github.com/{upstream}/pull/{pr_num})\n"
+            f"🔁 Imported from [{upstream}#{pr_num}](https://github.com/{upstream}/pull/{pr_num})\n"
             f"🧑‍💻 Originally authored by @{author}"
         )
         full_body = body + footer
 
-        # 5e) Create the PR and label it
         new_pr = super_repo.create_pull(
             title=title,
             body=full_body,
@@ -95,10 +92,18 @@ def main():
         )
         new_pr.add_to_labels("imported pr")
 
-        # 5f) Go back to target for next iteration
         run(f"git checkout {target}")
 
+    # 🔹 Summary of failed PRs due to conflict
+    if conflicted_prs:
+        print("\n⚠️ The following PRs failed due to merge conflicts:")
+        for pr in conflicted_prs:
+            print(f" - #{pr}")
+    else:
+        print("\n✅ All PRs imported successfully without conflicts.")
+
     print("\nAll imports complete.")
+
 
 if __name__ == "__main__":
     main()

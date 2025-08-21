@@ -1,9 +1,3 @@
-[![Ubuntu 22.04](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml)
-[![RHEL 8](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml)
-[![Instinct](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml)
-[![Docs](https://github.com/ROCm/rocprofiler-compute/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/rocprofiler-compute/)
-[![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
-
 # ROCm Compute Profiler
 
 ## General

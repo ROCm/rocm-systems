@@ -38,8 +38,8 @@
 
 #define NUM_SIZES 8
 // 4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
-static const unsigned int Sizes[NUM_SIZES] = {
-    4096, 8192, 65536, 262144, 1048576, 4194304, 16777216, 16777216 + 10};
+static const unsigned int Sizes[NUM_SIZES] = {4096,    8192,    65536,    262144,
+                                              1048576, 4194304, 16777216, 16777216 + 10};
 
 static const unsigned int Iterations[2] = {1, OCLPerfBufferCopySpeed::NUM_ITER};
 
@@ -47,19 +47,15 @@ static const unsigned int Iterations[2] = {1, OCLPerfBufferCopySpeed::NUM_ITER};
 //  16 ways to combine 4 different buffer types
 #define NUM_SUBTESTS (BUF_TYPES * BUF_TYPES)
 
-OCLPerfBufferCopySpeed::OCLPerfBufferCopySpeed() {
-  _numSubTests = NUM_SIZES * NUM_SUBTESTS * 2;
-}
+OCLPerfBufferCopySpeed::OCLPerfBufferCopySpeed() { _numSubTests = NUM_SIZES * NUM_SUBTESTS * 2; }
 
 OCLPerfBufferCopySpeed::~OCLPerfBufferCopySpeed() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfBufferCopySpeed::setData(void *ptr, unsigned int size,
-                                     unsigned int value) {
-  unsigned int *ptr2 = (unsigned int *)ptr;
+void OCLPerfBufferCopySpeed::setData(void* ptr, unsigned int size, unsigned int value) {
+  unsigned int* ptr2 = (unsigned int*)ptr;
   value = 0;
   for (unsigned int i = 0; i < size >> 2; i++) {
     ptr2[i] = value;
@@ -67,16 +63,14 @@ void OCLPerfBufferCopySpeed::setData(void *ptr, unsigned int size,
   }
 }
 
-void OCLPerfBufferCopySpeed::checkData(void *ptr, unsigned int size,
-                                       unsigned int value) {
-  unsigned int *ptr2 = (unsigned int *)ptr;
+void OCLPerfBufferCopySpeed::checkData(void* ptr, unsigned int size, unsigned int value) {
+  unsigned int* ptr2 = (unsigned int*)ptr;
   value = 0;
   for (unsigned int i = 0; i < size >> 2; i++) {
     if (ptr2[i] != value) {
-      printf("Data validation failed at %d!  Got 0x%08x 0x%08x 0x%08x 0x%08x\n",
-             i, ptr2[i], ptr2[i + 1], ptr2[i + 2], ptr2[i + 3]);
-      printf("Expected 0x%08x 0x%08x 0x%08x 0x%08x\n", value, value, value,
-             value);
+      printf("Data validation failed at %d!  Got 0x%08x 0x%08x 0x%08x 0x%08x\n", i, ptr2[i],
+             ptr2[i + 1], ptr2[i + 2], ptr2[i + 3]);
+      printf("Expected 0x%08x 0x%08x 0x%08x 0x%08x\n", value, value, value, value);
       CHECK_RESULT(true, "Data validation failed!");
       break;
     }
@@ -84,12 +78,12 @@ void OCLPerfBufferCopySpeed::checkData(void *ptr, unsigned int size,
   }
 }
 
-void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
-                                  double &conversion, unsigned int deviceId) {
+void OCLPerfBufferCopySpeed::open(unsigned int test, char* units, double& conversion,
+                                  unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -115,7 +109,7 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -125,13 +119,11 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -150,8 +142,8 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
   }
 
   char getVersion[128];
-  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION,
-                                       sizeof(getVersion), getVersion, NULL);
+  error_ = _wrapper->clGetPlatformInfo(platform, CL_PLATFORM_VERSION, sizeof(getVersion),
+                                       getVersion, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
   platformVersion[0] = getVersion[7];
   platformVersion[1] = getVersion[8];
@@ -183,19 +175,17 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
@@ -209,15 +199,13 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
   } else if (useHostPtr[0]) {
     flags |= CL_MEM_USE_HOST_PTR;
     memptr[0] = malloc(bufSize_ + 4096);
-    alignedmemptr[0] = (void *)(((size_t)memptr[0] + 4095) & ~4095);
+    alignedmemptr[0] = (void*)(((size_t)memptr[0] + 4095) & ~4095);
   }
-  srcBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_,
-                                        alignedmemptr[0], &error_);
+  srcBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedmemptr[0], &error_);
   CHECK_RESULT(srcBuffer_ == 0, "clCreateBuffer(srcBuffer) failed");
-  void *mem;
-  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, srcBuffer_, CL_TRUE,
-                                     CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL,
-                                     &error_);
+  void* mem;
+  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, srcBuffer_, CL_TRUE, CL_MAP_WRITE, 0, bufSize_, 0,
+                                     NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   setData(mem, bufSize_, 0x600df00d);
   _wrapper->clEnqueueUnmapMemObject(cmd_queue_, srcBuffer_, mem, 0, NULL, NULL);
@@ -230,31 +218,26 @@ void OCLPerfBufferCopySpeed::open(unsigned int test, char *units,
   } else if (useHostPtr[1]) {
     flags |= CL_MEM_USE_HOST_PTR;
     memptr[1] = malloc(bufSize_ + 4096);
-    alignedmemptr[1] = (void *)(((size_t)memptr[1] + 4095) & ~4095);
+    alignedmemptr[1] = (void*)(((size_t)memptr[1] + 4095) & ~4095);
   }
-  dstBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_,
-                                        alignedmemptr[1], &error_);
+  dstBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedmemptr[1], &error_);
   CHECK_RESULT(dstBuffer_ == 0, "clCreateBuffer(dstBuffer) failed");
 
   // Force persistent memory to be on GPU
   if (persistent[0]) {
-    cl_mem memBuffer =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    cl_mem memBuffer = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(memBuffer == 0, "clCreateBuffer(memBuffer) failed");
 
-    _wrapper->clEnqueueCopyBuffer(cmd_queue_, memBuffer, dstBuffer_, 0, 0,
-                                  bufSize_, 0, NULL, NULL);
+    _wrapper->clEnqueueCopyBuffer(cmd_queue_, memBuffer, dstBuffer_, 0, 0, bufSize_, 0, NULL, NULL);
     _wrapper->clFinish(cmd_queue_);
 
     _wrapper->clReleaseMemObject(memBuffer);
   }
   if (persistent[1]) {
-    cl_mem memBuffer =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    cl_mem memBuffer = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(memBuffer == 0, "clCreateBuffer(memBuffer) failed");
 
-    _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, memBuffer, 0, 0,
-                                  bufSize_, 0, NULL, NULL);
+    _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, memBuffer, 0, 0, bufSize_, 0, NULL, NULL);
     _wrapper->clFinish(cmd_queue_);
 
     _wrapper->clReleaseMemObject(memBuffer);
@@ -265,8 +248,8 @@ void OCLPerfBufferCopySpeed::run(void) {
   CPerfCounter timer;
 
   // Warm up
-  error_ = _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, dstBuffer_, 0,
-                                         0, bufSize_, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, dstBuffer_, 0, 0, bufSize_, 0,
+                                         NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueCopyBuffer failed");
   error_ = _wrapper->clFinish(cmd_queue_);
@@ -275,8 +258,8 @@ void OCLPerfBufferCopySpeed::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < numIter; i++) {
-    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, dstBuffer_,
-                                           0, 0, bufSize_, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queue_, srcBuffer_, dstBuffer_, 0, 0, bufSize_, 0,
+                                           NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueCopyBuffer failed");
   }
@@ -289,16 +272,15 @@ void OCLPerfBufferCopySpeed::run(void) {
   // Buffer copy bandwidth in GB/s
   double perf = ((double)bufSize_ * numIter * (double)(1e-09)) / sec;
 
-  void *mem;
-  mem =
-      _wrapper->clEnqueueMapBuffer(cmd_queue_, dstBuffer_, CL_TRUE, CL_MAP_READ,
-                                   0, bufSize_, 0, NULL, NULL, &error_);
+  void* mem;
+  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, dstBuffer_, CL_TRUE, CL_MAP_READ, 0, bufSize_, 0,
+                                     NULL, NULL, &error_);
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
   checkData(mem, bufSize_, 0x600df00d);
   _wrapper->clEnqueueUnmapMemObject(cmd_queue_, dstBuffer_, mem, 0, NULL, NULL);
 
-  const char *strSrc = NULL;
-  const char *strDst = NULL;
+  const char* strSrc = NULL;
+  const char* strDst = NULL;
   if (persistent[0])
     strSrc = "per";
   else if (allocHostPtr[0])
@@ -320,25 +302,22 @@ void OCLPerfBufferCopySpeed::run(void) {
       (persistent[1] || (!allocHostPtr[1] && !useHostPtr[1])))
     perf *= 2.0;
   // Double results when src and dst are both in sysmem
-  if ((allocHostPtr[0] || useHostPtr[0]) && (allocHostPtr[1] || useHostPtr[1]))
-    perf *= 2.0;
+  if ((allocHostPtr[0] || useHostPtr[0]) && (allocHostPtr[1] || useHostPtr[1])) perf *= 2.0;
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " (%8d bytes) s:%s d:%s i:%4d (GB/s) ", bufSize_,
-           strSrc, strDst, numIter);
+  SNPRINTF(buf, sizeof(buf), " (%8d bytes) s:%s d:%s i:%4d (GB/s) ", bufSize_, strSrc, strDst,
+           numIter);
   testDescString = buf;
 }
 
 unsigned int OCLPerfBufferCopySpeed::close(void) {
   if (srcBuffer_) {
     error_ = _wrapper->clReleaseMemObject(srcBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(srcBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(srcBuffer_) failed");
   }
   if (dstBuffer_) {
     error_ = _wrapper->clReleaseMemObject(dstBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(dstBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(dstBuffer_) failed");
   }
   if (memptr[0]) {
     free(memptr[0]);
@@ -348,8 +327,7 @@ unsigned int OCLPerfBufferCopySpeed::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);
@@ -380,9 +358,8 @@ void OCLPerfBufferCopyRectSpeed::run(void) {
     return;
   }
   // Warm up
-  error_ = _wrapper->clEnqueueCopyBufferRect(cmd_queue_, srcBuffer_, dstBuffer_,
-                                             srcOrigin, dstOrigin, region,
-                                             width, 0, width, 0, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueCopyBufferRect(cmd_queue_, srcBuffer_, dstBuffer_, srcOrigin,
+                                             dstOrigin, region, width, 0, width, 0, 0, NULL, NULL);
 
   CHECK_RESULT(error_, "clEnqueueCopyBufferRect failed");
   error_ = _wrapper->clFinish(cmd_queue_);
@@ -391,9 +368,9 @@ void OCLPerfBufferCopyRectSpeed::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < testNumIter; i++) {
-    error_ = _wrapper->clEnqueueCopyBufferRect(
-        cmd_queue_, srcBuffer_, dstBuffer_, srcOrigin, dstOrigin, region, width,
-        0, width, 0, 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueCopyBufferRect(cmd_queue_, srcBuffer_, dstBuffer_, srcOrigin, dstOrigin,
+                                          region, width, 0, width, 0, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueCopyBufferRect failed");
   }
@@ -406,8 +383,8 @@ void OCLPerfBufferCopyRectSpeed::run(void) {
   // Buffer copy bandwidth in GB/s
   double perf = ((double)bufSize_ * testNumIter * (double)(1e-09)) / sec;
 
-  const char *strSrc = NULL;
-  const char *strDst = NULL;
+  const char* strSrc = NULL;
+  const char* strDst = NULL;
   if (persistent[0])
     strSrc = "per";
   else if (allocHostPtr[0])
@@ -429,11 +406,10 @@ void OCLPerfBufferCopyRectSpeed::run(void) {
       (persistent[1] || (!allocHostPtr[1] && !useHostPtr[1])))
     perf *= 2.0;
   // Double results when src and dst are both in sysmem
-  if ((allocHostPtr[0] || useHostPtr[0]) && (allocHostPtr[1] || useHostPtr[1]))
-    perf *= 2.0;
+  if ((allocHostPtr[0] || useHostPtr[0]) && (allocHostPtr[1] || useHostPtr[1])) perf *= 2.0;
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " (%8d bytes) s:%s d:%s i:%4d (GB/s) ", bufSize_,
-           strSrc, strDst, testNumIter);
+  SNPRINTF(buf, sizeof(buf), " (%8d bytes) s:%s d:%s i:%4d (GB/s) ", bufSize_, strSrc, strDst,
+           testNumIter);
   testDescString = buf;
 }

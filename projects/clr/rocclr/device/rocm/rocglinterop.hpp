@@ -135,7 +135,7 @@ bool GetInfo(mesa_glinterop_device_info& info, MESA_INTEROP_KIND Kind, const Dis
 
 bool Export(mesa_glinterop_export_in& in, mesa_glinterop_export_out& out, MESA_INTEROP_KIND Kind,
             const DisplayHandle display, const ContextHandle context);
-}
-}
+}  // namespace MesaInterop
+}  // namespace amd::roc
 
 #endif /*WITHOUT_HSA_BACKEND*/

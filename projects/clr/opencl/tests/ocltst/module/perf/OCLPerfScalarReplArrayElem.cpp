@@ -37,8 +37,8 @@
 #define NUM_SIZES 1
 static const unsigned int Sizes[NUM_SIZES] = {16777216};  // 16
 
-static void genKernelSource(const char *vtypeName, unsigned arrayLen,
-                            unsigned loopCount, char *source) {
+static void genKernelSource(const char* vtypeName, unsigned arrayLen, unsigned loopCount,
+                            char* source) {
   sprintf(source,
           "%s foo(uint lid, __local %s *localLocal)\n"
           "{\n"
@@ -59,12 +59,12 @@ static void genKernelSource(const char *vtypeName, unsigned arrayLen,
           "    __local %s localLocal[%d];\n"
           "    outBuf[gid] = foo(lid, localLocal);\n"
           "}\n",
-          vtypeName, vtypeName, vtypeName, vtypeName, loopCount, vtypeName,
-          vtypeName, vtypeName, arrayLen);
+          vtypeName, vtypeName, vtypeName, vtypeName, loopCount, vtypeName, vtypeName, vtypeName,
+          arrayLen);
 }
 
 typedef struct {
-  const char *name;
+  const char* name;
   unsigned nBytes;
 } ExplicitType;
 
@@ -78,7 +78,7 @@ static const ExplicitType tyDouble = {"double", 8};
 typedef struct {
   ExplicitType elemType;
   unsigned nElems;
-  const char *name;
+  const char* name;
   unsigned getSize() const { return elemType.nBytes * nElems; }
 } VectorType;
 
@@ -111,51 +111,42 @@ void OCLPerfScalarReplArrayElem::genShader(unsigned int idx) {
   itemWidth_ = vecType.getSize();
 }
 
-OCLPerfScalarReplArrayElem::OCLPerfScalarReplArrayElem() {
-  _numSubTests = NUM_SIZES * nVecTypes;
-}
+OCLPerfScalarReplArrayElem::OCLPerfScalarReplArrayElem() { _numSubTests = NUM_SIZES * nVecTypes; }
 
 OCLPerfScalarReplArrayElem::~OCLPerfScalarReplArrayElem() {}
 
 void OCLPerfScalarReplArrayElem::setData(cl_mem buffer, float val) {
-  float *data = (float *)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true,
-                                                      CL_MAP_WRITE, 0, bufSize_,
-                                                      0, NULL, NULL, &error_);
+  float* data = (float*)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true, CL_MAP_WRITE, 0,
+                                                     bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < (bufSize_ >> 2); i++) data[i] = val;
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
 }
 
 void OCLPerfScalarReplArrayElem::checkData(cl_mem buffer) {
-  float *data = (float *)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true,
-                                                      CL_MAP_READ, 0, bufSize_,
-                                                      0, NULL, NULL, &error_);
+  float* data = (float*)_wrapper->clEnqueueMapBuffer(cmd_queue_, buffer, true, CL_MAP_READ, 0,
+                                                     bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < (bufSize_ >> 2); i++) {
     if (data[i] != (float)numReads_) {
       printf("Data validation failed at index %d!\n", i);
-      printf("Expected %d %d %d %d\nGot %d %d %d %d\n", numReads_, numReads_,
-             numReads_, numReads_, (unsigned int)data[i],
-             (unsigned int)data[i + 1], (unsigned int)data[i + 2],
+      printf("Expected %d %d %d %d\nGot %d %d %d %d\n", numReads_, numReads_, numReads_, numReads_,
+             (unsigned int)data[i], (unsigned int)data[i + 1], (unsigned int)data[i + 2],
              (unsigned int)data[i + 3]);
       CHECK_RESULT_NO_RETURN(0, "Data validation failed!\n");
       break;
     }
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
-                                      double &conversion,
+void OCLPerfScalarReplArrayElem::open(unsigned int test, char* units, double& conversion,
                                       unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -171,7 +162,7 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -181,13 +172,11 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -213,19 +202,17 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
    */
   CHECK_RESULT(platform == 0, "Couldn't find AMD platform, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
@@ -235,9 +222,8 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
   genShader(shaderIdx_);
-  char *tmp = (char *)shader_.c_str();
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, (const char **)&tmp, NULL, &error_);
+  char* tmp = (char*)shader_.c_str();
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&tmp, NULL, &error_);
   CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
 
   error_ = _wrapper->clBuildProgram(program_, 1, &device, "", NULL, NULL);
@@ -245,9 +231,8 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -255,8 +240,7 @@ void OCLPerfScalarReplArrayElem::open(unsigned int test, char *units,
   kernel_ = _wrapper->clCreateKernel(program_, "_ldsReadSpeed", &error_);
   CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void *)&outBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&outBuffer_);
 
   // setData(outBuffer_, 1.2345678f);
 }
@@ -273,9 +257,9 @@ void OCLPerfScalarReplArrayElem::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < NUM_ITER; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
 
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
   }
@@ -285,14 +269,12 @@ void OCLPerfScalarReplArrayElem::run(void) {
   double sec = timer.GetElapsedTime();
 
   // Constant bandwidth in GB/s
-  double perf =
-      ((double)global * numReads_ * itemWidth_ * NUM_ITER * (double)(1e-09)) /
-      sec;
+  double perf = ((double)global * numReads_ * itemWidth_ * NUM_ITER * (double)(1e-09)) / sec;
 
   _perfInfo = (float)perf;
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " %10s %8d threads, %4d reads (GB/s)",
-           vecTypes[shaderIdx_].name, global, numReads_);
+  SNPRINTF(buf, sizeof(buf), " %10s %8d threads, %4d reads (GB/s)", vecTypes[shaderIdx_].name,
+           global, numReads_);
   testDescString = buf;
   // checkData(outBuffer_);
 }
@@ -300,8 +282,7 @@ void OCLPerfScalarReplArrayElem::run(void) {
 unsigned int OCLPerfScalarReplArrayElem::close(void) {
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (kernel_) {
     error_ = _wrapper->clReleaseKernel(kernel_);
@@ -313,8 +294,7 @@ unsigned int OCLPerfScalarReplArrayElem::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

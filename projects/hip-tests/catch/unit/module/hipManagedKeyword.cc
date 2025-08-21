@@ -20,15 +20,15 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 
 constexpr int MANAGED_VAR_INIT_VALUE = 10;
-constexpr auto  fileName = "managed_kernel.code";
+constexpr auto fileName = "managed_kernel.code";
 
 /**
-* @addtogroup hipModuleGetGlobal
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod, const char* name)` -
-* Returns a global pointer from a module
-*/
+ * @addtogroup hipModuleGetGlobal
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t hmod, const char*
+ * name)` - Returns a global pointer from a module
+ */
 
 /**
  * Test Description
@@ -52,9 +52,7 @@ TEST_CASE("Unit_hipModuleGetGlobal_Functional") {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   for (int i = 0; i < numDevices; i++) {
     int managed_memory = 0;
-    HIPCHECK(hipDeviceGetAttribute(&managed_memory,
-                                hipDeviceAttributeManagedMemory,
-                                i));
+    HIPCHECK(hipDeviceGetAttribute(&managed_memory, hipDeviceAttributeManagedMemory, i));
     if (!managed_memory) {
       HipTest::HIP_SKIP_TEST("managed memory access not supported on device");
       return;
@@ -70,11 +68,9 @@ TEST_CASE("Unit_hipModuleGetGlobal_Functional") {
     HIP_CHECK(hipModuleLoad(&Module, fileName));
     hipFunction_t Function;
     HIP_CHECK(hipModuleGetFunction(&Function, Module, "GPU_func"));
-    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, 0,
-                                   NULL, NULL));
+    HIP_CHECK(hipModuleLaunchKernel(Function, 1, 1, 1, 1, 1, 1, 0, 0, NULL, NULL));
     HIP_CHECK(hipDeviceSynchronize());
-    HIP_CHECK(hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&x),
-                                &xSize, Module, "x"));
+    HIP_CHECK(hipModuleGetGlobal(reinterpret_cast<hipDeviceptr_t*>(&x), &xSize, Module, "x"));
     HIP_CHECK(hipMemcpyDtoH(&data, hipDeviceptr_t(x), xSize));
     if (data != (1 + MANAGED_VAR_INIT_VALUE)) {
       HIP_CHECK(hipModuleUnload(Module));

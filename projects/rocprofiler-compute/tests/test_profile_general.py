@@ -1676,9 +1676,9 @@ class TestSetsIntegration:
 
         memory_metrics = ["16.1.2", "17.1.0"]
         for metric_id in memory_metrics:
-            assert (
-                metric_id in open(Path(workload_dir) / "log.txt", "r").read()
-            ), f"Expected memory metric {metric_id} not found"
+            assert metric_id in open(Path(workload_dir) / "log.txt", "r").read(), (
+                f"Expected memory metric {metric_id} not found"
+            )
 
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -1745,7 +1745,9 @@ class TestSetsIntegration:
         assert returncode == 1
         test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
-    def test_set_and_block_mutual_exclusion(self, binary_handler_profile_rocprof_compute):
+    def test_set_and_block_mutual_exclusion(
+        self, binary_handler_profile_rocprof_compute
+    ):
         options = ["--set", "compute_thruput_util", "--block", "12"]
         workload_dir = test_utils.get_output_dir()
 

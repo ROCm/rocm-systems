@@ -19,17 +19,17 @@ THE SOFTWARE.
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 
-#include <algorithm> // std::min
+#include <algorithm>  // std::min
 
-#define CHECK_RET_VAL(cmd) \
-{ \
-  hipError_t error = cmd;\
-  if (error != hipSuccess) {\
-    fprintf(stderr, "error: '%s'(%d) at %s:%d\n", hipGetErrorString(error), \
-     error, __FILE__, __LINE__);\
-    exit(EXIT_FAILURE);\
-  }\
-}
+#define CHECK_RET_VAL(cmd)                                                                         \
+  {                                                                                                \
+    hipError_t error = cmd;                                                                        \
+    if (error != hipSuccess) {                                                                     \
+      fprintf(stderr, "error: '%s'(%d) at %s:%d\n", hipGetErrorString(error), error, __FILE__,     \
+              __LINE__);                                                                           \
+      exit(EXIT_FAILURE);                                                                          \
+    }                                                                                              \
+  }
 
 __global__ static void addition(float* C, float* A, float* B, size_t N) {
   size_t offset = hipBlockIdx_x * hipBlockDim_x + hipThreadIdx_x;
@@ -72,11 +72,10 @@ static int vectorAddKernelTest() {
 
   const unsigned blocks = 512;
   const unsigned threadsPerBlock = 256;
-  hipLaunchKernelGGL(addition, dim3(blocks), dim3(threadsPerBlock),
-                     0, 0, C_d, A_d, B_d, N);
+  hipLaunchKernelGGL(addition, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, B_d, N);
   CHECK_RET_VAL(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
 
-  for (size_t i=0; i < N ; i++) {
+  for (size_t i = 0; i < N; i++) {
     if (C_h[i] != (A_h[i] + B_h[i])) {
       testResult = 0;
       break;
@@ -99,17 +98,16 @@ namespace cg = cooperative_groups;
 
 static const uint BufferSizeInDwords = 448 * 1024 * 1024;
 
-__global__ static void test_gws(uint* buf, uint bufSize,
-                         int64_t* tmpBuf, int64_t* result) {
+__global__ static void test_gws(uint* buf, uint bufSize, int64_t* tmpBuf, int64_t* result) {
   extern __shared__ int64_t tmp[];
   uint offset = blockIdx.x * blockDim.x + threadIdx.x;
-  uint stride = gridDim.x  * blockDim.x;
+  uint stride = gridDim.x * blockDim.x;
   cg::grid_group gg = cg::this_grid();
 
   int64_t sum = 0;
 
   for (uint i = offset; i < bufSize; i += stride) {
-      sum += buf[i];
+    sum += buf[i];
   }
 
   tmp[threadIdx.x] = sum;
@@ -163,7 +161,7 @@ static int cooperativeKernelTest() {
   CHECK_RET_VAL(hipStreamCreate(&stream));
 
   dim3 dimBlock = dim3(1);
-  dim3 dimGrid  = dim3(1);
+  dim3 dimGrid = dim3(1);
 
   int numBlocks = 0;
   uint workgroups[4] = {32, 64, 128, 256};
@@ -172,27 +170,23 @@ static int cooperativeKernelTest() {
     dimBlock.x = workgroups[i];
     /* Calculate the device occupancy to know how many blocks can be
        run concurrently */
-    hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlocks,
-    test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x *
-    sizeof(int64_t));
+    hipOccupancyMaxActiveBlocksPerMultiprocessor(
+        &numBlocks, test_gws, dimBlock.x * dimBlock.y * dimBlock.z, dimBlock.x * sizeof(int64_t));
     dimGrid.x = deviceProp.multiProcessorCount * std::min(numBlocks, 32);
-    CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB),
-                       dimGrid.x * sizeof(int64_t)));
+    CHECK_RET_VAL(hipMalloc(reinterpret_cast<void**>(&dB), dimGrid.x * sizeof(int64_t)));
 
-    void *params[4];
+    void* params[4];
     params[0] = reinterpret_cast<void*>(&dA);
     params[1] = (void*)(&BufferSizeInDwords);  // NOLINT
     params[2] = reinterpret_cast<void*>(&dB);
     params[3] = reinterpret_cast<void*>(&dC);
 
-    CHECK_RET_VAL(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws),
-                                        dimGrid, dimBlock, params,
-                                        dimBlock.x * sizeof(int64_t), stream));
+    CHECK_RET_VAL(hipLaunchCooperativeKernel(reinterpret_cast<void*>(test_gws), dimGrid, dimBlock,
+                                             params, dimBlock.x * sizeof(int64_t), stream));
 
     CHECK_RET_VAL(hipMemcpy(Ah, dC, sizeof(int64_t), hipMemcpyDeviceToHost));
 
-    if (*Ah != (((int64_t)(BufferSizeInDwords) * (BufferSizeInDwords - 1))
-                   / 2)) {
+    if (*Ah != (((int64_t)(BufferSizeInDwords) * (BufferSizeInDwords - 1)) / 2)) {
       CHECK_RET_VAL(hipFree(dB));
       testResult = 0;
       break;
@@ -204,11 +198,9 @@ static int cooperativeKernelTest() {
   CHECK_RET_VAL(hipStreamDestroy(stream));
   CHECK_RET_VAL(hipFree(dC));
   CHECK_RET_VAL(hipFree(dA));
-  delete [] init;
+  delete[] init;
   free(Ah);
   return testResult;
 }
 
-extern "C" int lazyLoad() {
-  return vectorAddKernelTest() & cooperativeKernelTest();
-}
+extern "C" int lazyLoad() { return vectorAddKernelTest() & cooperativeKernelTest(); }
