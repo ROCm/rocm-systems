@@ -134,10 +134,6 @@ get_initial_environment()
 
     update_env(_env, "ROCPROFSYS_USE_SAMPLING", (_mode != "causal"));
 
-#if defined(ROCPROFSYS_USE_OMPT)
-    if(!getenv("OMP_TOOL_LIBRARIES"))
-        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-#endif
     return _env;
 }
 
@@ -769,9 +765,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
-
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 update_env(_env, "KOKKOS_TOOLS_LIBS", _omni_libpath, UPD_APPEND);
         });
@@ -792,15 +785,6 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
             _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
-
-            // if(_v.count("all") > 0 || _v.count("rocprofiler") > 0)
-            // {
-            //     remove_env(_env, "ROCP_TOOL_LIB");
-            //     remove_env(_env, "ROCP_HSA_INTERCEPT");
-            // }
-
-            if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                remove_env(_env, "OMP_TOOL_LIBRARIES");
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                 remove_env(_env, "KOKKOS_TOOLS_LIBS");
