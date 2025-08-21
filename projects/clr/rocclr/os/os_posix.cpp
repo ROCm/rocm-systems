@@ -40,6 +40,7 @@
 #include <dlfcn.h>
 #include <signal.h>
 #include <cxxabi.h>
+#include <libgen.h>
 
 #include <sys/prctl.h>
 #include <sys/resource.h>
