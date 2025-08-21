@@ -177,7 +177,7 @@ set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
     set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
                    "--cov-report=lcov:tests/coverage.info")
-    
+
     set(CTEST_COVERAGE_COMMAND "python3")
     set(CTEST_COVERAGE_EXTRA_FLAGS "-m" "coverage" "xml" "-o"
                                    "${CMAKE_BINARY_DIR}/coverage.xml")
@@ -360,7 +360,7 @@ if(${ENABLE_COVERAGE})
         test_profile_sort
         test_profile_misc
         test_profile_section
-        test_profile_sets_func 
+        test_profile_sets_func
         test_analyze_commands
         test_analyze_workloads
         test_L1_cache_counters
@@ -368,23 +368,19 @@ if(${ENABLE_COVERAGE})
         test_num_xcds_cli_output
         test_db_connector
         test_utils
-        test_autogen_config
-    )
-    
+        test_autogen_config)
+
     string(REPLACE ";" ";" ALL_TESTS_STRING "${ALL_TEST_NAMES}")
-    
+
     add_test(
         NAME generate_coverage_report
         COMMAND ${Python3_EXECUTABLE} -m coverage xml -o ${CMAKE_BINARY_DIR}/coverage.xml
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-    
+
     set_tests_properties(
         generate_coverage_report
-        PROPERTIES
-            DEPENDS "${ALL_TESTS_STRING}"
-            LABELS "coverage"
-            ENVIRONMENT "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage"
-    )
+        PROPERTIES DEPENDS "${ALL_TESTS_STRING}" LABELS "coverage" ENVIRONMENT
+                   "COVERAGE_FILE=${PROJECT_SOURCE_DIR}/.coverage")
 endif()
 
 # ---------
