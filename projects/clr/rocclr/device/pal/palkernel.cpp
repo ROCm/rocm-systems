@@ -167,7 +167,7 @@ bool HSAILKernel::init() {
   // Find total workgroup size
   if (workGroupInfo_.compileSize_[0] != 0) {
     workGroupInfo_.size_ = workGroupInfo_.compileSize_[0] * workGroupInfo_.compileSize_[1] *
-        workGroupInfo_.compileSize_[2];
+                           workGroupInfo_.compileSize_[2];
   } else {
     workGroupInfo_.size_ = device().info().preferredWorkGroupSize_;
   }

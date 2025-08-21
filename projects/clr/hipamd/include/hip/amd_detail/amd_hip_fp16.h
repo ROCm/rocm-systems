@@ -82,8 +82,8 @@ namespace __hip_internal {
 template <> struct is_floating_point<_Float16> : __hip_internal::true_type {};
 }  // namespace __hip_internal
 
-template <bool cond, typename T = void>
-using Enable_if_t = typename __hip_internal::enable_if<cond, T>::type;
+template <bool cond, typename T = void> using Enable_if_t =
+    typename __hip_internal::enable_if<cond, T>::type;
 
 // BEGIN STRUCT __HALF
 struct __half {
@@ -649,7 +649,7 @@ inline __HOST_DEVICE__ bool __hgt(__half x, __half y) {
 }
 inline __HOST_DEVICE__ bool __hequ(__half x, __half y) {
   return !(static_cast<__half_raw>(x).data < static_cast<__half_raw>(y).data) &&
-      !(static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data);
+         !(static_cast<__half_raw>(x).data > static_cast<__half_raw>(y).data);
 }
 inline __HOST_DEVICE__ bool __hneu(__half x, __half y) {
   return !(static_cast<__half_raw>(x).data == static_cast<__half_raw>(y).data);
@@ -693,7 +693,7 @@ inline __HOST_DEVICE__ __half2 __hgt2(__half2 x, __half2 y) {
 }
 inline __HOST_DEVICE__ __half2 __hequ2(__half2 x, __half2 y) {
   auto r = !(static_cast<__half2_raw>(x).data < static_cast<__half2_raw>(y).data) &&
-      !(static_cast<__half2_raw>(x).data > static_cast<__half2_raw>(y).data);
+           !(static_cast<__half2_raw>(x).data > static_cast<__half2_raw>(y).data);
   return __builtin_convertvector(-r, _Float16_2);
 }
 inline __HOST_DEVICE__ __half2 __hneu2(__half2 x, __half2 y) {
@@ -911,13 +911,12 @@ inline __device__ __half unsafeAtomicAdd(__half* address, __half value) {
   static_assert(sizeof(unsigned short int) == sizeof(__half_raw));
   unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);
   // Align to 4 bytes
-  unsigned int* aligned_addr =
-      __builtin_bit_cast(unsigned int*,
-                         __builtin_bit_cast(unsigned long long int, address_as_short) &
-                             (unsigned long long int)(~0x3));
+  unsigned int* aligned_addr = __builtin_bit_cast(
+      unsigned int*, __builtin_bit_cast(unsigned long long int, address_as_short) &
+                         (unsigned long long int)(~0x3));
 
   bool is_lower = __builtin_bit_cast(unsigned long long int, aligned_addr) ==
-      __builtin_bit_cast(unsigned long long int, address);
+                  __builtin_bit_cast(unsigned long long int, address);
   __half2 fval;
   if (is_lower)
     fval = __halves2half2(value, __float2half(0.0f));

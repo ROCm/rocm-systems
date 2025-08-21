@@ -68,8 +68,8 @@ template <typename T> inline amd::NotNullReference<T> not_null(T* ptrOrNull) {
 #define RUNTIME_ENTRY_RET_NOERRCODE(ret, func, args) CL_API_ENTRY ret CL_API_CALL func args {
 #define RUNTIME_ENTRY(ret, func, args) CL_API_ENTRY ret CL_API_CALL func args {
 #define RUNTIME_ENTRY_VOID(ret, func, args) CL_API_ENTRY ret CL_API_CALL func args {
-#define RUNTIME_EXIT                                                                               \
-  /* FIXME_lmoriche: we should check to thread->lastError here! */                                 \
+#define RUNTIME_EXIT
+/* FIXME_lmoriche: we should check to thread->lastError here! */                                 \
   }
 
 namespace amd {

@@ -114,11 +114,11 @@ template <typename __T, typename __U> struct is_same : public false_type {};
 template <typename __T> struct is_same<__T, __T> : public true_type {};
 
 template <typename _Tp, bool = is_arithmetic<_Tp>::value> struct is_signed : public false_type {};
-template <typename _Tp>
-struct is_signed<_Tp, true> : public true_or_false_type<_Tp(-1) < _Tp(0)> {};
+template <typename _Tp> struct is_signed<_Tp, true> : public true_or_false_type<_Tp(-1) < _Tp(0)> {
+};
 
-template <class T>
-auto test_returnable(int) -> decltype(void(static_cast<T (*)()>(nullptr)), true_type{});
+template <class T> auto test_returnable(int)
+    -> decltype(void(static_cast<T (*)()>(nullptr)), true_type{});
 template <class> auto test_returnable(...) -> false_type;
 
 template <class T> struct type_identity {
@@ -139,8 +139,7 @@ template <class T> struct add_rvalue_reference : decltype(try_add_rvalue_referen
 
 template <typename T> typename add_rvalue_reference<T>::type declval() noexcept;
 
-template <class From, class To>
-auto test_implicitly_convertible(int)
+template <class From, class To> auto test_implicitly_convertible(int)
     -> decltype(void(declval<void (&)(To)>()(declval<From>())), true_type{});
 
 template <class, class> auto test_implicitly_convertible(...) -> false_type;
@@ -160,12 +159,10 @@ template <class T> struct remove_cv<const volatile T> {
 
 template <class T> struct is_void : public is_same<void, typename remove_cv<T>::type> {};
 
-template <class From, class To>
-struct is_convertible
-    : public integral_constant<bool,
-                               (decltype(test_returnable<To>(0))::value &&
-                                decltype(test_implicitly_convertible<From, To>(0))::value) ||
-                                   (is_void<From>::value && is_void<To>::value)> {};
+template <class From, class To> struct is_convertible
+    : public integral_constant<bool, (decltype(test_returnable<To>(0))::value &&
+                                      decltype(test_implicitly_convertible<From, To>(0))::value) ||
+                                         (is_void<From>::value && is_void<To>::value)> {};
 
 template <typename _CharT> struct char_traits;
 template <typename _CharT, typename _Traits = char_traits<_CharT>> class basic_istream;
@@ -173,8 +170,8 @@ template <typename _CharT, typename _Traits = char_traits<_CharT>> class basic_o
 typedef basic_istream<char> istream;
 typedef basic_ostream<char> ostream;
 
-template <typename _Tp>
-struct is_standard_layout : public integral_constant<bool, __is_standard_layout(_Tp)> {};
+template <typename _Tp> struct is_standard_layout
+    : public integral_constant<bool, __is_standard_layout(_Tp)> {};
 
 template <typename _Tp> struct is_trivial : public integral_constant<bool, __is_trivial(_Tp)> {};
 
@@ -195,15 +192,15 @@ template <typename T, T... Ints> struct integer_sequence {
 
 template <size_t... Ints> using index_sequence = integer_sequence<size_t, Ints...>;
 
-template <size_t _hip_N, size_t... Ints>
-struct make_index_sequence_impl : make_index_sequence_impl<_hip_N - 1, _hip_N - 1, Ints...> {};
+template <size_t _hip_N, size_t... Ints> struct make_index_sequence_impl
+    : make_index_sequence_impl<_hip_N - 1, _hip_N - 1, Ints...> {};
 
 template <size_t... Ints> struct make_index_sequence_impl<0, Ints...> {
   using type = index_sequence<Ints...>;
 };
 
-template <size_t _hip_N>
-using make_index_sequence = typename make_index_sequence_impl<_hip_N>::type;
+template <size_t _hip_N> using make_index_sequence =
+    typename make_index_sequence_impl<_hip_N>::type;
 
 template <size_t... Ints>
 constexpr index_sequence<Ints...> make_index_sequence_value(index_sequence<Ints...>) {

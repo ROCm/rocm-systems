@@ -341,36 +341,32 @@ static bool TestMemoryAllocationInLoop(int test_type, bool isMultikernel = false
  * Scenario: Test malloc till nullptr is returned using even chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_Even") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
-                                             MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
  * Scenario: Test malloc till nullptr is returned using odd chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_Odd") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
-                                             MEMORY_CHUNK_SIZE_ODD));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE_ODD));
 }
 
 /**
  * Scenario: Test new till nullptr is returned using even chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_new_Even") {
-  REQUIRE(
-      true ==
-      TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST, MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
  * Scenario: Test new till nullptr is returned using odd chunksize.
  */
 TEST_CASE("Stress_deviceAllocation_new_Odd") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
-                                             MEMORY_CHUNK_SIZE_ODD));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, NO_ALLOCATION_ONHOST,
+                                                     MEMORY_CHUNK_SIZE_ODD));
 }
 
 /**
@@ -379,9 +375,8 @@ TEST_CASE("Stress_deviceAllocation_new_Odd") {
  * from host.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_hipmallocmanaged") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOCMANAGED,
-                                             MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(
+                      TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -390,9 +385,8 @@ TEST_CASE("Stress_deviceAllocation_malloc_hipmallocmanaged") {
  * from host.
  */
 TEST_CASE("Stress_deviceAllocation_new_hipmallocmanaged") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOCMANAGED,
-                                             MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(
+                      TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOCMANAGED, MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -400,9 +394,8 @@ TEST_CASE("Stress_deviceAllocation_new_hipmallocmanaged") {
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
 TEST_CASE("Stress_deviceAllocation_malloc_hipmalloc") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOC,
-                                             MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_MALLOC_FREE, ALLOCATE_ONHOST_HIPMALLOC,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**
@@ -410,9 +403,8 @@ TEST_CASE("Stress_deviceAllocation_malloc_hipmalloc") {
  * is returned. Device memory is also allocated using hipmalloc from host.
  */
 TEST_CASE("Stress_deviceAllocation_new_hipmalloc") {
-  REQUIRE(true ==
-          TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOC,
-                                             MEMORY_CHUNK_SIZE));
+  REQUIRE(true == TestAllocationOfAllAvailableMemory(TEST_NEW_DELETE, ALLOCATE_ONHOST_HIPMALLOC,
+                                                     MEMORY_CHUNK_SIZE));
 }
 
 /**

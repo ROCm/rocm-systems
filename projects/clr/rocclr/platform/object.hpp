@@ -29,16 +29,16 @@
 #include "utils/util.hpp"
 
 
-#define KHR_CL_TYPES_DO(F)                                                                         \
-  /* OpenCL type          Runtime type */                                                          \
-  F(cl_context, Context)                                                                           \
-  F(cl_event, Event)                                                                               \
-  F(cl_command_queue, CommandQueue)                                                                \
-  F(cl_kernel, Kernel)                                                                             \
-  F(cl_program, Program)                                                                           \
-  F(cl_device_id, Device)                                                                          \
-  F(cl_mem, Memory)                                                                                \
-  F(cl_sampler, Sampler)
+#define KHR_CL_TYPES_DO(F)
+/* OpenCL type          Runtime type */
+F(cl_context, Context)
+F(cl_event, Event)
+F(cl_command_queue, CommandQueue)
+F(cl_kernel, Kernel)
+F(cl_program, Program)
+F(cl_device_id, Device)
+F(cl_mem, Memory)
+F(cl_sampler, Sampler)
 
 #define AMD_CL_TYPES_DO(F)                                                                         \
   F(cl_counter_amd, Counter)                                                                       \

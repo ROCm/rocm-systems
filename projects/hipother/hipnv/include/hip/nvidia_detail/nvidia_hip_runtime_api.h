@@ -3956,18 +3956,14 @@ inline static hipError_t hipOccupancyMaxPotentialBlockSizeVariableSMemWithFlags(
       min_grid_size, block_size, func, block_size_to_dynamic_smem_size, block_size_limit, flags));
 }
 
-template <class T>
-inline static hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(int* minGridSize,
-                                                                    int* blockSize, T func,
-                                                                    size_t dynamicSMemSize = 0,
-                                                                    int blockSizeLimit = 0,
-                                                                    unsigned int flags = 0) {
+template <class T> inline static hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(
+    int* minGridSize, int* blockSize, T func, size_t dynamicSMemSize = 0, int blockSizeLimit = 0,
+    unsigned int flags = 0) {
   return hipCUDAErrorTohipError(cudaOccupancyMaxPotentialBlockSize(
       minGridSize, blockSize, func, dynamicSMemSize, blockSizeLimit, flags));
 }
 
-template <class T>
-inline static hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
+template <class T> inline static hipError_t hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
     int* numBlocks, T func, int blockSize, size_t dynamicSMemSize, unsigned int flags) {
   return hipCUDAErrorTohipError(cudaOccupancyMaxActiveBlocksPerMultiprocessorWithFlags(
       numBlocks, func, blockSize, dynamicSMemSize, flags));
@@ -4022,11 +4018,11 @@ template <class T> inline static hipChannelFormatDesc hipCreateChannelDesc() {
   return cudaCreateChannelDesc<T>();
 }
 
-template <class T>
-inline static hipError_t hipLaunchCooperativeKernel(T f, dim3 gridDim, dim3 blockDim,
-                                                    void** kernelParams,
-                                                    unsigned int sharedMemBytes,
-                                                    hipStream_t stream) {
+template <class T> inline static hipError_t hipLaunchCooperativeKernel(T f, dim3 gridDim,
+                                                                       dim3 blockDim,
+                                                                       void** kernelParams,
+                                                                       unsigned int sharedMemBytes,
+                                                                       hipStream_t stream) {
   return hipCUDAErrorTohipError(cudaLaunchCooperativeKernel(
       reinterpret_cast<const void*>(f), gridDim, blockDim, kernelParams, sharedMemBytes, stream));
 }

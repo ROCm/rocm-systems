@@ -55,7 +55,7 @@ TEST_CASE("Unit_hiprtc_warpsize") {
   std::string sarg = std::string("--gpu-architecture=") + props.gcnArchName;
 #else
   std::string sarg = std::string("--gpu-architecture=compute_") + std::to_string(props.major) +
-      std::to_string(props.minor);
+                     std::to_string(props.minor);
 #endif
   vector<const char*> opts;
   opts.push_back(sarg.c_str());
