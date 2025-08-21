@@ -760,7 +760,7 @@ class AMDSMIHelpers():
                     return accelerator_partition_profiles
                 break
             except Exception as e:
-                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occured --> Unable to get accelerator partition profile config for device {dev}: {str(e)}")
+                logging.debug(f"AMDSMIHelpers.get_accelerator_partition_profile_config - Unexpected error occurred --> Unable to get accelerator partition profile config for device {dev}: {str(e)}")
                 break
         return accelerator_partition_profiles
 

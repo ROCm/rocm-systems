@@ -25,9 +25,7 @@ import re
 import time
 from typing import Dict
 from enum import Enum
-import inspect
 from amdsmi_helpers import AMDSMIHelpers
-import amdsmi_cli_exceptions
 
 class AMDSMILogger():
     def __init__(self, format='human_readable', destination='stdout', helpers=None) -> None:
@@ -92,10 +90,10 @@ class AMDSMILogger():
         self.multiple_device_output.clear()
 
 
-    def cper_exit_message(self):
-        """ Store the cper exit message
+    def get_cper_exit_message(self):
+        """ Get the cper exit message
             params:
-                message (str) - message to store
+                None
             return:
                 cper_exit_message (bool) - True if cper exit message is set
         """
@@ -460,7 +458,7 @@ class AMDSMILogger():
             else:
                 self.output[argument] = data
         else:
-            raise amdsmi_cli_exceptions(self, "Invalid output format given, only json, csv, and human_readable supported")
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
 
     def _store_cpu_output_amdsmi(self, cpu_id, argument, data):
@@ -482,7 +480,7 @@ class AMDSMILogger():
             else:
                 self.output[argument] = data
         else:
-            raise amdsmi_cli_exceptions(self, "Invalid output format given, only json, csv, and human_readable supported")
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
 
     def _store_output_amdsmi(self, gpu_id, argument, data):
@@ -504,7 +502,7 @@ class AMDSMILogger():
             else:
                 self.output[argument] = data
         else:
-            raise amdsmi_cli_exceptions(self, "Invalid output format given, only json, csv, and human_readable supported")
+            raise ValueError("Invalid output format: expected json, csv, or human_readable")
 
 
     def store_multiple_device_output(self):

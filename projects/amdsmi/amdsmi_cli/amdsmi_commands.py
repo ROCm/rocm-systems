@@ -4183,7 +4183,7 @@ class AMDSMICommands():
                 else:
                     static_dict["set_core_boost_limit"]["Response"] = f"{boost_limit} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_core_boost_limit"]["Response"] = f"Error occured for Core {core_id} - {e.get_error_info()}"
+                static_dict["set_core_boost_limit"]["Response"] = f"Error occurred for Core {core_id} - {e.get_error_info()}"
                 logging.debug("Failed to set core boost limit for core %s | %s", core_id, e.get_error_info())
 
         multiple_devices_csv_override = False
@@ -4282,7 +4282,7 @@ class AMDSMICommands():
                     args.cpu_pwr_limit[0][0] = max_power
                 static_dict["set_pwr_limit"]["Response"] = f"{args.cpu_pwr_limit[0][0] / 1000:.3f} mW"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_pwr_limit"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_pwr_limit"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set power limit for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_xgmi_link_width:
@@ -4292,7 +4292,7 @@ class AMDSMICommands():
                                                            args.cpu_xgmi_link_width[0][1])
                 static_dict["set_xgmi_link_width"]["Response"] = f"{args.cpu_xgmi_link_width[0][0]} - {args.cpu_xgmi_link_width[0][1]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_xgmi_link_width"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_xgmi_link_width"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set xgmi link width for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_lclk_dpm_level:
@@ -4303,7 +4303,7 @@ class AMDSMICommands():
                                                                       args.cpu_lclk_dpm_level[0][2])
                 static_dict["set_lclk_dpm_level"]["Response"] = f"NBIO[{args.cpu_lclk_dpm_level[0][0]}]"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_lclk_dpm_level"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_lclk_dpm_level"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set lclk dpm level for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_pwr_eff_mode:
@@ -4312,7 +4312,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_set_cpu_pwr_efficiency_mode(args.cpu, args.cpu_pwr_eff_mode[0][0])
                 static_dict["set_pwr_eff_mode"]["Response"] = f"{args.cpu_pwr_eff_mode[0][0]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_pwr_eff_mode"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_pwr_eff_mode"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set power efficiency mode for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_gmi3_link_width:
@@ -4322,7 +4322,7 @@ class AMDSMICommands():
                 args.cpu_gmi3_link_width[0][1])
                 static_dict["set_gmi3_link_width"]["response"] = f"{args.cpu_gmi3_link_width[0][0]} - {args.cpu_gmi3_link_width[0][1]}"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_gmi3_link_width"]["response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_gmi3_link_width"]["response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set gmi3 link width for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_pcie_link_rate:
@@ -4331,7 +4331,7 @@ class AMDSMICommands():
                 resp = amdsmi_interface.amdsmi_set_cpu_pcie_link_rate(args.cpu, args.cpu_pcie_link_rate[0][0])
                 static_dict["set_pcie_link_rate"]["prev_mode"] = resp
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_pcie_link_rate"]["prev_mode"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_pcie_link_rate"]["prev_mode"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set pcie link rate for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_df_pstate_range:
@@ -4341,7 +4341,7 @@ class AMDSMICommands():
                 args.cpu_df_pstate_range[0][1])
                 static_dict["set_df_pstate_range"]["response"] = "Set Operation successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["set_df_pstate_range"]["response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_df_pstate_range"]["response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set df pstate range for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_enable_apb:
@@ -4350,7 +4350,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_cpu_apb_enable(args.cpu)
                 static_dict["apbenable"]["state"] = "Enabled DF - Pstate performance boost algorithm"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["apbenable"]["state"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["apbenable"]["state"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.cpu_disable_apb:
@@ -4359,7 +4359,7 @@ class AMDSMICommands():
                 amdsmi_interface.amdsmi_cpu_apb_disable(args.cpu, args.cpu_disable_apb[0][0])
                 static_dict["apbdisable"]["state"] = "Disabled DF - Pstate performance boost algorithm"
             except amdsmi_exception.AmdSmiLibraryException as e:
-                static_dict["apbdisable"]["state"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["apbdisable"]["state"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to enable APB for cpu %s | %s", cpu_id, e.get_error_info())
 
         if args.soc_boost_limit:
@@ -4369,7 +4369,7 @@ class AMDSMICommands():
                 static_dict["set_soc_boost_limit"]["Response"] = "Set Operation successful"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 #static_dict["set_soc_boost_limit"]["Response"] = "N/A"
-                static_dict["set_soc_boost_limit"]["Response"] = f"Error occured for CPU {cpu_id} - {e.get_error_info()}"
+                static_dict["set_soc_boost_limit"]["Response"] = f"Error occurred for CPU {cpu_id} - {e.get_error_info()}"
                 logging.debug("Failed to set socket boost limit for cpu %s | %s", cpu_id, e.get_error_info())
 
         multiple_devices_csv_override = False
@@ -6022,7 +6022,7 @@ class AMDSMICommands():
 
             self.logger.table_header += 'PCIE_BW'.rjust(12)
 
-        # Store process list seperately
+        # Store process list separately
         if args.process:
             # Populate initial processes
             try:
