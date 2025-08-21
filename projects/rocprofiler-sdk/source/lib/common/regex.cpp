@@ -1101,7 +1101,7 @@ regex_replace(std::string_view text, std::string_view pattern, std::string_view 
         // Expand replacement using these exact groups
         result += expand_replacement(text, groups, mb, me, replacement);
 
-        // Zero-length guard like std::regex_replace
+        // Zero-length guard like standard regex_replace
         if(me == mb)
         {
             if(me < n)
