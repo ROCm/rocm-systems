@@ -2031,5 +2031,10 @@ hipError_t hipLibraryUnload(hipLibrary_t library) {
   return hip::GetHipDispatchTable()->hipLibraryUnload_fn(library);
 }
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name)  {
-  return hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library, name);
+  return hip::GetHipDispatchTable()->hipLibraryGetKernel_fn(pKernel, library,
+                                                            name);
+}
+hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
+  return hip::GetHipDispatchTable()->hipLibraryGetKernelCount_fn(count,
+                                                                 library);
 }

@@ -873,6 +873,7 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t* library, const char* fileName,
                                   void** libraryOptionValues, unsigned int numLibraryOptions);
 hipError_t hipLibraryUnload(hipLibrary_t library);
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
+hipError_t hipLibraryGetKernelCount(unsigned int* count, hipLibrary_t library);
 }  // namespace hip
 
 namespace hip {
@@ -1412,6 +1413,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipLibraryLoadFromFile_fn = hip::hipLibraryLoadFromFile;
   ptrDispatchTable->hipLibraryUnload_fn = hip::hipLibraryUnload;
   ptrDispatchTable->hipLibraryGetKernel_fn = hip::hipLibraryGetKernel;
+  ptrDispatchTable->hipLibraryGetKernelCount_fn = hip::hipLibraryGetKernelCount;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2079,13 +2081,14 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadData_fn, 496);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryLoadFromFile_fn, 497);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryUnload_fn, 498);
 HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernel_fn, 499);
+HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetKernelCount_fn, 500);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 500)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 501)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 14,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "

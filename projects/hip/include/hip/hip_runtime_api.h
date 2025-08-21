@@ -6387,6 +6387,15 @@ hipError_t hipLibraryUnload(hipLibrary_t library);
 hipError_t hipLibraryGetKernel(hipKernel_t* pKernel, hipLibrary_t library, const char* name);
 
 /**
+ * @brief Get Kernel count in library
+ *
+ * @param [out] count Count of kernels in library
+ * @param [in] library Input created hip library
+ * @return #hipSuccess, #hipErrorInvalidValue
+*/
+hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library);
+
+/**
  * @brief Find out attributes for a given function.
  * @ingroup Execution
  * @param [out] attr  Attributes of funtion

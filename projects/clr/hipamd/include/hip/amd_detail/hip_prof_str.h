@@ -460,7 +460,8 @@ enum hip_api_id_t {
   HIP_API_ID_hipLibraryLoadFromFile = 440,
   HIP_API_ID_hipLibraryUnload = 441,
   HIP_API_ID_hipLibraryGetKernel = 442,
-  HIP_API_ID_LAST = 442,
+  HIP_API_ID_hipLibraryGetKernelCount = 443,
+  HIP_API_ID_LAST = 443,
 
   HIP_API_ID_hipChooseDevice = HIP_API_ID_CONCAT(HIP_API_ID_,hipChooseDevice),
   HIP_API_ID_hipGetDeviceProperties = HIP_API_ID_CONCAT(HIP_API_ID_,hipGetDeviceProperties),
@@ -930,6 +931,7 @@ static inline const char* hip_api_name(const uint32_t id) {
     case HIP_API_ID_hipLibraryLoadFromFile: return "hipLibraryLoadFromFile";
     case HIP_API_ID_hipLibraryUnload: return "hipLibraryUnload";
     case HIP_API_ID_hipLibraryGetKernel: return "hipLibraryGetKernel";
+    case HIP_API_ID_hipLibraryGetKernelCount: return "hipLibraryGetKernelCount";
   };
   return "unknown";
 };
@@ -1367,6 +1369,7 @@ static inline uint32_t hipApiIdByName(const char* name) {
   if (strcmp("hipLibraryLoadFromFile", name) == 0) return HIP_API_ID_hipLibraryLoadFromFile;
   if (strcmp("hipLibraryUnload", name) == 0) return HIP_API_ID_hipLibraryUnload;
   if (strcmp("hipLibraryGetKernel", name) == 0) return HIP_API_ID_hipLibraryGetKernel;
+  if (strcmp("hipLibraryGetKernelCount", name) == 0) return HIP_API_ID_hipLibraryGetKernelCount;
   return HIP_API_ID_NONE;
 }
 
@@ -3981,6 +3984,11 @@ typedef struct hip_api_data_s {
       const char* kname;
       char kname__val;
     } hipLibraryGetKernel;
+    struct {
+      unsigned int *count;
+      unsigned int count__val;
+      hipLibrary_t library;
+    } hipLibraryGetKernelCount;
   } args;
   uint64_t *phase_data;
 } hip_api_data_t;
@@ -6671,14 +6679,20 @@ typedef struct hip_api_data_s {
     cb_data.args.hipLibraryLoadFromFile.numLibraryOptions = (unsigned int)numLibraryOptions;       \
   };
 // hipLibraryUnload()
-#define INIT_hipLibraryUnload_CB_ARGS_DATA(cb_data)                                                \
+#define INIT_hipLibraryUnload_CB_ARGS_DATA(cb_data)                            \
   { cb_data.args.hipLibraryUnload.library = (hipLibrary_t)library; };
 // hipLibraryGetKernel()
-#define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data)                                             \
-  {                                                                                                \
-    cb_data.args.hipLibraryGetKernel.kernel = (hipKernel_t*)kernel;                                \
-    cb_data.args.hipLibraryGetKernel.library = (hipLibrary_t)library;                              \
-    cb_data.args.hipLibraryGetKernel.kname = (const char*)kname;                                   \
+#define INIT_hipLibraryGetKernel_CB_ARGS_DATA(cb_data)                         \
+  {                                                                            \
+    cb_data.args.hipLibraryGetKernel.kernel = (hipKernel_t *)kernel;           \
+    cb_data.args.hipLibraryGetKernel.library = (hipLibrary_t)library;          \
+    cb_data.args.hipLibraryGetKernel.kname = (const char *)kname;              \
+  };
+// hipLibraryGetKernelCount()
+#define INIT_hipLibraryGetKernelCount_CB_ARGS_DATA(cb_data)                    \
+  {                                                                            \
+    cb_data.args.hipLibraryGetKernelCount.count = (unsigned int *)count;       \
+    cb_data.args.hipLibraryGetKernelCount.library = (hipLibrary_t)library;     \
   };
 
 #define INIT_NONE_CB_ARGS_DATA(cb_data) {};
@@ -11927,6 +11941,20 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
         oss << "kname=";
         roctracer::hip_support::detail::operator<<(oss, data->args.hipLibraryGetKernel.kname__val);
       }
+      break;
+    case HIP_API_ID_hipLibraryGetKernelCount:
+      oss << "hipLibraryGetKernelCount(";
+      if (data->args.hipLibraryGetKernelCount.count == NULL)
+        oss << "count=NULL";
+      else {
+        oss << "count=";
+        roctracer::hip_support::detail::operator<<(
+            oss, data->args.hipLibraryGetKernelCount.count__val);
+      }
+      oss << ", library=";
+      roctracer::hip_support::detail::operator<<(
+          oss, data->args.hipLibraryGetKernelCount.library);
+      break;
     default:
       oss << "unknown";
   };
