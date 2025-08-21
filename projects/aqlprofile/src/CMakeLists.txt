@@ -25,7 +25,13 @@ set ( LIB_SRC
 )
 
 add_library ( ${TARGET_LIB} SHARED ${LIB_SRC} )
-target_include_directories ( ${TARGET_LIB} PRIVATE ${LIB_DIR} ${API_PATH} ${LIB_DIR}/core/include)
+target_include_directories ( ${TARGET_LIB}
+  PRIVATE ${LIB_DIR}
+          ${API_PATH}
+          ${LIB_DIR}/core/include
+  PUBLIC $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/src/core/include>
+         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
 target_link_libraries( ${TARGET_LIB} PRIVATE pthread hsa-runtime64::hsa-runtime64 )
 
 ## Generating definitions

@@ -26,6 +26,8 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
+#include "aqlprofile-sdk/version.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
