@@ -33,6 +33,7 @@
 #include "trace_cache/storage_parser.hpp"
 #include <cstdint>
 #include <limits>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <timemory/utility/demangle.hpp>
@@ -384,43 +385,43 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         std::vector<uint16_t> jpeg_busy;
     };
 
-    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& buffer) {
-        std::vector<xcp_metrics_t> metrics_vec;
-        size_t                     offset = 0;
+    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& data,
+                                      xcp_metrics_t&              result) {
+        constexpr size_t elem_size = sizeof(uint16_t) / sizeof(uint8_t);
 
-        auto read_size_t = [&](size_t& out) {
-            std::memcpy(&out, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-        };
+        size_t  offset    = 0;
+        uint8_t vcn_size  = 0;
+        uint8_t jpeg_size = 0;
 
-        auto read_uint16_t = [&](uint16_t& out) {
-            std::memcpy(&out, buffer.data() + offset, sizeof(uint16_t));
-            offset += sizeof(uint16_t);
-        };
+        vcn_size = *(data.data() + offset);
+        offset++;
+        offset += vcn_size * elem_size;
 
-        size_t root_size = 0;
-        read_size_t(root_size);
+        jpeg_size = *(data.data() + offset);
 
-        for(size_t i = 0; i < root_size; ++i)
+        if(data.size() != (2 + ((vcn_size + jpeg_size) * elem_size)))
         {
-            xcp_metrics_t metrics;
-
-            size_t vcn_size = 0;
-            read_size_t(vcn_size);
-            metrics.vcn_busy.resize(vcn_size);
-            for(size_t j = 0; j < vcn_size; ++j)
-                read_uint16_t(metrics.vcn_busy[j]);
-
-            size_t jpeg_size = 0;
-            read_size_t(jpeg_size);
-            metrics.jpeg_busy.resize(jpeg_size);
-            for(size_t j = 0; j < jpeg_size; ++j)
-                read_uint16_t(metrics.jpeg_busy[j]);
-
-            metrics_vec.push_back(std::move(metrics));
+            throw std::invalid_argument("XCP metric data is corrupted");
         }
 
-        return metrics_vec;
+        result.vcn_busy.resize(vcn_size);
+        result.jpeg_busy.resize(jpeg_size);
+
+        const auto* vcn_data  = data.data() + 1;
+        const auto* jpeg_data = data.data() + 2 + vcn_size;
+
+        for(size_t i = 0; i < vcn_size; ++i)
+        {
+            result.vcn_busy[i] = static_cast<uint8_t>(*vcn_data) |
+                                 (static_cast<uint8_t>(*(vcn_data + 1)) << 8);
+            vcn_data += elem_size;
+        }
+        for(size_t i = 0; i < jpeg_size; ++i)
+        {
+            result.jpeg_busy[i] = static_cast<uint8_t>(*jpeg_data) |
+                                  (static_cast<uint8_t>(*(jpeg_data + 1)) << 8);
+            jpeg_data += elem_size;
+        }
     };
 
     return [&](const storage_parsed_type_base& parsed) {
@@ -449,9 +450,9 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         bool           is_temp_enabled = settings_bits.test(static_cast<int>(pos::temp));
         bool is_power_enabled          = settings_bits.test(static_cast<int>(pos::power));
         bool is_mem_usage_enabled = settings_bits.test(static_cast<int>(pos::mem_usage));
-        bool is_vnc_jpeg_enabled =
-            settings_bits.test(static_cast<int>(pos::vcn_activity)) ||
-            settings_bits.test(static_cast<int>(pos::jpeg_activity));
+
+        bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
+        bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
 
         insert_event_and_sample(is_busy_enabled,
                                 trait::name<category::amd_smi_gfx_busy>::value,
@@ -472,6 +473,48 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         insert_event_and_sample(is_mem_usage_enabled,
                                 trait::name<category::amd_smi_memory_usage>::value,
                                 _amd_smi.mem_usage);
+
+        if(is_vcn_enabled || is_jpeg_enabled)
+        {
+            xcp_metrics_t xcp_metrics;
+            deserialize_xcp_metrics(_amd_smi.xcp_activity, xcp_metrics);
+
+            if(is_vcn_enabled)
+            {
+                for(size_t clk = 0; clk < xcp_metrics.vcn_busy.size(); ++clk)
+                {
+                    const auto value = xcp_metrics.vcn_busy[clk];
+                    if(value == std::numeric_limits<uint16_t>::max())
+                    {
+                        continue;
+                    }
+
+                    std::stringstream ss;
+                    ss << trait::name<category::amd_smi_vcn_activity>::value;
+                    ss << "_" << std::to_string(clk);
+
+                    insert_event_and_sample(is_vcn_enabled, ss.str().c_str(), value);
+                }
+            }
+
+            if(is_jpeg_enabled)
+            {
+                for(size_t clk = 0; clk < xcp_metrics.jpeg_busy.size(); ++clk)
+                {
+                    const auto value = xcp_metrics.jpeg_busy[clk];
+                    if(value == std::numeric_limits<uint16_t>::max())
+                    {
+                        continue;
+                    }
+
+                    std::stringstream ss;
+                    ss << trait::name<category::amd_smi_jpeg_activity>::value;
+                    ss << "_" << std::to_string(clk);
+
+                    insert_event_and_sample(is_jpeg_enabled, ss.str().c_str(), value);
+                }
+            }
+        }
     };
 }
 

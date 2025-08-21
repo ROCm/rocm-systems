@@ -28,6 +28,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <iterator>
 #include <map>
 #include <rocprofiler-systems/categories.h>
 #include <stdint.h>
@@ -65,7 +66,7 @@ private:
             size_t vector_size = *reinterpret_cast<const size_t*>(data_pos);
             data_pos += sizeof(size_t);
             arg.reserve(vector_size);
-            std::memcpy(arg.data(), data_pos, vector_size);
+            std::copy_n(data_pos, vector_size, std::back_inserter(arg));
             data_pos += vector_size;
         }
         else
