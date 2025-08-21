@@ -62,8 +62,8 @@ TEST_CASE("Unit_hipHostGetDevicePointer_Negative") {
 template <typename T> __global__ void set(T* ptr, T val) { *ptr = val; }
 
 TEST_CASE("Unit_hipHostGetDevicePointer_UseCase") {
-  if(!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
-    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory"); 
+  if (!DeviceAttributesSupport(0, hipDeviceAttributeCanMapHostMemory)) {
+    HipTest::HIP_SKIP_TEST("Device does not support mapping host memory");
     return;
   }
 

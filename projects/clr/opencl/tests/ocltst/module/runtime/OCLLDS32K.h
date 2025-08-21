@@ -28,15 +28,13 @@ class OCLLDS32K : public OCLTestImp {
   virtual ~OCLLDS32K();
 
  public:
-  virtual void open(unsigned int test, char *units, double &conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
-  void setup_run(const char *cmplr_opt);
+  void setup_run(const char* cmplr_opt);
   void cleanup_run();
-  void exec_kernel(void *a_mem, void *b_mem, void *c_mem, void *d_mem,
-                   void *e_mem);
-  static const char *kernel_src;
+  void exec_kernel(void* a_mem, void* b_mem, void* c_mem, void* d_mem, void* e_mem);
+  static const char* kernel_src;
   cl_kernel kernel2_;
 
  private:

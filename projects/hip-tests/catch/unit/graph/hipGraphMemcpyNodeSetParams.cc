@@ -241,7 +241,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
 
     SECTION("Invalid MemcpyKind") {
       params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent,
-                                     static_cast<hipMemcpyKind>(-1));
+                                static_cast<hipMemcpyKind>(-1));
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidMemcpyDirection);
     }
 
@@ -290,6 +290,6 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

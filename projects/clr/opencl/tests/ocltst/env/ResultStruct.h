@@ -46,8 +46,8 @@ class TestResult {
 
 class Report {
  public:
-  TestResult *max;
-  TestResult *min;
+  TestResult* max;
+  TestResult* min;
   bool success;
   int numFailedTests;
 
