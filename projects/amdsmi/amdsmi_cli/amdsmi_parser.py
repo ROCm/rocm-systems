@@ -1228,9 +1228,11 @@ class AMDSMIParser(argparse.ArgumentParser):
             power_cap_min, power_cap_max = self.helpers.get_power_caps()
             if power_cap_max != "N/A":
                 power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
+                power_cap_max = str(power_cap_max) + ' W'
             if power_cap_min != "N/A":
                 power_cap_min = self.helpers.convert_SI_unit(power_cap_min, AMDSMIHelpers.SI_Unit.MICRO)
-            set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min} W, max cap: {power_cap_max} W"
+                power_cap_min = str(power_cap_min) + ' W'
+            set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min}, max cap: {power_cap_max}"
             set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
             set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
 
