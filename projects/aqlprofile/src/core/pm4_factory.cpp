@@ -77,3 +77,4 @@ const AgentInfo* GetAgentInfo(aqlprofile_agent_handle_t agent_id) {
 }
 
 }  // namespace aql_profile
+
