@@ -327,6 +327,12 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t> *gpu_set) {
   if (gpu_set == nullptr) {
     return RSMI_STATUS_INVALID_ARGS;
   }
+
+  // Skip amd-smi process itself
+  if (pid == static_cast<uint32_t>(getpid())) {
+    return 0;
+  }
+
   errno = 0;
 
   std::string queues_dir = kKFDProcPathRoot;

@@ -239,9 +239,10 @@ class AMDSMILogger():
                             string_process_value = str(process_value)
                             if process_key == "name":
                                 # Truncate name if too long
-                                process_name = string_process_value.split('/')[-1][:17]
-                                if process_name == "":
+                                if string_process_value == "" or string_process_value == "N/A":
                                     process_name = "N/A"
+                                else:
+                                    process_name = string_process_value.split('/')[-1][:17]
                                 table_values += process_name.rjust(17)
                             elif process_key == "pid":
                                 table_values += string_process_value.rjust(9)
