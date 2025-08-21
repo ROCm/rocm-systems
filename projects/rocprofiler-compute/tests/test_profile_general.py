@@ -604,7 +604,7 @@ def test_path_rocpd(binary_handler_profile_rocprof_compute, binary_handler_analy
     )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
 
-    code = binary_handler_analyze_rocprof_compute("analyze", "--path", workload_dir)
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
     assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
