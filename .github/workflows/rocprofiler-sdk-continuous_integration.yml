@@ -435,7 +435,7 @@ jobs:
         python3 -m venv rocprofiler-sdk
         source rocprofiler-sdk/bin/activate
         python3 -m pip install --upgrade pip
-        python3 -m pip install -U --user -r requirements.txt
+        python3 -m pip install --upgrade -r requirements.txt
         rm -rf ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
     - name: Special Requirements
