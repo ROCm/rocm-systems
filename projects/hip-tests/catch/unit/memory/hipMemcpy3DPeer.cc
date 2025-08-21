@@ -17,17 +17,36 @@
  * THE SOFTWARE.
  */
 #include <hip_test_common.hh>
+#include <hip_test_defgroups.hh>
+/*@addtogroup hipMemcpy3DPeer hipMemcpy3DPeer* @{
+ *@ingroup MemoryTest* `hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p)` -
+ *Performs 3D memory copies between devices.
+ */
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify the 3D peer to peer device copy.
+ * 1. Allocate device memory for two Arrays (array_1, array_2).
+ * 2. Fill the source array with some data with hipMemcpy3D.
+ * 3. Transfer data between two peer devices with hipMemcpy3DPeer.
+ * 4. Verify the data on host.
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DPeer.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+#if HT_NVIDIA
 TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   int numW = 16;
   int numH = 16;
   int depth = 4;
-  // size_t width = numW * sizeof(char);
   size_t volume = numW * numH * depth * sizeof(char);
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = GENERATE_COPY(range(0, device_count));
   const auto dst_device = GENERATE_COPY(range(0, device_count));
-  // std::cout<<"Src device: " << src_device << ", Dst device: " << dst_device<<std::endl;
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
   HIP_CHECK(hipSetDevice(src_device));
   int can_access_peer = 0;
@@ -95,6 +114,26 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   HIP_CHECK(hipFreeArray(array_1));
   HIP_CHECK(hipFreeArray(array_2));
 }
+#endif
+/**
+ * Test Description
+ * ------------------------
+ * - Test case verifies the negative cases of hipMemcpy3DPeer.
+ * 1. Memcpy3DPeer Params struct as nullptr.
+ * 2. Max Destination/Source device id.
+ * 3. Neg Source/Destination device id
+ * 4. Source/Destination Array as Null.
+ * 5. Max value of extent
+ * 6. Passing width > max width size in extent
+ * 7. Passing height > max height size in extent
+ * 8. Passing depth > max depth size in extent
+ * Test source
+ * ------------------------
+ * - catch/unit/memory/hipMemcpy3DPeer.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
 TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
   SECTION("Memcpy3DPeer Params struct as nullptr") {
     HIP_CHECK_ERROR(hipMemcpy3D(nullptr), hipErrorInvalidValue);
@@ -102,8 +141,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
   int numW = 16;
   int numH = 16;
   int depth = 4;
-  // size_t width = numW * sizeof(char);
-  // size_t volume = numW * numH * depth * sizeof(char);
+
   hipExtent extent = make_hipExtent(numW, numH, depth);
   const auto device_count = HipTest::getDeviceCount();
   const auto src_device = GENERATE_COPY(range(0, device_count));
@@ -153,11 +191,6 @@ TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
       peerCopyParams.dstArray = nullptr;
       HIP_CHECK_ERROR(hipMemcpy3DPeer(&peerCopyParams), hipErrorInvalidValue);
     }
-    /*SECTION("Both Source and Desination Array same") {
-      peerCopyParams.dstArray = array_1;
-      peerCopyParams.srcArray = array_1;
-       HIP_CHECK_ERROR(hipMemcpy3DPeer(&peerCopyParams), hipErrorLaunchFailure);
-    }*/
     SECTION("Passing Max value to extent") {
       peerCopyParams.extent =
           make_hipExtent(std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
@@ -177,4 +210,10 @@ TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
       HIP_CHECK_ERROR(hipMemcpy3DPeer(&peerCopyParams), hipErrorInvalidValue);
     }
   }
+  HIP_CHECK(hipFreeArray(array_1));
+  HIP_CHECK(hipFreeArray(array_2));
 }
+/**
+ * End doxygen group MemoryTest.
+ * @}
+ */
