@@ -120,6 +120,7 @@ jobs:
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocr-runtime
         submodules: true
         set-safe-directory: true
 
@@ -379,6 +380,7 @@ jobs:
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocr-runtime
         submodules: true
         set-safe-directory: true
 
@@ -610,6 +612,7 @@ jobs:
           projects/rocprofiler-sdk
           projects/aqlprofile
           projects/rocprofiler-register
+          projects/rocr-runtime
         submodules: true
         set-safe-directory: true
 
