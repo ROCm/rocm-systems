@@ -115,7 +115,7 @@
     {
       "name": "rocr-runtime",
       "url": "ROCm/ROCR-Runtime",
-      "branch": "amd-staging",
+      "branch": "develop",
       "category": "projects",
       "auto_subtree_pull": false,
       "auto_subtree_push": true
