@@ -27,7 +27,8 @@ THE SOFTWARE.
 
 class MemcpyAsyncBenchmark : public Benchmark<MemcpyAsyncBenchmark> {
  public:
-  void operator()(void* dst, const void* src, size_t size, hipMemcpyKind kind, const hipStream_t& stream) {
+  void operator()(void* dst, const void* src, size_t size, hipMemcpyKind kind,
+                  const hipStream_t& stream) {
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
       HIP_CHECK(hipMemcpyAsync(dst, src, size, kind, stream));
     }
@@ -36,7 +37,7 @@ class MemcpyAsyncBenchmark : public Benchmark<MemcpyAsyncBenchmark> {
 };
 
 static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allocation_type,
-                         size_t size, hipMemcpyKind kind, bool enable_peer_access=false) {
+                         size_t size, hipMemcpyKind kind, bool enable_peer_access = false) {
   MemcpyAsyncBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(GetAllocationSectionName(src_allocation_type));
@@ -51,7 +52,9 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
   } else {
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard<int> src_allocation(src_allocation_type, size);
     HIP_CHECK(hipSetDevice(dst_device));
@@ -189,7 +192,8 @@ TEST_CASE("Performance_hipMemcpyAsync_DeviceToDevice_EnablePeerAccess") {
   const auto allocation_size = GENERATE(4_KB, 4_MB, 16_MB);
   const auto src_allocation_type = LinearAllocs::hipMalloc;
   const auto dst_allocation_type = LinearAllocs::hipMalloc;
-  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToDevice, true);
+  RunBenchmark(dst_allocation_type, src_allocation_type, allocation_size, hipMemcpyDeviceToDevice,
+               true);
 }
 
 /**

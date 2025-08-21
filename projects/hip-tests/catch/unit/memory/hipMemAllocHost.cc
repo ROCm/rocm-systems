@@ -83,7 +83,8 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
   }
 
   SECTION("size is negative") {
-    HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), -1), hipErrorOutOfMemory);
+    HIP_CHECK_ERROR(hipMemAllocHost(reinterpret_cast<void**>(&host_memory), -1),
+                    hipErrorOutOfMemory);
   }
 
   HIP_CHECK(hipCtxDestroy(ctx));
@@ -91,7 +92,7 @@ TEST_CASE("Unit_hipMemAllocHost_Negative") {
 
 /*
  * Verify that a device can read/write to the memory of another device
-*/
+ */
 TEST_CASE("Unit_hipMemAllocHost_VerifyAccess") {
   int devices_number = 0;
   HIP_CHECK(hipGetDeviceCount(&devices_number));

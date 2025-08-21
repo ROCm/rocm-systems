@@ -28,8 +28,7 @@ class OCLPersistent : public OCLTestImp {
   OCLPersistent();
   virtual ~OCLPersistent();
   static const unsigned int c_dimSize = 510;
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void);
   virtual unsigned int close(void);
 

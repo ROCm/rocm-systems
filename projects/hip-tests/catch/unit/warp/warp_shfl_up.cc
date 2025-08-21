@@ -120,6 +120,6 @@ TEMPLATE_TEST_CASE("Unit_Warp_Shfl_Up_Positive_Basic", "", int, unsigned int, lo
 }
 
 /**
-* End doxygen group DeviceLanguageTest.
-* @}
-*/
+ * End doxygen group DeviceLanguageTest.
+ * @}
+ */

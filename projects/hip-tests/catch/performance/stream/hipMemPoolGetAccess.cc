@@ -33,13 +33,8 @@ class MemPoolGetAccessBenchmark : public Benchmark<MemPoolGetAccessBenchmark> {
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
 
     hipMemAccessFlags flags = hipMemAccessFlagsProtNone;
-    hipMemLocation location = {
-      hipMemLocationTypeDevice,
-      0
-    };
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, location));
-    }
+    hipMemLocation location = {hipMemLocationTypeDevice, 0};
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolGetAccess(&flags, mem_pool, location)); }
 
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
   }
@@ -68,14 +63,15 @@ static void RunBenchmark() {
  */
 TEST_CASE("Performance_hipMemPoolGetAccess") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   RunBenchmark();
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

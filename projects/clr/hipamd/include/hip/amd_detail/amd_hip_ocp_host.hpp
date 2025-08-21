@@ -1,6 +1,6 @@
 /*
 Copyright © Advanced Micro Devices, Inc., or its affiliates.
- 
+
 SPDX-License-Identifier: MIT
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -592,7 +592,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float_sr(T f, uint32_t seed, int8_t 
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32;// (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 
@@ -706,7 +706,7 @@ __OCP_FP_HOST_DEVICE_STATIC__ uint32_t from_float(T f, int8_t scale_exp) {
   }();
   const auto& srcEnc = encodings[(size_t)srcE];
 
-  auto srcU32 = u.u32; // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
+  auto srcU32 = u.u32;  // (srcE == Encoding::IEEE754) ? U32(f) : (uint32_t)f;
   auto signBit = signbit<srcE, false>(srcU32);
   auto sign = signBit << (enc.ExpBits + enc.ManBits);
 

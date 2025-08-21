@@ -56,25 +56,25 @@ class Settings : public device::Settings {
 
   union {
     struct {
-      uint remoteAlloc_ : 1;            //!< Allocate remote memory for the heap
-      uint stagedXferRead_ : 1;         //!< Uses a staged buffer read
-      uint stagedXferWrite_ : 1;        //!< Uses a staged buffer write
-      uint disablePersistent_ : 1;      //!< Disables using persistent memory for staging
-      uint imageSupport_ : 1;           //!< Report images support
-      uint doublePrecision_ : 1;        //!< Enables double precision support
-      uint use64BitPtr_ : 1;            //!< Use 64bit pointers on GPU
-      uint force32BitOcl20_ : 1;        //!< Force 32bit apps to take CLANG/HSAIL path on GPU
-      uint imageDMA_ : 1;               //!< Enable direct image DMA transfers
-      uint threadTraceEnable_ : 1;      //!< Thread trace enable
-      uint svmAtomics_ : 1;             //!< SVM device atomics
-      uint svmFineGrainSystem_ : 1;     //!< SVM fine grain system support
-      uint useDeviceQueue_ : 1;         //!< Submit to separate device queue
-      uint rgpSqttWaitIdle_ : 1;        //!< Wait for idle after SQTT trace
-      uint rgpSqttForceDisable_ : 1;    //!< Disables SQTT
-      uint enableHwP2P_ : 1;            //!< Forces HW P2P path for testing
-      uint imageBufferWar_ : 1;         //!< Image buffer workaround for Gfx10
-      uint disableSdma_ : 1;            //!< Disable SDMA support
-      uint alwaysResident_ : 1;         //!< Make resources resident at allocation time
+      uint remoteAlloc_ : 1;          //!< Allocate remote memory for the heap
+      uint stagedXferRead_ : 1;       //!< Uses a staged buffer read
+      uint stagedXferWrite_ : 1;      //!< Uses a staged buffer write
+      uint disablePersistent_ : 1;    //!< Disables using persistent memory for staging
+      uint imageSupport_ : 1;         //!< Report images support
+      uint doublePrecision_ : 1;      //!< Enables double precision support
+      uint use64BitPtr_ : 1;          //!< Use 64bit pointers on GPU
+      uint force32BitOcl20_ : 1;      //!< Force 32bit apps to take CLANG/HSAIL path on GPU
+      uint imageDMA_ : 1;             //!< Enable direct image DMA transfers
+      uint threadTraceEnable_ : 1;    //!< Thread trace enable
+      uint svmAtomics_ : 1;           //!< SVM device atomics
+      uint svmFineGrainSystem_ : 1;   //!< SVM fine grain system support
+      uint useDeviceQueue_ : 1;       //!< Submit to separate device queue
+      uint rgpSqttWaitIdle_ : 1;      //!< Wait for idle after SQTT trace
+      uint rgpSqttForceDisable_ : 1;  //!< Disables SQTT
+      uint enableHwP2P_ : 1;          //!< Forces HW P2P path for testing
+      uint imageBufferWar_ : 1;       //!< Image buffer workaround for Gfx10
+      uint disableSdma_ : 1;          //!< Disable SDMA support
+      uint alwaysResident_ : 1;       //!< Make resources resident at allocation time
       uint reserved_ : 13;
     };
     uint value_;
@@ -110,8 +110,8 @@ class Settings : public device::Settings {
 
   amd::LibrarySelector libSelector_;  //!< Select linking libraries for compiler
 
-  size_t prepinnedMinSize_;           //!< minimal memory size for prepinned transfer
-  uint32_t limit_blit_wg_;        //!< The number of workgroups for blit execution
+  size_t prepinnedMinSize_;  //!< minimal memory size for prepinned transfer
+  uint32_t limit_blit_wg_;   //!< The number of workgroups for blit execution
 
   //! Default constructor
   Settings();

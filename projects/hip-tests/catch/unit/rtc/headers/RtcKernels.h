@@ -28,8 +28,8 @@ They are utilized by the compiler option functions, defined in RtcFunctions.cpp
 #include <hip/hip_runtime.h>
 #include <math.h>
 
-static constexpr auto max_thread_string {
-R"(
+static constexpr auto max_thread_string{
+    R"(
 extern "C"
 __global__ void max_thread(int* a) {
   int BD = blockDim.x;
@@ -37,8 +37,8 @@ __global__ void max_thread(int* a) {
 }
 )"};
 
-static constexpr auto denormals_string {
-R"(
+static constexpr auto denormals_string{
+    R"(
 extern "C"
 __global__ void denormals(double* base, double* power, double* result) {
   float denorm = powf(*base, *power);
@@ -49,16 +49,16 @@ __global__ void denormals(double* base, double* power, double* result) {
 }
 )"};
 
-static constexpr auto warning_string {
-R"(
+static constexpr auto warning_string{
+    R"(
 extern "C"
 __global__ void warning() {
   #warning "Just printing a WARNING message onto the terminal";
 }
 )"};
 
-static constexpr auto fp32_div_sqrt_string {
-R"(
+static constexpr auto fp32_div_sqrt_string{
+    R"(
 extern "C"
 __global__ void fp32_div_sqrt(float* result) {
   float input = 109.6209;
@@ -66,8 +66,8 @@ __global__ void fp32_div_sqrt(float* result) {
 }
 )"};
 
-static constexpr auto error_string {
-R"(
+static constexpr auto error_string{
+    R"(
 extern "C"
 __global__ void error() {
   unsigned int a = -1;
@@ -77,24 +77,24 @@ __global__ void error() {
 }
 )"};
 
-static constexpr auto macro_string {
-R"(
+static constexpr auto macro_string{
+    R"(
 extern "C"
 __global__ void macro(int *result) {
   *result = PI;
 }
 )"};
 
-static constexpr auto undef_macro_string {
-R"(
+static constexpr auto undef_macro_string{
+    R"(
 extern "C"
 __global__ void undef_macro() {
   int a = Z;
 }
 )"};
 
-static constexpr auto header_dir_string {
-R"(
+static constexpr auto header_dir_string{
+    R"(
 #include "RtcFact.h"
 extern "C"
 __global__ void header_dir(int* a, int* val) {
@@ -102,24 +102,24 @@ __global__ void header_dir(int* a, int* val) {
 }
 )"};
 
-static constexpr auto rdc_string {
-R"(
+static constexpr auto rdc_string{
+    R"(
 extern "C"
 __global__ void rdc(float* a, float* b, float* c) {
   *c = *a * *b;
 }
 )"};
 
-static constexpr auto ffp_contract_string {
-R"(
+static constexpr auto ffp_contract_string{
+    R"(
 extern "C"
 __global__ void ffp_contract(float* a, float* b, float* c) {
   *c = *a * *b + *c;
 }
 )"};
 
-static constexpr auto slp_vectorize_string {
-R"(
+static constexpr auto slp_vectorize_string{
+    R"(
 extern "C"
 __global__ void slp_vectorize(__half2 a, __half2 x, __half2 *y) {
   (*y).data.x = x.data.x + a.data.x;
@@ -127,8 +127,8 @@ __global__ void slp_vectorize(__half2 a, __half2 x, __half2 *y) {
 }
 )"};
 
-static constexpr auto unsafe_atomic_string {
-R"(
+static constexpr auto unsafe_atomic_string{
+    R"(
 extern "C"
 __global__ void unsafe_atomic(float* a) {
   int id = threadIdx.x + blockIdx.x * blockDim.x;
@@ -138,8 +138,8 @@ __global__ void unsafe_atomic(float* a) {
 }
 )"};
 
-static constexpr auto amdgpu_ieee_string {
-R"(
+static constexpr auto amdgpu_ieee_string{
+    R"(
 extern "C"
 __global__ void amdgpu_ieee(float* a, float* b, float* c) {
   *c = sqrt(*a / *b);
@@ -147,8 +147,8 @@ __global__ void amdgpu_ieee(float* a, float* b, float* c) {
 }
 )"};
 
-static constexpr auto associative_math_string {
-R"(
+static constexpr auto associative_math_string{
+    R"(
 extern "C"
 __global__ void associative_math(int* check) {
   double x = 0.1f;

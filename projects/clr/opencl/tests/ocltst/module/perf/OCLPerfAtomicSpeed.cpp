@@ -80,8 +80,7 @@ testOCLPerfAtomicSpeedStruct testOCLPerfAtomicSpeedList[] = {
 OCLPerfAtomicSpeed::OCLPerfAtomicSpeed() {
   _atomicsSupported = false;
   _dataSizeTooBig = false;
-  _numSubTests =
-      sizeof(testOCLPerfAtomicSpeedList) / sizeof(testOCLPerfAtomicSpeedStruct);
+  _numSubTests = sizeof(testOCLPerfAtomicSpeedList) / sizeof(testOCLPerfAtomicSpeedStruct);
   _numLoops = 10;
   _nCurrentInputScale = 1;
   _maxMemoryAllocationSize = 0;
@@ -97,12 +96,12 @@ OCLPerfAtomicSpeed::OCLPerfAtomicSpeed() {
 
 OCLPerfAtomicSpeed::~OCLPerfAtomicSpeed() {}
 
-void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
-                              double &conversion, unsigned int deviceId) {
+void OCLPerfAtomicSpeed::open(unsigned int test, char* units, double& conversion,
+                              unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_int status = CL_SUCCESS;
 
   device = NULL;
@@ -124,7 +123,7 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
     // Get last for default
@@ -133,9 +132,8 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
         for (unsigned i = 0; i < numPlatforms; ++i) {
 #endif
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
 #if 0
             if (!strcmp(pbuf, "Advanced Micro Devices, Inc.")) {
                 platform = platforms[i];
@@ -144,8 +142,7 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
 #endif
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
     // CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
@@ -167,15 +164,13 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
    * If we could find our platform, use it. If not, die as we need the AMD
    * platform for these extensions.
    */
-  CHECK_RESULT(platform == 0,
-               "Couldn't find platform with GPU devices, cannot proceed");
+  CHECK_RESULT(platform == 0, "Couldn't find platform with GPU devices, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
@@ -186,16 +181,13 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   // Global memory size
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE,
-                                     sizeof(cl_ulong),
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_MEM_ALLOC_SIZE, sizeof(cl_ulong),
                                      &_maxMemoryAllocationSize, NULL);
-  CHECK_RESULT(error_ != CL_SUCCESS,
-               "clGetDeviceIDs(CL_DEVICE_GLOBAL_MEM_SIZE) failed");
+  CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs(CL_DEVICE_GLOBAL_MEM_SIZE) failed");
 
   // Check that the test size is not too big for the current GPU.
   _dataSizeTooBig = false;
@@ -205,8 +197,8 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
     return;
   }
 
-  char *p = strstr(charbuf, "cl_khr_global_int32_base_atomics");
-  char *p2 = strstr(charbuf, "cl_khr_local_int32_base_atomics");
+  char* p = strstr(charbuf, "cl_khr_global_int32_base_atomics");
+  char* p2 = strstr(charbuf, "cl_khr_local_int32_base_atomics");
 
   _atomicsSupported = false;
   if (p || p2) _atomicsSupported = true;
@@ -218,8 +210,7 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
   // Create buffers...
-  _inputBuffer =
-      clCreateBuffer(context_, CL_MEM_READ_ONLY, _inputNBytes, 0, &status);
+  _inputBuffer = clCreateBuffer(context_, CL_MEM_READ_ONLY, _inputNBytes, 0, &status);
   CHECK_RESULT(status, "clCreateBuffer failed. (inputBuffer)");
 
   // Create the programs/kernels for the current test type.
@@ -230,15 +221,14 @@ void OCLPerfAtomicSpeed::open(unsigned int test, char *units,
   _outputNBytes = _nGroups * NBINS * sizeof(cl_uint);
   if (IsReduction(atomicType)) _outputNBytes = _inputNBytes;
 
-  _output = (cl_uint *)malloc(_outputNBytes);
+  _output = (cl_uint*)malloc(_outputNBytes);
   if (0 == _output) {
     _dataSizeTooBig = true;
     return;
   }
 
   // Create output Buffer
-  _outputBuffer =
-      clCreateBuffer(context_, CL_MEM_READ_WRITE, _outputNBytes, 0, &status);
+  _outputBuffer = clCreateBuffer(context_, CL_MEM_READ_WRITE, _outputNBytes, 0, &status);
   CHECK_RESULT(status, "clCreateBuffer failed. (outputBuffer)");
 }
 
@@ -250,67 +240,63 @@ void OCLPerfAtomicSpeed::CreateKernels(const AtomicType atomicType) {
   char buildOptions[1000];
   cl_int status = CL_SUCCESS;
 
-  SNPRINTF(buildOptions, sizeof(buildOptions),
-           "-D NBINS=%d -D BITS_PER_PIX=%d -D NBANKS=%d", NBINS, BITS_PER_PIX,
-           NBANKS);
+  SNPRINTF(buildOptions, sizeof(buildOptions), "-D NBINS=%d -D BITS_PER_PIX=%d -D NBANKS=%d", NBINS,
+           BITS_PER_PIX, NBANKS);
 
   // Create the programs.
   switch (atomicType) {
     case LocalHistogram:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_atomics_histogram, NULL, &error_);
+          context_, 1, (const char**)&local_atomics_histogram, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_atomics_reduce, NULL, &error_);
+          context_, 1, (const char**)&local_atomics_reduce, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case LocalReductionNoAtomics:
-      program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_reduction, NULL, &error_);
+      program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&local_reduction,
+                                                     NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case Local4ReductionNoAtomics:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_vec4_reduction, NULL, &error_);
+          context_, 1, (const char**)&local_vec4_reduction, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case LocalReductionAtomics:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_atomics_reduction, NULL, &error_);
+          context_, 1, (const char**)&local_atomics_reduction, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case Local4ReductionAtomics:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&local_vec4_atomics_reduction, NULL,
-          &error_);
+          context_, 1, (const char**)&local_vec4_atomics_reduction, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case GlobalHistogram:
     case Global4Histogram:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&global_atomics_histogram, NULL, &error_);
+          context_, 1, (const char**)&global_atomics_histogram, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case GlobalWGReduction:
     case Global4WGReduction:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&global_atomics_sum_reduction_workgroup,
-          NULL, &error_);
+          context_, 1, (const char**)&global_atomics_sum_reduction_workgroup, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
     case GlobalAllToZeroReduction:
     case Global4AllToZeroReduction:
       program_ = _wrapper->clCreateProgramWithSource(
-          context_, 1, (const char **)&global_atomics_sum_reduction_all_to_zero,
-          NULL, &error_);
+          context_, 1, (const char**)&global_atomics_sum_reduction_all_to_zero, NULL, &error_);
       CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
       _programs.push_back(program_);
       break;
@@ -319,11 +305,9 @@ void OCLPerfAtomicSpeed::CreateKernels(const AtomicType atomicType) {
   }
   // Build the programs.
   for (size_t i = 0; i < _programs.size(); i++) {
-    error_ = _wrapper->clBuildProgram(_programs[i], 1, &device, buildOptions,
-                                      NULL, NULL);
+    error_ = _wrapper->clBuildProgram(_programs[i], 1, &device, buildOptions, NULL, NULL);
     if (error_ != CL_SUCCESS) {
-      status = _wrapper->clGetProgramBuildInfo(_programs[i], device,
-                                               CL_PROGRAM_BUILD_LOG,
+      status = _wrapper->clGetProgramBuildInfo(_programs[i], device, CL_PROGRAM_BUILD_LOG,
                                                16384 * sizeof(char), log, NULL);
       printf("Build error -> %s\n", log);
 
@@ -333,12 +317,10 @@ void OCLPerfAtomicSpeed::CreateKernels(const AtomicType atomicType) {
 
   switch (atomicType) {
     case LocalHistogram:
-      kernel_ = _wrapper->clCreateKernel(_programs[0],
-                                         "local_atomics_histogram", &error_);
+      kernel_ = _wrapper->clCreateKernel(_programs[0], "local_atomics_histogram", &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
-      kernel_ = _wrapper->clCreateKernel(_programs[1], "local_atomics_reduce",
-                                         &error_);
+      kernel_ = _wrapper->clCreateKernel(_programs[1], "local_atomics_reduce", &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
       break;
@@ -346,29 +328,27 @@ void OCLPerfAtomicSpeed::CreateKernels(const AtomicType atomicType) {
     case Local4ReductionNoAtomics:
     case LocalReductionAtomics:
     case Local4ReductionAtomics:
-      kernel_ =
-          _wrapper->clCreateKernel(_programs[0], "local_reduction", &error_);
+      kernel_ = _wrapper->clCreateKernel(_programs[0], "local_reduction", &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
       break;
     case GlobalHistogram:
     case Global4Histogram:
-      kernel_ = _wrapper->clCreateKernel(_programs[0],
-                                         "global_atomics_histogram", &error_);
+      kernel_ = _wrapper->clCreateKernel(_programs[0], "global_atomics_histogram", &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
       break;
     case GlobalWGReduction:
     case Global4WGReduction:
-      kernel_ = _wrapper->clCreateKernel(
-          _programs[0], "global_atomics_sum_reduction_workgroup", &error_);
+      kernel_ =
+          _wrapper->clCreateKernel(_programs[0], "global_atomics_sum_reduction_workgroup", &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
       break;
     case GlobalAllToZeroReduction:
     case Global4AllToZeroReduction:
-      kernel_ = _wrapper->clCreateKernel(
-          _programs[0], "global_atomics_sum_reduction_all_to_zero", &error_);
+      kernel_ = _wrapper->clCreateKernel(_programs[0], "global_atomics_sum_reduction_all_to_zero",
+                                         &error_);
       CHECK_RESULT(kernel_ == 0, "clCreateKernel failed");
       _kernels.push_back(kernel_);
       break;
@@ -387,44 +367,36 @@ void OCLPerfAtomicSpeed::SetKernelArguments(const AtomicType atomicType) {
   switch (atomicType) {
     case LocalHistogram:
       // Set arguments for the local atomics histogram kernel
-      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                        (void *)&_inputBuffer);
+      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_inputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (inputBuffer)");
 
-      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                         (void *)&_outputBuffer);
+      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_outputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (outputBuffer)");
 
-      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++,
-                                         sizeof(_n4VectorsPerThread),
-                                         (void *)&_n4VectorsPerThread);
+      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(_n4VectorsPerThread),
+                                         (void*)&_n4VectorsPerThread);
       CHECK_RESULT(status, "clSetKernelArg failed. (n4VectorsPerThread)");
 
       // Set arguments for the local atomics reduce kernel
       Arg = 0;
-      status |= _wrapper->clSetKernelArg(_kernels[1], Arg++, sizeof(cl_mem),
-                                         (void *)&_outputBuffer);
+      status |= _wrapper->clSetKernelArg(_kernels[1], Arg++, sizeof(cl_mem), (void*)&_outputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (outputBuffer)");
 
-      status |= _wrapper->clSetKernelArg(_kernels[1], Arg++, sizeof(_nGroups),
-                                         (void *)&_nGroups);
+      status |= _wrapper->clSetKernelArg(_kernels[1], Arg++, sizeof(_nGroups), (void*)&_nGroups);
       CHECK_RESULT(status, "clSetKernelArg failed. (nGroups)");
       break;
     case LocalReductionAtomics:
     case LocalReductionNoAtomics:
     case Local4ReductionNoAtomics:
     case Local4ReductionAtomics:
-      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                        (void *)&_inputBuffer);
+      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_inputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (inputBuffer)");
 
-      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                         (void *)&_outputBuffer);
+      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_outputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (outputBuffer)");
 
       localSize = DEFAULT_WG_SIZE * sizeof(cl_uint);
-      if ((Local4ReductionNoAtomics == atomicType) ||
-          (Local4ReductionAtomics == atomicType))
+      if ((Local4ReductionNoAtomics == atomicType) || (Local4ReductionAtomics == atomicType))
         localSize *= 4;
       status = _wrapper->clSetKernelArg(_kernels[0], Arg++, localSize, NULL);
       CHECK_RESULT(status, "clSetKernelArg failed. (local memory)");
@@ -436,21 +408,18 @@ void OCLPerfAtomicSpeed::SetKernelArguments(const AtomicType atomicType) {
     case GlobalAllToZeroReduction:
     case Global4AllToZeroReduction:
       // Set arguments for the global atomics histogram kernel
-      if ((Global4Histogram == atomicType) ||
-          (Global4WGReduction == atomicType) ||
+      if ((Global4Histogram == atomicType) || (Global4WGReduction == atomicType) ||
           (Global4AllToZeroReduction == atomicType))
         itemsPerThread = 4;
 
-      status = _wrapper->clSetKernelArg(
-          _kernels[0], Arg++, sizeof(itemsPerThread), (void *)&itemsPerThread);
+      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(itemsPerThread),
+                                        (void*)&itemsPerThread);
       CHECK_RESULT(status, "clSetKernelArg failed. (itemsPerThread)");
 
-      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                        (void *)&_inputBuffer);
+      status = _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_inputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (inputBuffer)");
 
-      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem),
-                                         (void *)&_outputBuffer);
+      status |= _wrapper->clSetKernelArg(_kernels[0], Arg++, sizeof(cl_mem), (void*)&_outputBuffer);
       CHECK_RESULT(status, "clSetKernelArg failed. (outputBuffer)");
       break;
     default:
@@ -465,9 +434,8 @@ void OCLPerfAtomicSpeed::ResetGlobalOutput() {
 
   memset(_output, 0, _outputNBytes);
 
-  status =
-      _wrapper->clEnqueueWriteBuffer(cmd_queue_, _outputBuffer, CL_TRUE, 0,
-                                     _outputNBytes, _output, 0, NULL, NULL);
+  status = _wrapper->clEnqueueWriteBuffer(cmd_queue_, _outputBuffer, CL_TRUE, 0, _outputNBytes,
+                                          _output, 0, NULL, NULL);
   CHECK_RESULT(status, "clEnqueueWriteBuffer failed.");
 
   status = _wrapper->clFinish(cmd_queue_);
@@ -486,14 +454,12 @@ void OCLPerfAtomicSpeed::RunLocalHistogram() {
   globalThreads[0] = _nThreads;
   localThreads[0] = _nThreadsPerGroup;
 
-  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL,
-                                            globalThreads, localThreads, 0,
-                                            NULL, &events[0]);
+  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL, globalThreads,
+                                            localThreads, 0, NULL, &events[0]);
   CHECK_RESULT(status, "clEnqueueNDRangeKernel failed. (histogram)");
 
-  status = _wrapper->clEnqueueNDRangeKernel(
-      cmd_queue_, _kernels[1], 1, NULL, &globalThreadsReduce,
-      &localThreadsReduce, 1, &events[0], &events[1]);
+  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[1], 1, NULL, &globalThreadsReduce,
+                                            &localThreadsReduce, 1, &events[0], &events[1]);
   CHECK_RESULT(status, "clEnqueueNDRangeKernel failed. (reduce)");
 
   status = _wrapper->clFinish(cmd_queue_);
@@ -512,13 +478,11 @@ void OCLPerfAtomicSpeed::RunLocalReduction(const AtomicType atomicType) {
 
   globalThreads[0] = _inputNBytes / sizeof(cl_uint) / 2;
   localThreads[0] = _nThreadsPerGroup;
-  if ((Local4ReductionNoAtomics == atomicType) ||
-      (Local4ReductionAtomics == atomicType))
+  if ((Local4ReductionNoAtomics == atomicType) || (Local4ReductionAtomics == atomicType))
     globalThreads[0] /= 4;
 
-  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL,
-                                            globalThreads, localThreads, 0,
-                                            NULL, NULL);
+  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL, globalThreads,
+                                            localThreads, 0, NULL, NULL);
   CHECK_RESULT(status, "clEnqueueNDRangeKernel failed. (reduction)");
 
   status = _wrapper->clFinish(cmd_queue_);
@@ -538,9 +502,8 @@ void OCLPerfAtomicSpeed::RunGlobalHistogram(AtomicType atomicType) {
       (Global4AllToZeroReduction == atomicType))
     globalThreads[0] /= 4;
 
-  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL,
-                                            globalThreads, localThreads, 0,
-                                            NULL, NULL);
+  status = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, _kernels[0], 1, NULL, globalThreads,
+                                            localThreads, 0, NULL, NULL);
   CHECK_RESULT(status, "clEnqueueNDRangeKernel failed.");
 
   status = _wrapper->clFinish(cmd_queue_);
@@ -557,8 +520,8 @@ void OCLPerfAtomicSpeed::run() {
   if ((!_atomicsSupported) || (_dataSizeTooBig)) return;
 
   // Write data to the GPU
-  status = _wrapper->clEnqueueWriteBuffer(cmd_queue_, _inputBuffer, CL_FALSE, 0,
-                                          _inputNBytes, _input, 0, NULL, NULL);
+  status = _wrapper->clEnqueueWriteBuffer(cmd_queue_, _inputBuffer, CL_FALSE, 0, _inputNBytes,
+                                          _input, 0, NULL, NULL);
   CHECK_RESULT(status, "clEnqueueWriteBuffer failed. (inputBuffer)");
 
   status = _wrapper->clFlush(cmd_queue_);
@@ -606,8 +569,8 @@ void OCLPerfAtomicSpeed::run() {
 
   // Read the results back to the CPU - Only do it for the last run
   // of the test instead of for each iteration of _numLoops.
-  status = _wrapper->clEnqueueReadBuffer(cmd_queue_, _outputBuffer, CL_FALSE, 0,
-                                         _outputNBytes, _output, 0, NULL, NULL);
+  status = _wrapper->clEnqueueReadBuffer(cmd_queue_, _outputBuffer, CL_FALSE, 0, _outputNBytes,
+                                         _output, 0, NULL, NULL);
   CHECK_RESULT(status, "clEnqueueReadBuffer failed.");
   status = _wrapper->clFinish(cmd_queue_);
   CHECK_RESULT(status, "clFlush failed.");
@@ -642,8 +605,7 @@ bool OCLPerfAtomicSpeed::VerifyResults(const AtomicType atomicType) {
     case Local4ReductionAtomics:
     case GlobalWGReduction:
     case Global4WGReduction:
-      reductionElementCount =
-          _inputNBytes / sizeof(cl_uint) / _nThreadsPerGroup;
+      reductionElementCount = _inputNBytes / sizeof(cl_uint) / _nThreadsPerGroup;
       for (i = 0; i < reductionElementCount; i++) {
         calculatedValue += _output[i];
       }
@@ -680,8 +642,7 @@ unsigned int OCLPerfAtomicSpeed::close() {
 
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);
@@ -708,7 +669,7 @@ unsigned int OCLPerfAtomicSpeed::close() {
 /* Helper functions */
 void OCLPerfAtomicSpeed::calculateHostBin() {
   // compute CPU histogram
-  cl_int *p = (cl_int *)_input;
+  cl_int* p = (cl_int*)_input;
   memset(_cpuhist, 0, NBINS * sizeof(cl_uint));
   _cpuReductionSum = 0;
 
@@ -717,8 +678,8 @@ void OCLPerfAtomicSpeed::calculateHostBin() {
     _cpuhist[(p[i] >> 16) & 0xff]++;
     _cpuhist[(p[i] >> 8) & 0xff]++;
     _cpuhist[(p[i] >> 0) & 0xff]++;
-    _cpuReductionSum += ((p[i] >> 24) & 0x3) + ((p[i] >> 16) & 0x3) +
-                        ((p[i] >> 8) & 0x3) + ((p[i] >> 0) & 0x3);
+    _cpuReductionSum +=
+        ((p[i] >> 24) & 0x3) + ((p[i] >> 16) & 0x3) + ((p[i] >> 8) & 0x3) + ((p[i] >> 0) & 0x3);
   }
 }
 
@@ -735,7 +696,7 @@ void OCLPerfAtomicSpeed::setupHistogram() {
   _n4VectorsPerThread = _n4Vectors / _nThreads;
   _inputNBytes = _n4Vectors * sizeof(cl_uint4);
 
-  _input = (cl_uint *)malloc(_inputNBytes);
+  _input = (cl_uint*)malloc(_inputNBytes);
   if (0 == _input) {
     _dataSizeTooBig = true;
     return;
@@ -745,15 +706,14 @@ void OCLPerfAtomicSpeed::setupHistogram() {
   time_t ltime;
   time(&ltime);
   cl_uint a = (cl_uint)ltime, b = (cl_uint)ltime;
-  cl_uint *p = (cl_uint *)_input;
+  cl_uint* p = (cl_uint*)_input;
 
   for (unsigned int i = 0; i < _inputNBytes / sizeof(cl_uint); i++)
     p[i] = (b = (a * (b & 65535)) + (b >> 16));
 }
 
 // Print the results of the current test.
-void OCLPerfAtomicSpeed::PrintResults(const AtomicType atomicType,
-                                      double totalTime) {
+void OCLPerfAtomicSpeed::PrintResults(const AtomicType atomicType, double totalTime) {
   char buf[500];
   char sAtomicType[100];
   double inputInGB = (double)_inputNBytes * (double)(1e-09);
@@ -775,43 +735,36 @@ void OCLPerfAtomicSpeed::PrintResults(const AtomicType atomicType,
       SNPRINTF(sAtomicType, sizeof(sAtomicType), "Local reduction NO atomics");
       break;
     case Local4ReductionNoAtomics:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Local vec 4 reduction NO atomics");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Local vec 4 reduction NO atomics");
       break;
     case LocalReductionAtomics:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Local reduction with atomics");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Local reduction with atomics");
       break;
     case Local4ReductionAtomics:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Local vec 4 reduction with atomics");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Local vec 4 reduction with atomics");
       break;
     case GlobalWGReduction:
       SNPRINTF(sAtomicType, sizeof(sAtomicType), "Global work-group reduction");
       break;
     case Global4WGReduction:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Global vec 4 work-group reduction");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Global vec 4 work-group reduction");
       break;
     case GlobalAllToZeroReduction:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Global all to zero reduction");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Global all to zero reduction");
       break;
     case Global4AllToZeroReduction:
-      SNPRINTF(sAtomicType, sizeof(sAtomicType),
-               "Global vec 4 all to zero reduction");
+      SNPRINTF(sAtomicType, sizeof(sAtomicType), "Global vec 4 all to zero reduction");
       break;
     default:
       CHECK_RESULT(true, "Atomic type not supported (PrintResults)");
   }
 
-  SNPRINTF(buf, sizeof(buf), "%45s: Input [%.3f GB], Time [%.3f sec]: GB/s",
-           sAtomicType, totalHistogramDataInGB, perf);
+  SNPRINTF(buf, sizeof(buf), "%45s: Input [%.3f GB], Time [%.3f sec]: GB/s", sAtomicType,
+           totalHistogramDataInGB, perf);
   _perfInfo = (float)(totalHistogramDataInGB / perf);
   testDescString = buf;
 }
 
 bool OCLPerfAtomicSpeed::IsReduction(const AtomicType atomicType) {
-  return ((atomicType >= LocalReductionNoAtomics) &&
-          (atomicType <= GlobalAllToZeroReduction));
+  return ((atomicType >= LocalReductionNoAtomics) && (atomicType <= GlobalAllToZeroReduction));
 }

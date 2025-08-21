@@ -17,17 +17,17 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- #include <new>
+#include <new>
 
 // Test __HIP_DEVICE_COMPILE__ is defined after math_functions.h
 // is included.
 __device__ __host__ inline void throw_std_bad_alloc() {
-  #ifndef __HIP_DEVICE_COMPILE__
-    throw std::bad_alloc();
-  #else
-    std::size_t kHuge = static_cast<std::size_t>(-1);
-    new int[kHuge];
-  #endif
+#ifndef __HIP_DEVICE_COMPILE__
+  throw std::bad_alloc();
+#else
+  std::size_t kHuge = static_cast<std::size_t>(-1);
+  new int[kHuge];
+#endif
 }
 
 __global__ void FloatMathPreciseKernel() {
@@ -127,8 +127,7 @@ __global__ void FloatMathPreciseKernel() {
 
 TEST_CASE("Unit_TestIncludeMathPreciseFloat") {
   hipError_t err;
-  err = hipLaunchKernel(reinterpret_cast<void *>(FloatMathPreciseKernel),
-                    dim3(1, 1, 1),
-                    dim3(1, 1, 1), 0, 0, 0);
+  err = hipLaunchKernel(reinterpret_cast<void*>(FloatMathPreciseKernel), dim3(1, 1, 1),
+                        dim3(1, 1, 1), 0, 0, 0);
   REQUIRE(err == hipSuccess);
 }

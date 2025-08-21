@@ -57,8 +57,7 @@ OCLSDI::OCLSDI() {
 
 OCLSDI::~OCLSDI() {}
 
-void OCLSDI::open(unsigned int test, char* units, double& conversion,
-                  unsigned int deviceId) {
+void OCLSDI::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   cl_uint numPlatforms = 0;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
@@ -92,15 +91,13 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
   CHECK_RESULT(numPlatforms == 0, "clGetPlatformIDs failed");
   error_ = _wrapper->clGetPlatformIDs(1, &platform, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
-  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL,
-                                    &num_devices);
+  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 0, NULL, &num_devices);
   if (num_devices < 2) {
     printf("\nSilent Failure: Two GPUs are required to run OCLSdi test\n");
     silentFailure = true;
     return;
   }
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 2, devices_, 0);
+  error_ = _wrapper->clGetDeviceIDs(platform, CL_DEVICE_TYPE_GPU, 2, devices_, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
   if (test >= NUM_TESTS) {
     cl_device_id temp = devices_[0];
@@ -109,12 +106,11 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
   }
   size_t param_size = 0;
   char* strExtensions = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, 0, 0,
-                                     &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strExtensions = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS,
-                                     param_size, strExtensions, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_EXTENSIONS, param_size, strExtensions, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strstr(strExtensions, "cl_amd_bus_addressable_memory") == 0) {
     printf(
@@ -125,12 +121,11 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
     return;
   }
   free(strExtensions);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, 0, 0,
-                                     &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strExtensions = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS,
-                                     param_size, strExtensions, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_EXTENSIONS, param_size, strExtensions, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strstr(strExtensions, "cl_amd_bus_addressable_memory") == 0) {
     printf(
@@ -144,83 +139,66 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
   deviceNames_ = " [";
   param_size = 0;
   char* strDeviceName = 0;
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, 0, 0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strDeviceName = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, param_size,
-                                     strDeviceName, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[1], CL_DEVICE_NAME, param_size, strDeviceName, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   deviceNames_ = deviceNames_ + strDeviceName;
   free(strDeviceName);
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, 0, 0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strDeviceName = (char*)malloc(param_size);
-  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, param_size,
-                                     strDeviceName, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[0], CL_DEVICE_NAME, param_size, strDeviceName, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   deviceNames_ = deviceNames_ + "->";
   deviceNames_ = deviceNames_ + strDeviceName;
   free(strDeviceName);
   deviceNames_ = deviceNames_ + "]";
-  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM,
-                                    (cl_context_properties)platform, 0};
-  contexts_[0] =
-      _wrapper->clCreateContext(props, 1, &devices_[0], 0, 0, &error_);
+  cl_context_properties props[3] = {CL_CONTEXT_PLATFORM, (cl_context_properties)platform, 0};
+  contexts_[0] = _wrapper->clCreateContext(props, 1, &devices_[0], 0, 0, &error_);
   CHECK_RESULT(contexts_[0] == 0, "clCreateContext failed");
-  contexts_[1] =
-      _wrapper->clCreateContext(props, 1, &devices_[1], 0, 0, &error_);
+  contexts_[1] = _wrapper->clCreateContext(props, 1, &devices_[1], 0, 0, &error_);
   CHECK_RESULT(contexts_[1] == 0, "clCreateContext failed");
-  cmd_queues_[0] =
-      _wrapper->clCreateCommandQueue(contexts_[0], devices_[0], 0, NULL);
+  cmd_queues_[0] = _wrapper->clCreateCommandQueue(contexts_[0], devices_[0], 0, NULL);
   CHECK_RESULT(cmd_queues_[0] == 0, "clCreateCommandQueue failed");
-  cmd_queues_[1] =
-      _wrapper->clCreateCommandQueue(contexts_[1], devices_[1], 0, NULL);
+  cmd_queues_[1] = _wrapper->clCreateCommandQueue(contexts_[1], devices_[1], 0, NULL);
   CHECK_RESULT(cmd_queues_[1] == 0, "clCreateCommandQueue failed");
-  busAddressableBuff_ = _wrapper->clCreateBuffer(
-      contexts_[0], CL_MEM_BUS_ADDRESSABLE_AMD, bufSize_, 0, &error_);
+  busAddressableBuff_ =
+      _wrapper->clCreateBuffer(contexts_[0], CL_MEM_BUS_ADDRESSABLE_AMD, bufSize_, 0, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  error_ = _wrapper->clEnqueueMakeBuffersResidentAMD(
-      cmd_queues_[0], 1, &busAddressableBuff_, true, &busAddr_, 0, 0, 0);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clEnqueueMakeBuffersResidentAMD failed");
-  extPhysicalBuff_ = _wrapper->clCreateBuffer(
-      contexts_[1], CL_MEM_EXTERNAL_PHYSICAL_AMD, bufSize_, &busAddr_, &error_);
+  error_ = _wrapper->clEnqueueMakeBuffersResidentAMD(cmd_queues_[0], 1, &busAddressableBuff_, true,
+                                                     &busAddr_, 0, 0, 0);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueMakeBuffersResidentAMD failed");
+  extPhysicalBuff_ = _wrapper->clCreateBuffer(contexts_[1], CL_MEM_EXTERNAL_PHYSICAL_AMD, bufSize_,
+                                              &busAddr_, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                             0, 0, 0, 0, 0);
+  error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, 0, 0, 0, 0, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
   error_ = _wrapper->clFinish(cmd_queues_[1]);
   CHECK_RESULT(error_, "clFinish failed");
-  srcBuff_ = _wrapper->clCreateBuffer(contexts_[1],
-                                      CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
+  srcBuff_ = _wrapper->clCreateBuffer(contexts_[1], CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR,
                                       bufSize_, inputArr_, &error_);
   CHECK_RESULT(error_ != CL_SUCCESS, "clCreateBuffer failed");
-  error_ = _wrapper->clEnqueueMigrateMemObjects(cmd_queues_[1], 1,
-                                                &extPhysicalBuff_, 0, 0, 0, 0);
+  error_ = _wrapper->clEnqueueMigrateMemObjects(cmd_queues_[1], 1, &extPhysicalBuff_, 0, 0, 0, 0);
   CHECK_RESULT(error_, "clEnqueueMigrateMemObjects failed");
   error_ = _wrapper->clFinish(cmd_queues_[1]);
   CHECK_RESULT(error_, "clFinish failed");
-  error_ = _wrapper->clEnqueueMigrateMemObjects(cmd_queues_[1], 1, &srcBuff_, 0,
-                                                0, 0, 0);
+  error_ = _wrapper->clEnqueueMigrateMemObjects(cmd_queues_[1], 1, &srcBuff_, 0, 0, 0, 0);
   CHECK_RESULT(error_, "clEnqueueMigrateMemObjects failed");
   error_ = _wrapper->clFinish(cmd_queues_[1]);
   CHECK_RESULT(error_, "clFinish failed");
   if (_openTest == 2) {
-    program_ = _wrapper->clCreateProgramWithSource(contexts_[1], 1,
-                                                   &kernel_str_, NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(contexts_[1], 1, &kernel_str_, NULL, &error_);
     CHECK_RESULT(error_, "clCreateProgramWithSource failed");
-    error_ =
-        _wrapper->clBuildProgram(program_, 1, &devices_[1], NULL, NULL, NULL);
+    error_ = _wrapper->clBuildProgram(program_, 1, &devices_[1], NULL, NULL, NULL);
     if (error_ != CL_SUCCESS) {
       char* errorstr;
       size_t size;
-      _wrapper->clGetProgramBuildInfo(program_, devices_[1],
-                                      CL_PROGRAM_BUILD_LOG, 0, NULL, &size);
+      _wrapper->clGetProgramBuildInfo(program_, devices_[1], CL_PROGRAM_BUILD_LOG, 0, NULL, &size);
       errorstr = new char[size];
-      _wrapper->clGetProgramBuildInfo(
-          program_, devices_[1], CL_PROGRAM_BUILD_LOG, size, errorstr, &size);
+      _wrapper->clGetProgramBuildInfo(program_, devices_[1], CL_PROGRAM_BUILD_LOG, size, errorstr,
+                                      &size);
       printf("\n%s\n", errorstr);
       delete[] errorstr;
     }
@@ -228,8 +206,7 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
 
     kernel_ = _wrapper->clCreateKernel(program_, "test_kernel", &error_);
     CHECK_RESULT(error_, "clCreateKernel failed");
-    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem),
-                                      (void*)&extPhysicalBuff_);
+    error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&extPhysicalBuff_);
     CHECK_RESULT(error_, "clSetKernelArg failed");
   }
   if (_openTest == 5) {
@@ -245,8 +222,7 @@ void OCLSDI::open(unsigned int test, char* units, double& conversion,
     desc.num_mip_levels = 0;
     desc.num_samples = 0;
     desc.buffer = (cl_mem)NULL;
-    image_ = _wrapper->clCreateImage(contexts_[1], CL_MEM_READ_ONLY, &format,
-                                     &desc, 0, &error_);
+    image_ = _wrapper->clCreateImage(contexts_[1], CL_MEM_READ_ONLY, &format, &desc, 0, &error_);
     CHECK_RESULT(error_, "clCreateImage failed");
   }
 }
@@ -316,13 +292,11 @@ unsigned int OCLSDI::close(void) {
   }
   if (cmd_queues_[0]) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queues_[0]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (cmd_queues_[1]) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queues_[1]);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (contexts_[0]) {
     error_ = _wrapper->clReleaseContext(contexts_[0]);
@@ -355,12 +329,11 @@ unsigned int OCLSDI::close(void) {
 
 void OCLSDI::readAndVerifyResult() {
   memset(outputArr_, 0, bufSize_);
-  error_ = _wrapper->clEnqueueWaitSignalAMD(cmd_queues_[0], busAddressableBuff_,
-                                            markerValue_, 0, 0, 0);
+  error_ =
+      _wrapper->clEnqueueWaitSignalAMD(cmd_queues_[0], busAddressableBuff_, markerValue_, 0, 0, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWaitSignalAMD failed");
-  error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_,
-                                         CL_TRUE, 0, bufSize_, outputArr_, 0, 0,
-                                         NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_, CL_TRUE, 0, bufSize_,
+                                         outputArr_, 0, 0, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueReadBuffer failed");
   success_ = (memcmp(inputArr_, outputArr_, bufSize_) == 0);
 }
@@ -370,17 +343,16 @@ void OCLSDI::testEnqueueCopyImageToBuffer(int threadID) {
     size_t origin[3] = {0, 0, 0};
     size_t region[3] = {bufSize_ / sizeof(cl_uint), 1, 1};
     memset(inputArr_, (_openTest + 1), bufSize_);
-    error_ =
-        _wrapper->clEnqueueWriteImage(cmd_queues_[1], image_, CL_TRUE, origin,
-                                      region, 0, 0, inputArr_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteImage(cmd_queues_[1], image_, CL_TRUE, origin, region, 0, 0,
+                                           inputArr_, 0, 0, 0);
     CHECK_RESULT(error_, "clEnqueueWriteImage failed");
     _wrapper->clFinish(cmd_queues_[1]);
-    error_ = _wrapper->clEnqueueCopyImageToBuffer(
-        cmd_queues_[1], image_, extPhysicalBuff_, origin, region, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueCopyImageToBuffer(cmd_queues_[1], image_, extPhysicalBuff_, origin,
+                                                  region, 0, 0, 0, 0);
     CHECK_RESULT(error_, "clEnqueueCopyImageToBuffer failed");
     _wrapper->clFinish(cmd_queues_[1]);
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
@@ -396,23 +368,23 @@ void OCLSDI::testEnqueueWriteBufferRect(int threadID) {
   size_t region[3] = {width, width, 1};
   if (threadID == 0) {
     memset(inputArr_, (_openTest + 1), bufSize_);
-    error_ = _wrapper->clEnqueueWriteBufferRect(
-        cmd_queues_[1], extPhysicalBuff_, CL_TRUE, bufOrigin, hostOrigin,
-        region, width, 0, width, 0, inputArr_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteBufferRect(cmd_queues_[1], extPhysicalBuff_, CL_TRUE,
+                                                bufOrigin, hostOrigin, region, width, 0, width, 0,
+                                                inputArr_, 0, 0, 0);
     CHECK_RESULT(error_, "clEnqueueWriteBufferRect failed");
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
   } else {
     memset(outputArr_, 0, bufSize_);
-    error_ = _wrapper->clEnqueueWaitSignalAMD(
-        cmd_queues_[0], busAddressableBuff_, markerValue_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWaitSignalAMD(cmd_queues_[0], busAddressableBuff_, markerValue_, 0,
+                                              0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWaitSignalAMD failed");
-    error_ = _wrapper->clEnqueueReadBufferRect(
-        cmd_queues_[0], busAddressableBuff_, CL_TRUE, bufOrigin, hostOrigin,
-        region, width, 0, width, 0, outputArr_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueReadBufferRect(cmd_queues_[0], busAddressableBuff_, CL_TRUE,
+                                               bufOrigin, hostOrigin, region, width, 0, width, 0,
+                                               outputArr_, 0, 0, 0);
     CHECK_RESULT(error_, "clEnqueueReadBufferRect failed");
     success_ = (memcmp(inputArr_, outputArr_, bufSize_) == 0);
   }
@@ -421,26 +393,23 @@ void OCLSDI::testEnqueueWriteBufferRect(int threadID) {
 void OCLSDI::testEnqueueMapBuffer(int threadID) {
   if (threadID == 0) {
     memset(inputArr_, (_openTest + 1), bufSize_);
-    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], extPhysicalBuff_,
-                                            CL_TRUE, 0, bufSize_, inputArr_, 0,
-                                            0, NULL);
+    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], extPhysicalBuff_, CL_TRUE, 0, bufSize_,
+                                            inputArr_, 0, 0, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
   } else {
-    error_ = _wrapper->clEnqueueWaitSignalAMD(
-        cmd_queues_[0], busAddressableBuff_, markerValue_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWaitSignalAMD(cmd_queues_[0], busAddressableBuff_, markerValue_, 0,
+                                              0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWaitSignalAMD failed");
-    void* ptr = _wrapper->clEnqueueMapBuffer(
-        cmd_queues_[0], busAddressableBuff_, CL_TRUE, CL_MAP_READ, 0, bufSize_,
-        0, 0, 0, &error_);
+    void* ptr = _wrapper->clEnqueueMapBuffer(cmd_queues_[0], busAddressableBuff_, CL_TRUE,
+                                             CL_MAP_READ, 0, bufSize_, 0, 0, 0, &error_);
     CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
     success_ = (memcmp(inputArr_, ptr, bufSize_) == 0);
-    error_ = _wrapper->clEnqueueUnmapMemObject(
-        cmd_queues_[0], busAddressableBuff_, ptr, 0, 0, 0);
+    error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queues_[0], busAddressableBuff_, ptr, 0, 0, 0);
     CHECK_RESULT(error_, "clEnqueueUnmapMemObject failed");
     error_ = _wrapper->clFinish(cmd_queues_[0]);
     CHECK_RESULT(error_, "clFinish failed");
@@ -450,25 +419,23 @@ void OCLSDI::testEnqueueMapBuffer(int threadID) {
 void OCLSDI::testEnqueueNDRangeKernel(int threadID) {
   if (threadID == 0) {
     size_t global_work_size = bufSize_ / sizeof(cl_uint);
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queues_[1], kernel_, 1, NULL,
-                                              &global_work_size, NULL, 0, NULL,
-                                              NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queues_[1], kernel_, 1, NULL, &global_work_size,
+                                              NULL, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
   } else {
     memset(outputArr_, 0, bufSize_);
-    error_ = _wrapper->clEnqueueWaitSignalAMD(
-        cmd_queues_[0], busAddressableBuff_, markerValue_, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWaitSignalAMD(cmd_queues_[0], busAddressableBuff_, markerValue_, 0,
+                                              0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWaitSignalAMD failed");
-    error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_,
-                                           CL_TRUE, 0, bufSize_, outputArr_, 0,
-                                           0, NULL);
+    error_ = _wrapper->clEnqueueReadBuffer(cmd_queues_[0], busAddressableBuff_, CL_TRUE, 0,
+                                           bufSize_, outputArr_, 0, 0, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
     success_ = true;
     for (cl_uint i = 0; i < bufSize_ / sizeof(cl_uint); ++i) {
@@ -480,15 +447,14 @@ void OCLSDI::testEnqueueNDRangeKernel(int threadID) {
 void OCLSDI::testEnqueueCopyBuffer(int threadID) {
   if (threadID == 0) {
     memset(inputArr_, (_openTest + 1), bufSize_);
-    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], srcBuff_, CL_TRUE,
-                                            0, bufSize_, inputArr_, 0, 0, NULL);
+    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], srcBuff_, CL_TRUE, 0, bufSize_,
+                                            inputArr_, 0, 0, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
-    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_,
-                                           extPhysicalBuff_, 0, 0, bufSize_, 0,
-                                           NULL, NULL);
+    error_ = _wrapper->clEnqueueCopyBuffer(cmd_queues_[1], srcBuff_, extPhysicalBuff_, 0, 0,
+                                           bufSize_, 0, NULL, NULL);
     CHECK_RESULT(error_, "clEnqueueCopyBuffer failed");
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");
@@ -500,12 +466,11 @@ void OCLSDI::testEnqueueCopyBuffer(int threadID) {
 void OCLSDI::testEnqueueWriteBuffer(int threadID) {
   if (threadID == 0) {
     memset(inputArr_, (_openTest + 1), bufSize_);
-    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], extPhysicalBuff_,
-                                            CL_TRUE, 0, bufSize_, inputArr_, 0,
-                                            0, NULL);
+    error_ = _wrapper->clEnqueueWriteBuffer(cmd_queues_[1], extPhysicalBuff_, CL_TRUE, 0, bufSize_,
+                                            inputArr_, 0, 0, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteBuffer failed");
-    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_,
-                                               markerValue_, 0, 0, 0, 0);
+    error_ = _wrapper->clEnqueueWriteSignalAMD(cmd_queues_[1], extPhysicalBuff_, markerValue_, 0, 0,
+                                               0, 0);
     CHECK_RESULT(error_ != CL_SUCCESS, "clEnqueueWriteSignalAMD failed");
     error_ = _wrapper->clFinish(cmd_queues_[1]);
     CHECK_RESULT(error_, "clFinish failed");

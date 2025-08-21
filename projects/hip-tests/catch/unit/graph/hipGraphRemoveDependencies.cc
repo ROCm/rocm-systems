@@ -361,7 +361,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Positive_Parameters") {
   HIP_CHECK(hipGraphAddDependencies(graph, &memset_A, &memcpyH2D_A, 1));
   HIP_CHECK(hipGraphAddDependencies(graph, &memcpyH2D_A, &memcpyD2H_A, 1));
   size_t totalEdges = 2;
-#if HT_NVIDIA // EXSWHTEC-218
+#if HT_NVIDIA  // EXSWHTEC-218
   SECTION("numDependencies is zero, To/From are nullptr") {
     HIP_CHECK(hipGraphRemoveDependencies(graph, nullptr, nullptr, 0));
   }
@@ -465,7 +465,7 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Negative_Parameters") {
   SECTION("To/From are nullptr") {
     HIP_CHECK_ERROR(hipGraphRemoveDependencies(graph, nullptr, nullptr, 1), hipErrorInvalidValue);
   }
-#if HT_NVIDIA // EXSWHTEC-218
+#if HT_NVIDIA  // EXSWHTEC-218
   SECTION("To/From belong to different graph") {
     hipGraph_t graph1;
     hipGraphNode_t emptyNode1{};
@@ -498,6 +498,6 @@ TEST_CASE("Unit_hipGraphRemoveDependencies_Negative_Parameters") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

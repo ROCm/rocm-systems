@@ -220,6 +220,6 @@ TEST_CASE("Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node") {
 }
 
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */
