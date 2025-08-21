@@ -113,8 +113,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
 
   SECTION("handle == nullptr") {
     HIP_CHECK_ERROR(
-        hipMemExportToShareableHandle(&shareable_handle,
-                                      (hipMemGenericAllocationHandle_t)nullptr,
+        hipMemExportToShareableHandle(&shareable_handle, (hipMemGenericAllocationHandle_t) nullptr,
                                       hipMemHandleTypePosixFileDescriptor, 0),
         hipErrorInvalidValue);
   }
@@ -135,6 +134,6 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

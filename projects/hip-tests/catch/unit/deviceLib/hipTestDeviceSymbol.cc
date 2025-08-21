@@ -42,16 +42,13 @@ __global__ static void Assign(int* Out) {
 __device__ __constant__ int globalConst[NUM];
 __device__ static __constant__ float statConstVar[NUM];
 
-__global__ void checkAddress(int* addr, bool* out) {
-  *out = (globalConst == addr);
-}
+__global__ void checkAddress(int* addr, bool* out) { *out = (globalConst == addr); }
 __global__ void checkStaticConstVarAddress(float* addr, bool* out) {
   *out = (statConstVar == addr);
 }
 
 TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
-  int *A{nullptr}, *Am{nullptr}, *B{nullptr}, *Ad{nullptr},
-  *C{nullptr}, *Cm{nullptr};
+  int *A{nullptr}, *Am{nullptr}, *B{nullptr}, *Ad{nullptr}, *C{nullptr}, *Cm{nullptr};
   A = new int[NUM];
   B = new int[NUM];
   C = new int[NUM];
@@ -73,14 +70,13 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
     hipStream_t stream{};
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(
-        hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), Am, SIZE, 0,
-                               hipMemcpyHostToDevice, stream));
+        hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), Am, SIZE, 0, hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipLaunchKernelGGL(Assign, dim3(1, 1, 1), dim3(NUM, 1, 1), 0, 0, Ad);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(B, Ad, SIZE, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(Cm, HIP_SYMBOL(globalOut), SIZE, 0,
-              hipMemcpyDeviceToHost, stream));
+    HIP_CHECK(hipMemcpyFromSymbolAsync(Cm, HIP_SYMBOL(globalOut), SIZE, 0, hipMemcpyDeviceToHost,
+                                       stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
     for (size_t i = 0; i < NUM; i++) {
@@ -90,13 +86,11 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
   }
 
   SECTION("Calling hipMemcpyTo/FromSymbol - validate value in host memory") {
-    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(globalIn), A, SIZE, 0,
-                                hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(globalIn), A, SIZE, 0, hipMemcpyHostToDevice));
     hipLaunchKernelGGL(Assign, dim3(1, 1, 1), dim3(NUM, 1, 1), 0, 0, Ad);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(B, Ad, SIZE, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpyFromSymbol(C, HIP_SYMBOL(globalOut), SIZE, 0,
-                                  hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpyFromSymbol(C, HIP_SYMBOL(globalOut), SIZE, 0, hipMemcpyDeviceToHost));
 
     for (size_t i = 0; i < NUM; i++) {
       REQUIRE(A[i] == B[i]);
@@ -108,15 +102,13 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
     hipStream_t stream{};
     HIP_CHECK(hipStreamCreate(&stream));
     HIP_CHECK(
-        hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), A, SIZE, 0,
-                               hipMemcpyHostToDevice, stream));
+        hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), A, SIZE, 0, hipMemcpyHostToDevice, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     hipLaunchKernelGGL(Assign, dim3(1, 1, 1), dim3(NUM, 1, 1), 0, 0, Ad);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(B, Ad, SIZE, hipMemcpyDeviceToHost));
     HIP_CHECK(
-        hipMemcpyFromSymbolAsync(C, HIP_SYMBOL(globalOut), SIZE, 0,
-                                 hipMemcpyDeviceToHost, stream));
+        hipMemcpyFromSymbolAsync(C, HIP_SYMBOL(globalOut), SIZE, 0, hipMemcpyDeviceToHost, stream));
     HIP_CHECK(hipStreamSynchronize(stream));
     HIP_CHECK(hipStreamDestroy(stream));
 
@@ -127,14 +119,14 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
   }
 
   SECTION("Calling hipMemcpyTo/FromSymbol using hipStreamPerThread") {
-    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), A, SIZE, 0,
-                       hipMemcpyHostToDevice, hipStreamPerThread));
+    HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(globalIn), A, SIZE, 0, hipMemcpyHostToDevice,
+                                     hipStreamPerThread));
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
     hipLaunchKernelGGL(Assign, dim3(1, 1, 1), dim3(NUM, 1, 1), 0, 0, Ad);
     HIP_CHECK(hipGetLastError());
     HIP_CHECK(hipMemcpy(B, Ad, SIZE, hipMemcpyDeviceToHost));
-    HIP_CHECK(hipMemcpyFromSymbolAsync(C, HIP_SYMBOL(globalOut), SIZE, 0,
-                    hipMemcpyDeviceToHost, hipStreamPerThread));
+    HIP_CHECK(hipMemcpyFromSymbolAsync(C, HIP_SYMBOL(globalOut), SIZE, 0, hipMemcpyDeviceToHost,
+                                       hipStreamPerThread));
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
 
     for (size_t i = 0; i < NUM; i++) {
@@ -152,15 +144,12 @@ TEST_CASE("Unit_hipMemcpyToSymbolAsync_ToNFrom") {
     size_t symbolSize = 0;
     int* symbolAddress{nullptr};
     HIP_CHECK(hipGetSymbolSize(&symbolSize, HIP_SYMBOL(globalConst)));
-    HIP_CHECK(hipGetSymbolAddress(reinterpret_cast<void**>(&symbolAddress),
-                                  HIP_SYMBOL(globalConst)));
-    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&checkOkD),
-                        sizeof(bool)));
-    hipLaunchKernelGGL(checkAddress, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0,
-                       symbolAddress, checkOkD);
+    HIP_CHECK(
+        hipGetSymbolAddress(reinterpret_cast<void**>(&symbolAddress), HIP_SYMBOL(globalConst)));
+    HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&checkOkD), sizeof(bool)));
+    hipLaunchKernelGGL(checkAddress, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0, symbolAddress, checkOkD);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(&checkOk, checkOkD, sizeof(bool),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&checkOk, checkOkD, sizeof(bool), hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(checkOkD));
     REQUIRE(checkOk);
     REQUIRE((symbolSize == SIZE));
@@ -185,14 +174,12 @@ TEST_CASE("Unit_hipGetSymbolAddressAndSize_Validation") {
   SECTION("Validate symbol size/address of static const variable") {
     HIP_CHECK(hipGetSymbolSize(&symbolSize, HIP_SYMBOL(statConstVar)));
     HIP_CHECK(
-        hipGetSymbolAddress(reinterpret_cast<void**>(&symbolVarAddress),
-                            HIP_SYMBOL(statConstVar)));
+        hipGetSymbolAddress(reinterpret_cast<void**>(&symbolVarAddress), HIP_SYMBOL(statConstVar)));
     HIP_CHECK(hipMalloc(&checkOkD, sizeof(bool)));
-    hipLaunchKernelGGL(checkStaticConstVarAddress, dim3(1, 1, 1),
-          dim3(1, 1, 1), 0, 0, symbolVarAddress, checkOkD);
+    hipLaunchKernelGGL(checkStaticConstVarAddress, dim3(1, 1, 1), dim3(1, 1, 1), 0, 0,
+                       symbolVarAddress, checkOkD);
     HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpy(&checkOk, checkOkD, sizeof(bool),
-                        hipMemcpyDeviceToHost));
+    HIP_CHECK(hipMemcpy(&checkOk, checkOkD, sizeof(bool), hipMemcpyDeviceToHost));
     HIP_CHECK(hipFree(checkOkD));
     REQUIRE(checkOk);
     REQUIRE(symbolSize == SIZE);
@@ -203,14 +190,15 @@ TEST_CASE("Unit_hipGetSymbolAddress_Negative") {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     int* addr{nullptr};
-    HIP_CHECK_ERROR(hipGetSymbolAddress(reinterpret_cast<void**>(&addr),
-                    HIP_SYMBOL(notADeviceSymbol)), hipErrorInvalidSymbol);
+    HIP_CHECK_ERROR(
+        hipGetSymbolAddress(reinterpret_cast<void**>(&addr), HIP_SYMBOL(notADeviceSymbol)),
+        hipErrorInvalidSymbol);
   }
 
   SECTION("Nullptr symbol") {
     int* addr{nullptr};
-    HIP_CHECK_ERROR(hipGetSymbolAddress(reinterpret_cast<void**>(&addr),
-                    nullptr), hipErrorInvalidSymbol);
+    HIP_CHECK_ERROR(hipGetSymbolAddress(reinterpret_cast<void**>(&addr), nullptr),
+                    hipErrorInvalidSymbol);
   }
 }
 
@@ -218,8 +206,7 @@ TEST_CASE("Unit_hipGetSymbolSize_Negative") {
   SECTION("Invalid symbol") {
     int notADeviceSymbol{0};
     size_t dsize{0};
-    HIP_CHECK_ERROR(hipGetSymbolSize(&dsize, HIP_SYMBOL(notADeviceSymbol)),
-                    hipErrorInvalidSymbol);
+    HIP_CHECK_ERROR(hipGetSymbolSize(&dsize, HIP_SYMBOL(notADeviceSymbol)), hipErrorInvalidSymbol);
   }
 
   SECTION("Nullptr symbol") {

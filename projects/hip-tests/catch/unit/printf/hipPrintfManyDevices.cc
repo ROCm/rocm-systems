@@ -23,36 +23,33 @@ THE SOFTWARE.
 
 __global__ void print_things() {
   uint tid = hipThreadIdx_x + hipBlockIdx_x * hipBlockDim_x;
-  const char *msg[] = {msg_short_dev, msg_long1_dev, msg_long2_dev};
+  const char* msg[] = {msg_short_dev, msg_long1_dev, msg_long2_dev};
   printf("%s\n", msg[tid % 3]);
-  if (tid % 3 == 0)
-    printf("%s\n", msg_short_dev);
+  if (tid % 3 == 0) printf("%s\n", msg_short_dev);
   printf("%s\n", msg[(tid + 1) % 3]);
   printf("%s\n", msg[(tid + 2) % 3]);
 }
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify printf API functionality on many devices
-* Test source
-* ------------------------
-* - catch/unit/printf/hipPrintfManyDevices.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify printf API functionality on many devices
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/hipPrintfManyDevices.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
 TEST_CASE("Unit_Printf_ManyDevicesTest") {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic,
-                                  hipDeviceAttributeHostNativeAtomicSupported,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
@@ -65,8 +62,7 @@ TEST_CASE("Unit_Printf_ManyDevicesTest") {
   CaptureStream captured(stdout);
   for (int i = 0; i != num_devices; ++i) {
     HIP_CHECK(hipSetDevice(i));
-    hipLaunchKernelGGL(print_things, dim3(num_blocks), dim3(threads_per_block),
-                       0, 0);
+    hipLaunchKernelGGL(print_things, dim3(num_blocks), dim3(threads_per_block), 0, 0);
     HIP_CHECK(hipDeviceSynchronize());
   }
   auto CapturedData = captured.getCapturedData();
@@ -78,10 +74,9 @@ TEST_CASE("Unit_Printf_ManyDevicesTest") {
   REQUIRE(linecount.size() == 3);
   REQUIRE(linecount[msg_long1] == num_threads);
   REQUIRE(linecount[msg_long2] == num_threads);
-  REQUIRE(linecount[msg_short] ==
-            num_threads + ((threads_per_device + 2) / 3) * num_devices);
+  REQUIRE(linecount[msg_short] == num_threads + ((threads_per_device + 2) / 3) * num_devices);
 }
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

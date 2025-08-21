@@ -30,18 +30,17 @@ import json
 import locale
 import logging
 import os
-import tempfile
 import pathlib
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
 import pandas as pd
 import pytest
-import yaml
 
 import utils.utils as utils
 

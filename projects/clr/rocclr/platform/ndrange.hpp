@@ -57,7 +57,9 @@ class NDRange : public EmbeddedObject {
   explicit NDRange(size_t dimensions);
 
   NDRange(size_t dataX, size_t dataY, size_t dataZ) : dimensions_(3) {
-    data_[0] = dataX; data_[1] = dataY; data_[2] = dataZ;
+    data_[0] = dataX;
+    data_[1] = dataY;
+    data_[2] = dataZ;
   }
 
   //! Copy constructor.
@@ -129,8 +131,10 @@ struct LaunchParams {
 
   LaunchParams(uint32_t globalX, uint32_t globalY, uint32_t globalZ, uint32_t localX,
                uint32_t localY, uint32_t localZ, uint32_t sharedMemBytes)
-               : global_(globalX, globalY, globalZ), local_(localX, localY, localZ),
-                 sharedMemBytes_ (sharedMemBytes), validConfig_(true) {}
+      : global_(globalX, globalY, globalZ),
+        local_(localX, localY, localZ),
+        sharedMemBytes_(sharedMemBytes),
+        validConfig_(true) {}
 
   bool IsValidConfig() const { return validConfig_; }
 };
@@ -138,12 +142,11 @@ struct LaunchParams {
 //! Structure to store launch parameters in HIP Style (global and local size needs computation).
 struct HIPLaunchParams : public LaunchParams {
  public:
-  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX,
-                  uint32_t blockY, uint32_t blockZ, uint32_t sharedMemBytes)
-                  : LaunchParams(static_cast<uint32_t>(gridX) * blockX,
-                                 static_cast<uint32_t>(gridY) * blockY,
-                                 static_cast<uint32_t>(gridZ) * blockZ,
-                                 blockX, blockY, blockZ, sharedMemBytes) {
+  HIPLaunchParams(uint32_t gridX, uint32_t gridY, uint32_t gridZ, uint32_t blockX, uint32_t blockY,
+                  uint32_t blockZ, uint32_t sharedMemBytes)
+      : LaunchParams(static_cast<uint32_t>(gridX) * blockX, static_cast<uint32_t>(gridY) * blockY,
+                     static_cast<uint32_t>(gridZ) * blockZ, blockX, blockY, blockZ,
+                     sharedMemBytes) {
     if (global_[0] > std::numeric_limits<uint32_t>::max() ||
         global_[1] > std::numeric_limits<uint32_t>::max() ||
         global_[2] > std::numeric_limits<uint32_t>::max()) {

@@ -18,7 +18,7 @@ THE SOFTWARE.
 */
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
-#include "printf_common.h" // NOLINT
+#include "printf_common.h"  // NOLINT
 
 __global__ void test_kernel_star() {
   printf("%*d\n", 16, 42);
@@ -27,28 +27,26 @@ __global__ void test_kernel_star() {
   printf("%*.*f %s * %.*s\n", 16, 8, 123.456, "hello", 5, "worldxyz");
 }
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify the additional arguments (*) in the printf API
-* Test source
-* ------------------------
-* - catch/unit/printf/hipPrintfStar.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify the additional arguments (*) in the printf API
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/hipPrintfStar.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
 TEST_CASE("Unit_Printf_PrintfStar") {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic,
-                                  hipDeviceAttributeHostNativeAtomicSupported,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
@@ -67,6 +65,6 @@ TEST_CASE("Unit_Printf_PrintfStar") {
 }
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

@@ -15,10 +15,10 @@ This table provides the current status of the migration of specific ROCm systems
 |------------------------|-----------------|------------------|---------------------------------------|---------------------------------------|
 | `amdsmi`               | EMU             | Pending          |                                       |                                       |
 | `aqlprofile`           | Public          | Completed        |                                       | [![CodeQL](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-codeql.yml) <br> [![Continuous Integration](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml/badge.svg?branch=develop)](https://github.com/ROCm/rocm-systems/actions/workflows/aqlprofile-continuous_integration.yml) |
-| `clr`                  | EMU             | Pending          |                                       |                                       |
-| `hip`                  | EMU             | Pending          |                                       |                                       |
-| `hipother`             | EMU             | Pending          |                                       |                                       |
-| `hip-tests`            | EMU             | Pending          |                                       |                                       |
+| `clr`                  | Public          | Completed        |                                       |                                       |
+| `hip`                  | Public          | Completed        |                                       |                                       |
+| `hipother`             | Public          | Completed        |                                       |                                       |
+| `hip-tests`            | Public          | Completed        |                                       |                                       |
 | `rdc`                  | Public          | Completed        |                                       |                                       |
 | `rocm-core`            | Public          | Completed        |                                       |                                       |
 | `rocminfo`             | Public          | Completed        |                                       |                                       |
@@ -36,10 +36,7 @@ This table provides the current status of the migration of specific ROCm systems
 
 | Component              | Tentative Date |
 |------------------------|----------------|
-| `clr`                  | 8/18           |
-| `hip`                  | 8/18           |
-| `hipother`             | 8/18           |
-| `hip-tests`            | 8/18           |
+
 
 *Remaining schedule to be determined.
 

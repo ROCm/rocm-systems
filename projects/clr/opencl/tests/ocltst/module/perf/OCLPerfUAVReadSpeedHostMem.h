@@ -29,14 +29,12 @@ class OCLPerfUAVReadSpeedHostMem : public OCLTestImp {
   virtual ~OCLPerfUAVReadSpeedHostMem();
 
  public:
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceID);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceID);
   virtual void run(void);
   virtual unsigned int close(void);
 
   std::string shader_;
-  void genShader(unsigned int type, unsigned int vecWidth,
-                 unsigned int numReads);
+  void genShader(unsigned int type, unsigned int vecWidth, unsigned int numReads);
   void setData(cl_mem buffer, float data);
   void checkData(cl_mem buffer);
 

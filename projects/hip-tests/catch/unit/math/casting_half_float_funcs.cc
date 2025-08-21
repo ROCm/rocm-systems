@@ -72,8 +72,8 @@ CAST_FLOAT2HALF_TEST_DEF(__float2half_rd, FE_DOWNWARD)
 /**
  * Test Description
  * ------------------------
- *    - Tests that checks `__float2half_rn` for all possible inputs. The results are compared against
- * reference function which performs float cast to __half.
+ *    - Tests that checks `__float2half_rn` for all possible inputs. The results are compared
+ * against reference function which performs float cast to __half.
  *
  * Test source
  * ------------------------
@@ -121,8 +121,8 @@ CAST_FLOAT2HALF_TEST_DEF(__float2half_ru, FE_UPWARD)
  * ------------------------
  *    - Tests that checks `__float2half_rz` for all possible inputs apart from very small positive
  * values. Rounding behaviour is not correct for host functions for this range. The results are
- * compared against reference function which performs float cast to __half with FE_TOWARDZERO rounding
- * mode.
+ * compared against reference function which performs float cast to __half with FE_TOWARDZERO
+ * rounding mode.
  *
  * Test source
  * ------------------------
@@ -247,6 +247,6 @@ TEST_CASE("Unit_Device___half2float_Accuracy_Positive") {
 }
 
 /**
-* End doxygen group MathTest.
-* @}
-*/
+ * End doxygen group MathTest.
+ * @}
+ */

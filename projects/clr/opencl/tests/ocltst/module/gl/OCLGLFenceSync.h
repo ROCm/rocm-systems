@@ -28,8 +28,7 @@ class OCLGLFenceSync : public OCLGLCommon {
   OCLGLFenceSync();
   virtual ~OCLGLFenceSync();
 
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void);
   virtual unsigned int close(void);
 

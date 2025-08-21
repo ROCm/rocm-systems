@@ -34,7 +34,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
 // Unique file descriptor class
 struct UniqueFD {
   UniqueFD(const std::string& fpath, amd::Os::FileDesc fdesc, size_t fsize)
-           : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
+      : fpath_(fpath), fdesc_(fdesc), fsize_(fsize) {}
 
   const std::string fpath_;        //!< File path of this unique file
   const amd::Os::FileDesc fdesc_;  //!< File Descriptor
@@ -120,7 +120,7 @@ class PlatformState {
   bool initialized_{false};
   std::unordered_map<textureReference*, std::pair<hipModule_t, std::string>> texRef_map_;
 
-  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_; //!< Unique File Desc Map
+  std::unordered_map<std::string, std::shared_ptr<UniqueFD>> ufd_map_;  //!< Unique File Desc Map
 
   void* dynamicLibraryHandle_{nullptr};
 };

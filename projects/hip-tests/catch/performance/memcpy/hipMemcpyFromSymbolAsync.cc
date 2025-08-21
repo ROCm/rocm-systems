@@ -30,7 +30,8 @@ __device__ int devSymbol[1_MB];
 
 class MemcpyFromSymbolAsyncBenchmark : public Benchmark<MemcpyFromSymbolAsyncBenchmark> {
  public:
-  void operator()(const void* source, void* result, size_t size, size_t offset, const hipStream_t& stream) {
+  void operator()(const void* source, void* result, size_t size, size_t offset,
+                  const hipStream_t& stream) {
     HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), source, size, offset,
                                      hipMemcpyHostToDevice, stream));
     TIMED_SECTION_STREAM(kTimerTypeEvent, stream) {
@@ -41,7 +42,7 @@ class MemcpyFromSymbolAsyncBenchmark : public Benchmark<MemcpyFromSymbolAsyncBen
   }
 };
 
-static void RunBenchmark(const void* source, void* result, size_t size=1, size_t offset=0) {
+static void RunBenchmark(const void* source, void* result, size_t size = 1, size_t offset = 0) {
   MemcpyFromSymbolAsyncBenchmark benchmark;
   benchmark.AddSectionName(std::to_string(size));
   benchmark.AddSectionName(std::to_string(offset));
@@ -118,7 +119,8 @@ TEST_CASE("Performance_hipMemcpyFromSymbolAsync_WithOffset") {
   std::fill_n(result.data(), size, 0);
 
   size_t offset = GENERATE_REF(0, size / 2);
-  RunBenchmark(array.data() + offset, result.data() + offset, sizeof(int) * (size - offset), offset * sizeof(int));
+  RunBenchmark(array.data() + offset, result.data() + offset, sizeof(int) * (size - offset),
+               offset * sizeof(int));
 }
 
 /**

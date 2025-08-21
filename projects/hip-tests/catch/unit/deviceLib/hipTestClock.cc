@@ -38,7 +38,7 @@ TEST_CASE("Unit_hipTestClock") {
   int64_t *A, *Ad;
   A = new int64_t[LEN];
   for (unsigned i = 0; i < LEN; i++) {
-      A[i] = 0;
+    A[i] = 0;
   }
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
   HIP_CHECK(hipMemcpy(Ad, A, SIZE, hipMemcpyHostToDevice));

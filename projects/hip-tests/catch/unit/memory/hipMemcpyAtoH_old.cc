@@ -48,28 +48,24 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_Basic", "[hipMemcpyAtoH]", char, int, flo
 
   HIP_CHECK(hipSetDevice(0));
   // 1 refers to pinned host memory scenario
-  auto memtype_check =  GENERATE(0, 1);
+  auto memtype_check = GENERATE(0, 1);
   hipArray_t A_d;
   TestType *hData{nullptr}, *B_h{nullptr};
   size_t width{NUM_W * sizeof(TestType)};
 
   // Initialization of data
   if (memtype_check) {
-    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr,
-        &hData, &B_h, nullptr, NUM_W, true);
+    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W, true);
   } else {
-    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr,
-        &hData, &B_h, nullptr, NUM_W);
+    HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
   }
   HipTest::setDefaultData<TestType>(NUM_W, hData, B_h, nullptr);
   hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width,
-                              width, NUM_H, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
   // Performing API call
-  REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, copy_bytes*sizeof(TestType))
-                        == hipSuccess);
+  REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, copy_bytes * sizeof(TestType)) == hipSuccess);
 
   // Validating the result
   REQUIRE(HipTest::checkArray(B_h, hData, copy_bytes, NUM_H) == true);
@@ -77,11 +73,11 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_Basic", "[hipMemcpyAtoH]", char, int, flo
   // DeAllocating the memory
   HIP_CHECK(hipFreeArray(A_d));
   if (memtype_check) {
-    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h,
-                                           nullptr, true) == true);
+    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr, true) ==
+            true);
   } else {
-    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h,
-                                           nullptr, false) == true);
+    REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr, false) ==
+            true);
   }
 }
 
@@ -112,29 +108,25 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyAtoH_multiDevice-PeerDeviceContext", "[hipMemc
       size_t width{NUM_W * sizeof(TestType)};
 
       // Initialization of data
-      HipTest::initArrays<TestType>(nullptr, nullptr, nullptr,
-          &hData, &B_h, nullptr, NUM_W);
+      HipTest::initArrays<TestType>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
       HipTest::setDefaultData<TestType>(NUM_W, hData, B_h, nullptr);
       hipChannelFormatDesc desc = hipCreateChannelDesc<TestType>();
       HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width,
-                                   width, NUM_H, hipMemcpyHostToDevice));
+      HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
       HIP_CHECK(hipDeviceSynchronize());
       // Changing the device context
       HIP_CHECK(hipSetDevice(1));
 
       // Performing API call
-      REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, copy_bytes*sizeof(TestType))
-          == hipSuccess);
+      REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, copy_bytes * sizeof(TestType)) == hipSuccess);
       // Validating the result
       REQUIRE(HipTest::checkArray(B_h, hData, copy_bytes, NUM_H) == true);
 
       // DeAllocating the memory
       HIP_CHECK(hipFreeArray(A_d));
-      REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr,
-                                            hData, B_h,
-                                            nullptr, false) == true);
+      REQUIRE(HipTest::freeArrays<TestType>(nullptr, nullptr, nullptr, hData, B_h, nullptr,
+                                            false) == true);
     }
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
@@ -153,32 +145,28 @@ TEST_CASE("Unit_hipMemcpyAtoH_Negative") {
   size_t width{NUM_W * sizeof(float)};
 
   // Initialization of data
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &hData, &B_h, nullptr, NUM_W);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
   HipTest::setDefaultData<float>(NUM_W, hData, B_h, nullptr);
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width,
-                              width, NUM_H, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
   SECTION("Destination pointer is nullptr") {
-    REQUIRE(hipMemcpyAtoH(nullptr, A_d, 0, copy_bytes*sizeof(float))
-                          != hipSuccess);
+    REQUIRE(hipMemcpyAtoH(nullptr, A_d, 0, copy_bytes * sizeof(float)) != hipSuccess);
   }
 
   SECTION("Source offset is more than allocated size") {
-    REQUIRE(hipMemcpyAtoH(B_h, A_d, 100, copy_bytes*sizeof(float))
-                          != hipSuccess);
+    REQUIRE(hipMemcpyAtoH(B_h, A_d, 100, copy_bytes * sizeof(float)) != hipSuccess);
   }
 
   SECTION("ByteCount is greater than allocated size") {
-    REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, 12*sizeof(float)) != hipSuccess);
+    REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, 12 * sizeof(float)) != hipSuccess);
   }
 
   // DeAllocating the memory
   HIP_CHECK(hipFreeArray(A_d));
-  REQUIRE(HipTest::freeArrays<float>(nullptr, nullptr, nullptr, hData, B_h,
-                                      nullptr, false) == true);
+  REQUIRE(HipTest::freeArrays<float>(nullptr, nullptr, nullptr, hData, B_h, nullptr, false) ==
+          true);
 }
 
 /*
@@ -196,16 +184,13 @@ TEST_CASE("Unit_hipMemcpyAtoH_SizeCheck") {
   size_t width{NUM_W * sizeof(float)};
 
   // Initialization of data
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-      nullptr, &def_data, nullptr, NUM_W);
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-      &hData, &B_h, nullptr, NUM_W);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, nullptr, &def_data, nullptr, NUM_W);
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &hData, &B_h, nullptr, NUM_W);
   HipTest::setDefaultData<float>(NUM_W, hData, B_h, nullptr);
   HipTest::setDefaultData<float>(NUM_W, nullptr, def_data, nullptr);
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   HIP_CHECK(hipMallocArray(&A_d, &desc, NUM_W, NUM_H, hipArrayDefault));
-  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width,
-        width, NUM_H, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(A_d, 0, 0, hData, width, width, NUM_H, hipMemcpyHostToDevice));
 
   SECTION("Passing 0 to copy bytes") {
     REQUIRE(hipMemcpyAtoH(B_h, A_d, 0, 0) == hipSuccess);
@@ -213,13 +198,12 @@ TEST_CASE("Unit_hipMemcpyAtoH_SizeCheck") {
   }
 
   SECTION(" Source Array is nullptr") {
-    REQUIRE(hipMemcpyAtoH(B_h, nullptr, 0, copy_bytes*sizeof(float))
-                          != hipSuccess);
+    REQUIRE(hipMemcpyAtoH(B_h, nullptr, 0, copy_bytes * sizeof(float)) != hipSuccess);
   }
 
   // DeAllocating the memory
   HIP_CHECK(hipFreeArray(A_d));
-  REQUIRE(HipTest::freeArrays<float>(nullptr, nullptr, nullptr, hData, B_h,
-                                      def_data, false) == true);
+  REQUIRE(HipTest::freeArrays<float>(nullptr, nullptr, nullptr, hData, B_h, def_data, false) ==
+          true);
 }
 #endif
