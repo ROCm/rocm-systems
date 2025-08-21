@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -45,13 +45,13 @@
 #ifndef HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 #define HSA_RUNTME_CORE_INC_COMMAND_QUEUE_H_
 
+#include <cstddef>
 #include <sstream>
 
 #include "core/common/shared.h"
 #include "core/inc/checked.h"
 #include "core/inc/memory_region.h"
 #include "core/util/utils.h"
-#include "inc/amd_hsa_queue.h"
 #include "inc/hsa_ext_amd.h"
 #include "hsakmt/hsakmt.h"
 
@@ -151,11 +151,37 @@ struct AqlPacket {
 
 class Queue;
 
-/// @brief Helper structure to simplify conversion of amd_queue_v2_t and
-/// core::Queue object.
+/// @brief Helper structure to simplify conversion of a core::Queue implementation's
+/// queue descriptor and and core::Queue*.
 struct SharedQueue {
-  amd_queue_v2_t amd_queue;
   Queue* core_queue;
+  /// @brief The handle for HSA queues at the C API level.
+  /// @details This hsa_queue_t is embedded as the base field for all the
+  /// various queue implementations' queue descriptors. This field needs to
+  /// be last in the SharedQueue and is effectively the base of a variable
+  /// length array where the concrete queue implementation allocates the
+  /// SharedQueue* such that its size is sizeof(SharedQueue) +
+  /// sizeof(concrete_queue_descriptor_t) - sizeof(hsa_queue_t).
+  /// concrete_queue_descriptor_t must have hsa_queue_t as its first member.
+  ///
+  /// For example:
+  ///
+  /// struct my_queue_descriptor_t {
+  ///   hsa_queue_t hsa_queue;
+  ///   // More fields after here.
+  /// };
+  ///
+  /// Then to create the SharedQueue* for the implementation class derived from core::Queue:
+  ///
+  /// SharedQueue *shared_queue = allocator()(sizeof(SharedQueue) + sizeof(my_queue_descriptor_t) -
+  ///     sizeof(hsa_queue_t));
+  ///
+  /// // Inside of the implemention derived from core::Queue:
+  /// my_queue_descriptor_t *queue_descriptor =
+  /// reinterpret_cast<my_queue_descriptor_t*>(&shared_queue->hsa_interface_queue);
+  /// // Populate queue_descriptor.
+  hsa_queue_t hsa_interface_queue;
+  /// @warning Do not add any members after @p hsa_queue_interface_queue.
 };
 
 /// @brief Class Queue which encapsulate user mode queues and
@@ -172,8 +198,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
       : Queue(shared_queue, queue_flags, false) {}
 
   Queue(SharedQueue* shared_queue, uint64_t queue_flags, bool pcie_write_ordering)
-      : amd_queue_(shared_queue->amd_queue),
-        shared_queue_(shared_queue),
+      : shared_queue_(shared_queue),
         flags_(queue_flags),
         pcie_write_ordering_(pcie_write_ordering) {
     public_handle_ = Convert(this);
@@ -190,7 +215,7 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   ///
   /// @return hsa_queue_t * Pointer to the public data type of a queue
   static __forceinline hsa_queue_t* Convert(Queue* queue) {
-    return (queue != nullptr) ? &queue->amd_queue_.hsa_queue : nullptr;
+    return (queue != nullptr) ? &queue->shared_queue_->hsa_interface_queue : nullptr;
   }
 
   /// @brief Transform the public data type of a Queue's data type into an
@@ -202,7 +227,8 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   static __forceinline Queue* Convert(const hsa_queue_t* queue) {
     return (queue != nullptr)
         ? reinterpret_cast<SharedQueue*>(reinterpret_cast<uintptr_t>(queue) -
-                                         offsetof(SharedQueue, amd_queue.hsa_queue))->core_queue
+                                         offsetof(SharedQueue, hsa_interface_queue))
+              ->core_queue
         : nullptr;
   }
 
@@ -356,19 +382,13 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
                           hsa_fence_scope_t releaseFence = HSA_FENCE_SCOPE_NONE,
                           hsa_signal_t* signal = NULL) = 0;
 
-  virtual void SetProfiling(bool enabled) {
-    AMD_HSA_BITS_SET(amd_queue_.queue_properties, AMD_QUEUE_PROPERTIES_ENABLE_PROFILING,
-                     (enabled != 0));
-  }
+  virtual void SetProfiling(bool enabled) = 0;
 
   /// @ brief Returns queue queries about the queue
   virtual hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) = 0;
 
   /// @ brief Reports async queue errors to stderr if no other error handler was registered.
   static void DefaultErrorHandler(hsa_status_t status, hsa_queue_t* source, void* data);
-
-  // Handle of AMD Queue struct
-  amd_queue_v2_t& amd_queue_;
 
   hsa_queue_t* public_handle() const { return public_handle_; }
 
@@ -389,6 +409,24 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
 
   bool needsPcieOrdering() const { return pcie_write_ordering_; }
 
+  /// @brief Get the size of the queue implementatin's queue descriptor.
+  virtual std::size_t SharedQueueSize() = 0;
+  __forceinline SharedQueue& GetSharedQueue() { return *shared_queue_; }
+
+  /// @brief Sets the InterceptQueue's read_dispatch_id pointer.
+  /// @details Currently the intercept queue updates its own read_dispatch_id, which
+  /// is technically an illegal operation on the Queue API as it is normally expected
+  /// that the packet processor will update the read pointer. However, because the
+  /// InterceptQueue effectively acts as the packet processor for the outer queue that
+  /// wraps an agent's actual queue, it needs to update the read_dispatch_id itself.
+  /// To avoid having to be aware of each Queue implementations queue descriptor, we
+  /// can use this virtual method so each implementation can provide a pointer the
+  /// read_dispatch_id that external users will see when submitting to a queue.
+  /// @param read_dispatch_id Pointer to the read_dispatch_id pointer in the InterceptQueue
+  /// wrapping an instance of Queue.
+  virtual void SetInterceptQueueReadIndex(SharedQueue& shared_queue,
+                                          volatile uint64_t*& read_dispatch_id) const = 0;
+
  protected:
   static void set_public_handle(Queue* ptr, hsa_queue_t* handle) {
     ptr->do_set_public_handle(handle);
@@ -407,7 +445,6 @@ class Queue : public Checked<0xFA3906A679F9DB49> {
   uint64_t GetQueueId() { return hsa_queue_counter_++; }
 
  private:
-
   // HSA Queue ID - used to bind a unique ID
   static std::atomic<uint64_t> hsa_queue_counter_;
 

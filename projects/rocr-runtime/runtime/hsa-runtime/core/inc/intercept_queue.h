@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -43,9 +43,9 @@
 #ifndef HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_H_
 #define HSA_RUNTIME_CORE_INC_INTERCEPT_QUEUE_H_
 
-#include <vector>
 #include <memory>
 #include <utility>
+#include <vector>
 
 #include "core/inc/runtime.h"
 #include "core/inc/queue.h"
@@ -61,19 +61,29 @@ namespace core {
 // Class only has utility as a base type customized Queue wrappers.
 class QueueWrapper : public Queue {
  public:
-  std::unique_ptr<Queue> wrapped;
-
   explicit QueueWrapper(std::unique_ptr<Queue> queue)
       : Queue(static_cast<core::SharedQueue*>(core::Runtime::runtime_singleton_->system_allocator()(
-                  sizeof(core::SharedQueue), 4096, 0, 0)),
+                  queue->SharedQueueSize(), 4096, 0, 0)),
               0),
         wrapped(std::move(queue)) {
-    memcpy(&amd_queue_, &wrapped->amd_queue_, sizeof(amd_queue_));
+    // The queue wrapper only needs to interface with a copy of the wrapped queue's hsa_queue_t
+    // and not its full queue descriptor.
+    std::memcpy(&shared_queue_->hsa_interface_queue, &wrapped->GetSharedQueue().hsa_interface_queue,
+                wrapped->SharedQueueSize());
     wrapped->set_public_handle(wrapped.get(), public_handle_);
   }
 
   ~QueueWrapper() {
     if (shared_queue_) core::Runtime::runtime_singleton_->system_deallocator()(shared_queue_);
+  }
+
+  __forceinline std::size_t SharedQueueSize() override { return wrapped->SharedQueueSize(); }
+
+  __forceinline void SetInterceptQueueReadIndex(
+      SharedQueue& shared_queue, volatile uint64_t*& read_dispatch_id) const override {
+    throw AMD::hsa_exception(HSA_STATUS_ERROR,
+                             "SetInterceptQueueReadIndex should only be called on wrapped queues, "
+                             "and QueueWrappers cannot be wrapped.");
   }
 
   hsa_status_t Inactivate() override { return wrapped->Inactivate(); }
@@ -135,6 +145,7 @@ class QueueWrapper : public Queue {
   void SetProfiling(bool enabled) override { wrapped->SetProfiling(enabled); }
 
  protected:
+  std::unique_ptr<Queue> wrapped;
   void do_set_public_handle(hsa_queue_t* handle) override {
     public_handle_ = handle;
     wrapped->set_public_handle(wrapped.get(), handle);
@@ -190,6 +201,8 @@ class InterceptQueue : public QueueWrapper, private LocalSignal, public Doorbell
   std::vector<std::pair<AMD::callback_t<hsa_amd_queue_intercept_handler>, void*>> interceptors;
 
   static const hsa_signal_value_t DOORBELL_MAX = 0xFFFFFFFFFFFFFFFFull;
+
+  volatile uint64_t* read_dispatch_id = nullptr;
 
   static bool HandleAsyncDoorbell(hsa_signal_value_t value, void* arg);
   static void PacketWriter(const void* pkts, uint64_t pkt_count);

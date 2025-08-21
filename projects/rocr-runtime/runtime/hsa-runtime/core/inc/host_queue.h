@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -43,15 +43,18 @@
 #ifndef HSA_RUNTIME_CORE_INC_HOST_QUEUE_H_
 #define HSA_RUNTIME_CORE_INC_HOST_QUEUE_H_
 
+#include "core/inc/exceptions.h"
 #include "core/inc/memory_region.h"
 #include "core/inc/queue.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
+#include "inc/amd_hsa_queue.h"
 
 namespace rocr {
 namespace core {
 class HostQueue : public Queue {
  public:
+  using QueueDescriptorT = amd_queue_v2_t;
   static __forceinline bool IsType(core::Queue* queue) { return queue->IsType(&rtti_id()); }
 
   HostQueue(core::SharedQueue* shared_queue, hsa_region_t region, uint32_t ring_size,
@@ -65,83 +68,71 @@ class HostQueue : public Queue {
   }
 
   uint64_t LoadReadIndexAcquire() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id,
-                        std::memory_order_acquire);
+    return atomic::Load(&QueueDescriptor().read_dispatch_id, std::memory_order_acquire);
   }
 
   uint64_t LoadReadIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.read_dispatch_id,
-                        std::memory_order_relaxed);
+    return atomic::Load(&QueueDescriptor().read_dispatch_id, std::memory_order_relaxed);
   }
 
   uint64_t LoadWriteIndexAcquire() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id,
-                        std::memory_order_acquire);
+    return atomic::Load(&QueueDescriptor().write_dispatch_id, std::memory_order_acquire);
   }
 
   uint64_t LoadWriteIndexRelaxed() override {
-    return atomic::Load(&amd_queue_.write_dispatch_id,
-                        std::memory_order_relaxed);
+    return atomic::Load(&QueueDescriptor().write_dispatch_id, std::memory_order_relaxed);
   }
 
   void StoreReadIndexRelaxed(uint64_t value) override {
-    atomic::Store(&amd_queue_.read_dispatch_id, value,
-                  std::memory_order_relaxed);
+    atomic::Store(&QueueDescriptor().read_dispatch_id, value, std::memory_order_relaxed);
   }
 
   void StoreReadIndexRelease(uint64_t value) override {
-    atomic::Store(&amd_queue_.read_dispatch_id, value,
-                  std::memory_order_release);
+    atomic::Store(&QueueDescriptor().read_dispatch_id, value, std::memory_order_release);
   }
 
   void StoreWriteIndexRelaxed(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value,
-                  std::memory_order_relaxed);
+    atomic::Store(&QueueDescriptor().write_dispatch_id, value, std::memory_order_relaxed);
   }
 
   void StoreWriteIndexRelease(uint64_t value) override {
-    atomic::Store(&amd_queue_.write_dispatch_id, value,
-                  std::memory_order_release);
+    atomic::Store(&QueueDescriptor().write_dispatch_id, value, std::memory_order_release);
   }
 
   uint64_t CasWriteIndexAcqRel(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+    return atomic::Cas(&QueueDescriptor().write_dispatch_id, value, expected,
                        std::memory_order_acq_rel);
   }
 
   uint64_t CasWriteIndexAcquire(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+    return atomic::Cas(&QueueDescriptor().write_dispatch_id, value, expected,
                        std::memory_order_acquire);
   }
 
   uint64_t CasWriteIndexRelaxed(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+    return atomic::Cas(&QueueDescriptor().write_dispatch_id, value, expected,
                        std::memory_order_relaxed);
   }
 
   uint64_t CasWriteIndexRelease(uint64_t expected, uint64_t value) override {
-    return atomic::Cas(&amd_queue_.write_dispatch_id, value, expected,
+    return atomic::Cas(&QueueDescriptor().write_dispatch_id, value, expected,
                        std::memory_order_release);
   }
 
   uint64_t AddWriteIndexAcqRel(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_acq_rel);
+    return atomic::Add(&QueueDescriptor().write_dispatch_id, value, std::memory_order_acq_rel);
   }
 
   uint64_t AddWriteIndexAcquire(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_acquire);
+    return atomic::Add(&QueueDescriptor().write_dispatch_id, value, std::memory_order_acquire);
   }
 
   uint64_t AddWriteIndexRelaxed(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_relaxed);
+    return atomic::Add(&QueueDescriptor().write_dispatch_id, value, std::memory_order_relaxed);
   }
 
   uint64_t AddWriteIndexRelease(uint64_t value) override {
-    return atomic::Add(&amd_queue_.write_dispatch_id, value,
-                       std::memory_order_release);
+    return atomic::Add(&QueueDescriptor().write_dispatch_id, value, std::memory_order_release);
   }
 
   hsa_status_t SetCUMasking(uint32_t num_cu_mask_count, const uint32_t* cu_mask) override {
@@ -159,9 +150,22 @@ class HostQueue : public Queue {
     assert(false && "HostQueue::ExecutePM4 is unimplemented");
   }
 
+  void SetProfiling(bool enabled) override {
+    throw AMD::hsa_exception(static_cast<hsa_status_t>(HSA_STATUS_ERROR_NOT_SUPPORTED),
+                             "HostQueue::SetProfiling is not supported.");
+  }
+
   hsa_status_t GetInfo(hsa_queue_info_attribute_t attribute, void* value) override {
     assert(false && "HostQueue::GetInfo is unimplemented");
     return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  __forceinline std::size_t SharedQueueSize() override { return shared_queue_size_; }
+
+  __forceinline void SetInterceptQueueReadIndex(
+      SharedQueue& shared_queue, volatile uint64_t*& read_dispatch_id) const override {
+    read_dispatch_id =
+        &(reinterpret_cast<QueueDescriptorT&>(shared_queue.hsa_interface_queue).read_dispatch_id);
   }
 
   void* operator new(size_t size) {
@@ -182,9 +186,30 @@ class HostQueue : public Queue {
     static int rtti_id_ = 0;
     return rtti_id_;
   }
+
+  /// @brief Get a reference to this Queue implementation's queue descriptor.
+  __forceinline QueueDescriptorT& QueueDescriptor() {
+    return *reinterpret_cast<QueueDescriptorT*>(&shared_queue_->hsa_interface_queue);
+  }
+
   static const size_t kRingAlignment = 256;
   const uint32_t size_;
   void* ring_;
+
+  /// @brief This is the total size of the SharedQueue for HostQueue.
+  /// @details The SharedQueue allows for conversion between a pointer to the
+  /// public API queue handle (i.e., hsa_queue_t*) and a core::Queue* instance.
+  /// Each concrete queue type may have its own queue descriptor struct with an
+  /// hsa_queue_t struct embedded at the top. On creation, a queue implementation
+  /// allocates its concrete queue descriptor type, casts it to an hsa_queue_t*,
+  /// then stores it in the SharedQueue. The remaining bytes of its concrete
+  /// queue descriptor struct are implicitly stored at the end of the SharedQueue.
+  /// We could make this more explicit with variable-lenght arrays, but C++ does
+  /// not support them. Thus the total size of the AqlQueue's queue descriptor
+  /// is the following formula. We subtract the sizeof(hsa_queue_t) to avoid double
+  /// counting it.
+  static constexpr std::size_t shared_queue_size_ =
+      sizeof(core::SharedQueue) + sizeof(QueueDescriptorT) - sizeof(hsa_queue_t);
 
   // Host queue id counter, starting from 0x80000000 to avoid overlaping
   // with aql queue id.

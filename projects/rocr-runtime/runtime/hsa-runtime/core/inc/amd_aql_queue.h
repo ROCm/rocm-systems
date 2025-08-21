@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2025, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -44,18 +44,39 @@
 #define HSA_RUNTIME_CORE_INC_AMD_HW_AQL_COMMAND_PROCESSOR_H_
 
 #include "core/inc/runtime.h"
+#include "core/inc/scratch_cache.h"
 #include "core/inc/signal.h"
 #include "core/inc/queue.h"
-#include "core/inc/amd_gpu_agent.h"
 #include "core/util/locks.h"
+#include "inc/amd_hsa_queue.h"
 
 namespace rocr {
 namespace AMD {
+
+class GpuAgent;
+
 /// @brief Encapsulates HW Aql Command Processor functionality. It
 /// provide the interface for things such as Doorbell register, read,
 /// write pointers and a buffer.
 class AqlQueue : public core::Queue, private core::LocalSignal, public core::DoorbellSignal {
  public:
+  using QueueDescriptorT = amd_queue_v2_t;
+  /// @brief This is the total size of the SharedQueue for AqlQueue.
+  /// @details The SharedQueue allows for conversion between a pointer to the
+  /// public API queue handle (i.e., hsa_queue_t*) and a core::Queue* instance.
+  /// Each concrete queue type may have its own queue descriptor struct with an
+  /// hsa_queue_t struct embedded at the top. On creation, a queue implementation
+  /// allocates its concrete queue descriptor type, casts it to an hsa_queue_t*,
+  /// then stores it in the SharedQueue. The remaining bytes of its concrete
+  /// queue descriptor struct are implicitly stored at the end of the SharedQueue.
+  /// We could make this more explicit with variable-lenght arrays, but C++ does
+  /// not support them. Thus the total size of the AqlQueue's queue descriptor
+  /// is the following formula. We subtract the sizeof(hsa_queue_t) to avoid double
+  /// counting it.
+  static constexpr std::size_t shared_queue_size_ =
+      sizeof(core::SharedQueue) + sizeof(QueueDescriptorT) - sizeof(hsa_queue_t);
+  using ScratchInfo = ScratchCache::ScratchInfo;
+
   static __forceinline bool IsType(core::Signal* signal) {
     return signal->IsType(&rtti_id());
   }
@@ -227,6 +248,19 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   /// @brief Async reclaim alternate scratch memory
   void AsyncReclaimAltScratch();
 
+  __forceinline std::size_t SharedQueueSize() override { return shared_queue_size_; }
+
+  /// @brief Get a reference to this Queue implementation's queue descriptor.
+  __forceinline QueueDescriptorT& QueueDescriptor() {
+    return *reinterpret_cast<QueueDescriptorT*>(&shared_queue_->hsa_interface_queue);
+  }
+
+  __forceinline void SetInterceptQueueReadIndex(
+      core::SharedQueue& shared_queue, volatile uint64_t*& read_dispatch_id) const override {
+    read_dispatch_id =
+        &(reinterpret_cast<QueueDescriptorT&>(shared_queue.hsa_interface_queue).read_dispatch_id);
+  }
+
  protected:
   bool _IsA(Queue::rtti_t id) const override { return id == &rtti_id(); }
 
@@ -284,7 +318,7 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   void* ring_buf_;
 
   // Size of ring_buf_ allocation.
-  // This may be larger than (amd_queue_.hsa_queue.size * sizeof(AqlPacket)).
+  // This may be larger than (hsa_queue.size * sizeof(AqlPacket)).
   uint32_t ring_buf_alloc_bytes_;
 
   // Id of the Queue used in communication with thunk
