@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -67,6 +68,40 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id) ROCPROFILER_API;
  */
 rocprofiler_status_t
 rocprofiler_stop_context(rocprofiler_context_id_t context_id) ROCPROFILER_API;
+
+/**
+ * @brief Priority service callback function.
+ *
+ * @param [in] other_client_id Other clients rocprofiler_client_id_t
+ * @param [in] current_context_id Current clients context ID
+ * @param [in] callback_data User data provided when configuring the callback tracing service
+ * @return ::rocprofiler_status_t
+ */
+typedef rocprofiler_status_t (*rocprofiler_callback_context_priority_service_t)(
+    rocprofiler_client_id_t  other_client_id,
+    rocprofiler_context_id_t current_context_id,
+    void*                    callback_data) ROCPROFILER_NONNULL(3);
+
+/**
+ * @brief Configure Context Priority Service. A service which will give you a callback if
+ * another client (i.e. tool) wants to start a context which conflicts with the context you have
+ * started -- the primary example being RDC/Omnistat is collecting HW counters for the job which
+ * would prevent the user from collecting HW counters.
+ *
+ * @param [in] context_id Context to associate the service with
+ * @param [in] callback The callback is invoked when their context is active and another
+ * client wants to start a context which cannot be started while theirs is active.
+ * This gives them an opportunity to either stop their context so the other clients context
+ * can be started or to respond that the other clients context should be blocked from starting
+ * @param [in] callback_args Data provided to every invocation of the callback function
+ * @return ::rocprofiler_status_t
+ *
+ */
+rocprofiler_status_t
+rocprofiler_configure_context_priority_service(
+    rocprofiler_context_id_t                        context_id,
+    rocprofiler_callback_context_priority_service_t callback,
+    void*                                           callback_args) ROCPROFILER_API;
 
 /**
  * @brief Query whether context is currently active.
