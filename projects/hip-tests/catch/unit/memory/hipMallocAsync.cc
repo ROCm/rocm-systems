@@ -24,7 +24,7 @@
 #pragma clang diagnostic ignored "-Wunused-parameter"
 
 static bool thread_results[NUMBER_OF_THREADS];
-static constexpr auto NUM_ELM {1024 * 1024};
+static constexpr auto NUM_ELM{1024 * 1024};
 static constexpr int streamPerAsic = 2;
 
 /**
@@ -113,7 +113,7 @@ TEST_CASE("Unit_hipMallocAsync_Negative_Parameters") {
   HIP_CHECK(hipSetDevice(device_id));
   checkMempoolSupported(0)
 
-  int* p = nullptr;
+      int* p = nullptr;
   size_t max_size = std::numeric_limits<size_t>::max();
   size_t alloc_size = 1024;
   MemPoolGuard mempool(MemPools::dev_default, device_id);
@@ -133,7 +133,7 @@ TEST_CASE("Unit_hipMallocAsync_Negative_Parameters") {
  * Common function to allocate memory using hipMallocAsync API through a stream,
  * launch kernel and perform vectorADD and validate results. Free memory using
  * hipFreeAsync.
-*/
+ */
 static bool checkMallocAsync(hipStream_t stream) {
   streamMemAllocTest testObj(NUM_ELM);
   // Create host buffer with test data.
@@ -166,8 +166,8 @@ static bool checkMallocAsync(hipStream_t stream) {
  */
 TEST_CASE("Unit_hipMallocAsync_basic") {
   checkMempoolSupported(0)
-  // create a stream
-  hipStream_t stream;
+      // create a stream
+      hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(true == checkMallocAsync(stream));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -187,8 +187,7 @@ TEST_CASE("Unit_hipMallocAsync_basic") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent") {
-  checkMempoolSupported(0)
-  streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
+  checkMempoolSupported(0) streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
   // create multiple streams
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -235,8 +234,7 @@ TEST_CASE("Unit_hipMallocAsync_Multistream_Concurrent") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_StreamEvent_CrissCross") {
-  checkMempoolSupported(0)
-  streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
+  checkMempoolSupported(0) streamMemAllocTest testObj1(NUM_ELM), testObj2(NUM_ELM);
   // create two streams.
   hipStream_t stream1, stream2;
   HIP_CHECK(hipStreamCreate(&stream1));
@@ -296,8 +294,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int i = 0; i < num_devices; i++) {
-    checkMempoolSupported(i)
-    HIP_CHECK(hipSetDevice(i));
+    checkMempoolSupported(i) HIP_CHECK(hipSetDevice(i));
     hipStream_t stream;
     HIP_CHECK(hipStreamCreate(&stream));
     REQUIRE(true == checkMallocAsync(stream));
@@ -319,8 +316,8 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice") {
  *    - HIP_VERSION >= 6.2
  */
 #if HT_AMD
-static void threadQAsyncCommands(streamMemAllocTest* testObj,
-                                hipStream_t strm) {
+static void threadQAsyncCommands(streamMemAllocTest* testObj, hipStream_t strm, int idx) {
+  HIP_CHECK(hipSetDevice(idx));
   // Create host buffer with test data.
   testObj->createHostBufferWithData();
   // Allocate device memory and transfer data to it asyncronously on stream.
@@ -336,21 +333,19 @@ static void threadQAsyncCommands(streamMemAllocTest* testObj,
 TEST_CASE("Unit_hipMallocAsync_Multidevice_Concurrent") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
-  checkIfMultiDev(num_devices)
-  hipStream_t *stream_buf = new hipStream_t[num_devices];
+  checkIfMultiDev(num_devices) hipStream_t* stream_buf = new hipStream_t[num_devices];
   std::vector<streamMemAllocTest*> tesObjBuf;
   // Allocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    checkMempoolSupported(idx)
-    HIP_CHECK(hipSetDevice(idx));
+    checkMempoolSupported(idx) HIP_CHECK(hipSetDevice(idx));
     HIP_CHECK(hipStreamCreate(&stream_buf[idx]));
-    streamMemAllocTest *testObj = new streamMemAllocTest(NUM_ELM);
+    streamMemAllocTest* testObj = new streamMemAllocTest(NUM_ELM);
     tesObjBuf.push_back(testObj);
   }
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    std::thread test(threadQAsyncCommands, tesObjBuf[idx], stream_buf[idx]);
+    std::thread test(threadQAsyncCommands, tesObjBuf[idx], stream_buf[idx], idx);
     test.join();
   }
   // Wait for the streams
@@ -388,49 +383,48 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   checkIfMultiDev(num_devices)
-  // 2 stream per ASIC
-  hipStream_t *stream_buf = new hipStream_t[streamPerAsic*num_devices];
+      // 2 stream per ASIC
+      hipStream_t* stream_buf = new hipStream_t[streamPerAsic * num_devices];
   std::vector<streamMemAllocTest*> tesObjBuf;
   // Allocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
-    checkMempoolSupported(idx)
-    HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic*idx]));
-    HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic*idx + 1]));
-    streamMemAllocTest *testObj1 = new streamMemAllocTest(NUM_ELM);
+    checkMempoolSupported(idx) HIP_CHECK(hipSetDevice(idx));
+    HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic * idx]));
+    HIP_CHECK(hipStreamCreate(&stream_buf[streamPerAsic * idx + 1]));
+    streamMemAllocTest* testObj1 = new streamMemAllocTest(NUM_ELM);
     tesObjBuf.push_back(testObj1);
-    streamMemAllocTest *testObj2 = new streamMemAllocTest(NUM_ELM);
+    streamMemAllocTest* testObj2 = new streamMemAllocTest(NUM_ELM);
     tesObjBuf.push_back(testObj2);
   }
   // Queue commands in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    std::thread test1(threadQAsyncCommands, tesObjBuf[streamPerAsic*idx],
-                    stream_buf[streamPerAsic*idx]);
-    std::thread test2(threadQAsyncCommands, tesObjBuf[streamPerAsic*idx + 1],
-                    stream_buf[streamPerAsic*idx + 1]);
+    std::thread test1(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx],
+                      stream_buf[streamPerAsic * idx], idx);
+    std::thread test2(threadQAsyncCommands, tesObjBuf[streamPerAsic * idx + 1],
+                      stream_buf[streamPerAsic * idx + 1], idx);
     test1.join();
     test2.join();
   }
   // Wait for the streams
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
-    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic*idx]));
-    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic*idx + 1]));
+    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx]));
+    HIP_CHECK(hipStreamSynchronize(stream_buf[streamPerAsic * idx + 1]));
     // verify and validate
-    REQUIRE(true == tesObjBuf[streamPerAsic*idx]->validateResult());
-    REQUIRE(true == tesObjBuf[streamPerAsic*idx + 1]->validateResult());
+    REQUIRE(true == tesObjBuf[streamPerAsic * idx]->validateResult());
+    REQUIRE(true == tesObjBuf[streamPerAsic * idx + 1]->validateResult());
   }
   // Deallocate resources in each device
   for (int idx = 0; idx < num_devices; idx++) {
     HIP_CHECK(hipSetDevice(idx));
     // Destroy resources
-    tesObjBuf[streamPerAsic*idx]->freeHostBuf();
-    tesObjBuf[streamPerAsic*idx + 1]->freeHostBuf();
-    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic*idx]));
-    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic*idx + 1]));
-    delete tesObjBuf[streamPerAsic*idx];
-    delete tesObjBuf[streamPerAsic*idx + 1];
+    tesObjBuf[streamPerAsic * idx]->freeHostBuf();
+    tesObjBuf[streamPerAsic * idx + 1]->freeHostBuf();
+    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx]));
+    HIP_CHECK(hipStreamDestroy(stream_buf[streamPerAsic * idx + 1]));
+    delete tesObjBuf[streamPerAsic * idx];
+    delete tesObjBuf[streamPerAsic * idx + 1];
   }
   delete[] stream_buf;
 }
@@ -447,8 +441,7 @@ TEST_CASE("Unit_hipMallocAsync_Multidevice_MultiStream") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
-  checkMempoolSupported(0)
-  size_t byte_size = NUM_ELM * sizeof(float);
+  checkMempoolSupported(0) size_t byte_size = NUM_ELM * sizeof(float);
   // create a stream
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -467,8 +460,8 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&C_d), byte_size));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream));
   hipLaunchKernelGGL(HipTest::vector_square, dim3(NUM_ELM / THREADS_PER_BLOCK),
-                              dim3(THREADS_PER_BLOCK), 0, stream,
-                              static_cast<const float*>(A_d), C_d, NUM_ELM);
+                     dim3(THREADS_PER_BLOCK), 0, stream, static_cast<const float*>(A_d), C_d,
+                     NUM_ELM);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(A_d), stream));
   HIP_CHECK(hipFreeAsync(reinterpret_cast<void*>(C_d), stream));
@@ -496,8 +489,8 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipMalloc") {
 TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
   size_t byte_size = NUM_ELM * sizeof(float);
   checkMempoolSupported(0)
-  // create a stream
-  hipStream_t stream;
+      // create a stream
+      hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   float *A_h, *C_h;
   float *A_d, *C_d;
@@ -514,8 +507,8 @@ TEST_CASE("Unit_hipMallocAsync_ByUsinghipFree") {
   HIP_CHECK(hipMallocAsync(reinterpret_cast<void**>(&C_d), byte_size, stream));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, byte_size, hipMemcpyHostToDevice, stream));
   hipLaunchKernelGGL(HipTest::vector_square, dim3(NUM_ELM / THREADS_PER_BLOCK),
-                              dim3(THREADS_PER_BLOCK), 0, stream,
-                              static_cast<const float*>(A_d), C_d, NUM_ELM);
+                     dim3(THREADS_PER_BLOCK), 0, stream, static_cast<const float*>(A_d), C_d,
+                     NUM_ELM);
   HIP_CHECK(hipMemcpyAsync(C_h, C_d, byte_size, hipMemcpyDeviceToHost, stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   HIP_CHECK(hipFree(reinterpret_cast<void*>(A_d)));
@@ -555,7 +548,7 @@ static bool testhipMallocAsyncMThreadLocalStrm() {
     tests.push_back(std::thread(threadTestLocalStream, idx));
   }
   // Wait for all threads to complete
-  for (std::thread &t : tests) {
+  for (std::thread& t : tests) {
     t.join();
   }
   // Wait for thread
@@ -567,8 +560,7 @@ static bool testhipMallocAsyncMThreadLocalStrm() {
 }
 
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadLocalStream") {
-  checkMempoolSupported(0)
-  REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
+  checkMempoolSupported(0) REQUIRE(true == testhipMallocAsyncMThreadLocalStrm());
 }
 
 /**
@@ -594,7 +586,7 @@ static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
     tests.push_back(std::thread(threadTestCommonStream, idx, stream));
   }
   // Wait for all threads to complete
-  for (std::thread &t : tests) {
+  for (std::thread& t : tests) {
     t.join();
   }
   // Wait for thread
@@ -606,8 +598,7 @@ static bool testhipMallocAsyncMThreadLocalStrm(hipStream_t stream) {
 }
 
 TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
-  checkMempoolSupported(0)
-  hipStream_t stream;
+  checkMempoolSupported(0) hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
   REQUIRE(true == testhipMallocAsyncMThreadLocalStrm(stream));
   HIP_CHECK(hipStreamDestroy(stream));
@@ -625,10 +616,8 @@ TEST_CASE("Unit_hipMallocAsync_MThread_ThreadSharedStream") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
-  checkMempoolSupported(0)
-  streamMemAllocTest testObj[3] = {streamMemAllocTest(NUM_ELM),
-                                   streamMemAllocTest(NUM_ELM),
-                                   streamMemAllocTest(NUM_ELM)};
+  checkMempoolSupported(0) streamMemAllocTest testObj[3] = {
+      streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM), streamMemAllocTest(NUM_ELM)};
   // create multiple streams
   hipStream_t stream[3];
   HIP_CHECK(hipStreamCreate(&stream[0]));
@@ -659,6 +648,6 @@ TEST_CASE("Unit_hipMallocAsync_DefaultStreams_Concurrent") {
 }
 
 /**
-* End doxygen group StreamOTest.
-* @}
-*/
+ * End doxygen group StreamOTest.
+ * @}
+ */

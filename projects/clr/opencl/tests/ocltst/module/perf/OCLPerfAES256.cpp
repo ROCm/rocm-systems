@@ -27,7 +27,7 @@
 #include "CL/cl.h"
 #include "Timer.h"
 
-static const char *aes256_kernel =
+static const char* aes256_kernel =
     "// NOTE: THIS KERNEL WAS ADOPTED FROM SISOFT SANDRA: DO NOT "
     "REDISTRIBUTE!!\n"
     "inline uint Load(__global uint* pData, const uint iX, const uint iY)\n"
@@ -89,7 +89,7 @@ static const char *aes256_kernel =
     "   pOutput[iNdx] = tstate ^ pKey[0];\n"
     "}\n";
 
-static const char *aes256_kernel2 =
+static const char* aes256_kernel2 =
     "// NOTE: THIS KERNEL WAS ADOPTED FROM SISOFT SANDRA: DO NOT "
     "REDISTRIBUTE!!\n"
     "#define AES_BLOCK_SIZE      16\n"
@@ -209,37 +209,31 @@ OCLPerfAES256::OCLPerfAES256() { _numSubTests = 2; }
 OCLPerfAES256::~OCLPerfAES256() {}
 
 void OCLPerfAES256::setData(cl_mem buffer, unsigned int val) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL,
-      &error_);
-  for (unsigned int i = 0; i < bufSize_ / sizeof(unsigned int); i++)
-    data[i] = val;
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_WRITE, 0, bufSize_, 0, NULL, NULL, &error_);
+  for (unsigned int i = 0; i < bufSize_ / sizeof(unsigned int); i++) data[i] = val;
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmd_queue_);
 }
 
 void OCLPerfAES256::checkData(cl_mem buffer) {
-  unsigned int *data = (unsigned int *)_wrapper->clEnqueueMapBuffer(
-      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL,
-      &error_);
+  unsigned int* data = (unsigned int*)_wrapper->clEnqueueMapBuffer(
+      cmd_queue_, buffer, true, CL_MAP_READ, 0, bufSize_, 0, NULL, NULL, &error_);
   for (unsigned int i = 0; i < bufSize_ / sizeof(unsigned int); i++) {
   }
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL,
-                                             NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, buffer, data, 0, NULL, NULL);
   _wrapper->clFinish(cmd_queue_);
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfAES256::open(unsigned int test, char *units, double &conversion,
+void OCLPerfAES256::open(unsigned int test, char* units, double& conversion,
                          unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -262,51 +256,45 @@ void OCLPerfAES256::open(unsigned int test, char *units, double &conversion,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     delete platforms;
   }
   /*
    * If we could find our platform, use it. If not, die as we need the AMD
    * platform for these extensions.
    */
-  CHECK_RESULT(platform == 0,
-               "Couldn't find platform with GPU devices, cannot proceed");
+  CHECK_RESULT(platform == 0, "Couldn't find platform with GPU devices, cannot proceed");
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   char charbuf[1024];
   size_t retsize;
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024,
-                                     charbuf, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_EXTENSIONS, 1024, charbuf, &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   // Increase iterations for devices with many CUs
-  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS,
-                                     sizeof(size_t), &numCUs, &retsize);
+  error_ = _wrapper->clGetDeviceInfo(device, CL_DEVICE_MAX_COMPUTE_UNITS, sizeof(size_t), &numCUs,
+                                     &retsize);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
 
   maxIterations *= (unsigned int)(1 + 10 * numCUs / 20);
@@ -314,43 +302,38 @@ void OCLPerfAES256::open(unsigned int test, char *units, double &conversion,
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
   CHECK_RESULT(cmd_queue_ == 0, "clCreateCommandQueue failed");
 
-  inBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, bufSize_,
-                                       NULL, &error_);
+  inBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, bufSize_, NULL, &error_);
   CHECK_RESULT(inBuffer_ == 0, "clCreateBuffer(inBuffer) failed");
 
-  outBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufSize_,
-                                        NULL, &error_);
+  outBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_WRITE_ONLY, bufSize_, NULL, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
-  tableBuffer_ =
-      _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, 5120, NULL, &error_);
+  tableBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, 5120, NULL, &error_);
   CHECK_RESULT(tableBuffer_ == 0, "clCreateBuffer(tableBuffer) failed");
 
-  keyBuffer_ =
-      _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, 240, NULL, &error_);
+  keyBuffer_ = _wrapper->clCreateBuffer(context_, CL_MEM_READ_ONLY, 240, NULL, &error_);
   CHECK_RESULT(keyBuffer_ == 0, "clCreateBuffer(keyBuffer) failed");
 
   if (_openTest == 0) {
-    program_ = _wrapper->clCreateProgramWithSource(
-        context_, 1, (const char **)&aes256_kernel, NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&aes256_kernel, NULL,
+                                                   &error_);
     CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
     testDescString += "orig";
   } else {
-    program_ = _wrapper->clCreateProgramWithSource(
-        context_, 1, (const char **)&aes256_kernel2, NULL, &error_);
+    program_ = _wrapper->clCreateProgramWithSource(context_, 1, (const char**)&aes256_kernel2, NULL,
+                                                   &error_);
     CHECK_RESULT(program_ == 0, "clCreateProgramWithSource failed");
     testDescString += " new";
   }
 
-  const char *buildOps = NULL;
+  const char* buildOps = NULL;
   error_ = _wrapper->clBuildProgram(program_, 1, &device, buildOps, NULL, NULL);
 
   if (error_ != CL_SUCCESS) {
     cl_int intError;
     char log[16384];
-    intError =
-        _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
-                                        16384 * sizeof(char), log, NULL);
+    intError = _wrapper->clGetProgramBuildInfo(program_, device, CL_PROGRAM_BUILD_LOG,
+                                               16384 * sizeof(char), log, NULL);
     printf("Build error -> %s\n", log);
 
     CHECK_RESULT(0, "clBuildProgram failed");
@@ -360,16 +343,11 @@ void OCLPerfAES256::open(unsigned int test, char *units, double &conversion,
 
   cl_uint rounds = 14;
 
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void *)&inBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void *)&outBuffer_);
-  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_mem),
-                                    (void *)&tableBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_mem), (void *)&keyBuffer_);
-  error_ =
-      _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint), (void *)&rounds);
+  error_ = _wrapper->clSetKernelArg(kernel_, 0, sizeof(cl_mem), (void*)&inBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 1, sizeof(cl_mem), (void*)&outBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 2, sizeof(cl_mem), (void*)&tableBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 3, sizeof(cl_mem), (void*)&keyBuffer_);
+  error_ = _wrapper->clSetKernelArg(kernel_, 4, sizeof(cl_uint), (void*)&rounds);
   setData(inBuffer_, 0xdeadbeef);
   setData(outBuffer_, 0xdeadbeef);
 }
@@ -386,9 +364,9 @@ void OCLPerfAES256::run(void) {
   timer.Reset();
   timer.Start();
   for (unsigned int i = 0; i < maxIterations; i++) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(
-        cmd_queue_, kernel_, 1, NULL, (const size_t *)global_work_size,
-        (const size_t *)local_work_size, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmd_queue_, kernel_, 1, NULL,
+                                              (const size_t*)global_work_size,
+                                              (const size_t*)local_work_size, 0, NULL, NULL);
   }
 
   CHECK_RESULT(error_, "clEnqueueNDRangeKernel failed");
@@ -400,8 +378,7 @@ void OCLPerfAES256::run(void) {
   // No idea what data should be in here
   // checkData(outBuffer_);
   // Compute GB/s
-  double perf =
-      ((double)bufSize_ * (double)maxIterations * (double)(1e-09)) / sec;
+  double perf = ((double)bufSize_ * (double)maxIterations * (double)(1e-09)) / sec;
 
   _perfInfo = (float)perf;
 }
@@ -411,23 +388,19 @@ unsigned int OCLPerfAES256::close(void) {
 
   if (inBuffer_) {
     error_ = _wrapper->clReleaseMemObject(inBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(inBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(inBuffer_) failed");
   }
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (tableBuffer_) {
     error_ = _wrapper->clReleaseMemObject(tableBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(tableBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(tableBuffer_) failed");
   }
   if (keyBuffer_) {
     error_ = _wrapper->clReleaseMemObject(keyBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(keyBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(keyBuffer_) failed");
   }
   if (kernel_) {
     error_ = _wrapper->clReleaseKernel(kernel_);
@@ -439,8 +412,7 @@ unsigned int OCLPerfAES256::close(void) {
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

@@ -670,6 +670,8 @@ set_fini_status(int v)
 void
 initialize()
 {
+    init_logging();
+
     ROCP_INFO << "rocprofiler initialize called...";
 
     if(get_init_status() != 0)
@@ -688,7 +690,6 @@ initialize()
             common::destroy_static_tl_objects();
             common::destroy_static_objects();
         });
-        init_logging();
         invoke_client_configures();
         invoke_client_initializers();
         if(get_num_clients() > 0) internal_threading::initialize();

@@ -291,7 +291,6 @@ def build_causal_layout(
         filename,
         divChildren,
     ):
-        global file_timestamp
         global global_data
         global global_input_filters
         global workload_path

@@ -39,13 +39,11 @@ const static char* strKernel[] = {
     KERNEL_CODE(
     \n __kernel void atomic_test1(__global uint* res) {
       __global atomic_uint* inc = (__global atomic_uint*)res;
-      atomic_fetch_add_explicit(inc, 1, memory_order_acq_rel,
-                                memory_scope_device);
+      atomic_fetch_add_explicit(inc, 1, memory_order_acq_rel, memory_scope_device);
     }
     \n __kernel void atomic_test2(__global uint* res) {
       __global atomic_uint* inc = (__global atomic_uint*)res;
-      atomic_fetch_add_explicit(inc, 1, memory_order_acq_rel,
-                                memory_scope_device);
+      atomic_fetch_add_explicit(inc, 1, memory_order_acq_rel, memory_scope_device);
     }
     \n),
 #if EMU_ENV
@@ -54,8 +52,7 @@ const static char* strKernel[] = {
       for (uint i = 0; i < 8 * 32; ++i) {
         for (uint j = 0; j < 256; ++j) {
           __global atomic_uint* inc = (__global atomic_uint*)&res[j];
-          uint val = atomic_load_explicit(inc, memory_order_acquire,
-                                          memory_scope_device);
+          uint val = atomic_load_explicit(inc, memory_order_acquire, memory_scope_device);
           if (0 != val) {
             res[1] = get_global_id(0);
             res[2] = i;
@@ -69,8 +66,7 @@ const static char* strKernel[] = {
         __global atomic_uint* inc = (__global atomic_uint*)res;
         // atomic_fetch_add_explicit(inc, 1, memory_order_acq_rel,
         // memory_scope_device);
-        atomic_store_explicit(inc, get_global_id(0), memory_order_release,
-                              memory_scope_device);
+        atomic_store_explicit(inc, get_global_id(0), memory_order_release, memory_scope_device);
       }
     }
     \n)
@@ -101,8 +97,7 @@ const static char* strKernel[] = {
 #endif
 };
 
-OCLDeviceAtomic::OCLDeviceAtomic()
-    : hostQueue_(NULL), failed_(false), kernel2_(NULL) {
+OCLDeviceAtomic::OCLDeviceAtomic() : hostQueue_(NULL), failed_(false), kernel2_(NULL) {
   _numSubTests = 2;
 }
 
@@ -115,12 +110,11 @@ void OCLDeviceAtomic::open(unsigned int test, char* units, double& conversion,
   testID_ = test;
   size_t param_size = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0,
-                                     0, &param_size);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   strVersion = new char[param_size];
-  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION,
-                                     param_size, strVersion, 0);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_VERSION, param_size, strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceInfo failed");
   if (strVersion[7] < '2') {
     failed_ = true;
@@ -129,16 +123,14 @@ void OCLDeviceAtomic::open(unsigned int test, char* units, double& conversion,
   delete strVersion;
 
   char dbuffer[1024] = {0};
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test],
-                                                 NULL, &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel[test], NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -152,23 +144,21 @@ void OCLDeviceAtomic::open(unsigned int test, char* units, double& conversion,
 
   cl_mem buffer;
   memset(hostArray, 0, sizeof(hostArray));
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_COPY_HOST_PTR,
-                                    sizeof(hostArray), &hostArray, &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_COPY_HOST_PTR, sizeof(hostArray), &hostArray,
+                                    &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed");
   buffers_.push_back(buffer);
 
 #if defined(CL_VERSION_2_0)
-  const cl_queue_properties cprops[] = {CL_QUEUE_PROPERTIES,
-                                        static_cast<cl_queue_properties>(0), 0};
-  hostQueue_ = _wrapper->clCreateCommandQueueWithProperties(
-      context_, devices_[deviceId], cprops, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateCommandQueueWithProperties() failed");
+  const cl_queue_properties cprops[] = {CL_QUEUE_PROPERTIES, static_cast<cl_queue_properties>(0),
+                                        0};
+  hostQueue_ =
+      _wrapper->clCreateCommandQueueWithProperties(context_, devices_[deviceId], cprops, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateCommandQueueWithProperties() failed");
 #endif
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLDeviceAtomic::run(void) {
@@ -183,12 +173,12 @@ void OCLDeviceAtomic::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   if (testID_ == 0) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   } else {
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws2, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws2, NULL,
+                                              0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
   }
 
@@ -196,11 +186,11 @@ void OCLDeviceAtomic::run(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed");
 
   if (testID_ == 0) {
-    error_ = _wrapper->clEnqueueNDRangeKernel(hostQueue_, kernel2_, 1, NULL,
-                                              gws, NULL, 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueNDRangeKernel(hostQueue_, kernel2_, 1, NULL, gws, NULL, 0, NULL, NULL);
   } else {
-    error_ = _wrapper->clEnqueueNDRangeKernel(hostQueue_, kernel2_, 1, NULL,
-                                              gws3, NULL, 0, NULL, NULL);
+    error_ =
+        _wrapper->clEnqueueNDRangeKernel(hostQueue_, kernel2_, 1, NULL, gws3, NULL, 0, NULL, NULL);
   }
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed");
 
@@ -210,9 +200,8 @@ void OCLDeviceAtomic::run(void) {
   _wrapper->clFinish(cmdQueues_[_deviceId]);
   _wrapper->clFinish(hostQueue_);
 
-  error_ = _wrapper->clEnqueueReadBuffer(hostQueue_, buffer, CL_TRUE, 0,
-                                         sizeof(hostArray), hostArray, 0, NULL,
-                                         NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(hostQueue_, buffer, CL_TRUE, 0, sizeof(hostArray),
+                                         hostArray, 0, NULL, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer() failed");
 
   if (testID_ == 0) {
@@ -221,8 +210,7 @@ void OCLDeviceAtomic::run(void) {
       CHECK_RESULT(true, "Incorrect result for device atomic inc!\n");
     }
   } else {
-    printf("Value: %d, thread: %d, iter: %d\n", hostArray[0], hostArray[1],
-           hostArray[2]);
+    printf("Value: %d, thread: %d, iter: %d\n", hostArray[0], hostArray[1], hostArray[2]);
     if (hostArray[0] == 0) {
       CHECK_RESULT(true, "Incorrect result for device atomic inc!\n");
     }

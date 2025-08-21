@@ -396,7 +396,6 @@ RUNTIME_ENTRY(cl_int, clEnqueueReleaseD3D10ObjectsKHR,
 RUNTIME_EXIT
 
 
-
 /*! @}
  *  \addtogroup CL-D3D10 interop helper functions
  *  @{
@@ -412,7 +411,7 @@ RUNTIME_EXIT
 //      clCreateBufferFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateBufferFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                          ID3D10Resource* pD3DResource, int* errcode_ret) {
+                                               ID3D10Resource* pD3DResource, int* errcode_ret) {
   // Verify pD3DResource is a buffer
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -491,8 +490,8 @@ cl_mem amd::clCreateImage1DFromD3D10ResourceAMD(
 //      clCreateImage2DFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateImage2DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D10Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D10Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -527,8 +526,8 @@ cl_mem amd::clCreateImage2DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flag
 //      clCreateImage2DFromD3D10ResourceAMD
 //
 cl_mem amd::clCreateImage3DFromD3D10ResourceAMD(Context& amdContext, cl_mem_flags flags,
-                                           ID3D10Resource* pD3DResource, UINT subresource,
-                                           int* errcode_ret) {
+                                                ID3D10Resource* pD3DResource, UINT subresource,
+                                                int* errcode_ret) {
   // Verify the resource is a 2D texture
   D3D10_RESOURCE_DIMENSION rType;
   pD3DResource->GetType(&rType);
@@ -588,8 +587,6 @@ void amd::SyncD3D10Objects(std::vector<amd::Memory*>& memObjects) {
   while (S_OK != query->GetData(&data, sizeof(BOOL), 0)) {
   }
 }
-
-
 
 
 #endif  //_WIN32

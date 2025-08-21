@@ -105,17 +105,17 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_Negative") {
  *  - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
-  #if HT_NVIDIA
+#if HT_NVIDIA
   HipTest::HIP_SKIP_TEST("API currently unsupported on nvidia, skipping...");
   return;
-  #else
+#else
   CHECK_IMAGE_SUPPORT
   HIP_CHECK(hipSetDevice(0));
   int row, col;
   row = 1;
   col = GENERATE(3, 4, 100);
-  int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
-  int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+  int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
   for (int i = 0; i < (row * col); i++) {
     B_h[i] = i;
   }
@@ -136,17 +136,13 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_BasicTstsWithDiffStreams") {
     HIP_CHECK(hipStreamDestroy(stream));
   }
   SECTION("With Stream per thread") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
-                                 hipStreamPerThread));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
-                                hipStreamPerThread));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamPerThread));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamPerThread));
     HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
   }
   SECTION("With Legacy Stream") {
-    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row,
-                                 hipStreamLegacy));
-    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row,
-                                hipStreamLegacy));
+    HIP_CHECK(hipMemcpyHtoAAsync(A_a, 0, B_h, sizeof(int) * col * row, hipStreamLegacy));
+    HIP_CHECK(hipMemcpyAtoHAsync(A_h, A_a, 0, sizeof(int) * col * row, hipStreamLegacy));
     HIP_CHECK(hipStreamSynchronize(hipStreamLegacy));
   }
 
@@ -178,13 +174,13 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
   CHECK_IMAGE_SUPPORT
   int devCount = 0;
   HIP_CHECK(hipGetDeviceCount(&devCount));
-  for (int i=0; i < devCount; i++) {
+  for (int i = 0; i < devCount; i++) {
     HIP_CHECK(hipSetDevice(i));
     int row, col;
     row = 1;
     col = GENERATE(3, 4, 100);
-    int *A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
-    int *B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    int* A_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
+    int* B_h = reinterpret_cast<int*>(malloc(sizeof(int) * row * col));
     for (int i = 0; i < (row * col); i++) {
       B_h[i] = i;
     }
@@ -208,6 +204,6 @@ TEST_CASE("Unit_hipMemcpyHtoAAsync_MultiDevice") {
 #endif
 }
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

@@ -50,11 +50,13 @@ hipError_t hipModuleGetGlobal(hipDeviceptr_t* dptr, size_t* bytes, hipModule_t h
 hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memory** amd_mem_obj,
                                   hipDeviceptr_t* dptr, size_t* bytes);
 
-extern hipError_t ihipModuleLaunchKernel(
-    hipFunction_t f, amd::LaunchParams& launch_params, hipStream_t hStream, void** kernelParams,
-    void** extra, hipEvent_t startEvent, hipEvent_t stopEvent, uint32_t flags = 0,
-    uint32_t params = 0, uint32_t gridId = 0, uint32_t numGrids = 0, uint64_t prevGridSum = 0,
-    uint64_t allGridSum = 0, uint32_t firstDevice = 0);
+extern hipError_t ihipModuleLaunchKernel(hipFunction_t f, amd::LaunchParams& launch_params,
+                                         hipStream_t hStream, void** kernelParams, void** extra,
+                                         hipEvent_t startEvent, hipEvent_t stopEvent,
+                                         uint32_t flags = 0, uint32_t params = 0,
+                                         uint32_t gridId = 0, uint32_t numGrids = 0,
+                                         uint64_t prevGridSum = 0, uint64_t allGridSum = 0,
+                                         uint32_t firstDevice = 0);
 static bool isCompatibleCodeObject(const std::string& codeobj_target_id, const char* device_name) {
   // Workaround for device name mismatch.
   // Device name may contain feature strings delimited by '+', e.g.
@@ -83,9 +85,8 @@ void** __hipRegisterFatBinary(const void* data) {
 }
 
 void __hipRegisterFunction(hip::FatBinaryInfo** modules, const void* hostFunction,
-                                      char* deviceFunction, const char* deviceName,
-                                      unsigned int threadLimit, uint3* tid, uint3* bid,
-                                      dim3* blockDim, dim3* gridDim, int* wSize) {
+                           char* deviceFunction, const char* deviceName, unsigned int threadLimit,
+                           uint3* tid, uint3* bid, dim3* blockDim, dim3* gridDim, int* wSize) {
   static int enable_deferred_loading{[]() {
     char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
     return var ? atoi(var) : 1;
@@ -106,8 +107,7 @@ void __hipRegisterFunction(hip::FatBinaryInfo** modules, const void* hostFunctio
 
     for (size_t dev_idx = 0; dev_idx < g_devices.size(); ++dev_idx) {
       hip_error = PlatformState::instance().getStatFunc(&hfunc, hostFunction, dev_idx);
-      guarantee((hip_error == hipSuccess), "Cannot retrieve Static function, error: %d",
-                                            hip_error);
+      guarantee((hip_error == hipSuccess), "Cannot retrieve Static function, error: %d", hip_error);
     }
   }
 }
@@ -117,15 +117,14 @@ void __hipRegisterFunction(hip::FatBinaryInfo** modules, const void* hostFunctio
 // global variable in host code. The shadow host variable is used to keep
 // track of the value of the device side global variable between kernel
 // executions.
-void __hipRegisterVar(
-    hip::FatBinaryInfo** modules,  // The device modules containing code object
-    void* var,                     // The shadow variable in host code
-    char* hostVar,                 // Variable name in host code
-    char* deviceVar,               // Variable name in device code
-    int ext,                       // Whether this variable is external
-    size_t size,                   // Size of the variable
-    int constant,                  // Whether this variable is constant
-    int global)                    // Unknown, always 0
+void __hipRegisterVar(hip::FatBinaryInfo** modules,  // The device modules containing code object
+                      void* var,                     // The shadow variable in host code
+                      char* hostVar,                 // Variable name in host code
+                      char* deviceVar,               // Variable name in device code
+                      int ext,                       // Whether this variable is external
+                      size_t size,                   // Size of the variable
+                      int constant,                  // Whether this variable is constant
+                      int global)                    // Unknown, always 0
 {
   hip::Var* var_ptr = new hip::Var(std::string(hostVar), hip::Var::DeviceVarKind::DVK_Variable,
                                    size, 0, 0, modules);
@@ -148,18 +147,17 @@ void __hipRegisterSurface(
 void __hipRegisterManagedVar(
     void* hipModule,  // Pointer to hip module returned from __hipRegisterFatbinary
     void** pointer,   // Pointer to a chunk of managed memory with size \p size and alignment \p
-                     // align HIP runtime allocates such managed memory and assign it to \p pointer
+                      // align HIP runtime allocates such managed memory and assign it to \p pointer
     void* init_value,  // Initial value to be copied into \p pointer
     const char* name,  // Name of the variable in code object
     size_t size, unsigned align) {
-  
   static int enable_deferred_loading{[]() {
-    #ifdef _WIN32 // Don't defer loading for windows
-      return 0;
-    #else
-      char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
-      return var ? atoi(var) : 1;
-    #endif
+#ifdef _WIN32  // Don't defer loading for windows
+    return 0;
+#else
+    char* var = getenv("HIP_ENABLE_DEFERRED_LOADING");
+    return var ? atoi(var) : 1;
+#endif
   }()};
   hipError_t hip_error = hipSuccess;
   hip::Var* var_ptr = new hip::Var(std::string(name), hip::Var::DeviceVarKind::DVK_Managed, pointer,
@@ -174,13 +172,13 @@ void __hipRegisterManagedVar(
   } else {
     HIP_INIT_VOID();
     hipError_t status = ihipMallocManaged(pointer, size, align, 0);
-    var_ptr->setAllocFlag(true); // set flag true for managed alloc
+    var_ptr->setAllocFlag(true);  // set flag true for managed alloc
     if (status == hipSuccess) {
       hip::Stream* stream = hip::getNullStream();
       if (stream != nullptr) {
         status = ihipMemcpy(*pointer, init_value, size, hipMemcpyHostToDevice, *stream);
         guarantee((status == hipSuccess), "Error during memcpy to managed memory, error:%d!",
-                                           status);
+                  status);
       } else {
         ClPrint(amd::LOG_ERROR, amd::LOG_API, "Host Queue is NULL");
       }
@@ -206,7 +204,7 @@ void __hipUnregisterFatBinary(hip::FatBinaryInfo** modules) {
   static std::once_flag unregister_device_sync;
   // If SKIP ABORT is set and GPU is in error, dont need to sync streams.
   if (!HIP_SKIP_ABORT_ON_GPU_ERROR || !amd::Device::IsGPUInError()) {
-    std::call_once(unregister_device_sync, [](){
+    std::call_once(unregister_device_sync, []() {
       for (auto& hipDevice : g_devices) {
         // By synchronizing devices ensure that all HSA signal handlers
         // complete before removeFatBinary
@@ -237,15 +235,14 @@ void __hipRegisterTexture(void** modules, void* var, char* hostVar, char* device
 }
 void __hipRegisterVar(void** modules, void* var, char* hostVar, char* deviceVar, int ext,
                       size_t size, int constant, int global) {
-  return __hipRegisterVar(reinterpret_cast<hip::FatBinaryInfo**>(modules), var, hostVar,
-                          deviceVar, ext, size, constant, global);
+  return __hipRegisterVar(reinterpret_cast<hip::FatBinaryInfo**>(modules), var, hostVar, deviceVar,
+                          ext, size, constant, global);
 }
 void __hipUnregisterFatBinary(void** modules) {
   return __hipUnregisterFatBinary(reinterpret_cast<hip::FatBinaryInfo**>(modules));
 }
 
-hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
-                                       hipStream_t stream) {
+hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem, hipStream_t stream) {
   HIP_INIT_API(hipConfigureCall, gridDim, blockDim, sharedMem, stream);
 
   PlatformState::instance().configureCall(gridDim, blockDim, sharedMem, stream);
@@ -254,7 +251,7 @@ hipError_t hipConfigureCall(dim3 gridDim, dim3 blockDim, size_t sharedMem,
 }
 
 hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t sharedMem,
-                                                 hipStream_t stream) {
+                                      hipStream_t stream) {
   HIP_INIT_API(__hipPushCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   PlatformState::instance().configureCall(gridDim, blockDim, sharedMem, stream);
@@ -263,7 +260,7 @@ hipError_t __hipPushCallConfiguration(dim3 gridDim, dim3 blockDim, size_t shared
 }
 
 hipError_t __hipPopCallConfiguration(dim3* gridDim, dim3* blockDim, size_t* sharedMem,
-                                                hipStream_t* stream) {
+                                     hipStream_t* stream) {
   HIP_INIT_API(__hipPopCallConfiguration, gridDim, blockDim, sharedMem, stream);
 
   ihipExec_t exec;
@@ -345,7 +342,6 @@ hipError_t hipGetSymbolSize(size_t* sizePtr, const void* symbol) {
 
 hipError_t ihipCreateGlobalVarObj(const char* name, hipModule_t hmod, amd::Memory** amd_mem_obj,
                                   hipDeviceptr_t* dptr, size_t* bytes) {
-
   /* Get Device Program pointer*/
   amd::Program* program = as_amd(reinterpret_cast<cl_program>(hmod));
   device::Program* dev_program = program->getDeviceProgram(*hip::getCurrentDevice()->devices()[0]);
@@ -431,7 +427,7 @@ hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
   // multiply the number of SIMDs by 2, to account for 2CUs in 1 WGP.
   uint32_t simdPerCU = device.isa().simdPerCU();
   if (wrkGrpInfo->isWGPMode_) {
-    simdPerCU  *= 2;
+    simdPerCU *= 2;
   }
 
   const size_t alu_occupancy = simdPerCU * std::min(MaxWavesPerSimd, GprWaves);
@@ -674,8 +670,8 @@ hipError_t ihipLaunchKernel(const void* hostFunction, dim3 gridDim, dim3 blockDi
     return hipErrorInvalidConfiguration;
   }
 
-  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr,
-                                startEvent, stopEvent, flags);
+  return ihipModuleLaunchKernel(func, launch_params, stream, args, nullptr, startEvent, stopEvent,
+                                flags);
 }
 
 // conversion routines between float and half precision
@@ -761,7 +757,7 @@ void PlatformState::init() {
     it.second->resize_dVar(g_devices.size());
   }
   for (auto& it : statCO_.managedVars_) {
-    for (auto& var: it.second) {
+    for (auto& var : it.second) {
       var->resize_dVar(g_devices.size());
     }
   }
@@ -832,6 +828,17 @@ hipError_t PlatformState::getDynFunc(hipFunction_t* hfunc, hipModule_t hmod,
   }
 
   return it->second->getDynFunc(hfunc, func_name);
+}
+
+hipError_t PlatformState::getFuncCount(unsigned int* count, hipModule_t hmod) {
+  amd::ScopedLock lock(lock_);
+
+  auto it = dynCO_map_.find(hmod);
+  if (it == dynCO_map_.end()) {
+    LogPrintfError("Cannot find the module: 0x%x", hmod);
+    return hipErrorNotFound;
+  }
+  return it->second->getFuncCount(count);
 }
 
 bool PlatformState::isValidDynFunc(const void* hfunc) {
@@ -1044,9 +1051,9 @@ void* PlatformState::getDynamicLibraryHandle() {
   return dynamicLibraryHandle_;
 }
 
-void PlatformState::setDynamicLibraryHandle(void* handle){
+void PlatformState::setDynamicLibraryHandle(void* handle) {
   amd::ScopedLock lock(lock_);
   dynamicLibraryHandle_ = handle;
 }
 
-} //namespace hip
+}  // namespace hip

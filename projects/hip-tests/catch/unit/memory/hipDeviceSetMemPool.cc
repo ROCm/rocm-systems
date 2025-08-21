@@ -32,13 +32,13 @@ THE SOFTWARE.
 #include "mempool_common.hh"  // NOLINT
 
 #define THREADS_PER_BLOCK 512
-static constexpr auto NUM_ELM {1024 * 1024};
+static constexpr auto NUM_ELM{1024 * 1024};
 
 /**
  * Common function to allocate memory using hipMallocAsync API through a stream,
  * launch kernel and perform vectorADD and validate results. Free memory using
  * hipFreeAsync.
-*/
+ */
 static bool checkMallocAsync() {
   streamMemAllocTest testObj(NUM_ELM);
   // create a stream
@@ -78,8 +78,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_Basic") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
-    checkMempoolSupported(dev)
-    hipMemPool_t mem_pool_device = nullptr, curr_mem_pool = nullptr;
+    checkMempoolSupported(dev) hipMemPool_t mem_pool_device = nullptr, curr_mem_pool = nullptr;
     // create explicit mem pool
     hipMemPoolProps prop{};
     prop.allocType = hipMemAllocationTypePinned;
@@ -113,8 +112,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool") {
   int num_devices;
   HIP_CHECK(hipGetDeviceCount(&num_devices));
   for (int dev = 0; dev < num_devices; dev++) {
-    checkMempoolSupported(dev)
-    HIP_CHECK(hipSetDevice(dev));
+    checkMempoolSupported(dev) HIP_CHECK(hipSetDevice(dev));
     hipMemPool_t mem_pool_device, curr_mem_pool, def_mem_pool;
     hipMemPoolProps prop{};
     prop.allocType = hipMemAllocationTypePinned;
@@ -147,8 +145,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_DestroyCurrentMempool") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipDeviceSetMemPool_functional") {
-  checkMempoolSupported(0)
-  hipMemPool_t mem_pool = nullptr;
+  checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};
   PoolProps.allocType = hipMemAllocationTypePinned;
@@ -175,8 +172,7 @@ TEST_CASE("Unit_hipDeviceSetMemPool_functional") {
  *    - HIP_VERSION >= 6.2
  */
 TEST_CASE("Unit_hipDeviceSetMemPool_functionalAttribute") {
-  checkMempoolSupported(0)
-  hipMemPool_t mem_pool = nullptr;
+  checkMempoolSupported(0) hipMemPool_t mem_pool = nullptr;
   // create explicit mem pool
   hipMemPoolProps PoolProps{};
   PoolProps.allocType = hipMemAllocationTypePinned;

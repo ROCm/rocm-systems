@@ -407,6 +407,7 @@ class streamMemAllocTest {
                         dim3(THREADS_PER_BLOCK), 0, stream,
                         static_cast<const int*>(A_d),
                         static_cast<const int*>(B_d), C_d, size);
+    HIP_CHECK(hipGetLastError());
   }
   // Transfer data from device to host asynchronously.
   void transferFromMempool(hipStream_t stream) {

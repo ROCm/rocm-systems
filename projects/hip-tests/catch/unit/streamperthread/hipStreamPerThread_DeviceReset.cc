@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2021 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
 in the Software without restriction, including without limitation the rights
@@ -32,17 +32,17 @@ static void Copy_to_device() {
   int* A_h = nullptr;
   int* A_d = nullptr;
 
-  hipError_t status =  hipHostMalloc(&A_h, ele_size*sizeof(int));
+  hipError_t status = hipHostMalloc(&A_h, ele_size * sizeof(int));
   if (status != hipSuccess) return;
 
   status = hipMalloc(&A_d, ele_size * sizeof(int));
   if (status != hipSuccess) return;
 
-  for(unsigned int i = 0; i < ele_size; ++i) {
+  for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
-  HIP_CHECK(hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice,
-                 hipStreamPerThread));
+  HIP_CHECK(
+      hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread));
   // Clean up
   HIP_CHECK(hipHostFree(A_h));
   HIP_CHECK(hipFree(A_d));
@@ -52,10 +52,10 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_1") {
   constexpr unsigned int MAX_THREAD_CNT = 10;
   std::vector<std::thread> threads(MAX_THREAD_CNT);
 
-  for (auto &th : threads) {
+  for (auto& th : threads) {
     th = std::thread(Copy_to_device);
   }
-  for (auto &th : threads) {
+  for (auto& th : threads) {
     th.join();
   }
 
@@ -75,7 +75,7 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
   int* A_h = nullptr;
   int* A_d = nullptr;
 
-  hipError_t status =  hipHostMalloc(&A_h, ele_size*sizeof(int));
+  hipError_t status = hipHostMalloc(&A_h, ele_size * sizeof(int));
   if (status != hipSuccess) return;
   status = hipMalloc(&A_d, ele_size * sizeof(int));
   if (status != hipSuccess) return;
@@ -83,23 +83,26 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
   for (unsigned int i = 0; i < ele_size; ++i) {
     A_h[i] = 123;
   }
-  status = hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice,
-                 hipStreamPerThread);
+  status =
+      hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread);
   if (status != hipSuccess) return;
   HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
 
+  // Host Memory is not destroyed with hipDeviceReset, need to free it
+  // explicitly to avoid memory leaks
+  HIP_CHECK(hipHostFree(A_h));
   HIP_CHECK(hipDeviceReset());
 
   // After reset all memory objects will be destroyed hence allocating them again
   // Intention is to use hipStreamPerThread successfully after reset hence not validating
   // values after copy
-  status =  hipHostMalloc(&A_h, ele_size*sizeof(int));
+  status = hipHostMalloc(&A_h, ele_size * sizeof(int));
   if (status != hipSuccess) return;
   status = hipMalloc(&A_d, ele_size * sizeof(int));
   if (status != hipSuccess) return;
 
-  status = hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice,
-                 hipStreamPerThread);
+  status =
+      hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice, hipStreamPerThread);
   if (status != hipSuccess) return;
   HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
 

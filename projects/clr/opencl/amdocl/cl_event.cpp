@@ -251,15 +251,16 @@ RUNTIME_ENTRY_RET(cl_event, clCreateUserEvent, (cl_context context, cl_int* errc
     return (cl_event)0;
   }
 
-  amd::Event* event = new amd::UserEvent(*as_amd(context));
-  if (event == NULL) {
+  auto event = new amd::UserEvent(*as_amd(context));
+  if (event == nullptr || !event->Create()) {
+    delete event;
     *not_null(errcode_ret) = CL_OUT_OF_HOST_MEMORY;
     return (cl_event)0;
   }
 
   event->retain();
   *not_null(errcode_ret) = CL_SUCCESS;
-  return as_cl(event);
+  return as_cl(reinterpret_cast<amd::Event*>(event));
 }
 RUNTIME_EXIT
 
@@ -288,8 +289,8 @@ RUNTIME_ENTRY(cl_int, clSetUserEventStatus, (cl_event event, cl_int execution_st
   if (execution_status > CL_COMPLETE) {
     return CL_INVALID_VALUE;
   }
-
-  if (!as_amd(event)->setStatus(execution_status)) {
+  auto user_event = reinterpret_cast<amd::UserEvent*>(as_amd(event));
+  if (!user_event->SetExecutionStatus(execution_status)) {
     return CL_INVALID_OPERATION;
   }
   return CL_SUCCESS;

@@ -85,6 +85,11 @@ endif() # if (ROCM_CCACHE_BUILD)
 find_package(PkgConfig)
 find_package(LibElf REQUIRED)
 
+find_package(LibElf CONFIG)
+if(NOT LibElf_FOUND)
+  find_package(LibElf REQUIRED)
+endif()
+
 pkg_check_modules(drm REQUIRED IMPORTED_TARGET libdrm)
 
 ## Create the rocr target.

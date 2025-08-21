@@ -170,19 +170,33 @@ def generate_machine_specs(args, sysinfo: dict = None):
 
     vbios = gpu_data.get("vbios", {}).get("part_number")
 
-    # Get partition values with fallback for older amd-smi
-    compute_partition = gpu_data.get("partition", {}).get(
-        "accelerator_partition"
-    ) or gpu_data.get("partition", {}).get("compute_partition")
-    memory_partition = gpu_data.get("partition", {}).get("memory_partition")
+    # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
+    try:
+        partition_data = json.loads(
+            run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False)
+        )
+    except json.JSONDecodeError:
+        partition_data = {}
+
+    current_partition = partition_data.get("current_partition", [{}])[0]
+
+    # Extract partition values with gpu_data fallback (amd-smi < 26.0.0)
+    compute_partition = (
+        current_partition.get("accelerator_type")
+        or gpu_data.get("partition", {}).get("accelerator_partition")
+        or gpu_data.get("partition", {}).get("compute_partition")
+    )
+    memory_partition = current_partition.get("memory") or gpu_data.get(
+        "partition", {}
+    ).get("memory_partition")
 
     # Apply defaults and warnings
-    if compute_partition is None:
+    if not compute_partition:
         console_warning("Cannot detect accelerator partition from amd-smi.")
         console_warning("Applying default accelerator partition: SPX")
         compute_partition = "SPX"
 
-    if memory_partition is None:
+    if not memory_partition:
         console_warning("Cannot detect memory partition from amd-smi.")
 
     console_debug(

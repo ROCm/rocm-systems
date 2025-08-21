@@ -33,8 +33,8 @@ THE SOFTWARE.
 #include <vector>
 #include "shfl.hh"
 
-static constexpr auto shfl {
-R"(
+static constexpr auto shfl{
+    R"(
 template <typename T>
 __global__ void shflUpSum(T* a, int size) {
   T val = a[threadIdx.x];
@@ -62,8 +62,7 @@ __global__ void shflXorSum(T* a, int size) {
 }
 )"};
 
-template <typename T>
-void runTestShfl(int option) {
+template <typename T> void runTestShfl(int option) {
   using namespace std;
   hiprtcProgram prog;
   hiprtcCreateProgram(&prog,      // prog
@@ -72,16 +71,19 @@ void runTestShfl(int option) {
                       0, nullptr, nullptr);
 
   string str;
-  switch(option) {
-  case 1:
-  str = "shflUpSum<__half>"; break;
-  case 2:
-  str = "shflDownSum<__half>"; break;
-  case 3:
-  str = "shflXorSum<__half>"; break;
-  default:
-  INFO("Options 1,2,3 are supported, but the passed option is: " << option);
-  REQUIRE(false);
+  switch (option) {
+    case 1:
+      str = "shflUpSum<__half>";
+      break;
+    case 2:
+      str = "shflDownSum<__half>";
+      break;
+    case 3:
+      str = "shflXorSum<__half>";
+      break;
+    default:
+      INFO("Options 1,2,3 are supported, but the passed option is: " << option);
+      REQUIRE(false);
   }
 
   hiprtcAddNameExpression(prog, str.c_str());
@@ -132,11 +134,13 @@ void runTestShfl(int option) {
   HIP_CHECK(hipMemcpy(&a, d_a, bufferSize, hipMemcpyDefault));
   bool result;
   switch (option) {
-  case 1: //shflUpSum
-  result = compare(a[n - 1], cpuSum); break;
-  case 2: //shflDownSum
-  case 3: //shflXorSum
-  result = compare(a[0], cpuSum); break;
+    case 1:  // shflUpSum
+      result = compare(a[n - 1], cpuSum);
+      break;
+    case 2:  // shflDownSum
+    case 3:  // shflXorSum
+      result = compare(a[0], cpuSum);
+      break;
   }
 
   if (result) {
@@ -147,7 +151,6 @@ void runTestShfl(int option) {
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipModuleUnload(module));
   HIPRTC_CHECK(hiprtcDestroyProgram(&prog));
-
 }
 
 TEST_CASE("Unit_hiprtc_half_shuffle") {

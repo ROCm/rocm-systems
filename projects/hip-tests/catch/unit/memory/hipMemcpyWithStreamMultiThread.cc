@@ -510,6 +510,7 @@ void HipMemcpyWithStreamMultiThreadtests::TestkindDefaultForDtoD(bool& val_res) 
   }
 
   for (int i = 0; i < numDevices; ++i) {
+    HIP_CHECK_THREAD(hipSetDevice(i));
     hipLaunchKernelGGL(HipTest::vectorADD, dim3(blocks), dim3(threadsPerBlock), 0, stream[i],
                        static_cast<const int*>(A_d[i]), static_cast<const int*>(B_d[i]), C_d[i], N);
     HIP_CHECK_THREAD(hipGetLastError());

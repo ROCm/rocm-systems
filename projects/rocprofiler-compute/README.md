@@ -1,9 +1,3 @@
-[![Ubuntu 22.04](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml)
-[![RHEL 8](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml)
-[![Instinct](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml)
-[![Docs](https://github.com/ROCm/rocprofiler-compute/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/rocprofiler-compute/)
-[![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
-
 # ROCm Compute Profiler
 
 ## General
@@ -75,7 +69,7 @@ To build the binary we follow these steps:
 NOTE: Since RHEL 8 ships with glibc version 2.28, this standalone binary can only be run on environment with glibc version greater than 2.28.
 glibc version can be checked using `ldd --version` command.
 
-NOTE: libnss3.so shared library is required when using --roof-only option which generates roofline data in PDF format 
+NOTE: libnss3.so shared library is required when using --roof-only option which generates roofline data in PDF format
 
 To test the standalone binary provide the `--call-binary` option to pytest.
 
@@ -104,42 +98,3 @@ style reference is provided below for convenience:
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
 ```
-
-### Contribution Guidelines
-
-To ensure code quality and consistency, we use **Ruff**, a fast Python linter and formatter. Before submitting a pull request, please ensure your code is formatted and linted correctly.
-
------
-
-### Installing and Running Ruff
-
-Ruff is available on PyPI and can be installed using `pip`:
-
-```bash
-pip install ruff
-```
-
-Once installed, you can run Ruff from the command line. To check for linting errors and formatting issues, navigate to the project root and run:
-
-```bash
-ruff check .
-ruff format --check .
-```
-
-To automatically fix most of the issues detected, you can use the `--fix` flag with the `check` command and run the `format` command without the `--check` flag:
-
-```bash
-ruff check --fix .
-ruff format .
-```
-
------
-
-### Disabling Formatting for Specific Sections
-
-There may be instances where you need to disable Ruff's formatting on a specific block of code. You can do this using special comments:
-
-  * **`# fmt: off`** and **`# fmt: on`**: These comments can be used to disable and re-enable formatting for a block of code.
-  * **`# fmt: skip`**: This comment, placed at the end of a line, will prevent Ruff from formatting that specific statement.
-
-You can also disable specific linting rules for a line by using `# noqa: <rule_code>`.

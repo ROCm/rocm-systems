@@ -600,41 +600,11 @@ inline std::ostream& operator<<(std::ostream& os, const hip_api_id_t* s) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipTextureDesc& s) {
-  os << '{'
-  << '{'
-  << s.addressMode[0]
-  << ','
-  << s.addressMode[1]
-  << ','
-  << s.addressMode[2]
-  << '}'
-  << ','
-  << s.filterMode
-  << ','
-  << s.readMode
-  << ','
-  << s.sRGB
-  << ','
-  << '{'
-  << s.borderColor[0]
-  << ','
-  << s.borderColor[1]
-  << ','
-  << s.borderColor[2]
-  << ','
-  << s.borderColor[3]
-  << '}'
-  << ','
-  << s.normalizedCoords
-  << ','
-  << s.mipmapFilterMode
-  << ','
-  << s.mipmapLevelBias
-  << ','
-  << s.minMipmapLevelClamp
-  << ','
-  << s.maxMipmapLevelClamp
-  << '}';
+  os << '{' << '{' << s.addressMode[0] << ',' << s.addressMode[1] << ',' << s.addressMode[2] << '}'
+     << ',' << s.filterMode << ',' << s.readMode << ',' << s.sRGB << ',' << '{' << s.borderColor[0]
+     << ',' << s.borderColor[1] << ',' << s.borderColor[2] << ',' << s.borderColor[3] << '}' << ','
+     << s.normalizedCoords << ',' << s.mipmapFilterMode << ',' << s.mipmapLevelBias << ','
+     << s.minMipmapLevelClamp << ',' << s.maxMipmapLevelClamp << '}';
   return os;
 }
 
@@ -649,13 +619,7 @@ inline std::ostream& operator<<(std::ostream& os, const hipTextureDesc* s) {
 
 
 inline std::ostream& operator<<(std::ostream& os, const dim3& s) {
-  os << '{'
-  << s.x
-  << ','
-  << s.y
-  << ','
-  << s.z
-  << '}';
+  os << '{' << s.x << ',' << s.y << ',' << s.z << '}';
   return os;
 }
 
@@ -669,17 +633,7 @@ inline std::ostream& operator<<(std::ostream& os, const dim3* s) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipChannelFormatDesc& s) {
-  os << '{'
-  << s.x
-  << ','
-  << s.y
-  << ','
-  << s.z
-  << ','
-  << s.w
-  << ','
-  << s.f
-  << '}';
+  os << '{' << s.x << ',' << s.y << ',' << s.z << ',' << s.w << ',' << s.f << '}';
   return os;
 }
 
@@ -693,17 +647,8 @@ inline std::ostream& operator<<(std::ostream& os, const hipChannelFormatDesc* s)
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipMipmappedArray& s) {
-  os << '{'
-  << s.data
-  << ','
-  << s.desc
-  << ','
-  << s.width
-  << ','
-  << s.height
-  << ','
-  << s.depth
-  << '}';
+  os << '{' << s.data << ',' << s.desc << ',' << s.width << ',' << s.height << ',' << s.depth
+     << '}';
   return os;
 }
 
@@ -718,38 +663,24 @@ inline std::ostream& operator<<(std::ostream& os, const hipMipmappedArray* s) {
 
 
 inline std::ostream& operator<<(std::ostream& os, const hipResourceDesc& s) {
-  os << '{'
-  << s.resType
-  << ','
-  << '{';
+  os << '{' << s.resType << ',' << '{';
 
   switch (s.resType) {
-  case hipResourceTypeLinear:
-    os << s.res.linear.devPtr
-    << ','
-    << s.res.linear.desc
-    << ','
-    << s.res.linear.sizeInBytes;
-    break;
-  case hipResourceTypePitch2D:
-    os << s.res.pitch2D.devPtr
-    << ','
-    << s.res.pitch2D.desc
-    << ','
-    << s.res.pitch2D.width
-    << ','
-    << s.res.pitch2D.height
-    << ','
-    << s.res.pitch2D.pitchInBytes;
-    break;
-  case hipResourceTypeArray:
-    os << s.res.array.array;
-    break;
-  case hipResourceTypeMipmappedArray:
-    os <<s.res.mipmap.mipmap;
-    break;
-  default:
-    break;
+    case hipResourceTypeLinear:
+      os << s.res.linear.devPtr << ',' << s.res.linear.desc << ',' << s.res.linear.sizeInBytes;
+      break;
+    case hipResourceTypePitch2D:
+      os << s.res.pitch2D.devPtr << ',' << s.res.pitch2D.desc << ',' << s.res.pitch2D.width << ','
+         << s.res.pitch2D.height << ',' << s.res.pitch2D.pitchInBytes;
+      break;
+    case hipResourceTypeArray:
+      os << s.res.array.array;
+      break;
+    case hipResourceTypeMipmappedArray:
+      os << s.res.mipmap.mipmap;
+      break;
+    default:
+      break;
   }
 
   os << '}';
@@ -767,37 +698,11 @@ inline std::ostream& operator<<(std::ostream& os, const hipResourceDesc* s) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const textureReference& s) {
-  os << '{'
-  << s.normalized
-  << ','
-  << s.readMode
-  << ','
-  << s.filterMode
-  << ','
-  << '{'
-  << s.addressMode[0]
-  << ','
-  << s.addressMode[1]
-  << ','
-  << s.addressMode[2]
-  << '}'
-  << ','
-  << s.channelDesc
-  << ','
-  << s.sRGB
-  << ','
-  << s.maxAnisotropy
-  << ','
-  << s.mipmapFilterMode
-  << ','
-  << s.mipmapLevelBias
-  << ','
-  << s.minMipmapLevelClamp
-  << ','
-  << s.maxMipmapLevelClamp
-  << ','
-  << s.textureObject
-  << '}';
+  os << '{' << s.normalized << ',' << s.readMode << ',' << s.filterMode << ',' << '{'
+     << s.addressMode[0] << ',' << s.addressMode[1] << ',' << s.addressMode[2] << '}' << ','
+     << s.channelDesc << ',' << s.sRGB << ',' << s.maxAnisotropy << ',' << s.mipmapFilterMode << ','
+     << s.mipmapLevelBias << ',' << s.minMipmapLevelClamp << ',' << s.maxMipmapLevelClamp << ','
+     << s.textureObject << '}';
   return os;
 }
 
@@ -826,23 +731,9 @@ inline std::ostream& operator<<(std::ostream& os, const hipError_t* s) {
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipResourceViewDesc& s) {
-  os << '{'
-  << s.format
-  << ','
-  << s.width
-  << ','
-  << s.height
-  << ','
-  << s.depth
-  << ','
-  << s.firstMipmapLevel
-  << ','
-  << s.lastMipmapLevel
-  << ','
-  << s.firstLayer
-  << ','
-  << s.lastLayer
-  << '}';
+  os << '{' << s.format << ',' << s.width << ',' << s.height << ',' << s.depth << ','
+     << s.firstMipmapLevel << ',' << s.lastMipmapLevel << ',' << s.firstLayer << ',' << s.lastLayer
+     << '}';
   return os;
 }
 
@@ -856,15 +747,7 @@ inline std::ostream& operator<<(std::ostream& os, const hipResourceViewDesc* s) 
 }
 
 inline std::ostream& operator<<(std::ostream& os, const HIP_ARRAY_DESCRIPTOR& s) {
-  os << '{'
-  << s.Width
-  << ','
-  << s.Height
-  << ','
-  << s.Format
-  << ','
-  << s.NumChannels
-  << '}';
+  os << '{' << s.Width << ',' << s.Height << ',' << s.Format << ',' << s.NumChannels << '}';
   return os;
 }
 
@@ -878,19 +761,8 @@ inline std::ostream& operator<<(std::ostream& os, const HIP_ARRAY_DESCRIPTOR* s)
 }
 
 inline std::ostream& operator<<(std::ostream& os, const HIP_ARRAY3D_DESCRIPTOR& s) {
-  os << '{'
-  << s.Width
-  << ','
-  << s.Height
-  << ','
-  << s.Depth
-  << ','
-  << s.Format
-  << ','
-  << s.NumChannels
-  << ','
-  << s.Flags
-  << '}';
+  os << '{' << s.Width << ',' << s.Height << ',' << s.Depth << ',' << s.Format << ','
+     << s.NumChannels << ',' << s.Flags << '}';
   return os;
 }
 
@@ -904,23 +776,17 @@ inline std::ostream& operator<<(std::ostream& os, const HIP_ARRAY3D_DESCRIPTOR* 
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipExtent& s) {
-  os << '{'
-  << s.width
-  << ','
-  << s.height
-  << ','
-  << s.depth
-  << '}';
+  os << '{' << s.width << ',' << s.height << ',' << s.depth << '}';
   return os;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipIpcEventHandle_t& s) {
-  //TODO fill in later
+  // TODO fill in later
   return os;
 }
 
 inline std::ostream& operator<<(std::ostream& os, const hipIpcEventHandle_t* s) {
-  //TODO fill in later
+  // TODO fill in later
   return os;
 }
 
@@ -935,5 +801,31 @@ inline std::ostream& operator<<(std::ostream& os, const hipPitchedPtr* p) {
   } else {
     os << "nullptr";
   }
+  return os;
+}
+
+inline std::ostream& operator<<(std::ostream& os, const hipMemLocation& s) {
+  os << "{type=";
+  switch (s.type) {
+    case hipMemLocationTypeInvalid:
+      os << "hipMemLocationTypeInvalid";
+      break;
+    case hipMemLocationTypeDevice:
+      os << "hipMemLocationTypeDevice";
+      break;
+    case hipMemLocationTypeHost:
+      os << "hipMemLocationTypeHost";
+      break;
+    case hipMemLocationTypeHostNuma:
+      os << "hipMemLocationTypeHostNuma";
+      break;
+    case hipMemLocationTypeHostNumaCurrent:
+      os << "hipMemLocationTypeHostNumaCurrent";
+      break;
+    default:
+      os << static_cast<int>(s.type);
+      break;
+  }
+  os << ", id=" << s.id << "}";
   return os;
 }

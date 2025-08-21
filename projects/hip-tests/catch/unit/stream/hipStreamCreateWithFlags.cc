@@ -67,9 +67,9 @@ TEST_CASE("Unit_hipStreamCreateWithFlags_DefaultStreamInteraction") {
   constexpr auto delay = std::chrono::milliseconds(500);
 
   SECTION("default stream waiting for created stream") {
-    const hipError_t expectedError = (flagUnderTest == hipStreamDefault) && (defaultStream == nullptr)
-      ? hipErrorNotReady
-      : hipSuccess;
+    const hipError_t expectedError =
+        (flagUnderTest == hipStreamDefault) && (defaultStream == nullptr) ? hipErrorNotReady
+                                                                          : hipSuccess;
     LaunchDelayKernel(delay, stream);
     REQUIRE(hipStreamQuery(defaultStream) == expectedError);
   }

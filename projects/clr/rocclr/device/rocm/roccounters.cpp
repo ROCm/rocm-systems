@@ -24,11 +24,9 @@
 
 namespace amd::roc {
 
-hsa_status_t PerfCounterCallback(
-  hsa_ven_amd_aqlprofile_info_type_t  info_type,
-  hsa_ven_amd_aqlprofile_info_data_t* info_data,
-  void* callback_data)
-{
+hsa_status_t PerfCounterCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
+                                 hsa_ven_amd_aqlprofile_info_data_t* info_data,
+                                 void* callback_data) {
   typedef std::vector<hsa_ven_amd_aqlprofile_info_data_t> passed_data_t;
 
   if (info_type == HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) {
@@ -248,7 +246,7 @@ static constexpr BlockNameIdMapType gfx9BlockIdOrcaToRocr[gfx9BlockIdOrcaToRocrS
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // WD - 92
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // CPG - 93
     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_CPC, 0},     // CPC - 94
-// blocks that are not defined in GSL
+                                                    // blocks that are not defined in GSL
     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATC, 0},     // ATC - 97
     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_ATCL2, 0},   // ATCL2  - 98
     {HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_MCVML2, 0},  // MCVML2 - 99
@@ -268,15 +266,15 @@ static constexpr BlockNameIdMapType gfx9BlockIdOrcaToRocr[gfx9BlockIdOrcaToRocrS
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0x0d},   // EA - 113
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0x0e},   // EA - 114
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0x0f},   // EA - 115
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},     // RPB - 116
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},     // RMI - 117
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 1},     // RMI - 118
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 2},     // RMI - 119
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 3},     // RMI - 120
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 4},     // RMI - 121
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 5},     // RMI - 122
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 6},     // RMI - 123
-    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 7},     // RMI - 124
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // RPB - 116
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // RMI - 117
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 1},      // RMI - 118
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 2},      // RMI - 119
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 3},      // RMI - 120
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 4},      // RMI - 121
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 5},      // RMI - 122
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 6},      // RMI - 123
+    {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 7},      // RMI - 124
 };
 
 static constexpr size_t gfx10BlockIdOrcaToRocrSize = 139;
@@ -422,17 +420,16 @@ static constexpr BlockNameIdMapType gfx10BlockIdOrcaToRocr[gfx10BlockIdOrcaToRoc
     {HSA_VEN_AMD_AQLPROFILE_BLOCKS_NUMBER, 0},      // UTCL1    - 138
 };
 
-  //! Constructor for the ROC PerfCounter object
-PerfCounter::PerfCounter(const Device& device,   //!< A ROC device object
-  uint32_t blockIndex,     //!< HW block index
-  uint32_t counterIndex,   //!< Counter index (Counter register) within the block
-  uint32_t eventIndex)     //!< Event index (Counter selection) for profiling
-      : roc_device_(device),
-        profileRef_(nullptr) {
-
-  info_.blockIndex_ = blockIndex;       // Block name + block index
-  info_.counterIndex_ = counterIndex;   // Ignored as not being used in PPT library
-  info_.eventIndex_ = eventIndex;       // Counter Event Selection (counter_id)
+//! Constructor for the ROC PerfCounter object
+PerfCounter::PerfCounter(
+    const Device& device,   //!< A ROC device object
+    uint32_t blockIndex,    //!< HW block index
+    uint32_t counterIndex,  //!< Counter index (Counter register) within the block
+    uint32_t eventIndex)    //!< Event index (Counter selection) for profiling
+    : roc_device_(device), profileRef_(nullptr) {
+  info_.blockIndex_ = blockIndex;      // Block name + block index
+  info_.counterIndex_ = counterIndex;  // Ignored as not being used in PPT library
+  info_.eventIndex_ = eventIndex;      // Counter Event Selection (counter_id)
 
   // these block indices are valid for the SI (Gfx8) & Gfx9 devices
   switch (roc_device_.isa().versionMajor()) {
@@ -487,20 +484,17 @@ uint64_t PerfCounter::getInfo(uint64_t infoType) const {
       return info()->eventIndex_;
     }
     case CL_PERFCOUNTER_DATA: {
-
       const hsa_ven_amd_aqlprofile_profile_t* profile = profileRef_->profile();
 
       std::vector<hsa_ven_amd_aqlprofile_info_data_t> data;
-      profileRef_->api()->hsa_ven_amd_aqlprofile_iterate_data(profile,
-                                                              PerfCounterCallback,
-                                                              &data);
+      profileRef_->api()->hsa_ven_amd_aqlprofile_iterate_data(profile, PerfCounterCallback, &data);
 
       uint64_t result = 0;
       for (const auto& it : data) {
         if (it.pmc_data.event.block_name == event_.block_name &&
             it.pmc_data.event.block_index == event_.block_index &&
             it.pmc_data.event.counter_id == event_.counter_id) {
-            result += it.pmc_data.result;
+          result += it.pmc_data.result;
         }
       }
       return result;
@@ -512,7 +506,6 @@ uint64_t PerfCounter::getInfo(uint64_t infoType) const {
 }
 
 PerfCounter::~PerfCounter() {
-
   if (profileRef_ != nullptr) {
     profileRef_->release();
     profileRef_ = nullptr;
@@ -521,7 +514,6 @@ PerfCounter::~PerfCounter() {
 
 
 bool PerfCounterProfile::initialize() {
-
   // save the current command and output buffer information
   hsa_ven_amd_aqlprofile_descriptor_t cmd_buf = profile_.command_buffer;
   hsa_ven_amd_aqlprofile_descriptor_t out_buf = profile_.output_buffer;
@@ -537,7 +529,7 @@ bool PerfCounterProfile::initialize() {
     return false;
   }
 
-  const uint32_t alignment = amd::Os::pageSize();     // use page alignment
+  const uint32_t alignment = amd::Os::pageSize();  // use page alignment
 
   if (cmd_buf.ptr != nullptr && cmd_buf.size != profile_.command_buffer.size) {
     roc_device_.memFree(cmd_buf.ptr, cmd_buf.size);
@@ -545,12 +537,11 @@ bool PerfCounterProfile::initialize() {
   }
 
   if (cmd_buf.ptr == nullptr) {
-    void *buf_ptr = roc_device_.hostAlloc(profile_.command_buffer.size, alignment,
+    void* buf_ptr = roc_device_.hostAlloc(profile_.command_buffer.size, alignment,
                                           Device::MemorySegment::kAtomics);
     if (buf_ptr != nullptr) {
       profile_.command_buffer.ptr = buf_ptr;
-    }
-    else {
+    } else {
       LogError("Failed to allocate profile counter command buffer");
       return false;
     }
@@ -562,12 +553,11 @@ bool PerfCounterProfile::initialize() {
   }
 
   if (out_buf.ptr == nullptr) {
-    void *buf_ptr = roc_device_.hostAlloc(profile_.output_buffer.size, alignment,
+    void* buf_ptr = roc_device_.hostAlloc(profile_.output_buffer.size, alignment,
                                           Device::MemorySegment::kAtomics);
     if (buf_ptr != nullptr) {
       profile_.output_buffer.ptr = buf_ptr;
-    }
-    else {
+    } else {
       roc_device_.hostFree(profile_.command_buffer.ptr, profile_.command_buffer.size);
       LogError("Failed to allocate profile counter output buffer");
       return false;
@@ -584,7 +574,6 @@ bool PerfCounterProfile::initialize() {
 }
 
 hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStartPacket() {
-
   profile_.events = &events_[0];
   profile_.event_count = events_.size();
 
@@ -598,7 +587,6 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStartPacket() {
 }
 
 hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStopPacket() {
-
   profile_.events = &events_[0];
   profile_.event_count = events_.size();
 
@@ -615,7 +603,6 @@ hsa_ext_amd_aql_pm4_packet_t* PerfCounterProfile::createStopPacket() {
 }
 
 PerfCounterProfile::~PerfCounterProfile() {
-
   if (completionSignal_.handle != 0) {
     hsa_signal_destroy(completionSignal_);
   }
@@ -630,4 +617,3 @@ PerfCounterProfile::~PerfCounterProfile() {
 }
 
 }  // namespace amd::roc
-

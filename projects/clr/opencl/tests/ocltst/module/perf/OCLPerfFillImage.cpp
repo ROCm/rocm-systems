@@ -50,7 +50,7 @@ OCLPerfFillImage::OCLPerfFillImage() {
 
 OCLPerfFillImage::~OCLPerfFillImage() {}
 
-void OCLPerfFillImage::open(unsigned int test, char *units, double &conversion,
+void OCLPerfFillImage::open(unsigned int test, char* units, double& conversion,
                             unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "Error opening test");
@@ -58,16 +58,15 @@ void OCLPerfFillImage::open(unsigned int test, char *units, double &conversion,
   bufSize_ = sizeList[test % num_sizes_];
 
   cl_image_format format = {CL_RGBA, CL_UNSIGNED_INT8};
-  buffer_ = _wrapper->clCreateImage2D(context_, CL_MEM_WRITE_ONLY, &format,
-                                      bufSize_, bufSize_, 0, NULL, &error_);
+  buffer_ = _wrapper->clCreateImage2D(context_, CL_MEM_WRITE_ONLY, &format, bufSize_, bufSize_, 0,
+                                      NULL, &error_);
   CHECK_RESULT(buffer_ == 0, "clCreateImage2D(imageBuffer_) failed");
 
   return;
 }
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
 void OCLPerfFillImage::run(void) {
   CPerfCounter timer;
@@ -80,9 +79,8 @@ void OCLPerfFillImage::run(void) {
   timer.Reset();
   timer.Start();
   for (size_t i = 0; i < iter; ++i) {
-    error_ = clEnqueueFillImage(cmdQueues_[_deviceId], buffer_,
-                                (const void *)&fillColor, origin, region, 0,
-                                NULL, NULL);
+    error_ = clEnqueueFillImage(cmdQueues_[_deviceId], buffer_, (const void*)&fillColor, origin,
+                                region, 0, NULL, NULL);
     CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueFillImage() failed");
   }
   _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -90,20 +88,17 @@ void OCLPerfFillImage::run(void) {
 
   char buf[256];
 
-  SNPRINTF(buf, sizeof(buf), "FillImage (GB/s) for %4dx%4d ", (int)bufSize_,
-           (int)bufSize_);
+  SNPRINTF(buf, sizeof(buf), "FillImage (GB/s) for %4dx%4d ", (int)bufSize_, (int)bufSize_);
 
   testDescString = buf;
   double sec = timer.GetElapsedTime();
-  _perfInfo = static_cast<float>(
-      (bufSize_ * bufSize_ * 4 * iter * (double)(1e-09)) / sec);
+  _perfInfo = static_cast<float>((bufSize_ * bufSize_ * 4 * iter * (double)(1e-09)) / sec);
 }
 
 unsigned int OCLPerfFillImage::close(void) {
   if (buffer_) {
     error_ = _wrapper->clReleaseMemObject(buffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(buffer) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(buffer) failed");
   }
   return OCLTestImp::close();
 }

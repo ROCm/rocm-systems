@@ -37,7 +37,7 @@ usage()
     echo ""
     echo "Usage: ${BASH_SOURCE[0]} <OPTIONS> -- <test-release.sh OPTIONS>"
     echo "  e.g:"
-    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 20.04 --rocm-versions 5.0 5.1 -- --stgz /path/to/stgz/installer"
+    echo "       ${BASH_SOURCE[0]} --distro ubuntu --versions 22.04 --rocm-versions 6.4 6.3 -- --stgz /path/to/stgz/installer"
 }
 
 send-error()
@@ -70,7 +70,7 @@ reset-last
 
 : ${USER:=$(whoami)}
 : ${DISTRO:=ubuntu}
-: ${VERSIONS:=22.04 20.04}
+: ${VERSIONS:=22.04}
 : ${ROCM_VERSIONS:=6.2}
 
 n=0

@@ -54,6 +54,15 @@ bool is_rocp_disabled() {
                      [&value_str](const char* val) { return value_str == val; });
 }
 
+bool is_rocprofiler_metrics_path_set() {
+  const char* rocprofiler_metrics_path = getenv("ROCPROFILER_METRICS_PATH");
+  if (rocprofiler_metrics_path == nullptr) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
 rdc_status_t rdc_module_init(uint64_t /*flags*/) {
   if (is_rocp_disabled()) {
     // rocprofiler does NOT work in gtest.
@@ -67,19 +76,81 @@ rdc_status_t rdc_module_init(uint64_t /*flags*/) {
     return RDC_ST_DISABLED_MODULE;
   }
 
-  Dl_info dl_info = {};
-  RDC_LOG(RDC_DEBUG, "Checking if rocprofiler is available");
-  if (dladdr(reinterpret_cast<const void*>(rdc_module_init), &dl_info) != 0) {
-    const std::filesystem::path rdc_path(dl_info.dli_fname);
-    const auto profiler_metrics_path =
-        rdc_path.parent_path().parent_path().parent_path() / "share/rocprofiler-sdk";
-    const auto rocprofiler_exists = std::filesystem::exists(profiler_metrics_path);
-    if (!rocprofiler_exists) {
-      RDC_LOG(RDC_ERROR, "rocprofiler metrics are not available at " << profiler_metrics_path);
+  if (is_rocprofiler_metrics_path_set() == false) {
+    RDC_LOG(RDC_DEBUG, "Trying to find ROCPROFILER_METRICS_PATH");
+
+    std::filesystem::path profiler_metrics_path;
+    bool found_path = false;
+
+    // Strategy 1: Find profiler_metrics_path relative to rocprofiler-sdk library
+    Dl_info rocprofiler_dl_info = {};
+    void* rocprofiler_symbol = dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized");
+    if (rocprofiler_symbol != nullptr && dladdr(rocprofiler_symbol, &rocprofiler_dl_info) != 0) {
+      // NOTE: filesystem::canonical() returns absolute path, we need this for parent_path to work
+      // properly.
+      //
+      // bad example without canonical path:
+      //   rocprofiler is found in /opt/rocm/lib/rdc/../librocprofiler-sdk.so.
+      //   location.parent_path().parent_path() will return /opt/rocm/lib/rdc.
+      //   we're trying to find /opt/rocm!
+      // with canonical path:
+      //   rocprofiler is found in /opt/rocm/lib/rocprofiler-sdk.so
+      //   location.parent_path().parent_path() will return /opt/rocm/.
+      //   from here we can easily find /opt/rocm/share/rocprofiler-sdk
+      try {
+        const std::filesystem::path rocprofiler_lib_path(
+            std::filesystem::canonical(rocprofiler_dl_info.dli_fname));
+        RDC_LOG(RDC_DEBUG, "Found rocprofiler library at "
+                               << rocprofiler_lib_path << " : "
+                               << rocprofiler_lib_path.parent_path().parent_path());
+
+        profiler_metrics_path =
+            rocprofiler_lib_path.parent_path().parent_path() / "share/rocprofiler-sdk";
+        if (std::filesystem::exists(profiler_metrics_path)) {
+          found_path = true;
+          RDC_LOG(RDC_DEBUG, "Found rocprofiler metrics via rocprofiler library location at "
+                                 << profiler_metrics_path);
+        }
+      } catch (const std::filesystem::filesystem_error& e) {
+        RDC_LOG(RDC_ERROR, "Failed to resolve rocprofiler library path: " << e.what());
+      }
+    }
+
+    // Strategy 2: Find profiler_metrics_path relative to rdc
+    if (!found_path) {
+      RDC_LOG(RDC_DEBUG, "Rocprofiler library detection failed, trying fallback paths");
+      Dl_info rdc_dl_info = {};
+      if (dladdr(reinterpret_cast<const void*>(rdc_module_init), &rdc_dl_info) != 0) {
+        try {
+          const std::filesystem::path rdc_path(std::filesystem::canonical(rdc_dl_info.dli_fname));
+          RDC_LOG(RDC_DEBUG, "Found rdc library at " << rdc_path);
+          profiler_metrics_path =
+              rdc_path.parent_path().parent_path().parent_path() / "share/rocprofiler-sdk";
+          if (std::filesystem::exists(profiler_metrics_path)) {
+            found_path = true;
+            RDC_LOG(RDC_DEBUG,
+                    "Found rocprofiler metrics via fallback path at " << profiler_metrics_path);
+          }
+        } catch (const std::filesystem::filesystem_error& e) {
+          RDC_LOG(RDC_ERROR, "Failed to resolve rdc library path: " << e.what());
+        }
+      }
+    }
+
+    if (!found_path) {
+      RDC_LOG(RDC_ERROR,
+              "rocprofiler metrics are not available. Could not locate rocprofiler-sdk share "
+              "directory.");
+      RDC_LOG(RDC_ERROR,
+              "Make sure rocprofiler-sdk is properly installed or set ROCPROFILER_METRICS_PATH "
+              "manually.");
       return RDC_ST_FAIL_LOAD_MODULE;
     }
+
     RDC_LOG(RDC_DEBUG, "rocprofiler metrics are available at " << profiler_metrics_path);
     setenv("ROCPROFILER_METRICS_PATH", profiler_metrics_path.c_str(), 0);
+  } else {
+    RDC_LOG(RDC_DEBUG, "Using ROCPROFILER_METRICS_PATH from environment variable");
   }
 
   rocp_p = std::make_unique<amd::rdc::RdcRocpBase>();
