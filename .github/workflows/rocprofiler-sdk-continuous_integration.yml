@@ -93,7 +93,7 @@ jobs:
         sed -i "s/\/30.10/\/.30.10/" /etc/apt/sources.list.d/amdgpu*.list
         sed -i "s|rocm/apt/7.0|rocm/apt/.apt_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/apt/sources.list.d/rocm.list
         apt-get update
-        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev rccl-dev rocdecode-dev rocjpeg-dev
+        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev
         add-apt-repository ppa:git-core/ppa
         apt-get update
         apt-get install -y git
