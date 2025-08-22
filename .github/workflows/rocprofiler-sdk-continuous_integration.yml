@@ -81,6 +81,8 @@ jobs:
       - name: Get the latest therock build
         id: therock
         run: |
+          apt-get install -y python3-pip
+          python3 -m pip install -U pip
           python3 -m pip install -U awscli
           KEY=$(aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
