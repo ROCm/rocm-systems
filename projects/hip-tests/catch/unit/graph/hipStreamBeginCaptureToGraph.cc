@@ -861,14 +861,12 @@ TEST_CASE("Unit_hipStreamBeginCaptureToGraph_Negative") {
   HIP_CHECK(hipStreamCreate(&stream));
   HIP_CHECK(hipGraphCreate(&graph, 0));
   SECTION("Null graph") {
-    REQUIRE(hipErrorInvalidValue ==
-            hipStreamBeginCaptureToGraph(stream, nullptr, nullptr, nullptr, 0,
-                                         hipStreamCaptureModeGlobal));
+    REQUIRE(hipErrorInvalidValue == hipStreamBeginCaptureToGraph(stream, nullptr, nullptr, nullptr,
+                                                                 0, hipStreamCaptureModeGlobal));
   }
   SECTION("Null dependencies") {
-    REQUIRE(hipErrorInvalidValue ==
-            hipStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 1,
-                                         hipStreamCaptureModeGlobal));
+    REQUIRE(hipErrorInvalidValue == hipStreamBeginCaptureToGraph(stream, graph, nullptr, nullptr, 1,
+                                                                 hipStreamCaptureModeGlobal));
   }
   SECTION("Invalid mode") {
     REQUIRE(hipErrorInvalidValue ==

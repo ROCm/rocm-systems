@@ -615,7 +615,7 @@ bool run_erfinv() {
 TEST_CASE("Unit_hipTrigDeviceFunc_Double") {
   bool result = false;
   result = run_sincos() && run_sincospi() && run_llrint() && run_norm3d() && run_norm4d() &&
-      run_rnorm3d() && run_rnorm4d() && run_rnorm() && run_lround() && run_llround() &&
-      run_rint() && run_rhypot() && run_erfinv();
+           run_rnorm3d() && run_rnorm4d() && run_rnorm() && run_lround() && run_llround() &&
+           run_rint() && run_rhypot() && run_erfinv();
   REQUIRE(result == true);
 }

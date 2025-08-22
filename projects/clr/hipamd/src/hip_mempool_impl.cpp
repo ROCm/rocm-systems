@@ -422,9 +422,9 @@ hipError_t MemoryPool::GetAttribute(hipMemPoolAttr attr, void* value) {
       break;
     case hipMemPoolAttrReservedMemCurrent:
       // All allocated memory by the pool in OS
-      *reinterpret_cast<uint64_t*>(value) = (state_.use_vm_heap_)
-          ? MappedSize()
-          : (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
+      *reinterpret_cast<uint64_t*>(value) =
+          (state_.use_vm_heap_) ? MappedSize()
+                                : (busy_heap_.GetTotalSize() + free_heap_.GetTotalSize());
       break;
     case hipMemPoolAttrReservedMemHigh:
       // High watermark of all allocated memory in OS, since the last reset

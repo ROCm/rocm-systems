@@ -130,7 +130,7 @@ template <class S> class note_section_accessor_template {
       Elf_Word descsz = convertor(*(const Elf_Word*)(data + current + sizeof(namesz)));
 
       current += 3 * sizeof(Elf_Word) + ((namesz + align - 1) / align) * align +
-          ((descsz + align - 1) / align) * align;
+                 ((descsz + align - 1) / align) * align;
     }
   }
 
