@@ -29,7 +29,7 @@ import re
 from .importer import RocpdImportData
 from .query import export_sqlite_query
 from . import output_config
-from . import libpyrocpd
+from . import bindings
 
 
 def write_sql_query_to_csv(
@@ -199,14 +199,14 @@ def build_agent_id_string(agent_index_value, prefix=""):
 
     agent_prefix = prefix + "_" if prefix else ""
 
-    if agent_index_value == libpyrocpd.agent_indexing.node:  # absolute
+    if agent_index_value == bindings.agent_indexing.node:  # absolute
         return f"'Agent ' || {agent_prefix}agent_abs_index"
     elif (
-        agent_index_value == libpyrocpd.agent_indexing.logical_node
+        agent_index_value == bindings.agent_indexing.logical_node
     ):  # relative (default)
         return f"'Agent ' || {agent_prefix}agent_log_index"
     elif (
-        agent_index_value == libpyrocpd.agent_indexing.logical_node_type
+        agent_index_value == bindings.agent_indexing.logical_node_type
     ):  # type-relative
         return f"{agent_prefix}agent_type || ' ' || {agent_prefix}agent_type_index"
     else:

@@ -225,6 +225,7 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
         bindings.py
         csv.py
         features.py
+        functions.py
         importer.py
         __init__.py
         __main__.py
