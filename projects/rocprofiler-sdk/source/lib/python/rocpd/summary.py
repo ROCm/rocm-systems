@@ -49,7 +49,8 @@ def check_function_availability(connection, function_name):
     try:
         # Try the modern approach first (SQLite 3.30.0+)
         cursor.execute(
-            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)", (function_name,)
+            "SELECT EXISTS(SELECT 1 FROM pragma_function_list WHERE name=?)",
+            (function_name,)
         )
         result = cursor.fetchone()[0]
         return bool(result)
