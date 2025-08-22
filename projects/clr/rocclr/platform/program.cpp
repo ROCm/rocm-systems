@@ -170,8 +170,8 @@ int32_t Program::addDeviceProgram(Device& device, const void* image, size_t leng
       }
     }
     options->oVariables->Legacy = !device.settings().useLightning_
-        ? isAMDILTarget(*amd::aclutGetTargetInfo(binary))
-        : isHSAILTarget(*amd::aclutGetTargetInfo(binary));
+                                      ? isAMDILTarget(*amd::aclutGetTargetInfo(binary))
+                                      : isHSAILTarget(*amd::aclutGetTargetInfo(binary));
     amd::Hsail::BinaryFini(binary);
   }
 #endif  // defined(WITH_COMPILER_LIB)
@@ -522,9 +522,8 @@ int32_t Program::build(const std::vector<Device*>& devices, const char* options,
   for (const auto& it : devices) {
     option::Options parsedOptions;
     constexpr bool LinkOptsOnly = false;
-    if ((language_ != HIP) &&
-        !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
-                         it->settings().useLightning_)) {
+    if ((language_ != HIP) && !ParseAllOptions(cppstr, parsedOptions, optionChangable, LinkOptsOnly,
+                                               it->settings().useLightning_)) {
       programLog_ = parsedOptions.optionsLog();
       LogError("Parsing compile options failed.");
       return CL_INVALID_COMPILER_OPTIONS;

@@ -2166,18 +2166,18 @@ bool KernelBlitManager::fillBuffer(device::Memory& memory, const void* pattern, 
     for (auto& packed_obj : packed_vector) {
       constexpr uint32_t kFillType = FillBufferAligned;
       uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-          ? HostBlitManager::FillBufferInfo::kExtendedSize
-          : patternSize;
+                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
+                                   : patternSize;
       size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
       uint64_t koffset = overall_offset;
       overall_offset += packed_obj.fill_size_;
 
       size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0 ? 2 * sizeof(uint64_t)
-          : (kpattern_size & 0x7) == 0                ? sizeof(uint64_t)
-          : (kpattern_size & 0x3) == 0                ? sizeof(uint32_t)
-          : (kpattern_size & 0x1) == 0                ? sizeof(uint16_t)
-                                                      : sizeof(uint8_t);
+      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
+                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
+                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
+                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
+                                                        : sizeof(uint8_t);
 
       // Program kernels arguments for the fill operation
       Memory* mem = &gpuMem(memory);
@@ -2302,9 +2302,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   constexpr size_t kFillImageThreshold = 256 * 256;
 
   // Use host fill if memory has direct access and image is small
-  if (setup_.disableFillImage_ ||
-      (gpuMem(memory).isHostMemDirectAccess() &&
-       (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
+  if (setup_.disableFillImage_ || (gpuMem(memory).isHostMemDirectAccess() &&
+                                   (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
     gpu().releaseGpuMemoryFence();
 
     result = HostBlitManager::fillImage(memory, pattern, origin, size, entire);

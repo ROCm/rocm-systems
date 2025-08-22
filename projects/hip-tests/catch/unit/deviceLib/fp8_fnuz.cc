@@ -623,8 +623,8 @@ template <typename T> __FP8_DEVICE__ void e4m3_fnuz_fp8_cvt(T val, float* cvt1, 
 
   __hip_fp8_e4m3_fnuz tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
   ;
   *cvt2 = tmp1;
 #else
@@ -641,8 +641,8 @@ template <typename T> __FP8_DEVICE__ void e5m2_fnuz_fp8_cvt(T val, float* cvt1, 
 
   __hip_fp8_e5m2_fnuz tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
   ;
   *cvt2 = tmp1;
 #else

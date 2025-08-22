@@ -76,9 +76,8 @@ template <typename T> void Memcpy3D<T>::SetDefaultData() {
 /*
  * Constructor initalized width,depth and height
  */
-template <typename T>
-Memcpy3D<T>::Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
-                      hipChannelFormatKind l_format) {
+template <typename T> Memcpy3D<T>::Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
+                                            hipChannelFormatKind l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;
