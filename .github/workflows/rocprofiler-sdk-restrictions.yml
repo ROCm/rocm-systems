@@ -45,7 +45,7 @@ jobs:
       working-directory: projects/rocprofiler-sdk
       run: |
         set +e
-        FILES="$(find ${FOLDERS} -type f)"
+        FILES="$(find ${FOLDERS} -type f -not -name "*.md" -not -name "*.txt")"
         GREP="$(grep -E -n 'std::regex|<regex>' ${FILES})"
         if [ "${GREP}" != "" ]; then
           echo -e "\nError! std::regex is not allowed in ${FOLDERS}...\n"
