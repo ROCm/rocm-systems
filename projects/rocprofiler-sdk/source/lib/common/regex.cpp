@@ -70,7 +70,8 @@ struct Node
     struct Quant
     {
         std::unique_ptr<Node> sub;
-        size_t                min = 0, max = std::numeric_limits<size_t>::max();
+        size_t                min    = 0;
+        size_t                max    = std::numeric_limits<size_t>::max();
         bool                  greedy = true;
     };
     std::unique_ptr<Quant> quant;  // for QUANT
@@ -307,7 +308,8 @@ struct Parser
             i = save;
             return {0, 0, false};
         }
-        size_t mn = *m, mx = mn;
+        size_t mn = *m;
+        size_t mx = mn;
         if(eat('}')) return {mn, mx, true};
         if(!eat(','))
         {
@@ -491,7 +493,8 @@ struct FastMatcher
 
                 std::vector<size_t> ends;
                 ends.push_back(pos);  // 0 reps -> pos
-                size_t cur = pos, count = 0;
+                size_t cur   = pos;
+                size_t count = 0;
                 while(count < q.max)
                 {
                     auto r = match(q.sub.get(), cur);
@@ -533,7 +536,8 @@ struct FastMatcher
 
         std::vector<size_t> ends;
         ends.push_back(pos);  // 0 reps -> pos
-        size_t cur = pos, count = 0;
+        size_t cur   = pos;
+        size_t count = 0;
         while(count < q.max)
         {
             auto r = match(q.sub.get(), cur);
@@ -613,7 +617,8 @@ struct FastMatcher
                 const auto&         q = *n->quant;
                 std::vector<size_t> ends;
                 ends.push_back(i);  // 0 reps
-                size_t pos = i, count = 0;
+                size_t pos   = i;
+                size_t count = 0;
                 while(count < q.max)
                 {
                     auto r = match(q.sub.get(), pos);
@@ -694,7 +699,8 @@ struct CaptureMatcher
                 std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
                 snaps.push_back(groups);
 
-                size_t cur = pos, count = 0;
+                size_t cur   = pos;
+                size_t count = 0;
                 while(count < q.max)
                 {
                     auto saved = groups;
@@ -753,7 +759,8 @@ struct CaptureMatcher
         std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
         snaps.push_back(groups);
 
-        size_t cur = pos, count = 0;
+        size_t cur   = pos;
+        size_t count = 0;
         while(count < q.max)
         {
             auto saved = groups;
@@ -850,7 +857,8 @@ struct CaptureMatcher
                 std::vector<std::vector<std::pair<size_t, size_t>>> snaps;
                 snaps.push_back(groups);
 
-                size_t pos = i, count = 0;
+                size_t pos   = i;
+                size_t count = 0;
                 while(count < q.max)
                 {
                     auto saved = groups;
@@ -1068,7 +1076,8 @@ regex_replace(std::string_view text, std::string_view pattern, std::string_view 
     {
         // Find first match at or after 'cur' using CaptureMatcher only
         bool                                   found = false;
-        size_t                                 mb = std::string::npos, me = std::string::npos;
+        size_t                                 mb    = std::string::npos;
+        size_t                                 me    = std::string::npos;
         std::vector<std::pair<size_t, size_t>> groups;
 
         for(size_t pos = cur; pos <= n; ++pos)

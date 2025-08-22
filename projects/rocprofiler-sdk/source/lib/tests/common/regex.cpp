@@ -14,7 +14,8 @@ namespace R = rocprofiler::common::regex;
 struct StdRes
 {
     bool   ok = false;
-    size_t b = 0, e = 0;
+    size_t b  = 0;
+    size_t e  = 0;
 };
 
 static std::optional<bool>
@@ -66,7 +67,7 @@ TryStdReplace(std::string_view text, std::string_view pat, std::string_view repl
 
 // ----------------------------- Tests -------------------------------
 
-TEST(RegexParity, LiteralsAndEscapes)
+TEST(regex_parity, literals_and_escapes)
 {
     // Avoid invalid ECMAScript escapes that std::regex rejects (e.g., "\c").
     struct C
@@ -92,7 +93,8 @@ TEST(RegexParity, LiteralsAndEscapes)
         EXPECT_EQ(R::regex_search(c.s, c.p), ss->ok);
         if(ss->ok)
         {
-            size_t b = 0, e = 0;
+            size_t b = 0;
+            size_t e = 0;
             ASSERT_TRUE(R::regex_search(c.s, c.p, b, e));
             EXPECT_EQ(b, ss->b);
             EXPECT_EQ(e, ss->e);
@@ -100,7 +102,7 @@ TEST(RegexParity, LiteralsAndEscapes)
     }
 }
 
-TEST(RegexParity, DotAndAnchors)
+TEST(regex_parity, dot_and_anchors)
 {
     auto cmp = [&](std::string s, std::string p) {
         auto sm = TryStdMatch(s, p);
@@ -112,7 +114,8 @@ TEST(RegexParity, DotAndAnchors)
         EXPECT_EQ(R::regex_search(s, p), ss->ok);
         if(ss->ok)
         {
-            size_t b = 0, e = 0;
+            size_t b = 0;
+            size_t e = 0;
             ASSERT_TRUE(R::regex_search(s, p, b, e));
             EXPECT_EQ(b, ss->b);
             EXPECT_EQ(e, ss->e);
@@ -125,7 +128,7 @@ TEST(RegexParity, DotAndAnchors)
     cmp("world!", "world!$");
 }
 
-TEST(RegexParity, CharClassesAndShortcuts)
+TEST(regex_parity, char_classes_and_shortcuts)
 {
     std::vector<std::pair<std::string, std::string>> pats = {{"abc", "[a-c][a-c][a-c]"},
                                                              {"abc", "[^0-9]+"},
@@ -144,7 +147,8 @@ TEST(RegexParity, CharClassesAndShortcuts)
         EXPECT_EQ(R::regex_search(s, p), ss->ok);
         if(ss->ok)
         {
-            size_t b = 0, e = 0;
+            size_t b = 0;
+            size_t e = 0;
             ASSERT_TRUE(R::regex_search(s, p, b, e));
             EXPECT_EQ(b, ss->b);
             EXPECT_EQ(e, ss->e);
@@ -152,7 +156,7 @@ TEST(RegexParity, CharClassesAndShortcuts)
     }
 }
 
-TEST(RegexParity, AlternationAndGrouping)
+TEST(regex_parity, alternation_and_grouping)
 {
     std::string s  = "abc123xyz";
     std::string p  = "(abc|def)\\d{3}xyz";
@@ -165,7 +169,8 @@ TEST(RegexParity, AlternationAndGrouping)
     EXPECT_EQ(R::regex_search(s, p), ss->ok);
     if(ss->ok)
     {
-        size_t b = 0, e = 0;
+        size_t b = 0;
+        size_t e = 0;
         ASSERT_TRUE(R::regex_search(s, p, b, e));
         EXPECT_EQ(b, ss->b);
         EXPECT_EQ(e, ss->e);
@@ -175,7 +180,7 @@ TEST(RegexParity, AlternationAndGrouping)
     EXPECT_FALSE(R::regex_search("zzz", "(foo|bar)"));
 }
 
-TEST(RegexParity, QuantifiersGreedy)
+TEST(regex_parity, quantifiers_greedy)
 {
     struct C
     {
@@ -198,33 +203,35 @@ TEST(RegexParity, QuantifiersGreedy)
     }
 }
 
-TEST(RegexParity, BacktrackingAcrossTail)
+TEST(regex_parity, backtracking_across_tail)
 {
     const std::string s  = "/prefix/%env{ARBITRARY_ENV_VARIABLE}%/suffix.txt";
     const std::string p  = "(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)";
     auto              ss = TryStdSearch(s, p);
     ASSERT_TRUE(ss.has_value());
-    size_t b = 0, e = 0;
+    size_t b = 0;
+    size_t e = 0;
     ASSERT_TRUE(R::regex_search(s, p, b, e));
     ASSERT_TRUE(ss->ok);
     EXPECT_EQ(b, ss->b);
     EXPECT_EQ(e, ss->e);
 }
 
-TEST(RegexParity, SearchSpan)
+TEST(regex_parity, search_span)
 {
     const std::string s  = "xx abcd123 yy";
     const std::string p  = "[a-z]+\\d+";
     auto              ss = TryStdSearch(s, p);
     ASSERT_TRUE(ss.has_value());
-    size_t b = 999, e = 999;
+    size_t b = 999;
+    size_t e = 999;
     ASSERT_TRUE(R::regex_search(s, p, b, e));
     ASSERT_TRUE(ss->ok);
     EXPECT_EQ(b, ss->b);
     EXPECT_EQ(e, ss->e);
 }
 
-TEST(RegexParity, ReplaceWholeAndGroups)
+TEST(regex_parity, replace_whole_and_groups)
 {
     const std::string s  = "abc123def";
     const std::string p  = "(\\w+?)(\\d+)(\\w+)";
@@ -240,7 +247,7 @@ TEST(RegexParity, ReplaceWholeAndGroups)
     EXPECT_EQ(R::regex_replace(s, "(\\d+)", "pre($`) mid($&) post($')"), *r3);
 }
 
-TEST(RegexParity, ReplaceGlobalMultipleHits)
+TEST(regex_parity, replace_global_multiple_hits)
 {
     const std::string s  = "a1 b22 c333";
     const std::string p  = "(\\d+)";
@@ -249,7 +256,7 @@ TEST(RegexParity, ReplaceGlobalMultipleHits)
     EXPECT_EQ(R::regex_replace(s, p, "[$1]"), *sr);
 }
 
-TEST(RegexParity, ReplaceTwoDigitCaptureIndex)
+TEST(regex_parity, replace_two_digit_capture_index)
 {
     // 11 groups: 1=outer, 2=a, ..., 10=i, 11=j
     const std::string s  = "abcdefghij";
@@ -259,7 +266,7 @@ TEST(RegexParity, ReplaceTwoDigitCaptureIndex)
     EXPECT_EQ(R::regex_replace(s, p, "$10"), *sr);  // should be "i"
 }
 
-TEST(RegexParity, EnvPatternsFromIssue)
+TEST(regex_parity, env_patterns_from_issue)
 {
     const std::string fpath = "/home/user/summary/%env{ARBITRARY_ENV_VARIABLE}%/out_summary.txt";
 
@@ -273,7 +280,8 @@ TEST(RegexParity, EnvPatternsFromIssue)
     {
         auto ss = TryStdSearch(fpath, p);
         ASSERT_TRUE(ss.has_value());
-        size_t b = 0, e = 0;
+        size_t b   = 0;
+        size_t e   = 0;
         bool   got = R::regex_search(fpath, p, b, e);
         EXPECT_EQ(got, ss->ok) << "pattern: " << p;
         if(ss->ok)
@@ -294,7 +302,7 @@ TEST(RegexParity, EnvPatternsFromIssue)
     }
 }
 
-TEST(RegexParity, ZeroLengthAndEmpty)
+TEST(regex_parity, zero_length_and_empty)
 {
     auto sm = TryStdMatch("", "a*");
     ASSERT_TRUE(sm.has_value());
@@ -305,14 +313,15 @@ TEST(RegexParity, ZeroLengthAndEmpty)
     EXPECT_EQ(R::regex_search("", ""), ss->ok);
     if(ss->ok)
     {
-        size_t b = 0, e = 0;
+        size_t b = 0;
+        size_t e = 0;
         ASSERT_TRUE(R::regex_search("", "", b, e));
         EXPECT_EQ(b, ss->b);
         EXPECT_EQ(e, ss->e);
     }
 }
 
-TEST(RegexErrors, BadPatternsThrow)
+TEST(regex_parity, bad_patterns_throw)
 {
     // Both should throw on bad syntax we recognize (unterminated brackets/parens)
     EXPECT_THROW({ R::regex_search("abc", "[a-z"); }, std::runtime_error);
@@ -340,11 +349,14 @@ TEST(RegexErrors, BadPatternsThrow)
 }
 
 // --- LAZY QUANTIFIERS -------------------------------------------------
-TEST(RegexParity, LazyQuantifiers)
+TEST(regex_parity, lazy_quantifiers)
 {
     const std::string s  = "a---b---c";
     const std::string p  = "a.*?b";
-    size_t            b1 = 0, e1 = 0, b2 = 0, e2 = 0;
+    size_t            b1 = 0;
+    size_t            e1 = 0;
+    size_t            b2 = 0;
+    size_t            e2 = 0;
     // search span parity
     ASSERT_TRUE(R::regex_search(s, p, b1, e1));
     std::regex  re(p, std::regex::ECMAScript);
@@ -361,7 +373,7 @@ TEST(RegexParity, LazyQuantifiers)
 }
 
 // --- CAPTURE VALUE IS LAST ITERATION OF A QUANTIFIED GROUP -----------
-TEST(RegexParity, CaptureIsLastIteration)
+TEST(regex_parity, capture_is_last_iteration)
 {
     const std::string s = "ababab";
     const std::string p = "(ab)*";
@@ -370,7 +382,7 @@ TEST(RegexParity, CaptureIsLastIteration)
 }
 
 // --- ALTERNATION CHOICE (LEFT-TO-RIGHT) -------------------------------
-TEST(RegexParity, AlternationPreference)
+TEST(regex_parity, alternation_preference)
 {
     // (a|ab)b on "abb" prefers 'a' alternative (leftmost that leads to a match)
     const std::string s  = "abb";
@@ -381,7 +393,7 @@ TEST(RegexParity, AlternationPreference)
 }
 
 // --- CHARACTER CLASS CORNER CASES -------------------------------------
-TEST(RegexParity, ClassHyphenLiteralEdges)
+TEST(regex_parity, class_hyphen_literal_edges)
 {
     // '-' first/last is literal
     EXPECT_TRUE(R::regex_match("-", "[-a]"));
@@ -390,7 +402,7 @@ TEST(RegexParity, ClassHyphenLiteralEdges)
     EXPECT_TRUE(std::regex_match(std::string("a"), std::regex("[-a]")));
 }
 
-TEST(RegexParity, ClassEscapedBracketAndNegatedShorthand)
+TEST(regex_parity, class_escaped_bracket_and_negated_shorthand)
 {
     // Escaped ']' inside class
     EXPECT_TRUE(R::regex_match("]", "[\\]]"));
@@ -401,13 +413,13 @@ TEST(RegexParity, ClassEscapedBracketAndNegatedShorthand)
 }
 
 // --- ANCHORS WITH EMPTY STRING ----------------------------------------
-TEST(RegexParity, AnchorsEmptyString)
+TEST(regex_parity, anchors_empty_string)
 {
     EXPECT_EQ(R::regex_match("", "^$"), std::regex_match(std::string(""), std::regex("^$")));
 }
 
 // --- QUANTIFIER {0} ZERO REPS -----------------------------------------
-TEST(RegexParity, QuantifierZeroRepsMatchesEmpty)
+TEST(regex_parity, quantifier_zero_reps_matches_empty)
 {
     // {0} should match empty; compare match result
     const std::string p = "a{0}";
@@ -417,7 +429,7 @@ TEST(RegexParity, QuantifierZeroRepsMatchesEmpty)
 }
 
 // --- REPLACEMENT TOKEN CORNER CASES -----------------------------------
-TEST(RegexParity, ReplacementOneDigitThenLiteral)
+TEST(regex_parity, replacement_one_digit_then_literal)
 {
     // When only one group exists, "$10" == "$1" + "0"
     const std::string s = "a";
@@ -425,7 +437,7 @@ TEST(RegexParity, ReplacementOneDigitThenLiteral)
     EXPECT_EQ(R::regex_replace(s, p, "$10"), std::regex_replace(s, std::regex(p), "$10"));
 }
 
-TEST(RegexParity, ReplacementUnknownTwoDigitGroupFallsBack)
+TEST(regex_parity, replacement_unknown_two_digit_group_falls_back)
 {
     // With only 1 capture, "$99" -> ($9 empty) + "9" => "9"
     const std::string s = "a";
@@ -433,14 +445,14 @@ TEST(RegexParity, ReplacementUnknownTwoDigitGroupFallsBack)
     EXPECT_EQ(R::regex_replace(s, p, "$99"), std::regex_replace(s, std::regex(p), "$99"));
 }
 
-TEST(RegexParity, ReplacementDollarAtEndIsLiteral)
+TEST(regex_parity, replacement_dollar_at_end_is_literal)
 {
     const std::string s = "abc123";
     const std::string p = "\\d+";
     EXPECT_EQ(R::regex_replace(s, p, "x$"), std::regex_replace(s, std::regex(p), "x$"));
 }
 
-TEST(RegexParity, ReplacementWholeMatchAliases)
+TEST(regex_parity, replacement_whole_match_aliases)
 {
     const std::string s = "abc123def";
     const std::string p = "(\\w+?)(\\d+)(\\w+)";
@@ -449,7 +461,7 @@ TEST(RegexParity, ReplacementWholeMatchAliases)
 }
 
 // --- CAPTURE INDEXING STABILITY WITH NESTED GROUPS ---------------------
-TEST(RegexParity, NestedCaptureIndicesLeftToRight)
+TEST(regex_parity, nested_capture_indices_left_to_right)
 {
     // Ensure left-to-right numbering at '(' is honored
     const std::string s = "xyz";
