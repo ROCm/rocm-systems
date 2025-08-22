@@ -115,81 +115,76 @@ jobs:
                 apt-get update && \
                 apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
                 python3 -m pip install -U awscli pipx && \
-                python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt && \
-                true; \
+                python3 -m pip install -U --user -r projects/rocprofiler-sdk/requirements.txt; \
               elif grep -qi "ID=.*rhel" /etc/os-release || grep -qi "ID_LIKE=.*rhel" /etc/os-release; then \
                 dnf clean all || true; \
                 dnf install -y perl-ExtUtils-MakeMaker python3-pip || true; \
                 if grep -qi "VERSION_ID=\"8.8\"" /etc/os-release; then \
-                  wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz \
-                  tar -xf git-2.51.0.tar.xz \
-                  cd git-2.51.0 \
-                  rm -rf /etc/yum.repos.d/redhat-partner.repo || true \
-                  dnf clean all || true \
-                  dnf install -y perl-ExtUtils-MakeMaker || true \
-                  export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH \
-                  make prefix=/usr all -j 32 \
-                  make prefix=/usr install \
+                  wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
+                  tar -xf git-2.51.0.tar.xz; \
+                  cd git-2.51.0; \
+                  rm -rf /etc/yum.repos.d/redhat-partner.repo || true; \
+                  dnf clean all || true; \
+                  dnf install -y perl-ExtUtils-MakeMaker || true; \
+                  export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
+                  make prefix=/usr all -j 32; \
+                  make prefix=/usr install; \
                   dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm || true; \
                 else \
-                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm \
-                   || true; \
-                fi \
+                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm || true; \
+                fi; \
                 sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo || true; \
                 sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo || true; \
                 dnf clean all || true; \
                 dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers libsqlite3x-devel elfutils-devel || true; \
                 python3 -m pip install -U awscli pipx || true; \
-                python3 -m venv rocprofiler-sdk \
-                source rocprofiler-sdk/bin/activate \
-                export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH \
-                python3 -m pip install --upgrade pip \
-                python3 -m pip install --upgrade -r projects/rocprofiler-sdk/requirements.txt \
-                true; \
+                python3 -m venv rocprofiler-sdk || true; \
+                source rocprofiler-sdk/bin/activate; \
+                export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
+                python3 -m pip install --upgrade pip; \
+                python3 -m pip install --upgrade -r projects/rocprofiler-sdk/requirements.txt; \
               else \
-                # SLES/OpenSUSE
                 zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/.7.0/sle/15.6/amdgpu-install-7.0.70000-1.noarch.rpm || true; \
                 sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo || true; \
                 sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo || true; \
                 zypper --gpg-auto-import-keys refresh || true; \
                 zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers sqlite3-devel python3-pip || true; \
                 python3 -m pip install -U awscli pipx || true; \
-                python3 -m venv rocprofiler-sdk \
-                source rocprofiler-sdk/bin/activate \
-                export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH \
-                python3 -m pip install --upgrade pip \
-                python3 -m pip install --upgrade -r projects/rocprofiler-sdk/requirements.txt \
-                true; \
+                python3 -m venv rocprofiler-sdk; \
+                source rocprofiler-sdk/bin/activate; \
+                export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
+                python3 -m pip install --upgrade pip; \
+                python3 -m pip install --upgrade -r projects/rocprofiler-sdk/requirements.txt; \
               fi
           RUN set -euo pipefail; \
               KEY=$(aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key") \
-              KEY=${KEY//\"/} \
-              test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; } \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request \
-              mv rocm.tar.gz /opt/rocm-gfx94X.tar.gz \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key") && \
+              KEY=${KEY//\"/} && \
+              test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; } && \
+              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
+              mv rocm.tar.gz /opt/rocm-gfx94X.tar.gz
           RUN set -euo pipefail; \
               KEY=$(aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key") \
-              KEY=${KEY//\"/} \
-              test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; } \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request \
-              mv rocm.tar.gz /opt/rocm-gfx110X.tar.gz \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key") && \
+              KEY=${KEY//\"/} && \
+              test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; } && \
+              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
+              mv rocm.tar.gz /opt/rocm-gfx110X.tar.gz
           RUN set -euo pipefail; \
               KEY=$(aws s3api list-objects-v2 \
                 --bucket therock-nightly-tarball \
                 --no-sign-request \
                 --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key") \
-              KEY=${KEY//\"/} \
-              test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; } \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key") && \
+              KEY=${KEY//\"/} && \
+              test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; } && \
+              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
               mv rocm.tar.gz /opt/rocm-gfx120X.tar.gz
           EOF
 
