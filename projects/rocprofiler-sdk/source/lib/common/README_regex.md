@@ -77,7 +77,7 @@ The API is designed to be familiar to users of `std::regex`:
 namespace rocprofiler::common::regex {
     bool regex_match(std::string_view text, std::string_view pattern);
     bool regex_search(std::string_view text, std::string_view pattern);
-    bool regex_search(std::string_view text, std::string_view pattern, 
+    bool regex_search(std::string_view text, std::string_view pattern,
                      size_t& begin, size_t& end);
     std::string regex_replace(std::string_view text, std::string_view pattern,
                              std::string_view replacement);
@@ -132,8 +132,8 @@ if (regex_search("prefix_hello123_suffix", "hello\\d+", begin, end)) {
 
 // Replace with captures
 std::string result = regex_replace(
-    "file_v1.2.3.txt", 
-    "v(\\d+)\\.(\\d+)\\.(\\d+)", 
+    "file_v1.2.3.txt",
+    "v(\\d+)\\.(\\d+)\\.(\\d+)",
     "version_$1_$2_$3"
 );
 // result: "file_version_1_2_3.txt"
@@ -145,7 +145,6 @@ The implementation includes comprehensive tests that verify compatibility with E
 
 - **Parity Tests**: Compare behavior against `std::regex` where possible
 - **Edge Cases**: Handle corner cases like zero-length matches, nested captures
-- **Performance Tests**: Ensure reasonable performance for typical use cases
 - **Compatibility Tests**: Verify consistent behavior across different string types and usage patterns
 
 ## Maintenance Notes
@@ -171,7 +170,7 @@ Such comprehensive ABI testing would require:
 # Build with old ABI
 g++ -D_GLIBCXX_USE_CXX11_ABI=0 -c test_old_abi.cpp
 
-# Build with new ABI  
+# Build with new ABI
 g++ -D_GLIBCXX_USE_CXX11_ABI=1 -c test_new_abi.cpp
 
 # Link together and verify functionality
