@@ -25,10 +25,10 @@
 
 import ast
 import json
+import multiprocessing
 import re
 import sys
 import warnings
-import multiprocessing
 from collections import defaultdict
 from pathlib import Path
 from typing import Union
@@ -768,7 +768,8 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def init_metric_evaluator(raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict) -> None:
+def init_metric_evaluator(raw_pmc_df: Union[pd.DataFrame, dict],
+                          ammolite_vars: dict) -> None:
     if isinstance(raw_pmc_df, dict):
         raw_pmc_df_keys = set(raw_pmc_df.keys())
 
@@ -780,13 +781,14 @@ def init_metric_evaluator(raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: 
 
     raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
 
-    # The globals here are not shared across all processes, they exist only within the subprocess's context,
+    # The globals here are not shared across all processes,
+    # they exist only within the subprocess's context,
     # and their lifetime ends when the process terminates.
     # The process-local globals are used for performance optimization.
     globals().update(raw_pmc_df_items)
     globals().update(ammolite_vars)
-    
-    
+
+
 def run_metric_evaluator(row_expr: str) -> str:
     try:
         # cache dataframes of 'raw_pmc_df'
@@ -819,7 +821,7 @@ def run_metric_evaluator(row_expr: str) -> str:
 
         else:
             console_error("analysis", str(ae))
-            
+
 
 @demarcate
 def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
@@ -996,7 +998,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
 
     row_expr_indexes = []
     row_exprs = []
-    
+
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
     #     lambda s: eval(
@@ -1012,7 +1014,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                             if row[expr]:
                                 row_expr_indexes.append((id, idx, expr))
                                 row_exprs.append(row[expr])
-                                
+
                                 if debug:  # debug won't impact the regular calc
                                     print("~" * 40 + "\nExpression:")
                                     print(expr, "=", row[expr])
@@ -1047,9 +1049,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                                 ].to_list()
                                                 )
                                             except KeyError as ke:
-                                                # We can't guarantee that [] accesses are safe.
                                                 console_warning(
-                                                    "Skipping entry. Encountered a missing "
+                                                    "Skipping entry. "
+                                                    "Encountered a missing "
                                                     "key\n{}".format(str(ke))
                                                 )
                                             # print(
@@ -1107,7 +1109,8 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
     processes = min(16, multiprocessing.cpu_count() // 2)
 
     # breakpoint()
-    with multiprocessing.Pool(processes=processes, initializer=init_metric_evaluator, initargs=(raw_pmc_df, ammolite_vars)) as pool:
+    with multiprocessing.Pool(processes=processes, initializer=init_metric_evaluator,
+                              initargs=(raw_pmc_df, ammolite_vars)) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)
 
     for (df_id, row, col), out in zip(row_expr_indexes, outs):
