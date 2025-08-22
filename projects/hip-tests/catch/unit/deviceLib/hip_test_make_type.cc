@@ -66,7 +66,7 @@ __global__ void vectoradd_char4(char4* a, const char4* bm, const char4* cm, int 
   int i = y * width + x;
   if (i < (width * height)) {
     a[i] = make_char4(bm[i].x, bm[i].y, bm[i].z, bm[i].w) +
-        make_char4(cm[i].x, cm[i].y, cm[i].z, cm[i].w);
+           make_char4(cm[i].x, cm[i].y, cm[i].z, cm[i].w);
   }
 }
 
@@ -315,7 +315,7 @@ TEST_CASE("Unit_Test_makechar_functionality") {
   bool errors;
 
   errors = dataTypesRunChar1<char1>() && dataTypesRunChar2<char2>() && dataTypesRunChar3<char3>() &&
-      dataTypesRunChar4<char4>();
+           dataTypesRunChar4<char4>();
 
   REQUIRE(errors == true);
 }

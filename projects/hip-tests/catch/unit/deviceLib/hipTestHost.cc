@@ -324,12 +324,12 @@ __device__ bool check_rnorm4d(double* A) {
 
 __device__ bool check_rnormf(float* A) {
   return (rnorm3df(A[0], A[1], A[2]) - rnormf(3, A) < 0.0001) &&
-      (rnorm4df(A[0], A[1], A[2], A[3]) - rnormf(4, A) < 0.0001);
+         (rnorm4df(A[0], A[1], A[2], A[3]) - rnormf(4, A) < 0.0001);
 }
 
 __device__ bool check_rnorm(double* A) {
   return (rnorm3d(A[0], A[1], A[2]) - rnorm(3, A) < 0.0001) &&
-      (rnorm4d(A[0], A[1], A[2], A[3]) - rnorm(4, A) < 0.0001);
+         (rnorm4d(A[0], A[1], A[2], A[3]) - rnorm(4, A) < 0.0001);
 }
 
 __device__ bool check_sincospif() {
@@ -355,13 +355,13 @@ __device__ bool check_sincospi() {
 }
 __global__ void testFunctions(bool* result, float* Af, double* A) {
   result[0] &= check_erfcinvf() && check_erfcxf() && check_erfcinvf() && check_erfcinv() &&
-      check_erfcx() && check_erfcinv() && check_fdividef() && check_fdivide() && check_modff() &&
-      check_modf() && check_nextafterf() && check_norm3df(Af) && check_norm3d(A) &&
-      check_norm4df(Af) && check_norm4d(A) && check_normcdff() && check_normcdf() &&
-      check_normcdfinvf() && check_normcdfinv() && check_rcbrtf() && check_rcbrt() &&
-      check_rhypotf() && check_rhypot() && check_rnorm3df(Af) && check_rnorm3d(A) &&
-      check_rnorm4df(Af) && check_rnorm4d(A) && check_rnormf(Af) && check_rnorm(A) &&
-      check_sincospif() && check_sincospi() && check_nextafter();
+               check_erfcx() && check_erfcinv() && check_fdividef() && check_fdivide() &&
+               check_modff() && check_modf() && check_nextafterf() && check_norm3df(Af) &&
+               check_norm3d(A) && check_norm4df(Af) && check_norm4d(A) && check_normcdff() &&
+               check_normcdf() && check_normcdfinvf() && check_normcdfinv() && check_rcbrtf() &&
+               check_rcbrt() && check_rhypotf() && check_rhypot() && check_rnorm3df(Af) &&
+               check_rnorm3d(A) && check_rnorm4df(Af) && check_rnorm4d(A) && check_rnormf(Af) &&
+               check_rnorm(A) && check_sincospif() && check_sincospi() && check_nextafter();
 }
 
 TEST_CASE("Unit_TestDevice_DoublePrecisionMathFunc") {

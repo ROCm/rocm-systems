@@ -126,7 +126,7 @@ void OCLDX11YUY2::run(void) {
       BYTE* pLine = (BYTE*)LockedRectD11.pData + y * LockedRectD11.RowPitch;
 
       BYTE* pLineUV = (BYTE*)LockedRectD11.pData + y * LockedRectD11.RowPitch +
-          OCLDX11YUY2::HEIGHT * LockedRectD11.RowPitch;
+                      OCLDX11YUY2::HEIGHT * LockedRectD11.RowPitch;
 
       for (int x = 0; x < OCLDX11YUY2::WIDTH; x++) {
         *pLine++ = 0x7F;  // Y

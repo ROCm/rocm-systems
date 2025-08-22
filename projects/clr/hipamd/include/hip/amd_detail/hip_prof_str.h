@@ -8101,9 +8101,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       break;
       // hipDeviceGetPCIBusId[('char*', 'pciBusId'), ('int', 'len'), ('int', 'device')]
     case HIP_API_ID_hipDeviceGetPCIBusId:
-      data->args.hipDeviceGetPCIBusId.pciBusId = (data->args.hipDeviceGetPCIBusId.pciBusId)
-          ? strdup(data->args.hipDeviceGetPCIBusId.pciBusId)
-          : NULL;
+      data->args.hipDeviceGetPCIBusId.pciBusId =
+          (data->args.hipDeviceGetPCIBusId.pciBusId)
+              ? strdup(data->args.hipDeviceGetPCIBusId.pciBusId)
+              : NULL;
       break;
       // hipDeviceGetSharedMemConfig[('hipSharedMemConfig*', 'pConfig')]
     case HIP_API_ID_hipDeviceGetSharedMemConfig:
@@ -8991,9 +8992,10 @@ static inline void hipApiArgsInit(hip_api_id_t id, hip_api_data_t* data) {
       if (data->args.hipGraphInstantiate.pErrorNode)
         data->args.hipGraphInstantiate.pErrorNode__val =
             *(data->args.hipGraphInstantiate.pErrorNode);
-      data->args.hipGraphInstantiate.pLogBuffer = (data->args.hipGraphInstantiate.pLogBuffer)
-          ? strdup(data->args.hipGraphInstantiate.pLogBuffer)
-          : NULL;
+      data->args.hipGraphInstantiate.pLogBuffer =
+          (data->args.hipGraphInstantiate.pLogBuffer)
+              ? strdup(data->args.hipGraphInstantiate.pLogBuffer)
+              : NULL;
       break;
       // hipGraphInstantiateWithFlags[('hipGraphExec_t*', 'pGraphExec'), ('hipGraph_t', 'graph'),
       // ('unsigned long long', 'flags')]
@@ -15959,9 +15961,8 @@ static inline const char* hipApiString(hip_api_id_t id, const hip_api_data_t* da
           oss, data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.blockSize);
       oss << ", dynSharedMemPerBlk=";
       roctracer::hip_support::detail::operator<<(
-          oss,
-          data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
-              .dynSharedMemPerBlk);
+          oss, data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags
+                   .dynSharedMemPerBlk);
       oss << ", flags=";
       roctracer::hip_support::detail::operator<<(
           oss, data->args.hipModuleOccupancyMaxActiveBlocksPerMultiprocessorWithFlags.flags);

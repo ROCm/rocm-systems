@@ -75,10 +75,10 @@ size_t KernelParameters::localMemSize(size_t minDataTypeAlignment) const {
     if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
       if (desc.size_ == 8) {
         memSize = alignUp(memSize, minDataTypeAlignment) +
-            *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
+                  *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
       } else {
         memSize = alignUp(memSize, minDataTypeAlignment) +
-            *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
+                  *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
       }
     }
   }
@@ -300,10 +300,10 @@ address KernelParameters::capture(device::VirtualDevice& vDev, uint64_t lclMemSi
       } else if (desc.addressQualifier_ == CL_KERNEL_ARG_ADDRESS_LOCAL) {
         if (desc.size_ == 8) {
           lclMemSize = alignUp(lclMemSize, device.info().minDataTypeAlignSize_) +
-              *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
+                       *reinterpret_cast<const uint64_t*>(values_ + desc.offset_);
         } else {
           lclMemSize = alignUp(lclMemSize, device.info().minDataTypeAlignSize_) +
-              *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
+                       *reinterpret_cast<const uint32_t*>(values_ + desc.offset_);
         }
       }
     }

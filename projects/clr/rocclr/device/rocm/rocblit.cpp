@@ -1709,8 +1709,8 @@ bool KernelBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
   } else {
     size_t totalSize = size[0];
     // Do a staging copy
-    bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-        (totalSize <= dev().settings().sdmaCopyThreshold_) ||
+    bool useShaderCopyPath =
+        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
         (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
 
     if (!useShaderCopyPath) {
@@ -1843,8 +1843,8 @@ bool KernelBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemo
   } else {
     size_t totalSize = size[0];
     // Do a staging copy
-    bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-        (totalSize <= dev().settings().sdmaCopyThreshold_) ||
+    bool useShaderCopyPath =
+        setup_.disableHwlCopyBuffer_ || (totalSize <= dev().settings().sdmaCopyThreshold_) ||
         (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT);
 
     if (!useShaderCopyPath) {
@@ -2014,18 +2014,18 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     for (auto& packed_obj : packed_vector) {
       constexpr uint32_t kFillType = FillBufferAligned;
       uint32_t kpattern_size = (packed_obj.pattern_expanded_)
-          ? HostBlitManager::FillBufferInfo::kExtendedSize
-          : patternSize;
+                                   ? HostBlitManager::FillBufferInfo::kExtendedSize
+                                   : patternSize;
       size_t kfill_size = packed_obj.fill_size_ / kpattern_size;
       size_t koffset = overall_offset;
       overall_offset += packed_obj.fill_size_;
 
       size_t globalWorkOffset[3] = {0, 0, 0};
-      uint32_t alignment = (kpattern_size & 0xf) == 0 ? 2 * sizeof(uint64_t)
-          : (kpattern_size & 0x7) == 0                ? sizeof(uint64_t)
-          : (kpattern_size & 0x3) == 0                ? sizeof(uint32_t)
-          : (kpattern_size & 0x1) == 0                ? sizeof(uint16_t)
-                                                      : sizeof(uint8_t);
+      uint32_t alignment = (kpattern_size & 0xf) == 0   ? 2 * sizeof(uint64_t)
+                           : (kpattern_size & 0x7) == 0 ? sizeof(uint64_t)
+                           : (kpattern_size & 0x3) == 0 ? sizeof(uint32_t)
+                           : (kpattern_size & 0x1) == 0 ? sizeof(uint16_t)
+                                                        : sizeof(uint8_t);
       // Program kernels arguments for the fill operation
       cl_mem mem = as_cl<amd::Memory>(memory.owner());
       setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, koffset);
@@ -2096,10 +2096,10 @@ bool KernelBlitManager::fillBuffer2D(device::Memory& memory, const void* pattern
     size_t globalWorkSize[3] = {amd::alignUp(fillSizeX, 16), amd::alignUp(fillSizeY, 16), 1};
     size_t localWorkSize[3] = {16, 16, 1};
 
-    uint32_t alignment = (patternSize & 0x7) == 0 ? sizeof(uint64_t)
-        : (patternSize & 0x3) == 0                ? sizeof(uint32_t)
-        : (patternSize & 0x1) == 0                ? sizeof(uint16_t)
-                                                  : sizeof(uint8_t);
+    uint32_t alignment = (patternSize & 0x7) == 0   ? sizeof(uint64_t)
+                         : (patternSize & 0x3) == 0 ? sizeof(uint32_t)
+                         : (patternSize & 0x1) == 0 ? sizeof(uint16_t)
+                                                    : sizeof(uint8_t);
 
     cl_mem mem = as_cl<amd::Memory>(memory.owner());
     if (alignment == sizeof(uint64_t)) {
@@ -2250,8 +2250,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   bool ipcShared = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
 
-  bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
-      (sizeIn[0] <= dev().settings().sdmaCopyThreshold_) ||
+  bool useShaderCopyPath =
+      setup_.disableHwlCopyBuffer_ || (sizeIn[0] <= dev().settings().sdmaCopyThreshold_) ||
       (!(p2p || ipcShared) &&
            (!srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess() &&
             !(copyMetadata.copyEnginePreference_ ==
@@ -2307,9 +2307,8 @@ bool KernelBlitManager::fillImage(device::Memory& memory, const void* pattern,
   constexpr size_t kFillImageThreshold = 256 * 256;
 
   // Use host fill if memory has direct access and image is small
-  if (setup_.disableFillImage_ ||
-      (gpuMem(memory).isHostMemDirectAccess() &&
-       (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
+  if (setup_.disableFillImage_ || (gpuMem(memory).isHostMemDirectAccess() &&
+                                   (size.c[0] * size.c[1] * size.c[2]) <= kFillImageThreshold)) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     result = HostBlitManager::fillImage(memory, pattern, origin, size, entire);
@@ -2691,8 +2690,8 @@ bool KernelBlitManager::runScheduler(uint64_t vqVM, hsa_queue_t* schedulerQueue,
 
   amd::NDRangeContainer ndrange(1, globalWorkOffset, globalWorkSize, localWorkSize);
 
-  device::Kernel* devKernel = const_cast<device::Kernel*>(
-    kernels_[Scheduler]->getDeviceKernel(dev()));
+  device::Kernel* devKernel =
+      const_cast<device::Kernel*>(kernels_[Scheduler]->getDeviceKernel(dev()));
 
   Kernel& gpuKernel = static_cast<Kernel&>(*devKernel);
 

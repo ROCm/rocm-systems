@@ -896,7 +896,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
   // \todo forces PAL to reuse CBs, but requires postamble
   createInfo.flags.autoMemoryReuse = false;
   createInfo.allocInfo[Pal::CommandDataAlloc].allocHeap = Pal::GpuHeapGartUswc;
-  createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize = VirtualGPU::Queue::MaxCommands *
+  createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize =
+      VirtualGPU::Queue::MaxCommands *
       (320 + ((profiling) ? 96 : 0) + ((dev().captureMgr() != nullptr) ? 512 : 0));
   createInfo.allocInfo[Pal::CommandDataAlloc].allocSize =
       dev().settings().maxCmdBuffers_ * createInfo.allocInfo[Pal::CommandDataAlloc].suballocSize;
@@ -925,8 +926,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
 
   uint idx = index() % dev().numComputeEngines();
   uint64_t residency_limit = dev().properties().gpuMemoryProperties.flags.supportPerSubmitMemRefs
-      ? 0
-      : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
+                                 ? 0
+                                 : (dev().properties().gpuMemoryProperties.maxLocalMemSize >> 2);
   uint max_cmd_buffers = dev().settings().maxCmdBuffers_;
 
   if (dev().numComputeEngines()) {
@@ -937,8 +938,8 @@ bool VirtualGPU::create(bool profiling, uint deviceQueueSize, uint rtCUs,
     }
     const auto& info = dev().QueuePool().find(queues_[MainEngine]->iQueue_);
     hwRing_ = (info != dev().QueuePool().end())
-        ? info->second->index_
-        : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
+                  ? info->second->index_
+                  : (index() % dev().numExclusiveComputeEngines()) + GPU_MAX_HW_QUEUES;
 
     // Check if device has SDMA engines
     if (dev().numDMAEngines() != 0 && !dev().settings().disableSdma_) {
@@ -2158,7 +2159,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& vcmd) {
     amd::Memory* dstMemory = amd::MemObjMap::FindMemObj(vcmd.dst());
     assert(dstMemory && "No svm Buffer to fill with!");
     size_t offset = reinterpret_cast<uintptr_t>(vcmd.dst()) -
-        reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
+                    reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
     pal::Memory* memory = dev().getGpuMemory(dstMemory);
 
@@ -2828,15 +2829,13 @@ void VirtualGPU::submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) {
 
   if (cmd.semaphoreCmd() == amd::ExternalSemaphoreCmd::COMMAND_SIGNAL_EXTSEMAPHORE) {
     flushDMA(MainEngine);
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->SignalQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                           cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->SignalQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to signal external semaphore");
     }
   } else {
-    if (Pal::Result::Success !=
-        queues_[MainEngine]->iQueue_->WaitQueueSemaphore(const_cast<Pal::IQueueSemaphore*>(sem),
-                                                         cmd.fence())) {
+    if (Pal::Result::Success != queues_[MainEngine]->iQueue_->WaitQueueSemaphore(
+                                    const_cast<Pal::IQueueSemaphore*>(sem), cmd.fence())) {
       LogError("Failed to wait on external semaphore");
     }
   }
@@ -3657,9 +3656,8 @@ bool VirtualGPU::processMemObjectsHSA(const amd::Kernel& kernel, const_address p
           //! Note: SVM with subbuffers has an issue with tracking.
           //! Conformance can send read only subbuffer, but update the region
           //! in the kernel.
-          if ((mem != nullptr) &&
-              ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
-               ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
+          if ((mem != nullptr) && ((!info.readOnly_ && (mem->getSvmPtr() == nullptr)) ||
+                                   ((mem->getMemFlags() & CL_MEM_READ_ONLY) == 0))) {
             mem->signalWrite(&dev());
           }
           if (info.oclObject_ == amd::KernelParameterDescriptor::ImageObject) {
