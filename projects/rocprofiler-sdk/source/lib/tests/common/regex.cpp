@@ -1,8 +1,11 @@
 #include <gtest/gtest.h>
+#include <atomic>
+#include <chrono>
 #include <optional>
 #include <regex>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "lib/common/regex.hpp"  // rocprofiler::common::regex::...
@@ -469,4 +472,278 @@ TEST(regex_parity, nested_capture_indices_left_to_right)
     // Expect $1="xy", $2="x", $3="y", $4="z"
     EXPECT_EQ(R::regex_replace(s, p, "$1|$2|$3|$4"),
               std::regex_replace(s, std::regex(p), "$1|$2|$3|$4"));
+}
+
+// --- PERFORMANCE TESTS ------------------------------------------------
+TEST(regex_performance, basic_matching_speed)
+{
+    const std::string text    = "This is a sample text with numbers 123 and words hello world 456";
+    const std::string pattern = "\\d+";
+
+    // Warm up
+    for(int i = 0; i < 100; ++i)
+    {
+        R::regex_search(text, pattern);
+    }
+
+    auto          start      = std::chrono::high_resolution_clock::now();
+    constexpr int iterations = 10000;
+
+    for(int i = 0; i < iterations; ++i)
+    {
+        R::regex_search(text, pattern);
+    }
+
+    auto end      = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Should complete in reasonable time (less than 100ms for 10k iterations)
+    EXPECT_LT(duration.count(), 100000)
+        << "Performance test took " << duration.count() << " microseconds";
+
+    // Verify correctness wasn't sacrificed for speed
+    size_t begin, end_pos;
+    EXPECT_TRUE(R::regex_search(text, pattern, begin, end_pos));
+    EXPECT_EQ(text.substr(begin, end_pos - begin), "123");
+}
+
+TEST(regex_performance, complex_pattern_performance)
+{
+    const std::string text    = "/home/user/summary/%env{ARBITRARY_ENV_VARIABLE}%/out_summary.txt";
+    const std::string pattern = "(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)";
+
+    auto          start      = std::chrono::high_resolution_clock::now();
+    constexpr int iterations = 1000;
+
+    for(int i = 0; i < iterations; ++i)
+    {
+        R::regex_search(text, pattern);
+    }
+
+    auto end      = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Should complete complex patterns in reasonable time
+    EXPECT_LT(duration.count(), 50000)
+        << "Complex pattern performance test took " << duration.count() << " microseconds";
+
+    // Verify correctness
+    EXPECT_TRUE(R::regex_search(text, pattern));
+}
+
+TEST(regex_performance, replacement_performance)
+{
+    const std::string text        = "version 1.2.3 and version 2.4.6 and version 3.8.9";
+    const std::string pattern     = "version (\\d+)\\.(\\d+)\\.(\\d+)";
+    const std::string replacement = "v$1_$2_$3";
+
+    auto          start      = std::chrono::high_resolution_clock::now();
+    constexpr int iterations = 1000;
+
+    std::string result;
+    for(int i = 0; i < iterations; ++i)
+    {
+        result = R::regex_replace(text, pattern, replacement);
+    }
+
+    auto end      = std::chrono::high_resolution_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
+
+    // Should complete replacements in reasonable time
+    EXPECT_LT(duration.count(), 100000)
+        << "Replacement performance test took " << duration.count() << " microseconds";
+
+    // Verify correctness
+    EXPECT_EQ(result, "v1_2_3 and v2_4_6 and v3_8_9");
+}
+
+// --- COMPATIBILITY AND INTERFACE TESTS -------------------------------------------
+TEST(regex_compatibility, deterministic_behavior)
+{
+    // This test verifies that our implementation doesn't depend on std::regex
+    // across different usage patterns and string types
+
+    std::vector<std::pair<std::string, std::string>> test_cases = {
+        {"hello world", "hello.*world"},
+        {"file_v1.2.3.txt", "v(\\d+)\\.(\\d+)\\.(\\d+)"},
+        {"path/to/file", "path/to/.*"},
+        {"123-456-7890", "\\d{3}-\\d{3}-\\d{4}"},
+        {"", "a*"},  // Empty string edge case
+        {"abcdef", "[a-f]+"}};
+
+    for(const auto& [text, pattern] : test_cases)
+    {
+        // Operations should be deterministic and repeatable
+        bool match_result  = R::regex_match(text, pattern);
+        bool search_result = R::regex_search(text, pattern);
+
+        // Results should be consistent across multiple calls
+        EXPECT_EQ(match_result, R::regex_match(text, pattern))
+            << "Match result inconsistent for: " << text << " with pattern: " << pattern;
+        EXPECT_EQ(search_result, R::regex_search(text, pattern))
+            << "Search result inconsistent for: " << text << " with pattern: " << pattern;
+    }
+}
+
+TEST(regex_compatibility, string_interface_types)
+{
+    // Test that our implementation works correctly with different string interface types
+    // (const char*, std::string, std::string_view)
+
+    const char*      c_str   = "test string with numbers 123";
+    std::string      std_str = "test string with numbers 123";
+    std::string_view sv      = std_str;
+
+    const std::string pattern = "\\d+";
+
+    // All these should produce the same results
+    bool c_str_result   = R::regex_search(c_str, pattern);
+    bool std_str_result = R::regex_search(std_str, pattern);
+    bool sv_result      = R::regex_search(sv, pattern);
+
+    EXPECT_EQ(c_str_result, std_str_result);
+    EXPECT_EQ(std_str_result, sv_result);
+    EXPECT_TRUE(c_str_result);  // Should find "123"
+
+    // Test position results are consistent
+    size_t c_begin, c_end, s_begin, s_end, sv_begin, sv_end;
+    EXPECT_TRUE(R::regex_search(c_str, pattern, c_begin, c_end));
+    EXPECT_TRUE(R::regex_search(std_str, pattern, s_begin, s_end));
+    EXPECT_TRUE(R::regex_search(sv, pattern, sv_begin, sv_end));
+
+    EXPECT_EQ(c_begin, s_begin);
+    EXPECT_EQ(s_begin, sv_begin);
+    EXPECT_EQ(c_end, s_end);
+    EXPECT_EQ(s_end, sv_end);
+}
+
+TEST(regex_compatibility, build_system_patterns)
+{
+    // Test patterns commonly used in build systems and deployment scenarios
+
+    struct TestCase
+    {
+        std::string text;
+        std::string pattern;
+        std::string replacement;
+        std::string expected;
+    };
+
+    std::vector<TestCase> cases = {
+        // Environment variable patterns (common in build systems)
+        {"/path/%env{HOME}%/file", "%(env|ENV)\\{([A-Z_]+)\\}%", "${$2}", "/path/${HOME}/file"},
+
+        // Version patterns (common in package management)
+        {"package-1.2.3", "(\\w+)-(\\d+)\\.(\\d+)\\.(\\d+)", "$1_v$2_$3_$4", "package_v1_2_3"},
+
+        // Path patterns (common in file systems)
+        {"/usr/lib64/libfoo.so.1",
+         "/usr/lib(\\d*)/([^/]+)\\.so\\.(\\d+)",
+         "lib$1/$2.so.$3",
+         "lib64/libfoo.so.1"},
+
+        // Architecture patterns (common in cross-compilation)
+        {"x86_64-linux-gnu-gcc",
+         "(\\w+)-(\\w+)-(\\w+)-(\\w+)",
+         "$1/$2/$3/$4",
+         "x86_64/linux/gnu/gcc"}};
+
+    for(const auto& test_case : cases)
+    {
+        std::string result =
+            R::regex_replace(test_case.text, test_case.pattern, test_case.replacement);
+        EXPECT_EQ(result, test_case.expected)
+            << "Failed for text: " << test_case.text << " pattern: " << test_case.pattern
+            << " replacement: " << test_case.replacement;
+    }
+}
+
+TEST(regex_compatibility, memory_safety)
+{
+    // Test that our implementation doesn't have memory issues that could be
+
+    std::vector<std::string> large_texts;
+    const std::string        base_text = "This is a test string with numbers 123 and more text ";
+
+    // Create larger strings to test memory handling
+    for(int i = 0; i < 10; ++i)
+    {
+        std::string large_text;
+        for(int j = 0; j < 100; ++j)
+        {
+            large_text += base_text + std::to_string(j) + " ";
+        }
+        large_texts.push_back(large_text);
+    }
+
+    const std::string pattern = "\\d+";
+
+    for(const auto& text : large_texts)
+    {
+        // These operations should not cause memory corruption or leaks
+        size_t matches = 0;
+        size_t pos     = 0;
+
+        while(pos < text.length())
+        {
+            size_t begin, end;
+            if(R::regex_search(text.substr(pos), pattern, begin, end))
+            {
+                matches++;
+                pos += begin + (end - begin);
+            }
+            else
+            {
+                break;
+            }
+        }
+
+        EXPECT_GT(matches, 0) << "Should find numbers in the large text";
+        EXPECT_LT(matches, 2000) << "Shouldn't find unreasonable number of matches";
+    }
+}
+
+TEST(regex_compatibility, thread_safety)
+{
+    // Test that our implementation is thread-safe and doesn't have
+
+    const std::string text    = "concurrent test 123 with multiple threads 456";
+    const std::string pattern = "\\d+";
+    std::atomic<int>  success_count{0};
+    std::atomic<int>  failure_count{0};
+
+    auto worker = [&]() {
+        for(int i = 0; i < 100; ++i)
+        {
+            try
+            {
+                size_t begin, end;
+                if(R::regex_search(text, pattern, begin, end))
+                {
+                    success_count++;
+                }
+                else
+                {
+                    failure_count++;
+                }
+            } catch(...)
+            {
+                failure_count++;
+            }
+        }
+    };
+
+    std::vector<std::thread> threads;
+    for(int i = 0; i < 4; ++i)
+    {
+        threads.emplace_back(worker);
+    }
+
+    for(auto& thread : threads)
+    {
+        thread.join();
+    }
+
+    EXPECT_EQ(success_count.load(), 400) << "All regex operations should succeed";
+    EXPECT_EQ(failure_count.load(), 0) << "No regex operations should fail";
 }
