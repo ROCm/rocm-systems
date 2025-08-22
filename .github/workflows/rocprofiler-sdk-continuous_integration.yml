@@ -78,6 +78,35 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-sdk/requirements.txt
 
+      - name: Get the latest therock build
+        id: therock
+        run: |
+          python3 -m pip install -U awscli
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; }
+          echo "gfx120X=${KEY}" >> $GITHUB_OUTPUT
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
+          echo "gfx94X=${KEY}" >> $GITHUB_OUTPUT
+          KEY=$(aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; }
+          echo "gfx110X=${KEY}" >> $GITHUB_OUTPUT
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -119,10 +148,10 @@ jobs:
                 apt-get install -y git rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev && \
                 python3 -m pip install -U awscli pipx && \
                 python3 -m pip install -U --user -r /root/requirements.txt; \
-              elif grep -qi "ID=.*rhel" /etc/os-release || grep -qi "ID_LIKE=.*rhel" /etc/os-release; then \
+              elif [ $(grep -i "ID=.*rhel" /etc/os-release | wc -l) -gt 0 ]; then \
                 dnf clean all || true; \
                 dnf install -y perl-ExtUtils-MakeMaker python3-pip || true; \
-                if grep -qi "VERSION_ID=\"8.8\"" /etc/os-release; then \
+                if [ $(grep -i "VERSION_ID=\"8.8\"" /etc/os-release | wc -l) -gt 0 ]; then \
                   wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
                   tar -xf git-2.51.0.tar.xz; \
                   cd git-2.51.0; \
@@ -161,35 +190,14 @@ jobs:
                 python3 -m pip install --upgrade -r /root/requirements.txt; \
               fi
           RUN set -euo pipefail; \
-              KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key") && \
-              KEY=${KEY//\"/} && \
-              test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; } && \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
-              mv rocm.tar.gz /opt/rocm-gfx94X.tar.gz
+              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
+              mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz
           RUN set -euo pipefail; \
-              KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx110X')], &LastModified)[-1].Key") && \
-              KEY=${KEY//\"/} && \
-              test -n "$KEY" || { echo "No gfx110X tarball found"; exit 1; } && \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
-              mv rocm.tar.gz /opt/rocm-gfx110X.tar.gz
+              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
+              mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz
           RUN set -euo pipefail; \
-              KEY=$(aws s3api list-objects-v2 \
-                --bucket therock-nightly-tarball \
-                --no-sign-request \
-                --output json \
-                --query "sort_by(Contents[?contains(Key, 'linux-gfx120X')], &LastModified)[-1].Key") && \
-              KEY=${KEY//\"/} && \
-              test -n "$KEY" || { echo "No gfx120X tarball found"; exit 1; } && \
-              aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request && \
-              mv rocm.tar.gz /opt/rocm-gfx120X.tar.gz
+              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
+              mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz
           EOF
 
       - name: Build & Push (to Docker Hub; cache to GHA)
@@ -250,8 +258,32 @@ jobs:
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocr-runtime
-          submodules: true
+          submodules: false
           set-safe-directory: true
+
+      - name: Compute submodule cache key
+        id: submods
+        shell: bash
+        run: |
+          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # collect submodule paths for cache 'path'
+          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules
+            ${{ steps.submods.outputs.paths }}
+          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          restore-keys: |
+            submods-${{ runner.os }}-
+            submods-
+
+      - name: Init/Update submodules
+        run: git submodule update --init --recursive --jobs 16
 
       - name: Clone ROCDecode
         uses: actions/checkout@v5
@@ -294,6 +326,7 @@ jobs:
           key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           max-size: 2G
           save: true
+          create-symlink: true
 
       - name: Install Missing ROCm Dependencies
         shell: bash
@@ -526,8 +559,32 @@ jobs:
             projects/aqlprofile
             projects/rocprofiler-register
             projects/rocr-runtime
-          submodules: true
+          submodules: false
           set-safe-directory: true
+
+      - name: Compute submodule cache key
+        id: submods
+        shell: bash
+        run: |
+          git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+          echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+          # collect submodule paths for cache 'path'
+          git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+          { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+      - name: Restore submodule cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            .git/modules
+            ${{ steps.submods.outputs.paths }}
+          key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+          restore-keys: |
+            submods-${{ runner.os }}-
+            submods-
+
+      - name: Init/Update submodules
+        run: git submodule update --init --recursive --jobs 16
 
       - name: Install Latest Nightly ROCm using TheRock Tarballs
         shell: bash
@@ -558,13 +615,20 @@ jobs:
           key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}
           max-size: 2G
           save: true
+          create-symlink: true
 
       - name: Build and Install ROCProfiler-Register
         shell: bash
         working-directory: projects/rocprofiler-register
         run: |
           echo "Install ROCProfiler-Register"
-          cmake -B build-rocprofiler-register -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+          cmake -B build-rocprofiler-register \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
           cmake --build build-rocprofiler-register --target all --parallel 16
           cmake --build build-rocprofiler-register --target install
           echo "✅ ROCProfiler-Register Installation complete!"
@@ -576,7 +640,13 @@ jobs:
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
           echo "Install ROCR-Runtime..."
-          cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
           echo "✅ ROCR-Runtime Installation complete!"
@@ -588,9 +658,15 @@ jobs:
           echo "Install Aqlprofile."
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
-          cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }};${{ env.ROCM_PATH }}/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
-          cmake --build build --target all --parallel 16
-          cmake --build build --target install
+          cmake -B build-aqlprofile \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
+          cmake --build build-aqlprofile --target all --parallel 16
+          cmake --build build-aqlprofile --target install
           echo "✅ AQLProfile Installation complete!"
 
       - name: Enable PC Sampling
@@ -637,7 +713,7 @@ jobs:
             -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
-    name: Sanitizers ${{ matrix.os }} • ${{ matrix.runner }} • ${{ matrix.sanitizer }}
+    name: Sanitizers • ${{ matrix.sanitizer }} • ${{ matrix.runner }} • ${{ matrix.os }}
     needs: build-ci-base
     strategy:
       fail-fast: false
@@ -669,6 +745,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
+        ls -lah /opt/
         tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
@@ -681,8 +758,32 @@ jobs:
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocr-runtime
-        submodules: true
+        submodules: false
         set-safe-directory: true
+
+    - name: Compute submodule cache key
+      id: submods
+      shell: bash
+      run: |
+        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        # collect submodule paths for cache 'path'
+        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+    - name: Restore submodule cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          .git/modules
+          ${{ steps.submods.outputs.paths }}
+        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        restore-keys: |
+          submods-${{ runner.os }}-
+          submods-
+
+    - name: Init/Update submodules
+      run: git submodule update --init --recursive --jobs 16
 
     - name: Install requirements
       timeout-minutes: 10
@@ -721,13 +822,20 @@ jobs:
         key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}-${{ matrix.sanitizer}}
         max-size: 2G
         save: true
+        create-symlink: true
 
     - name: Build and Install ROCProfiler-Register
       shell: bash
       working-directory: projects/rocprofiler-register
       run: |
         echo "Install ROCProfiler-Register"
-        cmake -B build-rocprofiler-register -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake -B build-rocprofiler-register \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
         cmake --build build-rocprofiler-register --target all --parallel 16
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
@@ -737,7 +845,13 @@ jobs:
       working-directory: projects/rocr-runtime
       run: |
         echo "Install ROCR-Runtime..."
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake -B build \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
         echo "✅ ROCR-Runtime Installation complete!"
@@ -747,9 +861,15 @@ jobs:
       working-directory: projects/aqlprofile
       run: |
         echo "Install Aqlprofile."
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
-        cmake --build build --target all --parallel 16
-        cmake --build build --target install
+        cmake -B build-aqlprofile \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            .
+        cmake --build build-aqlprofile --target all --parallel 16
+        cmake --build build-aqlprofile --target install
         echo "✅ Installation complete!"
 
     - name: Configure, Build, and Test
