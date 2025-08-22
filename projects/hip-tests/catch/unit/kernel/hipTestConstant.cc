@@ -17,7 +17,7 @@ OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include <hip_test_common.hh>
- 
+
 
 #define LEN 512
 #define SIZE 2048
@@ -61,21 +61,20 @@ TEST_CASE("Unit_kernel_chkConstantViaKernel") {
 
   HIP_CHECK(hipMalloc(reinterpret_cast<void**>(&Ad), SIZE));
 
-  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(Value), A, SIZE, 0,
-                                hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(Value), A, SIZE, 0, hipMemcpyHostToDevice));
   hipLaunchKernelGGL(Get, dim3(1, 1, 1), dim3(LEN, 1, 1), 0, 0, Ad);
   HIP_CHECK(hipMemcpy(B, Ad, SIZE, hipMemcpyDeviceToHost));
 
   for (unsigned i = 0; i < LEN; i++) {
     REQUIRE(A[i] == B[i]);
   }
-  delete [] A;
-  delete [] B;
+  delete[] A;
+  delete[] B;
   HIP_CHECK(hipFree(Ad));
 }
 
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

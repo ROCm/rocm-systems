@@ -42,7 +42,6 @@ THE SOFTWARE.
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipDriverGetVersion_Positive") {
-
   int driverVersion = -1;
   HIP_CHECK(hipDriverGetVersion(&driverVersion));
   REQUIRE(driverVersion > 0);
@@ -69,6 +68,6 @@ TEST_CASE("Unit_hipDriverGetVersion_Negative") {
 
 
 /**
-* End doxygen group DriverTest.
-* @}
-*/
+ * End doxygen group DriverTest.
+ * @}
+ */

@@ -25,15 +25,15 @@ THE SOFTWARE.
 
 
 /**
-* @addtogroup hiprtcGetLoweredName hiprtcGetLoweredName
-* @{
-* @ingroup hiprtc
-* `hiprtcResult hiprtcGetLoweredName(prog,
-*               kernel_name_vec[i].c_str(), // name expression
-*               &name                       // lowered name
-*               ));` -
-* These test cases tests working hiprtcGetLoweredName() api
-*/
+ * @addtogroup hiprtcGetLoweredName hiprtcGetLoweredName
+ * @{
+ * @ingroup hiprtc
+ * `hiprtcResult hiprtcGetLoweredName(prog,
+ *               kernel_name_vec[i].c_str(), // name expression
+ *               &name                       // lowered name
+ *               ));` -
+ * These test cases tests working hiprtcGetLoweredName() api
+ */
 
 static const char* const gpuProgram1 = R"(
 template <int N, typename T>
@@ -65,12 +65,12 @@ bool Test(int CaseNum, const char* GpuProgram) {
   // Create an instance of hiprtcProgram
   hiprtcProgram prog;
 
-  HIPRTC_CHECK(hiprtcCreateProgram(&prog,         // prog
-                                   GpuProgram,   // buffer
-                                   "prog.cu",     // name
-                                   0,             // numHeaders
-                                   NULL,          // headers
-                                   NULL));        // includeNames
+  HIPRTC_CHECK(hiprtcCreateProgram(&prog,       // prog
+                                   GpuProgram,  // buffer
+                                   "prog.cu",   // name
+                                   0,           // numHeaders
+                                   NULL,        // headers
+                                   NULL));      // includeNames
 
   // add all name expressions for kernels
   std::vector<std::string> kernel_name_vec, kernelNameExpectdOutput;
@@ -100,9 +100,9 @@ bool Test(int CaseNum, const char* GpuProgram) {
     kernel_name_vec.push_back("my_kernel<(int)6, int, int >");
     kernel_name_vec.push_back("my_kernel<(int)10, long, long >");
     kernel_name_vec.push_back("my_kernel<(int)11, long long, long long >");
-    kernel_name_vec.push_back("my_kernel<(int)123, unsigned int, unsigned int >"); //NOLINT
+    kernel_name_vec.push_back("my_kernel<(int)123, unsigned int, unsigned int >");  // NOLINT
     kernel_name_vec.push_back("my_kernel<(int)1234, char, char >");
-    kernel_name_vec.push_back("my_kernel<(int)12345, unsigned char, unsigned char >"); //NOLINT
+    kernel_name_vec.push_back("my_kernel<(int)12345, unsigned char, unsigned char >");  // NOLINT
 
     kernelNameExpectdOutput.push_back("_Z9my_kernelILi3EffEvPT0_PT1_");
     kernelNameExpectdOutput.push_back("_Z9my_kernelILi66EfiEvPT0_PT1_");
@@ -128,15 +128,15 @@ bool Test(int CaseNum, const char* GpuProgram) {
   for (size_t i = 0; i < kernel_name_vec.size(); ++i)
     HIPRTC_CHECK(hiprtcAddNameExpression(prog, kernel_name_vec[i].c_str()));
 
-  hiprtcResult compileResult = hiprtcCompileProgram(prog,  // prog
-                                                    0,     // numOptions
+  hiprtcResult compileResult = hiprtcCompileProgram(prog,   // prog
+                                                    0,      // numOptions
                                                     NULL);  // options
   // Obtain compilation log from the program.
   size_t logSize;
   HIPRTC_CHECK(hiprtcGetProgramLogSize(prog, &logSize));
 
   if (logSize > 0) {
-    char *log = new char[logSize];
+    char* log = new char[logSize];
     HIPRTC_CHECK(hiprtcGetProgramLog(prog, log));
     INFO(log);
     delete[] log;
@@ -144,10 +144,10 @@ bool Test(int CaseNum, const char* GpuProgram) {
   }
   // Extract lowered names
   for (size_t i = 0; i < kernel_name_vec.size(); ++i) {
-    const char *name;
+    const char* name;
     HIPRTC_CHECK(hiprtcGetLoweredName(prog,
-                 kernel_name_vec[i].c_str(),  // name expression
-                 &name));                       // lowered name
+                                      kernel_name_vec[i].c_str(),  // name expression
+                                      &name));                     // lowered name
     if (name != kernelNameExpectdOutput[i]) {
       IfTestPassed = false;
     }
@@ -164,6 +164,6 @@ TEST_CASE("Unit_hiprtcGetLoweredName_templateKrnls") {
 }
 
 /**
-* End doxygen group hiprtc.
-* @}
-*/
+ * End doxygen group hiprtc.
+ * @}
+ */

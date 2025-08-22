@@ -45,7 +45,7 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   int totalOps = 2;
   static hipStreamBatchMemOpParams paramArray[2], invalidParamArray[2];
   std::vector<hipDeviceptr_t> opsArray(1);
-  HIP_CHECK(hipMalloc((void **)&opsArray[0], sizeof(uint32_t)));
+  HIP_CHECK(hipMalloc((void**)&opsArray[0], sizeof(uint32_t)));
 
   paramArray[0].operation = hipStreamMemOpWriteValue32;
   paramArray[0].writeValue.address = opsArray[0];
@@ -70,48 +70,41 @@ TEST_CASE("Unit_hipStreamBatchMemOp_Negative_Tests") {
   invalidParamArray[1].waitValue.flags = hipStreamWaitValueEq;
 
   SECTION("Stream as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(nullptr, totalOps, paramArray, 0), hipErrorInvalidValue);
   }
 
   SECTION("Invalid Stream") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1),
-                    totalOps, paramArray, 0),
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(reinterpret_cast<hipStream_t>(-1), totalOps, paramArray, 0),
                     hipErrorContextIsDestroyed);
   }
 
   SECTION("Parameter Array as a nullptr") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, totalOps, nullptr, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, totalOps, nullptr, 0), hipErrorInvalidValue);
   }
 
   SECTION("More than 256 Total Operations") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, 1000, paramArray, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, 1000, paramArray, 0), hipErrorInvalidValue);
   }
 
   SECTION("Total Operations less than 0") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, -4, paramArray, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, -4, paramArray, 0), hipErrorInvalidValue);
   }
   SECTION("Total Operations Zero") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, 0, paramArray, 0),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, 0, paramArray, 0), hipErrorInvalidValue);
   }
 
   SECTION("Flag value not Zero") {
-    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, totalOps, paramArray, -6),
-                    hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, totalOps, paramArray, -6), hipErrorInvalidValue);
   }
 
-  // Disabled due to defect SWDEV-502219
-  #if 0
+// Disabled due to defect SWDEV-502219
+#if 0
   SECTION("InValid Parameter Array") {
     HIP_CHECK_ERROR(hipStreamBatchMemOp(stream, totalOps, invalidParamArray, 0),
                     hipErrorInvalidValue);
   }
-  #endif
-  HIP_CHECK(hipFree((void *)opsArray[0]));
+#endif
+  HIP_CHECK(hipFree((void*)opsArray[0]));
   HIP_CHECK(hipStreamDestroy(stream));
 }
 /**

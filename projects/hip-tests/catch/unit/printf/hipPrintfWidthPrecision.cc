@@ -37,28 +37,26 @@ __global__ void test_kernel_width() {
   printf("%.5s\n", "helloxyz");
 }
 /**
-* @addtogroup printf printf
-* @{
-* @ingroup PrintfTest
-* `int printf()` -
-* Method to print the content on output device.
-*/
+ * @addtogroup printf printf
+ * @{
+ * @ingroup PrintfTest
+ * `int printf()` -
+ * Method to print the content on output device.
+ */
 /**
-* Test Description
-* ------------------------
-* - Test case to verify the floating point details via printf API
-* Test source
-* ------------------------
-* - catch/unit/printf/hipPrintfWidthPrecision.cc
-* Test requirements
-* ------------------------
-* - HIP_VERSION >= 6.2
-*/
+ * Test Description
+ * ------------------------
+ * - Test case to verify the floating point details via printf API
+ * Test source
+ * ------------------------
+ * - catch/unit/printf/hipPrintfWidthPrecision.cc
+ * Test requirements
+ * ------------------------
+ * - HIP_VERSION >= 6.2
+ */
 TEST_CASE("Unit_Printf_PrintfWidthPrecision") {
   int pcieAtomic = 0;
-  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic,
-                                  hipDeviceAttributeHostNativeAtomicSupported,
-                                  0));
+  HIP_CHECK(hipDeviceGetAttribute(&pcieAtomic, hipDeviceAttributeHostNativeAtomicSupported, 0));
   if (!pcieAtomic) {
     HipTest::HIP_SKIP_TEST("Device doesn't support pcie atomic, Skipped");
     return;
@@ -87,6 +85,6 @@ hello
 }
 
 /**
-* End doxygen group PrintfTest.
-* @}
-*/
+ * End doxygen group PrintfTest.
+ * @}
+ */

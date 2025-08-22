@@ -173,7 +173,7 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
         if (p->ptr == NULL) {
           return CL_INVALID_GL_SHAREGROUP_REFERENCE_KHR;
         }
-        //skip the null case in the case of hip-gl, it will be initialized in create
+        // skip the null case in the case of hip-gl, it will be initialized in create
       case ROCCLR_HIP_GL_CONTEXT_KHR:
         info->hCtx_ = p->ptr;
         info->flags_ |= GLDeviceKhr;
@@ -215,7 +215,8 @@ int Context::create(const intptr_t* properties) {
     ::memcpy(properties_, properties, info().propertiesSize_);
   }
 
-  // if the context passed in is null, it's the GL interop case and we need to get the current context
+  // if the context passed in is null, it's the GL interop case and we need to get the current
+  // context
   if (info_.hCtx_ == nullptr) {
     if (info_.flags_ & GLDeviceKhr) {
       // Init context for GL interop
@@ -223,7 +224,7 @@ int Context::create(const intptr_t* properties) {
         HMODULE h = (HMODULE)Os::loadLibrary(
 #ifdef _WIN32
             "OpenGL32.dll"
-#else  //!_WIN32
+#else   //!_WIN32
             "libGL.so.1"
 #endif  //!_WIN32
         );
@@ -285,9 +286,9 @@ int Context::create(const intptr_t* properties) {
       if (glenv_ == NULL) {
         HMODULE h = (HMODULE)Os::loadLibrary(
 #ifdef _WIN32
-          "OpenGL32.dll"
-#else  //!_WIN32
-          "libGL.so.1"
+            "OpenGL32.dll"
+#else   //!_WIN32
+            "libGL.so.1"
 #endif  //!_WIN32
         );
         if (!h || !(glenv_ = new GLFunctions(h, (info_.flags_ & Flags::EGLDeviceKhr) != 0))) {
@@ -308,9 +309,9 @@ int Context::create(const intptr_t* properties) {
 
 void* Context::hostAlloc(size_t size, size_t alignment, bool atomics) const {
   if (customHostAllocDevice_ != NULL) {
-    return customHostAllocDevice_->hostAlloc(size, alignment, atomics
-                                             ? Device::MemorySegment::kAtomics
-                                             : Device::MemorySegment::kNoAtomics);
+    return customHostAllocDevice_->hostAlloc(
+        size, alignment,
+        atomics ? Device::MemorySegment::kAtomics : Device::MemorySegment::kNoAtomics);
   }
   return AlignedMemory::allocate(size, alignment);
 }
@@ -350,8 +351,7 @@ void* Context::svmAlloc(size_t size, size_t alignment, cl_svm_mem_flags flags,
     }
     // check if the device support svm platform atomics,
     // skipped allocation for platform atomics if not supported by this device
-    if ((flags & CL_MEM_SVM_ATOMICS) &&
-        !(dev->info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS)) {
+    if ((flags & CL_MEM_SVM_ATOMICS) && !(dev->info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS)) {
       continue;
     }
     svmPtrAlloced = dev->svmAlloc(*this, size, alignment, flags, svmPtrAlloced);

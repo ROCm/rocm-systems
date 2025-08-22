@@ -35,17 +35,16 @@ THE SOFTWARE.
 #define LEN 64
 #define SIZE LEN * sizeof(float)
 
-#define ARR_SIZE (32*32)
-#define SIZE_BYTES (ARR_SIZE*sizeof(int))
+#define ARR_SIZE (32 * 32)
+#define SIZE_BYTES (ARR_SIZE * sizeof(int))
 
-extern "C" __global__ void bit_extract_kernel(uint32_t* C_d, const uint32_t*
-                                              A_d, size_t N) {
+extern "C" __global__ void bit_extract_kernel(uint32_t* C_d, const uint32_t* A_d, size_t N) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   size_t stride = blockDim.x * gridDim.x;
   for (size_t i = offset; i < N; i += stride) {
 #if HT_AMD
     C_d[i] = __bitextract_u32(A_d[i], 8, 4);
-#else  /* defined __HIP_PLATFORM_NVIDIA__ or other path */
+#else /* defined __HIP_PLATFORM_NVIDIA__ or other path */
     C_d[i] = ((A_d[i] & 0xf00) >> 8);
 #endif
   }
@@ -54,18 +53,16 @@ extern "C" __global__ void bit_extract_kernel(uint32_t* C_d, const uint32_t*
 /**
  * Host Function to check for negative case.
  */
-__host__ void hostFunction() {
-  printf("hostFunction\n");
-}
+__host__ void hostFunction() { printf("hostFunction\n"); }
 
 /**
  * Sample Kernel to be used for functional test cases
  */
-__global__ void hipKernel(int *a) {
+__global__ void hipKernel(int* a) {
   int offset = blockDim.x * blockIdx.x + threadIdx.x;
   int stride = blockDim.x * gridDim.x;
 
-  for (int i = offset; i < ARR_SIZE; i+= stride) {
+  for (int i = offset; i < ARR_SIZE; i += stride) {
     a[i] += a[i];
   }
 }
@@ -73,7 +70,7 @@ __global__ void hipKernel(int *a) {
 /**
  * Local Function to validate the result
  */
-bool verifyResult(int *a, int *output_ref, int arrSize) {
+bool verifyResult(int* a, int* output_ref, int arrSize) {
   for (int i = 0; i < arrSize; i++) {
     if (a[i] != output_ref[i]) {
       return false;
@@ -126,20 +123,19 @@ TEST_CASE("Unit_hipGetFuncBySymbol_PositiveTest") {
     void* _Ad;
     size_t _N;
   } args;
-  args._Cd = reinterpret_cast<void**> (C_d);
-  args._Ad = reinterpret_cast<void**> (A_d);
-  args._N = static_cast<size_t> (N);
+  args._Cd = reinterpret_cast<void**>(C_d);
+  args._Ad = reinterpret_cast<void**>(A_d);
+  args._N = static_cast<size_t>(N);
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+                    HIP_LAUNCH_PARAM_END};
 
   hipFunction_t Function;
-  HIPCHECK(hipGetFuncBySymbol(&Function,
-                              reinterpret_cast<void*>(bit_extract_kernel)));
+  HIPCHECK(hipGetFuncBySymbol(&Function, reinterpret_cast<void*>(bit_extract_kernel)));
 
   HIPCHECK(hipModuleLaunchKernel(Function, 1, 1, 1, LEN, 1, 1, 0, 0, NULL,
-                                     reinterpret_cast<void**>(&config)));
+                                 reinterpret_cast<void**>(&config)));
 
   HIPCHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)(C_d), Nbytes));
 
@@ -177,8 +173,7 @@ TEST_CASE("Unit_hipGetFuncBySymbol_NegativeTests") {
   REQUIRE(hipGetFuncBySymbol(&funcPointer, NULL) != hipSuccess);
 
   // Passing hostFunction as second parameter
-  REQUIRE(hipGetFuncBySymbol(&funcPointer,
-          reinterpret_cast<const void*>(hostFunction)));
+  REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hostFunction)));
 }
 
 /**
@@ -225,12 +220,12 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev") {
   for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
     HIP_CHECK(hipSetDevice(deviceId));
 
-    REQUIRE(hipGetFuncBySymbol(&funcPointer,
-            reinterpret_cast<const void*>(hipKernel))== hipSuccess);
+    REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) ==
+            hipSuccess);
 
-    int *h_a = reinterpret_cast<int *>(malloc(SIZE_BYTES));
+    int* h_a = reinterpret_cast<int*>(malloc(SIZE_BYTES));
     REQUIRE(h_a != nullptr);
-    int *output_ref = reinterpret_cast<int *>(malloc(SIZE_BYTES));
+    int* output_ref = reinterpret_cast<int*>(malloc(SIZE_BYTES));
     REQUIRE(output_ref != nullptr);
 
     for (int i = 0; i < ARR_SIZE; i++) {
@@ -238,7 +233,7 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev") {
       output_ref[i] = 4;
     }
 
-    int *d_a = nullptr;
+    int* d_a = nullptr;
     HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES));
     REQUIRE(d_a != nullptr);
     HIP_CHECK(hipMemcpy(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice));
@@ -249,13 +244,11 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev") {
     void* kernelParam[] = {d_a};
     auto size = sizeof(kernelParam);
     void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                                HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                                HIP_LAUNCH_PARAM_END};
+                                HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-    REQUIRE(hipModuleLaunchKernel(funcPointer,
-            blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-            threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z,
-            0, 0, nullptr, kernel_parameter) == hipSuccess);
+    REQUIRE(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
+                                  threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, 0,
+                                  nullptr, kernel_parameter) == hipSuccess);
 
     HIP_CHECK(hipMemcpy(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost));
 
@@ -273,9 +266,9 @@ TEST_CASE("Unit_hipGetFuncBySymbol_MultiDev") {
 void MultiThreadMultiDevFunc(int DevId) {
   HIP_CHECK(hipSetDevice(DevId));
 
-  int *h_a = reinterpret_cast<int *>(malloc(SIZE_BYTES));
+  int* h_a = reinterpret_cast<int*>(malloc(SIZE_BYTES));
   REQUIRE(h_a != nullptr);
-  int *output_ref = reinterpret_cast<int *>(malloc(SIZE_BYTES));
+  int* output_ref = reinterpret_cast<int*>(malloc(SIZE_BYTES));
   REQUIRE(output_ref != nullptr);
 
   for (int i = 0; i < ARR_SIZE; i++) {
@@ -287,32 +280,27 @@ void MultiThreadMultiDevFunc(int DevId) {
   HIP_CHECK(hipSetDevice(DevId));
   HIP_CHECK(hipStreamCreate(&stream));
 
-  int *d_a = nullptr;
+  int* d_a = nullptr;
   HIP_CHECK(hipMalloc(&d_a, SIZE_BYTES));
   REQUIRE(d_a != nullptr);
-  HIP_CHECK(hipMemcpyAsync(d_a, h_a, SIZE_BYTES,
-                           hipMemcpyHostToDevice, stream));
+  HIP_CHECK(hipMemcpyAsync(d_a, h_a, SIZE_BYTES, hipMemcpyHostToDevice, stream));
 
   dim3 blocksPerGrid(1, 1, 1);
   dim3 threadsPerBlock(1, 1, 64);
 
   hipFunction_t funcPointer;
-  REQUIRE(hipGetFuncBySymbol(&funcPointer,
-          reinterpret_cast<const void*>(hipKernel))== hipSuccess);
+  REQUIRE(hipGetFuncBySymbol(&funcPointer, reinterpret_cast<const void*>(hipKernel)) == hipSuccess);
 
   void* kernelParam[] = {d_a};
   auto size = sizeof(kernelParam);
   void* kernel_parameter[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &kernelParam,
-                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
-                              HIP_LAUNCH_PARAM_END};
+                              HIP_LAUNCH_PARAM_BUFFER_SIZE, &size, HIP_LAUNCH_PARAM_END};
 
-  REQUIRE(hipModuleLaunchKernel(funcPointer,
-          blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
-          threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z,
-          0, stream, nullptr, kernel_parameter) == hipSuccess);
+  REQUIRE(hipModuleLaunchKernel(funcPointer, blocksPerGrid.x, blocksPerGrid.y, blocksPerGrid.z,
+                                threadsPerBlock.x, threadsPerBlock.y, threadsPerBlock.z, 0, stream,
+                                nullptr, kernel_parameter) == hipSuccess);
 
-  HIP_CHECK(hipMemcpyAsync(h_a, d_a, SIZE_BYTES,
-                           hipMemcpyDeviceToHost, stream));
+  HIP_CHECK(hipMemcpyAsync(h_a, d_a, SIZE_BYTES, hipMemcpyDeviceToHost, stream));
 
   REQUIRE(verifyResult(h_a, output_ref, ARR_SIZE) == true);
 

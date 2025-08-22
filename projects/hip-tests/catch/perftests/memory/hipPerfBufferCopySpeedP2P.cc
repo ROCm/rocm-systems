@@ -18,13 +18,13 @@ THE SOFTWARE.
 */
 
 /**
-* @addtogroup hipMemcpyAsync
-* @{
-* @ingroup perfMemoryTest
-* `hipMemcpyAsync(void* dst, const void* src, size_t count,
-*                 hipMemcpyKind kind, hipStream_t stream = 0)` -
-* Copies data between devices.
-*/
+ * @addtogroup hipMemcpyAsync
+ * @{
+ * @ingroup perfMemoryTest
+ * `hipMemcpyAsync(void* dst, const void* src, size_t count,
+ *                 hipMemcpyKind kind, hipStream_t stream = 0)` -
+ * Copies data between devices.
+ */
 
 #include <hip_test_common.hh>
 #include <hip_array_common.hh>
@@ -33,27 +33,27 @@ THE SOFTWARE.
 #include <sstream>
 #include <iomanip>
 using namespace std;
-typedef long long T; // You may change to any type
+typedef long long T;  // You may change to any type
 
-//#define VERIFY_DATA
+// #define VERIFY_DATA
 enum TIMING_MODE { TIMING_MODE_CPU, TIMING_MODE_GPU };
 
 // -sizes are in bytes, +sizes are in kb, last size must be largest
 #if 1
-static constexpr int sizes[] = {-64, -256, -512, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024,
-                       2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144};
+static constexpr int sizes[] = {-64,  -256,  -512,  1,     2,      4,     8,    16,
+                                32,   64,    128,   256,   512,    1024,  2048, 4096,
+                                8192, 16384, 32768, 65536, 131072, 262144};
 #else
-static constexpr int sizes[] = { 262144 };
+static constexpr int sizes[] = {262144};
 #endif
 static constexpr int nSizes = sizeof(sizes) / sizeof(sizes[0]);
 static constexpr double megaSize = 1000000.;
 static constexpr int defaultIterations = 200;
 static constexpr unsigned threadsPerBlock = 1024;
 
-template <typename T>
-static __global__ void copy_kernel(T* dst, T* src, size_t N) {
+template <typename T> static __global__ void copy_kernel(T* dst, T* src, size_t N) {
   size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if(idx < N) dst[idx] = src[idx]; // We make sure idx < N
+  if (idx < N) dst[idx] = src[idx];  // We make sure idx < N
 }
 
 static size_t sizeToBytes(int size) { return (size < 0) ? -size : size * 1024; }
@@ -68,7 +68,7 @@ static string sizeToString(int size) {
   return ss.str();
 }
 
-static void checkP2PSupport(){
+static void checkP2PSupport() {
   int deviceCnt = 0;
   HIP_CHECK(hipGetDeviceCount(&deviceCnt));
   cout << "Total no. of  available gpu #" << deviceCnt << "\n" << endl;
@@ -87,8 +87,7 @@ static void checkP2PSupport(){
         ++PeerCnt;
       }
     }
-    if (PeerCnt == 0)
-     cout << "NONE" << " ";
+    if (PeerCnt == 0) cout << "NONE" << " ";
 
     cout << std::endl;
     cout << "    peer2peer not supported : ";
@@ -101,21 +100,20 @@ static void checkP2PSupport(){
         ++nonPeerCnt;
       }
     }
-    if (nonPeerCnt == 0)
-      cout << "NONE" << " ";
+    if (nonPeerCnt == 0) cout << "NONE" << " ";
 
     cout << "\n" << endl;
   }
 
   cout << "\nNote: For non-supported peer2peer devices, memcopy will use/follow the normal "
-               "behaviour (GPU1-->host then host-->GPU2)\n\n"
-            << endl;
+          "behaviour (GPU1-->host then host-->GPU2)\n\n"
+       << endl;
 }
 
-static void outputMatrix(const string &title, const int numGPUs, const vector<double> &data,
-   const TIMING_MODE mode, const size_t dataSize, const int iterations) {
-  fprintf(stderr, "%s, Timing %s, Data %zu KB, Iterations %d\n   ",
-      title.c_str(), mode == TIMING_MODE_GPU ? "GPU" : "CPU", dataSize, iterations);
+static void outputMatrix(const string& title, const int numGPUs, const vector<double>& data,
+                         const TIMING_MODE mode, const size_t dataSize, const int iterations) {
+  fprintf(stderr, "%s, Timing %s, Data %zu KB, Iterations %d\n   ", title.c_str(),
+          mode == TIMING_MODE_GPU ? "GPU" : "CPU", dataSize, iterations);
   for (int j = 0; j < numGPUs; j++) {
     fprintf(stderr, "%9d ", j);
   }
@@ -130,7 +128,7 @@ static void outputMatrix(const string &title, const int numGPUs, const vector<do
 }
 
 static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingMode,
-  const bool useHipMemcpyAsync) {
+                                 const bool useHipMemcpyAsync) {
   const char* method = useHipMemcpyAsync ? "hipMemcpyAsync()" : "copy kernel";
   int gpuCount = 0;
   HIP_CHECK(hipGetDeviceCount(&gpuCount));
@@ -150,8 +148,8 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
     for (int peerGpu = 0; peerGpu < gpuCount; peerGpu++) {
       HIP_CHECK(hipSetDevice(currentGpu));
 
-      fprintf(stderr, "Uni: Gpu%d -> Gpu%d by %s, Timing %s, Iterations %d\n",
-          currentGpu, peerGpu, method, timingMode == TIMING_MODE_GPU ? "GPU" : "CPU", iterations);
+      fprintf(stderr, "Uni: Gpu%d -> Gpu%d by %s, Timing %s, Iterations %d\n", currentGpu, peerGpu,
+              method, timingMode == TIMING_MODE_GPU ? "GPU" : "CPU", iterations);
 
       if (currentGpu != peerGpu) {
         int canAccessPeer = 0;
@@ -173,18 +171,16 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
 #ifdef VERIFY_DATA
       HIP_CHECK(hipMemcpy(currentGpuMem, hostMem0.data(), numMax, hipMemcpyHostToDevice));
 #endif
-      unsigned N = numMax / sizeof(T); // Number of T in buffer of numMax bytes.
-      REQUIRE(N * sizeof(T) == numMax); // To prevent verification failure
+      unsigned N = numMax / sizeof(T);   // Number of T in buffer of numMax bytes.
+      REQUIRE(N * sizeof(T) == numMax);  // To prevent verification failure
       unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
       // Warmup
       if (useHipMemcpyAsync) {
-        HIP_CHECK(hipMemcpyAsync(peerGpuMem, currentGpuMem, numMax,
-          hipMemcpyDeviceToDevice, 0));
-      }
-      else {
+        HIP_CHECK(hipMemcpyAsync(peerGpuMem, currentGpuMem, numMax, hipMemcpyDeviceToDevice, 0));
+      } else {
         hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
-          reinterpret_cast<T*>(peerGpuMem), reinterpret_cast<T*>(currentGpuMem),
-          static_cast<size_t>(N));
+                           reinterpret_cast<T*>(peerGpuMem), reinterpret_cast<T*>(currentGpuMem),
+                           static_cast<size_t>(N));
         HIP_CHECK(hipGetLastError());
       }
       HIP_CHECK(hipDeviceSynchronize());
@@ -193,7 +189,7 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
       HIP_CHECK(hipMemcpy(hostMem1.data(), peerGpuMem, numMax, hipMemcpyDeviceToHost));
       REQUIRE(hostMem1 == hostMem0);
 #endif
-      float t = 0; // in ms
+      float t = 0;  // in ms
       auto cpuStart = std::chrono::steady_clock::now();
       hipEvent_t eventStart, eventStop;
       hipStream_t stream;
@@ -216,17 +212,17 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
           HIP_CHECK(hipEventRecord(eventStart, stream));
         }
 
-        for (size_t offsetEnd = numMax - nbytes, offset = 0, j = 0;
-          j < iterations; j++, offset += nbytes) {
+        for (size_t offsetEnd = numMax - nbytes, offset = 0, j = 0; j < iterations;
+             j++, offset += nbytes) {
           if (offset > offsetEnd) offset = 0;
           if (useHipMemcpyAsync) {
-            HIP_CHECK(hipMemcpyAsync(peerGpuMem + offset,
-              currentGpuMem + offset, nbytes, hipMemcpyDeviceToDevice, stream));
-          }
-          else {
+            HIP_CHECK(hipMemcpyAsync(peerGpuMem + offset, currentGpuMem + offset, nbytes,
+                                     hipMemcpyDeviceToDevice, stream));
+          } else {
             hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, stream,
-              reinterpret_cast<T*>(peerGpuMem + offset),
-              reinterpret_cast<T*>(currentGpuMem + offset), static_cast<size_t>(N));
+                               reinterpret_cast<T*>(peerGpuMem + offset),
+                               reinterpret_cast<T*>(currentGpuMem + offset),
+                               static_cast<size_t>(N));
             HIP_CHECK(hipGetLastError());
           }
         }
@@ -237,14 +233,14 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
         } else if (timingMode == TIMING_MODE_CPU) {
           HIP_CHECK(hipDeviceSynchronize());
           std::chrono::duration<double, std::milli> cpuMs =
-                                    std::chrono::steady_clock::now() - cpuStart;
+              std::chrono::steady_clock::now() - cpuStart;
           t = cpuMs.count();
         }
         t /= iterations;
-        double bandwidth = nbytes / megaSize / t; // GByte/s
+        double bandwidth = nbytes / megaSize / t;  // GByte/s
 
-        fprintf(stderr, "%8s,         %-9.06lf,        %-4.08lf\n",
-            sizeToString(thisSize).c_str(), t, bandwidth);
+        fprintf(stderr, "%8s,         %-9.06lf,        %-4.08lf\n", sizeToString(thisSize).c_str(),
+                t, bandwidth);
         if (i == (nSizes - 1)) {
           timeMs[currentGpu * gpuCount + peerGpu] = t;
           bandWidth[currentGpu * gpuCount + peerGpu] = bandwidth;
@@ -269,10 +265,10 @@ static void testP2PUniDirMemPerf(const int iterations, const TIMING_MODE timingM
       HIP_CHECK(hipStreamDestroy(stream));
     }
   }
-  outputMatrix(string("Unidirectional ") + method + " Time Table(ms)", gpuCount, timeMs,
-    timingMode, sizes[nSizes - 1], iterations);
-  outputMatrix(string("Unidirectional ") + method + " Bandwith Table(GB/s)", gpuCount,
-    bandWidth, timingMode, sizes[nSizes - 1], iterations);
+  outputMatrix(string("Unidirectional ") + method + " Time Table(ms)", gpuCount, timeMs, timingMode,
+               sizes[nSizes - 1], iterations);
+  outputMatrix(string("Unidirectional ") + method + " Bandwith Table(GB/s)", gpuCount, bandWidth,
+               timingMode, sizes[nSizes - 1], iterations);
 }
 
 static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsync) {
@@ -289,8 +285,8 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
   for (int currentGpu = 0; currentGpu < gpuCount; currentGpu++) {
     for (int peerGpu = 0; peerGpu < gpuCount; peerGpu++) {
       HIP_CHECK(hipSetDevice(currentGpu));
-      fprintf(stderr, "Bi: Gpu%d <-> Gpu%d by %s, Timing GPU, Iterations %d\n",
-          currentGpu, peerGpu, method, iterations);
+      fprintf(stderr, "Bi: Gpu%d <-> Gpu%d by %s, Timing GPU, Iterations %d\n", currentGpu, peerGpu,
+              method, iterations);
 
       if (currentGpu != peerGpu) {
         int canAccessPeer = 0;
@@ -310,10 +306,13 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
         HIP_CHECK(hipSetDevice(currentGpu));
         HIP_CHECK(hipDeviceEnablePeerAccess(peerGpu, 0));
       }
-      fprintf(stderr, "Gpu%d -> Gpu%d                                         *"
-                       "*      Gpu%d -> Gpu%d\n",  currentGpu, peerGpu, peerGpu, currentGpu);
-      fprintf(stderr, "Size(KB)          Time(ms)       Bandwidth(GB/s)      "
-                       "       Time(ms)       Bandwidth(GB/s)\n");
+      fprintf(stderr,
+              "Gpu%d -> Gpu%d                                         *"
+              "*      Gpu%d -> Gpu%d\n",
+              currentGpu, peerGpu, peerGpu, currentGpu);
+      fprintf(stderr,
+              "Size(KB)          Time(ms)       Bandwidth(GB/s)      "
+              "       Time(ms)       Bandwidth(GB/s)\n");
 
       unsigned char *currentGpuMem[2], *peerGpuMem[2];
       HIP_CHECK(hipMalloc((void**)&currentGpuMem[0], numMax));
@@ -326,30 +325,31 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
 
       HIP_CHECK(hipSetDevice(currentGpu));
 
-      unsigned N = numMax / sizeof(T); // Number of T in buffer of numMax bytes.
+      unsigned N = numMax / sizeof(T);  // Number of T in buffer of numMax bytes.
       REQUIRE(N * sizeof(T) == numMax);
       unsigned blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
 
       // Warmup. currentGpu is the current device
       if (useHipMemcpyAsync) {
-        HIP_CHECK(hipMemcpyAsync(peerGpuMem[0], currentGpuMem[0], numMax, hipMemcpyDeviceToDevice, 0));
+        HIP_CHECK(
+            hipMemcpyAsync(peerGpuMem[0], currentGpuMem[0], numMax, hipMemcpyDeviceToDevice, 0));
         HIP_CHECK(hipDeviceSynchronize());
         HIP_CHECK(hipSetDevice(peerGpu));
-        HIP_CHECK(hipMemcpyAsync(currentGpuMem[1], peerGpuMem[1], numMax, hipMemcpyDeviceToDevice, 0));
+        HIP_CHECK(
+            hipMemcpyAsync(currentGpuMem[1], peerGpuMem[1], numMax, hipMemcpyDeviceToDevice, 0));
         HIP_CHECK(hipDeviceSynchronize());
-      }
-      else {
+      } else {
         // Warmup
-        hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-          0, reinterpret_cast<T*>(peerGpuMem[0]),
-          reinterpret_cast<T*>(currentGpuMem[0]), static_cast<size_t>(N));
+        hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                           reinterpret_cast<T*>(peerGpuMem[0]),
+                           reinterpret_cast<T*>(currentGpuMem[0]), static_cast<size_t>(N));
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
 
         HIP_CHECK(hipSetDevice(peerGpu));
-        hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-          0, reinterpret_cast<T*>(currentGpuMem[1]),
-          reinterpret_cast<T*>(peerGpuMem[1]), static_cast<size_t>(N));
+        hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, 0,
+                           reinterpret_cast<T*>(currentGpuMem[1]),
+                           reinterpret_cast<T*>(peerGpuMem[1]), static_cast<size_t>(N));
         HIP_CHECK(hipGetLastError());
         HIP_CHECK(hipDeviceSynchronize());
       }
@@ -377,21 +377,22 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
         HIP_CHECK(hipEventRecord(eventStart[1], stream[1]));
 
         for (size_t offsetEnd = numMax - nbytes, offset = 0, j = 0; j < iterations;
-          j++, offset += nbytes) {
+             j++, offset += nbytes) {
           if (offset > offsetEnd) offset = 0;
           if (useHipMemcpyAsync) {
             HIP_CHECK(hipMemcpyAsync(peerGpuMem[0] + offset, currentGpuMem[0] + offset, nbytes,
-              hipMemcpyDeviceToDevice, stream[0]));
+                                     hipMemcpyDeviceToDevice, stream[0]));
             HIP_CHECK(hipMemcpyAsync(currentGpuMem[1] + offset, peerGpuMem[1] + offset, nbytes,
-              hipMemcpyDeviceToDevice, stream[1]));
-          }
-          else {
-            hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-              stream[0], reinterpret_cast<T*>(peerGpuMem[0] + offset),
-              reinterpret_cast<T*>(currentGpuMem[0] + offset), static_cast<size_t>(N));
-            hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0,
-              stream[1], reinterpret_cast<T*>(currentGpuMem[1] + offset),
-              reinterpret_cast<T*>(peerGpuMem[1] + offset), static_cast<size_t>(N));
+                                     hipMemcpyDeviceToDevice, stream[1]));
+          } else {
+            hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, stream[0],
+                               reinterpret_cast<T*>(peerGpuMem[0] + offset),
+                               reinterpret_cast<T*>(currentGpuMem[0] + offset),
+                               static_cast<size_t>(N));
+            hipLaunchKernelGGL(copy_kernel<T>, dim3(blocks), dim3(threadsPerBlock), 0, stream[1],
+                               reinterpret_cast<T*>(currentGpuMem[1] + offset),
+                               reinterpret_cast<T*>(peerGpuMem[1] + offset),
+                               static_cast<size_t>(N));
           }
         }
 
@@ -406,12 +407,13 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
         for (int n = 0; n < 2; n++) {
           HIP_CHECK(hipEventElapsedTime(&t[n], eventStart[n], eventStop[n]));
           t[n] /= iterations;
-          bandwidth[n] = nbytes / megaSize / t[n]; // GByte/s
+          bandwidth[n] = nbytes / megaSize / t[n];  // GByte/s
         }
 
-        fprintf(stderr, "%8s,         %-9.06lf,        %-4.08lf,              "
-          "%-9.06lf,        %-4.08lf\n", sizeToString(thisSize).c_str(), t[0],
-          bandwidth[0], t[1], bandwidth[1]);
+        fprintf(stderr,
+                "%8s,         %-9.06lf,        %-4.08lf,              "
+                "%-9.06lf,        %-4.08lf\n",
+                sizeToString(thisSize).c_str(), t[0], bandwidth[0], t[1], bandwidth[1]);
 
         if (i == (nSizes - 1)) {
           timeMs[currentGpu * gpuCount + peerGpu] = (t[0] + t[1]) / 2;
@@ -434,9 +436,9 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
     }
   }
   outputMatrix(string("Bidirectional ") + method + " Time Table(ms)", gpuCount, timeMs,
-      TIMING_MODE_GPU, sizes[nSizes - 1], iterations);
-  outputMatrix(string("Bidirectional ") + method + " Bandwith Table(GB/s)", gpuCount,
-      bandWidth, TIMING_MODE_GPU, sizes[nSizes - 1], iterations);
+               TIMING_MODE_GPU, sizes[nSizes - 1], iterations);
+  outputMatrix(string("Bidirectional ") + method + " Bandwith Table(GB/s)", gpuCount, bandWidth,
+               TIMING_MODE_GPU, sizes[nSizes - 1], iterations);
 }
 
 /**
@@ -455,14 +457,14 @@ static void testP2PBiDirMemPerf(const int iterations, const bool useHipMemcpyAsy
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing CPU") {
-  const int iterations = cmd_options.iterations == 1000 ?
-    defaultIterations : cmd_options.iterations;
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, true);
 }
 
 TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing GPU") {
-    const int iterations = cmd_options.iterations == 1000 ?
-      defaultIterations : cmd_options.iterations;
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, true);
 }
 
@@ -480,14 +482,14 @@ TEST_CASE("Perf_hipTestP2PUniDirMemcpyAsync_test - Timing GPU") {
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing CPU") {
-  const int iterations = cmd_options.iterations == 1000 ?
-    defaultIterations : cmd_options.iterations;
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_CPU, false);
 }
 
 TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing GPU") {
-  const int iterations = cmd_options.iterations == 1000 ?
-    defaultIterations : cmd_options.iterations;
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PUniDirMemPerf(iterations, TIMING_MODE_GPU, false);
 }
 
@@ -507,8 +509,8 @@ TEST_CASE("Perf_hipTestP2PUniDirKernelCopy_test - Timing GPU") {
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
-  const int iterations = cmd_options.iterations == 1000 ?
-    defaultIterations : cmd_options.iterations;
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
   testP2PBiDirMemPerf(iterations, true);
 }
 
@@ -526,9 +528,9 @@ TEST_CASE("Perf_hipTestP2PBiDirMemcpyAsync_test") {
  *  - HIP_VERSION >= 6.0
  */
 TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
-    const int iterations = cmd_options.iterations == 1000 ?
-      defaultIterations : cmd_options.iterations;
-    testP2PBiDirMemPerf(iterations, false);
+  const int iterations =
+      cmd_options.iterations == 1000 ? defaultIterations : cmd_options.iterations;
+  testP2PBiDirMemPerf(iterations, false);
 }
 
 /**
@@ -542,11 +544,9 @@ TEST_CASE("Perf_hipTestP2PBiDirKernelCopy_test") {
  * ------------------------
  *  - HIP_VERSION >= 6.0
  */
-TEST_CASE("Perf_hipCheckP2PSupport") {
-  checkP2PSupport();
-}
+TEST_CASE("Perf_hipCheckP2PSupport") { checkP2PSupport(); }
 
 /**
-* End doxygen group perfMemoryTest.
-* @}
-*/
+ * End doxygen group perfMemoryTest.
+ * @}
+ */

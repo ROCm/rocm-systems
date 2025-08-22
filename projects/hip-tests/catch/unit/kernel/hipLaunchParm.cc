@@ -54,7 +54,7 @@ THE SOFTWARE.
 // Bit fields are broken
 #define ENABLE_BIT_FIELDS 0
 
-static const int  BLOCK_DIM_SIZE = 512;
+static const int BLOCK_DIM_SIZE = 512;
 
 // allocate memory on device and host for result validation
 static bool *result_d, *result_h;
@@ -64,8 +64,7 @@ static hipError_t hipHostMallocError = hipErrorUnknown;
 static hipError_t hipMemsetError = hipErrorUnknown;
 
 static void ResultValidation() {
-  HIP_CHECK(hipMemcpy(result_h, result_d, BLOCK_DIM_SIZE*sizeof(bool),
-            hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(result_h, result_d, BLOCK_DIM_SIZE * sizeof(bool), hipMemcpyDeviceToHost));
 
   for (int k = 0; k < BLOCK_DIM_SIZE; ++k) {
     REQUIRE(result_h[k] == true);
@@ -86,8 +85,8 @@ static void ResetValidationMem() {
 // This test is to verify Struct with variables
 // support, read from device.
 typedef struct hipLaunchKernelStruct1 {
-  int li;  // local int
-  float lf;  // local float
+  int li;       // local int
+  float lf;     // local float
   bool result;  // local bool
 } hipLaunchKernelStruct_t1;
 
@@ -126,14 +125,14 @@ typedef struct hipLaunchKernelStruct5 {
 typedef struct hipLaunchKernelStruct6 {
   char c1;
   int16_t si;
-} __attribute__((aligned(8)))  hipLaunchKernelStruct_t6;
+} __attribute__((aligned(8))) hipLaunchKernelStruct_t6;
 
 // This test is to verify struct with aligned(16),
 // right now it's brokenon hcc & hip-clang
 typedef struct hipLaunchKernelStruct7 {
   char c1;
   int16_t si;
-} __attribute__((aligned(16)))  hipLaunchKernelStruct_t7;
+} __attribute__((aligned(16))) hipLaunchKernelStruct_t7;
 
 // This test is to verify struct with packed & aligned,
 // size should be 4Bytes right now it's broken on hcc & hip-clang
@@ -141,7 +140,7 @@ typedef struct hipLaunchKernelStruct8 {
   char c1;
   int16_t si;
   bool b;
-}__attribute__((packed, aligned(4)))  hipLaunchKernelStruct_t8;
+} __attribute__((packed, aligned(4))) hipLaunchKernelStruct_t8;
 
 // This test is to verify struct with packed, no alignment as Sam suggested
 // size should be 4Bytes, right now it's broken on hcc & hip-clang
@@ -149,7 +148,7 @@ typedef struct hipLaunchKernelStruct8A {
   char c1;
   int16_t si;
   bool b;
-}__attribute__((packed))  hipLaunchKernelStruct_t8A;
+} __attribute__((packed)) hipLaunchKernelStruct_t8A;
 
 // This test is to verify struct with alignment, no packing as Sam suggested
 // size should be 8Bytes as no packing, right now it's broken on hcc & hip-clang
@@ -157,7 +156,7 @@ typedef struct hipLaunchKernelStruct8B {
   char c1;
   int16_t si;
   bool b;
-}__attribute__((aligned(8)))  hipLaunchKernelStruct_t8B;
+} __attribute__((aligned(8))) hipLaunchKernelStruct_t8B;
 
 // This test is to verify const struct object
 typedef struct hipLaunchKernelStruct9 {
@@ -181,8 +180,8 @@ typedef struct hipLaunchKernelStruct11 {
 // This test is to verify struct with simple class object
 class base {
  public:
-    int i = 0;
-    base() {}
+  int i = 0;
+  base() {}
 };
 typedef struct hipLaunchKernelStruct12 {
   base b;
@@ -210,14 +209,13 @@ typedef struct hipLaunchKernelStruct15 {
 } hipLaunchKernelStruct_t15;
 
 // This test is to verify simple template struct
-template<typename T>
-struct hipLaunchKernelStruct_t16 {
+template <typename T> struct hipLaunchKernelStruct_t16 {
   T t1;
 };
 
 // This test is to verify simple explicity template struct
-template<typename T> struct hipLaunchKernelStruct_t17 {};
-template<>  // explicit template
+template <typename T> struct hipLaunchKernelStruct_t17 {};
+template <>  // explicit template
 struct hipLaunchKernelStruct_t17<int> {
   int t1;
 };
@@ -246,301 +244,257 @@ typedef struct hipLaunchKernelStruct21 {
 
 // Passing struct to a hipLaunchKernelGGL(),
 // read and write into the same struct
-__global__ void hipLaunchKernelStructFunc1(
-                    hipLaunchKernelStruct_t1 hipLaunchKernelStruct_,
-                    bool* result_d1) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void hipLaunchKernelStructFunc1(hipLaunchKernelStruct_t1 hipLaunchKernelStruct_,
+                                           bool* result_d1) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
 
-    // set the result to true if the condition met
-    result_d1[x] =  ((hipLaunchKernelStruct_.li == 1)
-                      && (hipLaunchKernelStruct_.lf == 1.0)
-                      && (hipLaunchKernelStruct_.result == false));
+  // set the result to true if the condition met
+  result_d1[x] = ((hipLaunchKernelStruct_.li == 1) && (hipLaunchKernelStruct_.lf == 1.0) &&
+                  (hipLaunchKernelStruct_.result == false));
 }
 
 // Passing struct to a hipLaunchKernelGGL(), checks padding,
 // read and write into the same struct
-__global__ void hipLaunchKernelStructFunc2(
-                    hipLaunchKernelStruct_t2 hipLaunchKernelStruct_,
-                    bool* result_d2) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void hipLaunchKernelStructFunc2(hipLaunchKernelStruct_t2 hipLaunchKernelStruct_,
+                                           bool* result_d2) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
 
-    // set the result to true if the condition met
-    result_d2[x] =  ((hipLaunchKernelStruct_.c1 == 'a')
-                      && (hipLaunchKernelStruct_.l1 == 1.0)
-                      && (hipLaunchKernelStruct_.c2 == 'b')
-                      && (hipLaunchKernelStruct_.l2 == 2.0) );
+  // set the result to true if the condition met
+  result_d2[x] = ((hipLaunchKernelStruct_.c1 == 'a') && (hipLaunchKernelStruct_.l1 == 1.0) &&
+                  (hipLaunchKernelStruct_.c2 == 'b') && (hipLaunchKernelStruct_.l2 == 2.0));
 }
 
 // Passing struct to a hipLaunchKernelGGL(), checks padding,
 // read and write into the same struct
-__global__ void hipLaunchKernelStructFunc3(
-                    hipLaunchKernelStruct_t3 hipLaunchKernelStruct_,
-                    bool* result_d3) {
-    int x = blockIdx.x * blockDim.x + threadIdx.x;
+__global__ void hipLaunchKernelStructFunc3(hipLaunchKernelStruct_t3 hipLaunchKernelStruct_,
+                                           bool* result_d3) {
+  int x = blockIdx.x * blockDim.x + threadIdx.x;
 
-    // set the result to true if the condition met
-    result_d3[x] =  ((hipLaunchKernelStruct_.bf1 == 1)
-                     && (hipLaunchKernelStruct_.bf2 == 1)
-                     && (hipLaunchKernelStruct_.l1 == 1.0)
-                     && (hipLaunchKernelStruct_.bf3 == 1) );
+  // set the result to true if the condition met
+  result_d3[x] = ((hipLaunchKernelStruct_.bf1 == 1) && (hipLaunchKernelStruct_.bf2 == 1) &&
+                  (hipLaunchKernelStruct_.l1 == 1.0) && (hipLaunchKernelStruct_.bf3 == 1));
 }
 
 // Passing empty struct to a hipLaunchKernelGGL(),
 // check the size of 1Byte, set  result_d4 to true if condition met
-__global__ void hipLaunchKernelStructFunc4(
-                    hipLaunchKernelStruct_t4 hipLaunchKernelStruct_,
-                    bool* result_d4) {
+__global__ void hipLaunchKernelStructFunc4(hipLaunchKernelStruct_t4 hipLaunchKernelStruct_,
+                                           bool* result_d4) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   // set the result to true if the condition met
-  result_d4[x] =  (sizeof(hipLaunchKernelStruct_) == 1);
+  result_d4[x] = (sizeof(hipLaunchKernelStruct_) == 1);
 }
 
 // Passing struct with pointer object to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc5(
-                    hipLaunchKernelStruct_t5 hipLaunchKernelStruct_,
-                    bool* result_d5) {
+__global__ void hipLaunchKernelStructFunc5(hipLaunchKernelStruct_t5 hipLaunchKernelStruct_,
+                                           bool* result_d5) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   // set the result to true if the condition met
-  result_d5[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (*hipLaunchKernelStruct_.cp == 'p'));
+  result_d5[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (*hipLaunchKernelStruct_.cp == 'p'));
 }
 
 // Passing struct which is aligned to 8Byte to a hipLaunchKernelGGL(),
 // set the result_d6 to true if condition met
-__global__ void hipLaunchKernelStructFunc6(
-                    hipLaunchKernelStruct_t6 hipLaunchKernelStruct_,
-                    bool* result_d6) {
+__global__ void hipLaunchKernelStructFunc6(hipLaunchKernelStruct_t6 hipLaunchKernelStruct_,
+                                           bool* result_d6) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   // set the result to true if the condition met
   // get the address of the struct
   // size_t(p)%8 will be 0 if aligned to 8Byte address space
-  int *p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
-  result_d6[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.si == 1)
-                    && ((size_t(p))%8 ==0));
+  int* p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
+  result_d6[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.si == 1) &&
+                  ((size_t(p)) % 8 == 0));
 }
 
 // Passing struct which is aligned to 16Byte,
 // set the result_d7 to true if condition met
-__global__ void hipLaunchKernelStructFunc7(
-                    hipLaunchKernelStruct_t7 hipLaunchKernelStruct_,
-                    bool* result_d7) {
+__global__ void hipLaunchKernelStructFunc7(hipLaunchKernelStruct_t7 hipLaunchKernelStruct_,
+                                           bool* result_d7) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   // set the result to true if the condition met
   // get the address of the struct
   // size_t(p)%16 will be 0 if aligned to 16Byte address space
-  int *p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
-  result_d7[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.si == 1)
-                    && ((size_t(p))%16 ==0) );
+  int* p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
+  result_d7[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.si == 1) &&
+                  ((size_t(p)) % 16 == 0));
 }
 
 // Passing struct which is packed & aligned to 4Byte,
 // set the result_d8 to true if condition met
-__global__ void hipLaunchKernelStructFunc8(
-                    hipLaunchKernelStruct_t8 hipLaunchKernelStruct_,
-                    bool* result_d8) {
+__global__ void hipLaunchKernelStructFunc8(hipLaunchKernelStruct_t8 hipLaunchKernelStruct_,
+                                           bool* result_d8) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
   // get the address of the xth element, struct[x],
   // size_t(p)%4 will be 0 if aligned to 4Byte address space
-  int *p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
-  result_d8[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.si == 1)
-                    && ((size_t(p))%4 ==0)
-                    && (sizeof(hipLaunchKernelStruct_) == 4));
+  int* p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
+  result_d8[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.si == 1) &&
+                  ((size_t(p)) % 4 == 0) && (sizeof(hipLaunchKernelStruct_) == 4));
 }
 
 // Passing struct which is packed only, as Sam suggested, should be 4Bytes
 // set the result_d8A to true if condition met
-__global__ void hipLaunchKernelStructFunc8A(
-                    hipLaunchKernelStruct_t8A hipLaunchKernelStruct_,
-                    bool* result_d8A) {
+__global__ void hipLaunchKernelStructFunc8A(hipLaunchKernelStruct_t8A hipLaunchKernelStruct_,
+                                            bool* result_d8A) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
   // this is packed struct
   // the address will not be aglined in this case hence condition removed
   // only sizeof(hipLaunchKernelStruct_) will be valided
-  result_d8A[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.si == 1)
-                    && (sizeof(hipLaunchKernelStruct_) == 4));
+  result_d8A[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.si == 1) &&
+                   (sizeof(hipLaunchKernelStruct_) == 4));
 }
 
 // Passing struct which is aligned(4) only, as Sam suggested
 // , size should be 8Bytes, set the result_d8B to true if condition met
-__global__ void hipLaunchKernelStructFunc8B(
-                    hipLaunchKernelStruct_t8B hipLaunchKernelStruct_,
-                    bool* result_d8B) {
+__global__ void hipLaunchKernelStructFunc8B(hipLaunchKernelStruct_t8B hipLaunchKernelStruct_,
+                                            bool* result_d8B) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
   // get the address of the xth element, struct[x],
   // size_t(p)%4 will be 0 if aligned to 4Byte address space
-  int *p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
-  result_d8B[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.si == 1)
-                    && ((size_t(p))%8 == 0)
-                    && (sizeof(hipLaunchKernelStruct_) == 8));
+  int* p = reinterpret_cast<int*>(&hipLaunchKernelStruct_);
+  result_d8B[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.si == 1) &&
+                   ((size_t(p)) % 8 == 0) && (sizeof(hipLaunchKernelStruct_) == 8));
 }
 
 // Passing struct with uint pointer object to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc9(
-                    const hipLaunchKernelStruct_t9 hipLaunchKernelStruct_,
-                    bool* result_d9) {
+__global__ void hipLaunchKernelStructFunc9(const hipLaunchKernelStruct_t9 hipLaunchKernelStruct_,
+                                           bool* result_d9) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
 
   // set the result to true if the condition met
-  result_d9[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (*hipLaunchKernelStruct_.ip == 1));
+  result_d9[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (*hipLaunchKernelStruct_.ip == 1));
 }
 
 // Passing struct with stdint types object, uintN_t, to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc10(
-                    hipLaunchKernelStruct_t10 hipLaunchKernelStruct_,
-                    bool* result_d10) {
+__global__ void hipLaunchKernelStructFunc10(hipLaunchKernelStruct_t10 hipLaunchKernelStruct_,
+                                            bool* result_d10) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d10[x] =  ((hipLaunchKernelStruct_.u64 == UINT64_MAX)
-                    && (hipLaunchKernelStruct_.u32 == 1)
-                    && (hipLaunchKernelStruct_.u8 == UINT8_MAX));
+  result_d10[x] = ((hipLaunchKernelStruct_.u64 == UINT64_MAX) &&
+                   (hipLaunchKernelStruct_.u32 == 1) && (hipLaunchKernelStruct_.u8 == UINT8_MAX));
 }
 
 // Passing struct with volatile member, to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc11(
-                    hipLaunchKernelStruct_t11 hipLaunchKernelStruct_,
-                    bool* result_d11) {
+__global__ void hipLaunchKernelStructFunc11(hipLaunchKernelStruct_t11 hipLaunchKernelStruct_,
+                                            bool* result_d11) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d11[x] =  ((hipLaunchKernelStruct_.i1 == 1)
-                    && (hipLaunchKernelStruct_.vint == 0));
+  result_d11[x] = ((hipLaunchKernelStruct_.i1 == 1) && (hipLaunchKernelStruct_.vint == 0));
 }
 
 // Passing struct with simple class obj, to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc12(
-                    hipLaunchKernelStruct_t12 hipLaunchKernelStruct_,
-                    bool* result_d12) {
+__global__ void hipLaunchKernelStructFunc12(hipLaunchKernelStruct_t12 hipLaunchKernelStruct_,
+                                            bool* result_d12) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d12[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                    && (hipLaunchKernelStruct_.b.i == 0));
+  result_d12[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.b.i == 0));
 }
 
 // Passing struct with simple __device__ func(), to a hipLaunchKernelGGL()
-__global__ void hipLaunchKernelStructFunc13(
-                    hipLaunchKernelStruct_t13 hipLaunchKernelStruct_,
-                    bool* result_d13) {
+__global__ void hipLaunchKernelStructFunc13(hipLaunchKernelStruct_t13 hipLaunchKernelStruct_,
+                                            bool* result_d13) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d13[x] =  ((hipLaunchKernelStruct_.i1 == 1)
-                    && (hipLaunchKernelStruct_.getvalue() == 1));
+  result_d13[x] = ((hipLaunchKernelStruct_.i1 == 1) && (hipLaunchKernelStruct_.getvalue() == 1));
 }
 
 // Passing struct with array variable, write to from device
-__global__ void hipLaunchKernelStructFunc14(
-                    hipLaunchKernelStruct_t14 hipLaunchKernelStruct_,
-                    bool* result_d14) {
+__global__ void hipLaunchKernelStructFunc14(hipLaunchKernelStruct_t14 hipLaunchKernelStruct_,
+                                            bool* result_d14) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   hipLaunchKernelStruct_.writeint[x] = 1;
   // set the result to true if the condition met
-  result_d14[x] =  ((hipLaunchKernelStruct_.readint == 1)
-                    && (hipLaunchKernelStruct_.writeint[x] == 1));
+  result_d14[x] =
+      ((hipLaunchKernelStruct_.readint == 1) && (hipLaunchKernelStruct_.writeint[x] == 1));
 }
 
 // Passing struct with struct with dynamic memory, new int
 // the heap memory will be accessed from device
-__global__ void hipLaunchKernelStructFunc15(
-                    hipLaunchKernelStruct_t15 hipLaunchKernelStruct_,
-                    bool* result_d15) {
+__global__ void hipLaunchKernelStructFunc15(hipLaunchKernelStruct_t15 hipLaunchKernelStruct_,
+                                            bool* result_d15) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d15[x] =  ((hipLaunchKernelStruct_.c1 == 'c')
-                     && (hipLaunchKernelStruct_.heapmem[x] == 1));
+  result_d15[x] = ((hipLaunchKernelStruct_.c1 == 'c') && (hipLaunchKernelStruct_.heapmem[x] == 1));
 }
 
 // Passing simple template struct
-__global__ void hipLaunchKernelStructFunc16(
-                    hipLaunchKernelStruct_t16<char> hipLaunchKernelStruct_,
-                    bool* result_d16) {
+__global__ void hipLaunchKernelStructFunc16(hipLaunchKernelStruct_t16<char> hipLaunchKernelStruct_,
+                                            bool* result_d16) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d16[x] =  (hipLaunchKernelStruct_.t1 == 'c');
+  result_d16[x] = (hipLaunchKernelStruct_.t1 == 'c');
 }
 
 // Passing simple explicit template struct
-__global__ void hipLaunchKernelStructFunc17(
-                    hipLaunchKernelStruct_t17<int> hipLaunchKernelStruct_,
-                    bool* result_d17) {
+__global__ void hipLaunchKernelStructFunc17(hipLaunchKernelStruct_t17<int> hipLaunchKernelStruct_,
+                                            bool* result_d17) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // set the result to true if the condition met
-  result_d17[x] =  (hipLaunchKernelStruct_.t1 == 1);
+  result_d17[x] = (hipLaunchKernelStruct_.t1 == 1);
 }
 
 // Passing struct and write to struct memory using __device__ func()
-__global__ void hipLaunchKernelStructFunc18(
-                    hipLaunchKernelStruct_t18 hipLaunchKernelStruct_,
-                    bool* result_d18) {
+__global__ void hipLaunchKernelStructFunc18(hipLaunchKernelStruct_t18 hipLaunchKernelStruct_,
+                                            bool* result_d18) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   hipLaunchKernelStruct_.setChar('c');
   // set the result to true if the condition met
-  result_d18[x] =  (hipLaunchKernelStruct_.getChar() == 'c');
+  result_d18[x] = (hipLaunchKernelStruct_.getChar() == 'c');
 }
 
 // Passing out of order initalized struct, access in-order
-__global__ void hipLaunchKernelStructFunc20(
-                    hipLaunchKernelStruct_t20 hipLaunchKernelStruct_,
-                    bool* result_d20) {
+__global__ void hipLaunchKernelStructFunc20(hipLaunchKernelStruct_t20 hipLaunchKernelStruct_,
+                                            bool* result_d20) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // accessing struct members in order
   result_d20[x] = (hipLaunchKernelStruct_.name == 'A'
-  // strcmp(hipLaunchKernelStruct_.name, "AMD") -> strcmp is not broken
-                   && hipLaunchKernelStruct_.age == 42
-                   && hipLaunchKernelStruct_.rank == 2);
+                   // strcmp(hipLaunchKernelStruct_.name, "AMD") -> strcmp is not broken
+                   && hipLaunchKernelStruct_.age == 42 && hipLaunchKernelStruct_.rank == 2);
 }
 
 // Passing struct with bit fields
-__global__ void hipLaunchKernelStructFunc21(
-                    hipLaunchKernelStruct_t21 hipLaunchKernelStruct_,
-                    bool* result_d21) {
+__global__ void hipLaunchKernelStructFunc21(hipLaunchKernelStruct_t21 hipLaunchKernelStruct_,
+                                            bool* result_d21) {
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   // accessing struct members in order
-  result_d21[x] = (hipLaunchKernelStruct_.i == 2
-                   && hipLaunchKernelStruct_.j == 0
-                   && (sizeof(hipLaunchKernelStruct_) == 1));
+  result_d21[x] = (hipLaunchKernelStruct_.i == 2 && hipLaunchKernelStruct_.j == 0 &&
+                   (sizeof(hipLaunchKernelStruct_) == 1));
 }
 
 __global__ void vAdd(float* a) {}
 
-template<class T1, class T2>
-__global__ void myKernel(T1 a, T2 b) {}
+template <class T1, class T2> __global__ void myKernel(T1 a, T2 b) {}
 
 
 //---
 // Some wrapper macro for testing:
 #define WRAP(...) __VA_ARGS__
 
-#define MY_LAUNCH_MACRO(cmd, elapsed, quiet)                         \
-    do {                                                            \
-        HIP_CHECK(hipDeviceSynchronize());                                     \
-        cmd;                                                        \
-        HIP_CHECK(hipDeviceSynchronize());                                     \
-    } while (0);
+#define MY_LAUNCH_MACRO(cmd, elapsed, quiet)                                                       \
+  do {                                                                                             \
+    HIP_CHECK(hipDeviceSynchronize());                                                             \
+    cmd;                                                                                           \
+    HIP_CHECK(hipDeviceSynchronize());                                                             \
+  } while (0);
 
 
-#define MY_LAUNCH(command, doTrace, msg)                            \
-    {                                                               \
-        if (doTrace) printf("TRACE: %s %s\n", msg, #command);       \
-        command;                                                    \
-    }
+#define MY_LAUNCH(command, doTrace, msg)                                                           \
+  {                                                                                                \
+    if (doTrace) printf("TRACE: %s %s\n", msg, #command);                                          \
+    command;                                                                                       \
+  }
 
 
-#define MY_LAUNCH_WITH_PAREN(command, doTrace, msg)                 \
-    {                                                               \
-        if (doTrace) printf("TRACE: %s %s\n", msg, #command);       \
-        (command);                                                  \
-    }
+#define MY_LAUNCH_WITH_PAREN(command, doTrace, msg)                                                \
+  {                                                                                                \
+    if (doTrace) printf("TRACE: %s %s\n", msg, #command);                                          \
+    (command);                                                                                     \
+  }
 
 /**
 * @addtogroup hipLaunchKernelGGL hipLaunchKernelGGL
@@ -589,10 +543,9 @@ __global__ void myKernel(T1 a, T2 b) {}
  */
 
 TEST_CASE("Unit_hipLaunchParm") {
-  hipMallocError = hipMalloc(reinterpret_cast<void**>(&result_d),
-                             BLOCK_DIM_SIZE*sizeof(bool));
-  hipHostMallocError = hipHostMalloc(reinterpret_cast<void**>(&result_h),
-                                     BLOCK_DIM_SIZE*sizeof(bool));
+  hipMallocError = hipMalloc(reinterpret_cast<void**>(&result_d), BLOCK_DIM_SIZE * sizeof(bool));
+  hipHostMallocError =
+      hipHostMalloc(reinterpret_cast<void**>(&result_h), BLOCK_DIM_SIZE * sizeof(bool));
   hipMemsetError = hipMemset(result_d, false, BLOCK_DIM_SIZE);
 
   // Validating memory & initial value, for result_d, result_h
@@ -606,10 +559,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h1.li = 1;
     hipLaunchKernelStruct_h1.lf = 1.0;
     hipLaunchKernelStruct_h1.result = false;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc1),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h1,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc1), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h1, result_d);
     ResultValidation();
   }
 
@@ -621,10 +572,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h2.c2 = 'b';
     hipLaunchKernelStruct_h2.l2 = 2.0;
     hipLaunchKernelStruct_h2.result = false;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc2),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h2,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc2), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h2, result_d);
     ResultValidation();
   }
 
@@ -636,22 +585,18 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h3.l1 = 1.0;
     hipLaunchKernelStruct_h3.bf3 = 1;
     hipLaunchKernelStruct_h3.result = false;
-                // initialize to false, will be set to
-                // true if the struct size is 1Byte, from device size
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc3),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h3,
-                    result_d);
+    // initialize to false, will be set to
+    // true if the struct size is 1Byte, from device size
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc3), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h3, result_d);
     ResultValidation();
   }
 
   SECTION("Empty struct") {
     ResetValidationMem();
     hipLaunchKernelStruct_t4 hipLaunchKernelStruct_h4;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc4),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h4,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc4), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h4, result_d);
     ResultValidation();
   }
 
@@ -664,10 +609,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     HIP_CHECK(hipMemset(cp_d5, 'p', sizeof(char)));
     hipLaunchKernelStruct_h5.c1 = 'c';
     hipLaunchKernelStruct_h5.cp = cp_d5;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc5),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h5,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc5), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h5, result_d);
     ResultValidation();
     HIP_CHECK(hipFree(reinterpret_cast<void*>(cp_d5)));
   }
@@ -677,14 +620,12 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t6 hipLaunchKernelStruct_h6;
     hipLaunchKernelStruct_h6.c1 = 'c';
     hipLaunchKernelStruct_h6.si = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc6),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h6,
-                    result_d);
-    // alignment is broken hence disabled the validation part
-    #if ENABLE_ALIGNMENT_TEST_SMALL_BAR
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc6), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h6, result_d);
+// alignment is broken hence disabled the validation part
+#if ENABLE_ALIGNMENT_TEST_SMALL_BAR
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with aligned(16)") {
@@ -692,13 +633,11 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t7 hipLaunchKernelStruct_h7;
     hipLaunchKernelStruct_h7.c1 = 'c';
     hipLaunchKernelStruct_h7.si = 1;
-    #if ENABLE_ALIGNMENT_TEST_SMALL_BAR  // This is broken on small bar
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc7),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h7,
-                    result_d);
+#if ENABLE_ALIGNMENT_TEST_SMALL_BAR  // This is broken on small bar
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc7), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h7, result_d);
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with packed aligned to 4bytes") {
@@ -706,14 +645,12 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t8 hipLaunchKernelStruct_h8;
     hipLaunchKernelStruct_h8.c1 = 'c';
     hipLaunchKernelStruct_h8.si = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h8,
-                    result_d);
-    // packed member broken on large and small bar setup.
-    #if ENABLE_PACKED_TEST
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h8, result_d);
+// packed member broken on large and small bar setup.
+#if ENABLE_PACKED_TEST
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with packed to 4Bytes") {
@@ -721,14 +658,12 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t8A hipLaunchKernelStruct_h8A;
     hipLaunchKernelStruct_h8A.c1 = 'c';
     hipLaunchKernelStruct_h8A.si = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8A),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h8A,
-                    result_d);
-    // packed member broken on large and small bar setup.
-    #if ENABLE_PACKED_TEST
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8A), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h8A, result_d);
+// packed member broken on large and small bar setup.
+#if ENABLE_PACKED_TEST
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with aligned(4) to 4Bytes") {
@@ -736,14 +671,12 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t8B hipLaunchKernelStruct_h8B;
     hipLaunchKernelStruct_h8B.c1 = 'c';
     hipLaunchKernelStruct_h8B.si = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8B),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h8B,
-                    result_d);
-    // alignment is broken hence disabled the validation part
-    #if ENABLE_ALIGNMENT_TEST_SMALL_BAR
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc8B), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h8B, result_d);
+// alignment is broken hence disabled the validation part
+#if ENABLE_ALIGNMENT_TEST_SMALL_BAR
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing const struct object") {
@@ -754,13 +687,11 @@ TEST_CASE("Unit_hipLaunchParm") {
     HIP_CHECK(hipMemset(ip_d9, 1, sizeof(uint32_t)));
     // ip_d9 passed as pointer to struct member, struct.ip = &ip_d9
     const hipLaunchKernelStruct_t9 hipLaunchKernelStruct_h9 = {'c', ip_d9};
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc9),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h9,
-                    result_d);
-    #if ENABLE_DECLARE_INITIALIZATION_POINTER
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc9), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h9, result_d);
+#if ENABLE_DECLARE_INITIALIZATION_POINTER
     ResultValidation();
-    #endif
+#endif
     HIP_CHECK(hipFree(reinterpret_cast<void*>(ip_d9)));
   }
 
@@ -770,10 +701,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h10.u64 = UINT64_MAX;
     hipLaunchKernelStruct_h10.u32 = 1;
     hipLaunchKernelStruct_h10.u8 = UINT8_MAX;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc10),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h10,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc10), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h10, result_d);
     ResultValidation();
   }
 
@@ -782,10 +711,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t11 hipLaunchKernelStruct_h11;
     hipLaunchKernelStruct_h11.i1 = 1;
     hipLaunchKernelStruct_h11.vint = 0;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc11),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h11,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc11), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h11, result_d);
     ResultValidation();
   }
 
@@ -793,24 +720,20 @@ TEST_CASE("Unit_hipLaunchParm") {
     ResetValidationMem();
     hipLaunchKernelStruct_t12 hipLaunchKernelStruct_h12;
     hipLaunchKernelStruct_h12.c1 = 'c';
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc12),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h12,
-                    result_d);
-    #if ENABLE_CLASS_OBJ_ACCESS  // access class obj from device broken
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc12), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h12, result_d);
+#if ENABLE_CLASS_OBJ_ACCESS  // access class obj from device broken
     // Validation part of the struct, hipLaunchKernelStructFunc12
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with simple __device__ func()") {
     ResetValidationMem();
     hipLaunchKernelStruct_t13 hipLaunchKernelStruct_h13;
     hipLaunchKernelStruct_h13.i1 = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc13),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h13,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc13), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h13, result_d);
     ResultValidation();
   }
 
@@ -818,10 +741,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     ResetValidationMem();
     hipLaunchKernelStruct_t14 hipLaunchKernelStruct_h14;
     hipLaunchKernelStruct_h14.readint = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc14),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h14,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc14), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h14, result_d);
     ResultValidation();
   }
 
@@ -830,16 +751,12 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_t15 hipLaunchKernelStruct_h15;
     hipLaunchKernelStruct_h15.c1 = 'c';
 
-    #if ENABLE_HEAP_MEMORY_ACCESS  // causing page fault here,
-                                   // on small bar set
-    HIP_CHECK(hipMalloc(&hipLaunchKernelStruct_h15.heapmem,
-                       BLOCK_DIM_SIZE*sizeof(int)));
-    HIP_CHECK(hipMemset(&hipLaunchKernelStruct_h15.heapmem,
-                       0, BLOCK_DIM_SIZE));
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc15),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h15,
-                    result_d);
+#if ENABLE_HEAP_MEMORY_ACCESS  // causing page fault here,
+                               // on small bar set
+    HIP_CHECK(hipMalloc(&hipLaunchKernelStruct_h15.heapmem, BLOCK_DIM_SIZE * sizeof(int)));
+    HIP_CHECK(hipMemset(&hipLaunchKernelStruct_h15.heapmem, 0, BLOCK_DIM_SIZE));
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc15), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h15, result_d);
     ResultValidation();
     HIP_CHECK(hipFree(reinterpret_cast<void*>(hipLaunchKernelStruct_h15.heapmem)));
 #endif
@@ -849,10 +766,8 @@ TEST_CASE("Unit_hipLaunchParm") {
     ResetValidationMem();
     hipLaunchKernelStruct_t16<char> hipLaunchKernelStruct_h16;
     hipLaunchKernelStruct_h16.t1 = 'c';
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc16),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h16,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc16), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h16, result_d);
     ResultValidation();
   }
 
@@ -860,20 +775,16 @@ TEST_CASE("Unit_hipLaunchParm") {
     ResetValidationMem();
     hipLaunchKernelStruct_t17<int> hipLaunchKernelStruct_h17;
     hipLaunchKernelStruct_h17.t1 = 1;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc17),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h17,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc17), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h17, result_d);
     ResultValidation();
   }
 
   SECTION("Passing struct with simple __device__ func()") {
     ResetValidationMem();
     hipLaunchKernelStruct_t18 hipLaunchKernelStruct_h18;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc18),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h18,
-                    result_d);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc18), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h18, result_d);
     ResultValidation();
   }
 
@@ -886,26 +797,24 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelStruct_h20.rank = 2;
     hipLaunchKernelStruct_h20.age = 42;
     bool *result_d20, *result_h20;
-    #if ENABLE_OUT_OF_ORDER_INITIALIZATION
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc20),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h20, result_d);
+#if ENABLE_OUT_OF_ORDER_INITIALIZATION
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc20), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h20, result_d);
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing struct with bit fields operation") {
     ResetValidationMem();
     hipLaunchKernelStruct_t21 hipLaunchKernelStruct_h21 =
-    // out of order initalization
-                     {2, 0};
+        // out of order initalization
+        {2, 0};
     bool *result_d21, *result_h21;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc21),
-                    dim3(BLOCK_DIM_SIZE),
-                    dim3(1), 0, 0, hipLaunchKernelStruct_h21, result_d);
-    #if ENABLE_BIT_FIELDS
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(hipLaunchKernelStructFunc21), dim3(BLOCK_DIM_SIZE), dim3(1),
+                       0, 0, hipLaunchKernelStruct_h21, result_d);
+#if ENABLE_BIT_FIELDS
     ResultValidation();
-    #endif
+#endif
   }
 
   SECTION("Passing the different hipLaunchParm options") {
@@ -917,42 +826,36 @@ TEST_CASE("Unit_hipLaunchParm") {
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vAdd), dim3(1024), dim3(1), 0, 0, Ad);
 
     // Test: Passing macro to hipLaunchKernelGGL
-#define KERNEL_CONFIG  dim3(1024), dim3(1), 0, 0
+#define KERNEL_CONFIG dim3(1024), dim3(1), 0, 0
     hipLaunchKernelGGL(HIP_KERNEL_NAME(vAdd), KERNEL_CONFIG, Ad);
 
     // Test: Same thing with templates:
     int a;
     float b;
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(myKernel<int, float>),
-                       KERNEL_CONFIG, a, b);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(myKernel<int, float>), KERNEL_CONFIG, a, b);
 
 #define TYPE_PARAM_CONFIG int, float
-    hipLaunchKernelGGL(HIP_KERNEL_NAME(myKernel<TYPE_PARAM_CONFIG>),
-                       KERNEL_CONFIG, a, b);
+    hipLaunchKernelGGL(HIP_KERNEL_NAME(myKernel<TYPE_PARAM_CONFIG>), KERNEL_CONFIG, a, b);
 
     // Test: Passing hipLaunchKernelGGL inside another macro:
     float e0;
-    MY_LAUNCH_MACRO(hipLaunchKernelGGL(vAdd, dim3(1024),
-                   dim3(1), 0, 0, Ad), e0, j);
-    MY_LAUNCH_MACRO(WRAP(hipLaunchKernelGGL(vAdd, dim3(1024),
-                   dim3(1), 0, 0, Ad)), e0, j);
+    MY_LAUNCH_MACRO(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad), e0, j);
+    MY_LAUNCH_MACRO(WRAP(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad)), e0, j);
 
 #ifdef EXTRA_PARENS_1
     // Don't wrap hipLaunchKernelGGL in extra set of parens:
-    MY_LAUNCH_MACRO((hipLaunchKernelGGL(vAdd, dim3(1024),
-                    dim3(1), 0, 0, Ad)), e0, j);
+    MY_LAUNCH_MACRO((hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad)), e0, j);
 #endif
 
-    MY_LAUNCH(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1),
-              0, 0, Ad), true, "firstCall");
+    MY_LAUNCH(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad), true, "firstCall");
     float* A;
     float e1;
     MY_LAUNCH_WITH_PAREN(static_cast<void>(hipMalloc(&A, 100)), true, "launch2");
 
 #ifdef EXTRA_PARENS_2
     // MY_LAUNCH_WITH_PAREN wraps cmd in () which can cause issues.
-    MY_LAUNCH_WITH_PAREN(hipLaunchKernelGGL(vAdd, dim3(1024),
-                         dim3(1), 0, 0, Ad), true, "firstCall");
+    MY_LAUNCH_WITH_PAREN(hipLaunchKernelGGL(vAdd, dim3(1024), dim3(1), 0, 0, Ad), true,
+                         "firstCall");
 #endif
     HIP_CHECK(hipFree(reinterpret_cast<void*>(A)));
     HIP_CHECK(hipFree(reinterpret_cast<void*>(Ad)));
@@ -962,6 +865,6 @@ TEST_CASE("Unit_hipLaunchParm") {
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

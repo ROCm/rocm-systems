@@ -29,59 +29,59 @@ THE SOFTWARE.
 
 
 // Kernel functions
-__global__ void HMinMaxHalfOps(__half x, __half y, __half ExptdResult,
-                int *TstResult, int TstToRun) {
+__global__ void HMinMaxHalfOps(__half x, __half y, __half ExptdResult, int* TstResult,
+                               int TstToRun) {
   __half OutVal = 0;
   if (TstToRun == 1) {
-     OutVal = __hmax(x, y);
-     if (!(__heq(OutVal, ExptdResult))) {
-       *TstResult = 0;  // Indicates Test failed
-     }
+    OutVal = __hmax(x, y);
+    if (!(__heq(OutVal, ExptdResult))) {
+      *TstResult = 0;  // Indicates Test failed
+    }
   } else if (TstToRun == 2) {
-     OutVal = __hmin(x, y);
-     if (!(__heq(OutVal, ExptdResult))) {
-       *TstResult = 0;  // Indicates Test failed
-     }
+    OutVal = __hmin(x, y);
+    if (!(__heq(OutVal, ExptdResult))) {
+      *TstResult = 0;  // Indicates Test failed
+    }
   } else if (TstToRun == 3) {
-     OutVal = __hmax_nan(x, y);
-     if ((__hisnan(ExptdResult))) {
-       if (!(__hisnan(OutVal))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
-     } else {
-       if (!(__heq(OutVal, ExptdResult))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
-     }
+    OutVal = __hmax_nan(x, y);
+    if ((__hisnan(ExptdResult))) {
+      if (!(__hisnan(OutVal))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
+    } else {
+      if (!(__heq(OutVal, ExptdResult))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
+    }
   } else if (TstToRun == 4) {
-     OutVal = __hmin_nan(x, y);
-     if ((__hisnan(ExptdResult))) {
-       if (!(__hisnan(OutVal))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
-     } else {
-       if (!(__heq(OutVal, ExptdResult))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
-     }
+    OutVal = __hmin_nan(x, y);
+    if ((__hisnan(ExptdResult))) {
+      if (!(__hisnan(OutVal))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
+    } else {
+      if (!(__heq(OutVal, ExptdResult))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
+    }
   }
 }
 
-__global__ void HMinMaxHalfOpsArray(__half *x, __half *y, __half *ExptdResult,
-                int *TstResult, int TstToRun) {
+__global__ void HMinMaxHalfOpsArray(__half* x, __half* y, __half* ExptdResult, int* TstResult,
+                                    int TstToRun) {
   size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
   if (offset < NElms) {
-     __half OutVal = 0;
+    __half OutVal = 0;
     if (TstToRun == 1) {
-       OutVal = __hmax(x[offset], y[offset]);
-       if (!(__heq(OutVal, ExptdResult[offset]))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
+      OutVal = __hmax(x[offset], y[offset]);
+      if (!(__heq(OutVal, ExptdResult[offset]))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
     } else if (TstToRun == 2) {
-       OutVal = __hmin(x[offset], y[offset]);
-       if (!(__heq(OutVal, ExptdResult[offset]))) {
-         *TstResult = 0;  // Indicates Test failed
-       }
+      OutVal = __hmin(x[offset], y[offset]);
+      if (!(__heq(OutVal, ExptdResult[offset]))) {
+        *TstResult = 0;  // Indicates Test failed
+      }
     }
   }
 }

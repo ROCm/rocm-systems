@@ -37,7 +37,7 @@ class Memcpy2DFromArrayAsyncBenchmark : public Benchmark<Memcpy2DFromArrayAsyncB
 };
 
 static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
-                         bool enable_peer_access=false) {
+                         bool enable_peer_access = false) {
   Memcpy2DFromArrayAsyncBenchmark benchmark;
   benchmark.AddSectionName("(" + std::to_string(width) + ", " + std::to_string(height) + ")");
 
@@ -48,22 +48,23 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind,
     size_t allocation_size = width * height * sizeof(int);
     LinearAllocGuard<int> host_allocation(LinearAllocs::hipHostMalloc, allocation_size);
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
-    benchmark.Run(host_allocation.ptr(), width * sizeof(int),
-                  array_allocation.ptr(), width * sizeof(int),
-                  height, hipMemcpyDeviceToHost, stream);
+    benchmark.Run(host_allocation.ptr(), width * sizeof(int), array_allocation.ptr(),
+                  width * sizeof(int), height, hipMemcpyDeviceToHost, stream);
   } else {
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-    if (src_device == -1 && dst_device == -1) { return; }
+    if (src_device == -1 && dst_device == -1) {
+      return;
+    }
 
     LinearAllocGuard2D<int> device_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));
     ArrayAllocGuard<int> array_allocation(make_hipExtent(width, height, 0), hipArrayDefault);
     HIP_CHECK(hipSetDevice(src_device));
-    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(),
-                  array_allocation.ptr(), device_allocation.width(),
-                  device_allocation.height(), hipMemcpyDeviceToDevice, stream);
+    benchmark.Run(device_allocation.ptr(), device_allocation.pitch(), array_allocation.ptr(),
+                  device_allocation.width(), device_allocation.height(), hipMemcpyDeviceToDevice,
+                  stream);
   }
 }
 
