@@ -65,7 +65,7 @@ jobs:
   # -----------------------------------------------------------------------------
   build-ci-base:
     name: Build CI Base Image (${{ matrix.os }})
-    runs-on: ubuntu-latest
+    runs-on: azure-linux-scale-rocm
     strategy:
       fail-fast: false
       matrix:
@@ -130,6 +130,7 @@ jobs:
                   export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
                   make prefix=/usr all -j 32; \
                   make prefix=/usr install; \
+                  cd ..; rm -rf git-2.51.0*; \
                   dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm || true; \
                 else \
                   dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm || true; \
@@ -457,7 +458,7 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
-    name: RPM (${{ matrix.os }}) • ${{ matrix.runner }}
+    name: Core • (${{ matrix.os }}) • ${{ matrix.runner }}
     needs: build-ci-base
     strategy:
       fail-fast: false
