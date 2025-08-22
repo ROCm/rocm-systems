@@ -921,7 +921,10 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False,
             print('\n', end='')
 
         # Handle non UTF-8 locale
-        print(logstr.encode('ascii', 'ignore').decode('ascii'))
+        try:
+            print(logstr.encode('utf-8', 'ignore').decode('utf-8'))
+        except UnicodeError:
+            print(logstr.encode('ascii', 'ignore').decode('ascii'))
 
         sys.stdout.flush()
     # when piped into programs like 'head' - print throws an error.
