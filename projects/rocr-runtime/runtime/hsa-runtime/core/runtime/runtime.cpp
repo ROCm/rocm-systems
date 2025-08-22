@@ -929,11 +929,15 @@ Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va
   auto reservedAddressIt = reserved_address_map_.upper_bound(va);
   if (reservedAddressIt != reserved_address_map_.begin()) {
     reservedAddressIt--;
-    if ((reservedAddressIt->first <= va) &&
-        ((reinterpret_cast<const uint8_t*>(va)) <=
-         (reinterpret_cast<const uint8_t*>(reservedAddressIt->first) +
-          reservedAddressIt->second.size))) {
-      return &(reservedAddressIt->second);
+
+    auto& addressHandle = reservedAddressIt->second;
+    if (!addressHandle.registered) {
+      return nullptr;
+    }
+    
+    const auto* base = reinterpret_cast<const uint8_t*>(reservedAddressIt->first);
+    if ((base <= va) && ((reinterpret_cast<const uint8_t*>(va)) <= base + addressHandle.size)) {
+      return &(addressHandle);
     }
   }
   return nullptr;
