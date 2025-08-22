@@ -171,20 +171,16 @@ def apply_rounding_logic(df, decimal_precision):
         return df
 
     df_rounded = df.copy()
-    skip_cols = {"Metric", "Tips", "coll_level", "Unit", "Kernel_Name", "Info"}
 
-    candidate_cols = [col for col in df_rounded.columns if col not in skip_cols]
-
-    numeric_cols = df_rounded[candidate_cols].select_dtypes(include=[np.number]).columns
-
-    if len(numeric_cols) > 0:
-        df_rounded[numeric_cols] = df_rounded[numeric_cols].round(decimal_precision)
-
-    object_cols = df_rounded[candidate_cols].select_dtypes(include=["object"]).columns
-    for col in object_cols:
-        numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
-        if numeric_series.notna().any():
-            mask = pd.notna(numeric_series)
-            df_rounded.loc[mask, col] = numeric_series[mask].round(decimal_precision)
+    for col in df_rounded.columns:
+        if df_rounded[col].dtype in ["float64", "float32", "int64", "int32"]:
+            df_rounded[col] = df_rounded[col].round(decimal_precision)
+        else:
+            numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
+            if numeric_series.notna().any():
+                mask = pd.notna(numeric_series)
+                df_rounded.loc[mask, col] = numeric_series[mask].round(
+                    decimal_precision
+                )
 
     return df_rounded
