@@ -1,3 +1,25 @@
+/*
+Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANNTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER INN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR INN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+*/
+
 #include <filesystem>
 #include <mutex>
 #include <string>
@@ -57,6 +79,9 @@ LibraryContainer::~LibraryContainer() {
 
 hipError_t LibraryContainer::BuildIt() {
   std::scoped_lock<std::mutex> lock(lib_mutex_);
+  if (built_) {
+    return hipSuccess;
+  }
 
   if (!fatbin_) {
     return hipErrorInvalidValue;
@@ -78,6 +103,7 @@ hipError_t LibraryContainer::BuildIt() {
         std::make_pair(name, std::make_shared<hip::Function>(name)));
   }
 
+  built_ = true;
   return hipSuccess;
 }
 
@@ -101,9 +127,8 @@ hipError_t hipLibraryLoadData(hipLibrary_t *library, const void *image,
   }
 
   auto *l = new hip::LibraryContainer((const char *)image);
-  auto ret = l->BuildIt();
   *library = reinterpret_cast<hipLibrary_t>(l);
-  HIP_RETURN(ret);
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipLibraryLoadFromFile(hipLibrary_t *library, const char *fname,
@@ -121,9 +146,8 @@ hipError_t hipLibraryLoadFromFile(hipLibrary_t *library, const char *fname,
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto *l = new hip::LibraryContainer(std::string(fname));
-  auto ret = l->BuildIt();
   *library = reinterpret_cast<hipLibrary_t>(l);
-  HIP_RETURN(ret);
+  HIP_RETURN(hipSuccess);
 }
 
 hipError_t hipLibraryUnload(hipLibrary_t library) {
@@ -142,6 +166,10 @@ hipError_t hipLibraryGetKernelCount(unsigned int *count, hipLibrary_t library) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto l = reinterpret_cast<hip::LibraryContainer *>(library);
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
   *count = static_cast<int>(l->KernelCount());
   HIP_RETURN(hipSuccess);
 }
@@ -153,8 +181,11 @@ hipError_t hipLibraryGetKernel(hipKernel_t *kernel, hipLibrary_t library,
     HIP_RETURN(hipErrorInvalidValue);
   }
   auto l = reinterpret_cast<hip::LibraryContainer *>(library);
-  auto ret = l->Kernel(kernel, kname);
-
+  auto ret = l->BuildIt();
+  if (ret != hipSuccess) {
+    HIP_RETURN(ret);
+  }
+  ret = l->Kernel(kernel, kname);
   HIP_RETURN(ret);
 }
 } // namespace hip
