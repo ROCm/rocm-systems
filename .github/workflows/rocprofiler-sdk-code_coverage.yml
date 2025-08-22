@@ -77,7 +77,6 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      GPU_RUNNER: 'rocprofiler-mi300a-dind'
       GCC_COMPILER_VERSION: 11
       ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
@@ -271,7 +270,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
           --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
+          --site 'rocprofiler-mi300a-dind'
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage all
           --run-attempt ${{ github.run_attempt }}
@@ -293,7 +292,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
           --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
+          --site 'rocprofiler-mi300a-dind'
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage tests
           --run-attempt ${{ github.run_attempt }}
@@ -314,7 +313,7 @@ jobs:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
           --build-jobs 16
-          --site ${RUNNER_HOSTNAME}
+          --site 'rocprofiler-mi300a-dind'
           --gpu-targets ${{ env.GPU_TARGETS }}
           --coverage samples
           --run-attempt ${{ github.run_attempt }}
