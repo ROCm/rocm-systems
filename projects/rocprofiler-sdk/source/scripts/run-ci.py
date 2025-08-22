@@ -110,7 +110,6 @@ def generate_custom(args, cmake_args, ctest_args):
                 external_symbolizer_path = f"external_symbolizer_path={_symbolizer}"
         os.environ["TSAN_OPTIONS"] = " ".join(
             [
-                "mmap_limit_mb=16384",
                 "history_size=5",
                 "detect_deadlocks=0",
                 f"suppressions={SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt",
