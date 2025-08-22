@@ -413,25 +413,25 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         }
 
         auto deserialize_uint16_array = [](const std::vector<uint8_t>& data,
-                                           size_t& _offset, int array_size) {
-            std::vector<uint16_t> _result;
-            _result.reserve(array_size);
+                                           size_t& offset, int array_size) {
+            std::vector<uint16_t> result;
+            result.reserve(array_size);
 
             for(int i = 0; i < array_size; ++i)
             {
-                if(_offset + 1 >= data.size())
+                if(offset + 1 >= data.size())
                 {
                     throw std::runtime_error(
                         "Invalid serialized data: unexpected end of data");
                 }
 
-                uint16_t value = static_cast<uint16_t>(data[_offset]) |
-                                 (static_cast<uint16_t>(data[_offset + 1]) << 8);
-                _result.push_back(value);
-                _offset += 2;
+                uint16_t value = static_cast<uint16_t>(data[offset]) |
+                                 (static_cast<uint16_t>(data[offset + 1]) << 8);
+                result.push_back(value);
+                offset += 2;
             }
 
-            return _result;
+            return result;
         };
 
         result.reserve(chunk_count);
@@ -572,82 +572,11 @@ rocpd_post_processing::get_cpu_freq_sample_callback() const
         float  value;
     };
 
-    auto deserialize_freqs = [](std::vector<uint8_t>& buffer) {
-        std::vector<core_freq_sample> result;
-        size_t                        offset = 0;
-
-        while(offset + sizeof(float) + sizeof(size_t) <= buffer.size())
-        {
-            core_freq_sample core_sample;
-            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
-            offset += sizeof(size_t);
-            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(float));
-            offset += sizeof(float);
-            result.push_back(core_sample);
-        }
-        return result;
-    };
-
-    return [&](const storage_parsed_type_base& parsed) {
-        auto _cpu_freq_sample = static_cast<const struct cpu_freq_sample&>(parsed);
-
-        auto&       data_processor   = get_data_processor();
-        const auto* _name            = trait::name<category::cpu_freq>::value;
-        auto        name_primary_key = data_processor.insert_string(_name);
-        auto        event_id = data_processor.insert_event(name_primary_key, 0, 0, 0);
-
-        auto device_id = 0;
-
-        auto& agent_mngr = agent_manager::get_instance();
-        auto  base_id =
-            agent_mngr.get_agent_by_type_index(device_id, agent_type::CPU).base_id;
-
-        auto insert_event_and_sample = [&](const char* name, double value) {
-            data_processor.insert_pmc_event(event_id, base_id, name, value);
-            data_processor.insert_sample(name, _cpu_freq_sample.timestamp, event_id);
-        };
-
-        insert_event_and_sample(trait::name<category::process_page>::value,
-                                _cpu_freq_sample.page_rss);
-        insert_event_and_sample(trait::name<category::process_virt>::value,
-                                _cpu_freq_sample.virt_mem_usage);
-        insert_event_and_sample(trait::name<category::process_peak>::value,
-                                _cpu_freq_sample.peak_rss);
-        insert_event_and_sample(trait::name<category::process_context_switch>::value,
-                                _cpu_freq_sample.context_switch_count);
-        insert_event_and_sample(trait::name<category::process_page_fault>::value,
-                                _cpu_freq_sample.page_faults);
-        insert_event_and_sample(trait::name<category::process_user_mode_time>::value,
-                                _cpu_freq_sample.user_mode_time);
-        insert_event_and_sample(trait::name<category::process_kernel_mode_time>::value,
-                                _cpu_freq_sample.kernel_mode_time);
-
-        auto get_track_name = [](const auto& cpu_id) {
-            return std::string(trait::name<category::cpu_freq>::value) + " [" +
-                   std::to_string(cpu_id) + "]";
-        };
-
-        auto core_freq_samples = deserialize_freqs(_cpu_freq_sample.freqs);
-        for(const auto& core : core_freq_samples)
-        {
-            insert_event_and_sample(get_track_name(core.id).c_str(), core.value);
-        }
-    };
-}
-postprocessing_callback
-rocpd_post_processing::get_cpu_freq_sample_callback() const
-{
-    struct core_freq_sample
-    {
-        size_t id;
-        float  value;
-    };
-
     auto deserialize_freqs = [](std::vector<uint8_t>& data) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
-        while(offset != data.size())
+        while(offset + sizeof(float) + sizeof(size_t) <= data.size())
         {
             core_freq_sample core_sample;
             core_sample.id = *reinterpret_cast<size_t*>(data.data() + offset);
