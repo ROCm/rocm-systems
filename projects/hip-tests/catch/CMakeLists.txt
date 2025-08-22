@@ -7,6 +7,9 @@ option(BUILD_SHARED_LIBS "Option for testing shared libraries" ON)
 option(BUILD_UNIT_TESTS "Build unit tests" ON)
 option(BUILD_PERF_TESTS "Build perf tests" OFF)
 option(BUILD_STRESS_TESTS "Build stress tests" OFF)
+option(ENABLE_SPIRV "Option to enable SPIRV mode" OFF)
+set(SPIRV_WARP_SIZE "32" CACHE STRING "Warp size for SPIRV Mode")
+
 option(TEST_CLOCK_CYCLE "Option to use clock64" OFF)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -47,6 +50,13 @@ set(HIP_PATH_OPT "--hip-path=${HIP_PATH}")
 
 if(TEST_CLOCK_CYCLE)
     add_definitions(-DTEST_CLOCK_CYCLE)
+endif()
+
+if(ENABLE_SPIRV)
+    message(STATUS "hip-tests will be built using SPIRV offload arch, Warp size: ${SPIRV_WARP_SIZE}")
+    set(OFFLOAD_ARCH_STR "--offload-arch=amdgcnspirv")
+    set(SPIRV_WARP_SIZE_FLAG "-D__AMDGCN_WAVEFRONT_SIZE=${SPIRV_WARP_SIZE}" CACHE STRING "Warp CXX Flag")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${SPIRV_WARP_SIZE_FLAG}")
 endif()
 
 # flag to generate standalone exe per src file.

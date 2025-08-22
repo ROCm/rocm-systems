@@ -148,7 +148,7 @@
         "Unit_Device_h2log10_Accuracy_Positive",
         "Unit_Device___hfma2_Accuracy_Positive",
     #endif
-    #if defined gfx90a || defined gfx942 || defined gfx950
+    #if defined gfx90a || defined gfx942 || defined gfx950 || defined amdgcnspirv
         "=== SWDEV-443630 : Below test failed in stress test on 19/01/24 ===",
         "Unit_Multi_Grid_Group_Positive_Sync",
         "Unit_Warp_Shfl_Up_Positive_Basic - int",
@@ -172,7 +172,7 @@
         "Unit_Warp_Shfl_Down_Positive_Basic - __half",
         "Unit_Warp_Shfl_Down_Positive_Basic - __half2",
     #endif
-    #if defined gfx1200 || defined gfx1201
+    #if defined gfx1200 || defined gfx1201 || defined amdgcnspirv
         "=== SWDEV-470751 : Fine Grain memory is MTYPE_NC due to HW bug.",
         "Unit_hipEventCreateWithFlags_DisableSystemFence_CohHstMem",
     #endif
