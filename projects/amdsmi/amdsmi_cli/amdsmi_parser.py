@@ -49,7 +49,7 @@ class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
 # Custom Help Formatter for not duplicating the metavar in the subparsers
 class AMDSMISubparserHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog):
-        super().__init__(prog, indent_increment=2, max_help_position=24, width=90)
+        super().__init__(prog, indent_increment=2, max_help_position=80, width=90)
         self._action_max_length = 20
 
     def _format_action_invocation(self, action):
