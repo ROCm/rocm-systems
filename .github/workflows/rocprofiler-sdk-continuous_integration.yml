@@ -159,20 +159,24 @@ jobs:
                   tar -xf git-2.51.0.tar.xz; \
                   cd git-2.51.0; \
                   rm -rf /etc/yum.repos.d/redhat-partner.repo || true; \
-                  dnf clean all || true; \
+                  dnf clean all; \
                   dnf install -y perl-ExtUtils-MakeMaker || true; \
                   export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
                   make prefix=/usr all -j 32; \
                   make prefix=/usr install; \
                   cd ..; rm -rf git-2.51.0*; \
-                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm || true; \
+                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm; \
+                  sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo; \
+                  sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo; \
                 else \
-                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm || true; \
+                  rm -rf /etc/yum.repos.d/RHEL-partners.repo; \
+                  dnf clean all; \
+                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm; \
+                  sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo; \
+                  sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo; \
                 fi; \
-                sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo || true; \
-                sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo || true; \
-                dnf clean all || true; \
-                dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers libsqlite3x-devel elfutils-devel || true; \
+                dnf clean all; \
+                dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers libsqlite3x-devel elfutils-devel; \
                 python3 -m pip install -U awscli pipx || true; \
                 python3 -m venv rocprofiler-sdk || true; \
                 source rocprofiler-sdk/bin/activate; \
