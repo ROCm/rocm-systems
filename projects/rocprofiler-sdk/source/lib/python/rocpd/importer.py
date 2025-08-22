@@ -27,12 +27,12 @@
 #
 #
 
-import sys
 import os
 import sqlite3
+import sys
 
 from .schema import RocpdSchema
-from . import libpyrocpd
+from . import bindings
 from .features import get_supported_features_from_version
 from .pc_sampling_support import (
     add_decode_args,
@@ -60,6 +60,7 @@ def internal_init(
     cache_disassembly=True,
 ):
     from . import package
+    from . import bindings
 
     _input = package.flatten_rocpd_yaml_input_file(
         _input, skip_auto_merge=skip_auto_merge, automerge_limit=automerge_limit
@@ -68,10 +69,10 @@ def internal_init(
     assert _check_for_valid_dbs(
         _input
     ), "RocpdImportData error, invalid SQLite3 database provided"
-    _connection = libpyrocpd.connect(_output)
+    _connection = bindings.connect(_output)
     _connection.execute("PRAGMA foreign_keys = ON")
     _table_info = _create_temp_views(_connection, _input)
-    _schema_version = libpyrocpd.schema_version(0, 0, 0)
+    _schema_version = bindings.schema_version(0, 0, 0)
     # When _input is empty (e.g. a missing file caused package.py to return []),
     # _create_temp_views creates no TEMP VIEWs.  Calling _create_meta_views
     # with uuid="" would then produce circularly-defined TEMP VIEWs because
@@ -85,10 +86,14 @@ def internal_init(
             codeobj_path_prefix_map=codeobj_path_prefix_map,
             cache_disassembly=cache_disassembly,
         )
+        if not bindings.supported():
+            from . import functions
+
+            functions.create(_connection)
     return (_connection, _input, _table_info, _schema_version)
 
 
-class RocpdImportData(libpyrocpd.RocpdImportData):
+class RocpdImportData(bindings.RocpdImportData):
 
     def __init__(
         self,
@@ -108,7 +113,6 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
             super(RocpdImportData, self).__init__(input)
             self.table_info = input.table_info
         else:
-
             if isinstance(input, sqlite3.Connection):
                 raise ValueError(
                     "RocpdImportData does not accept existing sqlite3 connections"
@@ -286,4 +290,4 @@ def _fetch_version_info(connection):
     if len(_versions) != 1:
         raise ValueError(f"Expected exactly one schema version, found: {_versions}")
 
-    return libpyrocpd.schema_version(_versions[0])
+    return bindings.schema_version(_versions[0])
