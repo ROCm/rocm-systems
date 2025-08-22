@@ -1028,7 +1028,11 @@ class AMDSMILogger():
 
         # print GPU info
         print(default_line_1)
-        print("| AMD-SMI {0:20s} amdgpu version: {1:8s} ROCm version: {2:8s} |".format(amd_smi_version.ljust(20), amdgpu_version, rocm_version))
+        # Split the version line into 3 lines, each wrapping to the same width
+        print("| AMD-SMI {0:40s} {1:28s}|".format(amd_smi_version.ljust(40), ""))
+        print("| amdgpu version: {0:40s} {1:20s}|".format(amdgpu_version.ljust(40), ""))
+        if rocm_version != "N/A":
+            print("| ROCm version:   {0:40s} {1:28s}|".format(rocm_version, ""))
 
         # adjust format depending on whether vbios or fw pldm version is present
         if vbios_version != "N/A" and fw_pldm_version != "N/A":
