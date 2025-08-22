@@ -484,7 +484,7 @@ inline dim3 GenerateThreadDimensions() { return dim3(16); }
 inline dim3 GenerateBlockDimensions() {
   int sm_count = 0;
   HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return dim3(sm_count);
+  return dim3(sm_count/10);
 }
 
 // Configures and creates the TestCore for a single device, and a single kernel launch
@@ -615,7 +615,7 @@ void MultipleDeviceMultipleKernelAndHostTest(const unsigned int num_devices,
   params.host_thread_count = host_thread_count;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);

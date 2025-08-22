@@ -59,6 +59,16 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicDec.cc
     )
 
+  set_source_files_properties(atomicAnd_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicOr_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicXor_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicMin_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicMax_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicAdd_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicSub_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicCAS_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+  set_source_files_properties(atomicExch_system.cc PROPERTIES COMPILE_FLAGS "-fatomic-fine-grained-memory -fatomic-remote-memory")
+
   hip_add_exe_to_target(NAME AtomicsTest
                         TEST_SRC ${TEST_SRC}
                         TEST_TARGET_NAME build_tests

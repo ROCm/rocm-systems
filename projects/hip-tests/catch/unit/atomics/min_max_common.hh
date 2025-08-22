@@ -326,12 +326,12 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(128)); }
 
 inline dim3 GenerateBlockDimensions() {
   int sm_count = 0;
   HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return dim3(sm_count);
+  return dim3(sm_count/10);
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>

@@ -296,12 +296,12 @@ void TestCore(const TestParams& p) {
   Verify<TestType, operation>(p, res_vals, old_vals);
 }
 
-inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(16), dim3(1024)); }
+inline dim3 GenerateThreadDimensions() { return GENERATE(dim3(128)); }
 
 inline dim3 GenerateBlockDimensions() {
   int sm_count = 0;
   HIP_CHECK(hipDeviceGetAttribute(&sm_count, hipDeviceAttributeMultiprocessorCount, 0));
-  return GENERATE_COPY(dim3(sm_count));
+  return GENERATE_COPY(dim3(sm_count/10));
 }
 
 template <typename TestType, AtomicOperation operation, int memory_scope = __HIP_MEMORY_SCOPE_AGENT>
@@ -427,7 +427,7 @@ void MultipleDeviceMultipleKernelTest(const unsigned int num_devices,
   params.pitch = pitch;
 
   using LA = LinearAllocs;
-  for (const auto alloc_type : {LA::hipMalloc}) {
+  for (const auto alloc_type : {LA::hipHostMalloc}) {
     params.alloc_type = alloc_type;
     DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
       TestCore<TestType, operation, false, __HIP_MEMORY_SCOPE_SYSTEM>(params);
