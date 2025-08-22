@@ -5059,7 +5059,7 @@ class AMDSMICommands():
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
         else:
-            if not any([args.process_isolation is not None, args.clk_limit is not None]):
+            if not any([args.process_isolation is not None, args.clk_limit is not None, args.power_cap is not None]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
 
