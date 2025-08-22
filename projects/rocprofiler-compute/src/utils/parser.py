@@ -31,6 +31,7 @@ import warnings
 import multiprocessing
 from collections import defaultdict
 from pathlib import Path
+from typing import Union
 
 import astunparse
 import numpy as np
@@ -767,7 +768,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def init_metric_evaluator(raw_pmc_df: pd.DataFrame | dict, ammolite_vars: dict) -> None:
+def init_metric_evaluator(raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict) -> None:
     if isinstance(raw_pmc_df, dict):
         raw_pmc_df_keys = set(raw_pmc_df.keys())
 
