@@ -61,39 +61,38 @@ TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Negative_Params") {
   alloc_param.poolProps.location.id = 0;
   alloc_param.poolProps.location.type = hipMemLocationTypeDevice;
 
-  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr,
-                        0, &alloc_param));
+  HIP_CHECK(hipGraphAddMemAllocNode(&alloc_node, graph, nullptr, 0, &alloc_param));
   REQUIRE(alloc_param.dptr != nullptr);
 
   SECTION("Passing nullptr to graph node") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(nullptr, graph,
-                        &alloc_node, 1, (hipDeviceptr_t)alloc_param.dptr),
-                        hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipDrvGraphAddMemFreeNode(nullptr, graph, &alloc_node, 1, (hipDeviceptr_t)alloc_param.dptr),
+        hipErrorInvalidValue);
   }
 
   SECTION("Passing nullptr to graph") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&free_node, nullptr,
-                       &alloc_node, 1, (hipDeviceptr_t)alloc_param.dptr),
-                       hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&free_node, nullptr, &alloc_node, 1,
+                                              (hipDeviceptr_t)alloc_param.dptr),
+                    hipErrorInvalidValue);
   }
 
   SECTION("Pass invalid numDependencies") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&free_node, graph, nullptr,
-                       5, (hipDeviceptr_t)alloc_param.dptr),
-                       hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipDrvGraphAddMemFreeNode(&free_node, graph, nullptr, 5, (hipDeviceptr_t)alloc_param.dptr),
+        hipErrorInvalidValue);
   }
 
   SECTION("Pass invalid numDependencies and valid list for dependencies") {
     dependencies.push_back(alloc_node);
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&free_node, graph,
-                       dependencies.data(), dependencies.size() + 1,
-                       (hipDeviceptr_t)alloc_param.dptr),
-                       hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipDrvGraphAddMemFreeNode(&free_node, graph, dependencies.data(), dependencies.size() + 1,
+                                  (hipDeviceptr_t)alloc_param.dptr),
+        hipErrorInvalidValue);
   }
 
   SECTION("Passing nullptr to dev_ptr") {
-    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph,
-                       &alloc_node, 1, 0), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipDrvGraphAddMemFreeNode(&alloc_node, graph, &alloc_node, 1, 0),
+                    hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipGraphDestroy(graph));
@@ -109,7 +108,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Negative_Params") {
  * Test requirements
  * ------------------------
  *  - HIP_VERSION >= 6.4
-*/
+ */
 TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Positive") {
   constexpr size_t N = 1024;
   hipGraph_t graph;
@@ -117,7 +116,7 @@ TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Positive") {
   hipCtx_t context;
   hipStream_t streamForGraph;
   int deviceid = 0;
-  hipGraphNode_t  node = nullptr, memFreeNode = nullptr;
+  hipGraphNode_t node = nullptr, memFreeNode = nullptr;
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipSetDevice(deviceid));
   HIP_CHECK(hipStreamCreate(&streamForGraph));
@@ -132,8 +131,8 @@ TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Positive") {
   HIP_CHECK(hipGraphAddMemAllocNode(&node, graph, nullptr, 0, &alloc_param));
   REQUIRE(alloc_param.dptr != nullptr);
 
-  HIP_CHECK(hipDrvGraphAddMemFreeNode(&memFreeNode, graph, &node, 1,
-                        (hipDeviceptr_t)alloc_param.dptr));
+  HIP_CHECK(
+      hipDrvGraphAddMemFreeNode(&memFreeNode, graph, &node, 1, (hipDeviceptr_t)alloc_param.dptr));
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
   HIP_CHECK(hipGraphLaunch(graphExec, 0));
   HIP_CHECK(hipStreamSynchronize(streamForGraph));
@@ -143,6 +142,6 @@ TEST_CASE("Unit_hipDrvGraphAddMemFreeNode_Positive") {
   HIP_CHECK(hipCtxDestroy(context));
 }
 /**
-* End doxygen group GraphTest.
-* @}
-*/
+ * End doxygen group GraphTest.
+ * @}
+ */

@@ -168,6 +168,6 @@ TEST_CASE("Unit_hipDeviceSynchronize_Functional") {
 
 
 /**
-* End doxygen group DeviceTest.
-* @}
-*/
+ * End doxygen group DeviceTest.
+ * @}
+ */

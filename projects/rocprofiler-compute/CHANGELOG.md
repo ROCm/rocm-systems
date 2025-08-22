@@ -53,6 +53,50 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * sL1D-L2 BW Utilization (section 1401)
   * Bandwidth Utilization (section 1601)
 
+* Update `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
+  * Theoretical LDS Bandwidth
+  * vL1D Cache BW
+  * L2 Cache BW
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * Kernel Time
+  * Kernel Time (Cycles)
+  * SIMD Utilization
+  * Clock Rate
+
+* Add `Compute Throughput` panel to TUI with the following metrics:
+  * VALU FLOPs
+  * VALU IOPs
+  * MFMA FLOPs (F8)
+  * MFMA FLOPs (BF16)
+  * MFMA FLOPs (F16)
+  * MFMA FLOPs (F32)
+  * MFMA FLOPs (F64)
+  * MFMA FLOPs (F6F4) (in gfx950)
+  * MFMA IOPs (Int8)
+  * SALU Utilization
+  * VALU Utilization
+  * MFMA Utilization
+  * VMEM Utilization
+  * Branch Utilization
+  * IPC
+
+* Add `Memory Throughput` panel to TUI with the following metrics:
+  * vL1D Cache BW
+  * vL1D Cache Utilization
+  * Theoretical LDS Bandwidth
+  * LDS Utilization
+  * L2 Cache BW
+  * L2 Cache Utilization
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * sL1D Cache BW
+  * L1I BW
+  * Address Processing Unit Busy
+  * Data-Return Busy
+  * L1I-L2 Bandwidth
+  * sL1D-L2 BW
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi

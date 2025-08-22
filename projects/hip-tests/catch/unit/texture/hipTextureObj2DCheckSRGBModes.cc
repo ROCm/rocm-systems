@@ -22,26 +22,27 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
 
-template<bool normalizedCoords>
-__global__ void tex2DRGBAKernel(float4 *outputData, hipTextureObject_t textureObject,
-                            int width, int height, float offsetX,
-                            float offsetY) {
+template <bool normalizedCoords>
+__global__ void tex2DRGBAKernel(float4* outputData, hipTextureObject_t textureObject, int width,
+                                int height, float offsetX, float offsetY) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
-  outputData[y * width + x] = tex2D<float4>(textureObject,
-                                           normalizedCoords ? (x + offsetX) / width : x + offsetX,
-                                           normalizedCoords ? (y + offsetY) / height : y + offsetY);
+  outputData[y * width + x] =
+      tex2D<float4>(textureObject, normalizedCoords ? (x + offsetX) / width : x + offsetX,
+                    normalizedCoords ? (y + offsetY) / height : y + offsetY);
 #endif
 }
 
-template<hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords, bool sRGB = false>
+template <hipTextureAddressMode addressMode, hipTextureFilterMode filterMode, bool normalizedCoords,
+          bool sRGB = false>
 static void runTest(const int width, const int height, const float offsetX, const float offsetY) {
-  //printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, height=%d, offsetX=%f, offsetY=%f)\n",
-  //     __FUNCTION__, addressMode, filterMode, normalizedCoords, width, height, offsetX, offsetY);
+  // printf("%s(addressMode=%d, filterMode=%d, normalizedCoords=%d, width=%d, height=%d, offsetX=%f,
+  // offsetY=%f)\n",
+  //      __FUNCTION__, addressMode, filterMode, normalizedCoords, width, height, offsetX, offsetY);
   constexpr float uCharMax = UCHAR_MAX;
   unsigned int size = width * height * sizeof(uchar4);
-  uchar4 *hData = (uchar4*) malloc(size);
+  uchar4* hData = (uchar4*)malloc(size);
   memset(hData, 0, size);
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
@@ -57,7 +58,8 @@ static void runTest(const int width, const int height, const float offsetX, cons
   hipArray_t hipArray;
   HIP_CHECK(hipMallocArray(&hipArray, &channelDesc, width, height));
 
-  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(uchar4), width * sizeof(uchar4), height, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy2DToArray(hipArray, 0, 0, hData, width * sizeof(uchar4),
+                               width * sizeof(uchar4), height, hipMemcpyHostToDevice));
 
   hipResourceDesc resDesc;
   memset(&resDesc, 0, sizeof(resDesc));
@@ -78,21 +80,21 @@ static void runTest(const int width, const int height, const float offsetX, cons
   hipTextureObject_t textureObject = 0;
   HIP_CHECK(hipCreateTextureObject(&textureObject, &resDesc, &texDesc, NULL));
 
-  float4 *dData = nullptr;
+  float4* dData = nullptr;
   size = width * height * sizeof(float4);
-  HIP_CHECK(hipMalloc((void**) &dData, size));
+  HIP_CHECK(hipMalloc((void**)&dData, size));
 
   dim3 dimBlock(16, 16, 1);
-  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y -1)/ dimBlock.y, 1);
+  dim3 dimGrid((width + dimBlock.x - 1) / dimBlock.x, (height + dimBlock.y - 1) / dimBlock.y, 1);
 
   hipLaunchKernelGGL(tex2DRGBAKernel<normalizedCoords>, dimGrid, dimBlock, 0, 0, dData,
                      textureObject, width, height, offsetX, offsetY);
-  HIP_CHECK(hipGetLastError()); 
+  HIP_CHECK(hipGetLastError());
 
   HIP_CHECK(hipDeviceSynchronize());
 
-  float4 *hInputData = (float4*) malloc(size);  // CPU expected values
-  float4 *hOutputData = (float4*) malloc(size); // GPU output values
+  float4* hInputData = (float4*)malloc(size);   // CPU expected values
+  float4* hOutputData = (float4*)malloc(size);  // GPU output values
   memset(hInputData, 0, size);
   memset(hOutputData, 0, size);
 
@@ -112,12 +114,13 @@ static void runTest(const int width, const int height, const float offsetX, cons
   for (int i = 0; i < height; i++) {
     for (int j = 0; j < width; j++) {
       int index = i * width + j;
-        //printf("(%d, %d): hInputData=(%f, %f, %f, %f), hOutputData=(%f, %f, %f, %f)\n", i, j,
-        //     hInputData[index].x, hInputData[index].y, hInputData[index].z, hInputData[index].w,
-        //     hOutputData[index].x, hOutputData[index].y, hOutputData[index].z, hOutputData[index].w);
+      // printf("(%d, %d): hInputData=(%f, %f, %f, %f), hOutputData=(%f, %f, %f, %f)\n", i, j,
+      //      hInputData[index].x, hInputData[index].y, hInputData[index].z, hInputData[index].w,
+      //      hOutputData[index].x, hOutputData[index].y, hOutputData[index].z,
+      //      hOutputData[index].w);
 
-      float4 cpuExpected = getExpectedValue<float4, addressMode, filterMode, sRGB>(width, height,
-                                                    offsetX + j, offsetY + i, hInputData);
+      float4 cpuExpected = getExpectedValue<float4, addressMode, filterMode, sRGB>(
+          width, height, offsetX + j, offsetY + i, hInputData);
       float4 gpuOutput = hOutputData[index];
       if (sRGB) {
         // CTS will map to sRGP before comparison, so we do so
@@ -128,16 +131,11 @@ static void runTest(const int width, const int height, const float offsetX, cons
       gpuOutput *= uCharMax;
       cpuExpected *= uCharMax;
       if (!hipTextureSamplingVerify<float4, filterMode, sRGB>(gpuOutput, cpuExpected)) {
-        WARN("Mismatch at (" << offsetX + j << ", " << offsetY + i << ") GPU output : " <<
-             gpuOutput.x << ", " <<
-             gpuOutput.y << ", " <<
-             gpuOutput.z << ", " <<
-             gpuOutput.w << ", " <<
-             " CPU expected: " <<
-             cpuExpected.x << ", " <<
-             cpuExpected.y << ", " <<
-             cpuExpected.z << ", " <<
-             cpuExpected.w << "\n");
+        WARN("Mismatch at (" << offsetX + j << ", " << offsetY + i
+                             << ") GPU output : " << gpuOutput.x << ", " << gpuOutput.y << ", "
+                             << gpuOutput.z << ", " << gpuOutput.w << ", "
+                             << " CPU expected: " << cpuExpected.x << ", " << cpuExpected.y << ", "
+                             << cpuExpected.z << ", " << cpuExpected.w << "\n");
         result = false;
         goto line1;
       }

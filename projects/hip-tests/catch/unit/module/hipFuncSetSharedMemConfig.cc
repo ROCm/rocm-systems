@@ -19,7 +19,7 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 #include <hip_test_defgroups.hh>
 
-__global__ void ReverseSeq(int *A, int *B, int N) {
+__global__ void ReverseSeq(int* A, int* B, int N) {
   extern __shared__ int SMem[];
   int offset = threadIdx.x;
   int MirrorVal = N - offset - 1;
@@ -28,12 +28,12 @@ __global__ void ReverseSeq(int *A, int *B, int N) {
   B[offset] = SMem[MirrorVal];
 }
 /**
-* @addtogroup hipFuncSetSharedMemConfig
-* @{
-* @ingroup ModuleTest
-* `hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config)` -
-* Sets shared memory configuation for a specific function
-*/
+ * @addtogroup hipFuncSetSharedMemConfig
+ * @{
+ * @ingroup ModuleTest
+ * `hipError_t hipFuncSetSharedMemConfig(const void* func, hipSharedMemConfig config)` -
+ * Sets shared memory configuation for a specific function
+ */
 
 /**
  * Test Description
@@ -63,8 +63,8 @@ TEST_CASE("Unit_hipFuncSetSharedMemConfig_functional") {
 
   // Testing hipFuncSetSharedMemConfig() with hipSharedMemBankSizeDefault flag
   SECTION("Flag: hipSharedMemBankSizeDefault") {
-    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>
-                      (&ReverseSeq), hipSharedMemBankSizeDefault));
+    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>(&ReverseSeq),
+                                        hipSharedMemBankSizeDefault));
     // Kernel Launch with shared mem size of = NELMTS * sizeof(int)
     ReverseSeq<<<1, NELMTS, NELMTS * sizeof(int)>>>(Ad, RAd, NELMTS);
     memset(Ah, 0, NELMTS * sizeof(int));
@@ -77,8 +77,8 @@ TEST_CASE("Unit_hipFuncSetSharedMemConfig_functional") {
 
   // Testing hipFuncSetSharedMemConfig() with hipSharedMemBankSizeFourBytes flag
   SECTION("Flag: hipSharedMemBankSizeFourBytes") {
-    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>
-                      (&ReverseSeq), hipSharedMemBankSizeFourByte));
+    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>(&ReverseSeq),
+                                        hipSharedMemBankSizeFourByte));
     HIP_CHECK(hipMemset(RAd, 0, NELMTS * sizeof(int)));
     // Kernel Launch with shared mem size of = NELMTS * sizeof(int)
     ReverseSeq<<<1, NELMTS, NELMTS * sizeof(int)>>>(Ad, RAd, NELMTS);
@@ -91,8 +91,8 @@ TEST_CASE("Unit_hipFuncSetSharedMemConfig_functional") {
   }
   // Testing hipFuncSetSharedMemConfig() with hipSharedMemBankSizeEightBytes flg
   SECTION("Flag: hipSharedMemBankSizeEightByte") {
-    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>
-                     (&ReverseSeq), hipSharedMemBankSizeEightByte));
+    HIP_CHECK(hipFuncSetSharedMemConfig(reinterpret_cast<const void*>(&ReverseSeq),
+                                        hipSharedMemBankSizeEightByte));
     HIP_CHECK(hipMemset(RAd, 0, NELMTS * sizeof(int)));
     // Kernel Launch with shared mem size of = NELMTS * sizeof(int)
     ReverseSeq<<<1, NELMTS, NELMTS * sizeof(int)>>>(Ad, RAd, NELMTS);

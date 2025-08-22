@@ -153,6 +153,6 @@ TEST_CASE("Unit_hipMemAddressReserve_Negative") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

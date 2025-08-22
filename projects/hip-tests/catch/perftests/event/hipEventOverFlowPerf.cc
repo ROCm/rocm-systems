@@ -21,13 +21,13 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <unistd.h>
 #include <vector>
-#define HIP_CHECK_PERF(a)                                                      \
-  {                                                                            \
-    auto err = a;                                                              \
-    if ((err != hipSuccess) && (err != hipErrorNotReady)) {                    \
-      printf(#a "= Error! %s\n", hipGetErrorString(err));                      \
-      exit(1);                                                                 \
-    }                                                                          \
+#define HIP_CHECK_PERF(a)                                                                          \
+  {                                                                                                \
+    auto err = a;                                                                                  \
+    if ((err != hipSuccess) && (err != hipErrorNotReady)) {                                        \
+      printf(#a "= Error! %s\n", hipGetErrorString(err));                                          \
+      exit(1);                                                                                     \
+    }                                                                                              \
   }
 /**
  * @addtogroup hipEventRecord hipEventRecord
@@ -40,7 +40,7 @@ __global__ void null_kernel() {
   __shared__ int temp[256];
   temp[threadIdx.x] = sinf(float(threadIdx.x));
 }
-void rocm_null_gpu_job(void *stream) {
+void rocm_null_gpu_job(void* stream) {
   hipLaunchKernelGGL(null_kernel, 1, 256, 0, (hipStream_t)stream);
 }
 std::vector<std::vector<hipStream_t>> stream_pool;
@@ -48,12 +48,12 @@ std::atomic<int> counter(0);
 bool do_kill = false;
 std::chrono::system_clock::time_point thread_reports[16];
 void thread_job(int dev, int virt) {
-  HIP_CHECK_PERF(hipSetDevice(dev)); // use dev
-  uint8_t *mem;
+  HIP_CHECK_PERF(hipSetDevice(dev));  // use dev
+  uint8_t* mem;
   HIP_CHECK_PERF(hipMalloc(&mem, 512));
-  void *hmem2;
+  void* hmem2;
   HIP_CHECK_PERF(hipHostAlloc(&hmem2, 512, 0));
-  uint8_t *hmem = (uint8_t *)hmem2;
+  uint8_t* hmem = (uint8_t*)hmem2;
   hipStream_t exec_stream = stream_pool[dev][virt];
   hipStream_t h2d_stream = stream_pool[dev][virt + 4];
   hipStream_t d2h_stream = stream_pool[dev][virt + 8];
@@ -63,10 +63,8 @@ void thread_job(int dev, int virt) {
   uint64_t n = 0;
   while (!do_kill) {
     rocm_null_gpu_job(exec_stream);
-    HIP_CHECK_PERF(
-        hipMemcpyAsync(hmem, mem, 4, hipMemcpyDeviceToHost, d2h_stream));
-    HIP_CHECK_PERF(hipMemcpyAsync(mem + 256, hmem + 256, 4,
-                                  hipMemcpyHostToDevice, h2d_stream));
+    HIP_CHECK_PERF(hipMemcpyAsync(hmem, mem, 4, hipMemcpyDeviceToHost, d2h_stream));
+    HIP_CHECK_PERF(hipMemcpyAsync(mem + 256, hmem + 256, 4, hipMemcpyHostToDevice, h2d_stream));
     HIP_CHECK_PERF(hipEventRecord(eh2d, h2d_stream));
     HIP_CHECK_PERF(hipEventRecord(ed2h, d2h_stream));
     HIP_CHECK_PERF(hipEventQuery(eh2d));
@@ -109,14 +107,13 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
   HIP_CHECK_PERF(hipGetDeviceCount(&mgpu));
   stream_pool.resize(mgpu);
   HIP_CHECK_PERF(hipSetDeviceFlags(hipDeviceScheduleSpin));
-  std::vector<uint8_t *> memory_buffers[2];
+  std::vector<uint8_t*> memory_buffers[2];
   for (int i = 0; i < mgpu; i++) {
     HIP_CHECK_PERF(hipSetDevice(i));
     stream_pool[i].resize(12);
     memory_buffers[i].resize(128);
     for (int j = 0; j < 12; j++)
-      HIP_CHECK_PERF(
-          hipStreamCreateWithFlags(&stream_pool[i][j], hipStreamNonBlocking));
+      HIP_CHECK_PERF(hipStreamCreateWithFlags(&stream_pool[i][j], hipStreamNonBlocking));
     for (int j = 0; j < 128; j++)
       HIP_CHECK_PERF(hipMalloc(&memory_buffers[i][j], 4096 * ((j & 1) + 1)));
   }
@@ -125,8 +122,7 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
     printf("RUNNING ON %d DEVICES\n", nDev);
     do_kill = false;
     std::vector<std::thread> threads;
-    for (int i = 0; i < nDev * 4; i++)
-      threads.push_back(std::thread(thread_job, i / 4, i % 4));
+    for (int i = 0; i < nDev * 4; i++) threads.push_back(std::thread(thread_job, i / 4, i % 4));
     usleep(1000000);
     auto t1 = std::chrono::system_clock::now();
     int count = int(counter);
@@ -135,15 +131,12 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
     for (int t = 0; t < 10; t++) {
       usleep(1000000);
       auto t2 = std::chrono::system_clock::now();
-      auto duration =
-          std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1)
-              .count();
+      auto duration = std::chrono::duration_cast<std::chrono::microseconds>(t2 - t1).count();
       int count2 = int(counter);
       for (int i = 0; i < nDev * 4; i++) {
-        if (std::chrono::duration_cast<std::chrono::microseconds>(
-                t2 - thread_reports[i])
-                .count() >= 1000000) {
-          printf("Thread %d/%d is stuck\n", i/4, i%4);
+        if (std::chrono::duration_cast<std::chrono::microseconds>(t2 - thread_reports[i]).count() >=
+            1000000) {
+          printf("Thread %d/%d is stuck\n", i / 4, i % 4);
         }
       }
       total_count += count2 - count;
@@ -153,8 +146,7 @@ TEST_CASE("Unit_hipEventOverFlow_PerfTest") {
     }
     printf("AVERAGE: %ld / %f = %f job/s\n", total_count, total_time, total_count / total_time);
     do_kill = true;
-    for (auto &t : threads)
-      t.join();
+    for (auto& t : threads) t.join();
     for (int i = 0; i < nDev; i++) {
       HIP_CHECK_PERF(hipSetDevice(i));
       HIP_CHECK_PERF(hipDeviceSynchronize());

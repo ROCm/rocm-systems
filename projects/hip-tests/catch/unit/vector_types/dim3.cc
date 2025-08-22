@@ -261,6 +261,6 @@ TEST_CASE("Unit_dim3_XYZ_Positive_Host") {
 }
 
 /**
-* End doxygen group VectorTypeTest.
-* @}
-*/
+ * End doxygen group VectorTypeTest.
+ * @}
+ */

@@ -995,7 +995,8 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
   /* Allocation not found */
   info->type = HSA_EXT_POINTER_TYPE_UNKNOWN;
 
-  return HSA_STATUS_SUCCESS;
+  /* This is a helper function, return error to indicate ptr not found */
+  return HSA_STATUS_ERROR;
 }
 
 hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),

@@ -147,16 +147,6 @@ reset_rocprofsys_preload()
     {
         (void) get_rocprofsys_is_preloaded();
         (void) get_rocprofsys_preload();
-        auto _modified_preload = std::string{};
-        for(const auto& itr : delimit(_preload_libs, ":"))
-        {
-            if(itr.find("librocprof-sys") != std::string::npos) continue;
-            _modified_preload += common::join("", ":", itr);
-        }
-        if(!_modified_preload.empty() && _modified_preload.find(':') == 0)
-            _modified_preload = _modified_preload.substr(1);
-
-        setenv("LD_PRELOAD", _modified_preload.c_str(), 1);
     }
 }
 
@@ -1251,9 +1241,9 @@ rocprofsys_preload()
 
     verify_instrumented_preloaded();
 
-    static bool _once = false;
-    if(_once) return _preload;
-    _once = true;
+    static pid_t _once = 0;
+    if(_once == getpid()) return _preload;
+    _once = getpid();
 
     if(_preload)
     {

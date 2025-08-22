@@ -36,32 +36,33 @@
 #include <sstream>
 
 
-//#define DEBUG_DETAIL // For detailed debug log
+// #define DEBUG_DETAIL // For detailed debug log
 
 #ifdef DEBUG_DETAIL
 
-#define ElfTrace(level) ClPrint(level, amd::LOG_CODE, "%-5d: [%zx] %p %s: ", \
-                                getpid(), std::this_thread::get_id(), this, __func__)
+#define ElfTrace(level)                                                                            \
+  ClPrint(level, amd::LOG_CODE, "%-5d: [%zx] %p %s: ", getpid(), std::this_thread::get_id(), this, \
+          __func__)
 
-#define logElfInfo(msg) \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, \
-          getpid(), std::this_thread::get_id(), this, __func__)
+#define logElfInfo(msg)                                                                            \
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                       \
+          std::this_thread::get_id(), this, __func__)
 
-#define logElfWarning(msg) \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, \
-          getpid(), std::this_thread::get_id(), this, __func__)
+#define logElfWarning(msg)                                                                         \
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                    \
+          std::this_thread::get_id(), this, __func__)
 
-#define LogElfDebug(format, ...) \
-  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, \
-          getpid(), std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+#define LogElfDebug(format, ...)                                                                   \
+  ClPrint(amd::LOG_DEBUG, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
+          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
 
-#define LogElfWarning(format, ...) \
-  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, \
-          getpid(), std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+#define LogElfWarning(format, ...)                                                                 \
+  ClPrint(amd::LOG_WARNING, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                 \
+          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
 
-#define LogElfInfo(format, ...) \
-  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, \
-          getpid(), std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+#define LogElfInfo(format, ...)                                                                    \
+  ClPrint(amd::LOG_INFO, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                    \
+          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
 #else
 #define ElfTrace(level)
 #define logElfInfo(msg)
@@ -71,124 +72,87 @@
 #define LogElfInfo(format, ...)
 #endif
 
-#define logElfError(msg) \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, \
-          getpid(), std::this_thread::get_id(), this, __func__)
+#define logElfError(msg)                                                                           \
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " msg, getpid(),                      \
+          std::this_thread::get_id(), this, __func__)
 
-#define LogElfError(format, ...) \
-  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, \
-          getpid(), std::this_thread::get_id(), this, __func__, __VA_ARGS__)
+#define LogElfError(format, ...)                                                                   \
+  ClPrint(amd::LOG_ERROR, amd::LOG_CODE, "%-5d: [%zx] %p %s: " format, getpid(),                   \
+          std::this_thread::get_id(), this, __func__, __VA_ARGS__)
 
 namespace amd {
 using namespace amd::ELFIO;
 
 #if !defined(ELFMAG)
-#define ELFMAG  "\177ELF"
+#define ELFMAG "\177ELF"
 #define SELFMAG 4
 #endif
 
 typedef struct {
   Elf::ElfSections id;
-  const char  *name;
-  uint64_t    d_align;  // section alignment in bytes
-  Elf32_Word  sh_type;  // section type
-  Elf32_Word  sh_flags; // section flags
-  const char  *desc;
+  const char* name;
+  uint64_t d_align;     // section alignment in bytes
+  Elf32_Word sh_type;   // section type
+  Elf32_Word sh_flags;  // section flags
+  const char* desc;
 } ElfSectionsDesc;
 
 namespace {
-  // Objects that are visible only within this module
-  constexpr ElfSectionsDesc ElfSecDesc[] =
-  {
-    { Elf::LLVMIR,         ".llvmir",         1, SHT_PROGBITS, 0,
-      "ASIC-independent LLVM IR" },
-    { Elf::SOURCE,         ".source",         1, SHT_PROGBITS, 0,
-      "OpenCL source" },
-    { Elf::ILTEXT,         ".amdil",          1, SHT_PROGBITS, 0,
-      "AMD IL text" },
-    { Elf::ASTEXT,         ".astext",         1, SHT_PROGBITS, 0,
-      "X86 assembly text" },
-    { Elf::CAL,            ".text",           1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR,
-      "AMD CalImage" },
-    { Elf::DLL,            ".text",           1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR,
-      "x86 dll" },
-    { Elf::STRTAB,         ".strtab",         1, SHT_STRTAB,   SHF_STRINGS,
-      "String table" },
-    { Elf::SYMTAB,         ".symtab",         sizeof(Elf64_Xword), SHT_SYMTAB,   0,
-      "Symbol table" },
-    { Elf::RODATA,         ".rodata",         1, SHT_PROGBITS, SHF_ALLOC,
-      "Read-only data" },
-    { Elf::SHSTRTAB,       ".shstrtab",       1, SHT_STRTAB,   SHF_STRINGS,
-      "Section names" },
-    { Elf::NOTES,          ".note",           1, SHT_NOTE,     0,
-      "used by loader for notes" },
-    { Elf::COMMENT,        ".comment",        1, SHT_PROGBITS, 0,
-      "Version string" },
-    { Elf::ILDEBUG,        ".debugil",        1, SHT_PROGBITS, 0,
-      "AMD Debug IL" },
-    { Elf::DEBUG_INFO,     ".debug_info",     1, SHT_PROGBITS, 0,
-      "Dwarf debug info" },
-    { Elf::DEBUG_ABBREV,   ".debug_abbrev",   1, SHT_PROGBITS, 0,
-      "Dwarf debug abbrev" },
-    { Elf::DEBUG_LINE,     ".debug_line",     1, SHT_PROGBITS, 0,
-      "Dwarf debug line" },
-    { Elf::DEBUG_PUBNAMES, ".debug_pubnames", 1, SHT_PROGBITS, 0,
-      "Dwarf debug pubnames" },
-    { Elf::DEBUG_PUBTYPES, ".debug_pubtypes", 1, SHT_PROGBITS, 0,
-      "Dwarf debug pubtypes" },
-    { Elf::DEBUG_LOC,      ".debug_loc",      1, SHT_PROGBITS, 0,
-      "Dwarf debug loc" },
-    { Elf::DEBUG_ARANGES,  ".debug_aranges",  1, SHT_PROGBITS, 0,
-      "Dwarf debug aranges" },
-    { Elf::DEBUG_RANGES,   ".debug_ranges",   1, SHT_PROGBITS, 0,
-      "Dwarf debug ranges" },
-    { Elf::DEBUG_MACINFO,  ".debug_macinfo",  1, SHT_PROGBITS, 0,
-      "Dwarf debug macinfo" },
-    { Elf::DEBUG_STR,      ".debug_str",      1, SHT_PROGBITS, 0,
-      "Dwarf debug str" },
-    { Elf::DEBUG_FRAME,    ".debug_frame",    1, SHT_PROGBITS, 0,
-      "Dwarf debug frame" },
-    { Elf::JITBINARY,      ".text",           1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR,
-      "x86 JIT Binary" },
-    { Elf::CODEGEN,         ".cg",            1, SHT_PROGBITS, 0,
-      "Target dependent IL" },
-    { Elf::TEXT,            ".text",          1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR,
-      "Device specific ISA" },
-    { Elf::INTERNAL,        ".internal",      1, SHT_PROGBITS, 0,
-      "Internal usage" },
-    { Elf::SPIR,            ".spir",          1, SHT_PROGBITS, 0,
-      "Vendor/Device-independent LLVM IR" },
-    { Elf::SPIRV,           ".spirv",         1, SHT_PROGBITS, 0,
-      "SPIR-V Binary" },
-    { Elf::RUNTIME_METADATA,".AMDGPU.runtime_metadata",  1, SHT_PROGBITS, 0,
-      "AMDGPU runtime metadata" },
-  };
-}
+// Objects that are visible only within this module
+constexpr ElfSectionsDesc ElfSecDesc[] = {
+    {Elf::LLVMIR, ".llvmir", 1, SHT_PROGBITS, 0, "ASIC-independent LLVM IR"},
+    {Elf::SOURCE, ".source", 1, SHT_PROGBITS, 0, "OpenCL source"},
+    {Elf::ILTEXT, ".amdil", 1, SHT_PROGBITS, 0, "AMD IL text"},
+    {Elf::ASTEXT, ".astext", 1, SHT_PROGBITS, 0, "X86 assembly text"},
+    {Elf::CAL, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "AMD CalImage"},
+    {Elf::DLL, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "x86 dll"},
+    {Elf::STRTAB, ".strtab", 1, SHT_STRTAB, SHF_STRINGS, "String table"},
+    {Elf::SYMTAB, ".symtab", sizeof(Elf64_Xword), SHT_SYMTAB, 0, "Symbol table"},
+    {Elf::RODATA, ".rodata", 1, SHT_PROGBITS, SHF_ALLOC, "Read-only data"},
+    {Elf::SHSTRTAB, ".shstrtab", 1, SHT_STRTAB, SHF_STRINGS, "Section names"},
+    {Elf::NOTES, ".note", 1, SHT_NOTE, 0, "used by loader for notes"},
+    {Elf::COMMENT, ".comment", 1, SHT_PROGBITS, 0, "Version string"},
+    {Elf::ILDEBUG, ".debugil", 1, SHT_PROGBITS, 0, "AMD Debug IL"},
+    {Elf::DEBUG_INFO, ".debug_info", 1, SHT_PROGBITS, 0, "Dwarf debug info"},
+    {Elf::DEBUG_ABBREV, ".debug_abbrev", 1, SHT_PROGBITS, 0, "Dwarf debug abbrev"},
+    {Elf::DEBUG_LINE, ".debug_line", 1, SHT_PROGBITS, 0, "Dwarf debug line"},
+    {Elf::DEBUG_PUBNAMES, ".debug_pubnames", 1, SHT_PROGBITS, 0, "Dwarf debug pubnames"},
+    {Elf::DEBUG_PUBTYPES, ".debug_pubtypes", 1, SHT_PROGBITS, 0, "Dwarf debug pubtypes"},
+    {Elf::DEBUG_LOC, ".debug_loc", 1, SHT_PROGBITS, 0, "Dwarf debug loc"},
+    {Elf::DEBUG_ARANGES, ".debug_aranges", 1, SHT_PROGBITS, 0, "Dwarf debug aranges"},
+    {Elf::DEBUG_RANGES, ".debug_ranges", 1, SHT_PROGBITS, 0, "Dwarf debug ranges"},
+    {Elf::DEBUG_MACINFO, ".debug_macinfo", 1, SHT_PROGBITS, 0, "Dwarf debug macinfo"},
+    {Elf::DEBUG_STR, ".debug_str", 1, SHT_PROGBITS, 0, "Dwarf debug str"},
+    {Elf::DEBUG_FRAME, ".debug_frame", 1, SHT_PROGBITS, 0, "Dwarf debug frame"},
+    {Elf::JITBINARY, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "x86 JIT Binary"},
+    {Elf::CODEGEN, ".cg", 1, SHT_PROGBITS, 0, "Target dependent IL"},
+    {Elf::TEXT, ".text", 1, SHT_PROGBITS, SHF_ALLOC | SHF_EXECINSTR, "Device specific ISA"},
+    {Elf::INTERNAL, ".internal", 1, SHT_PROGBITS, 0, "Internal usage"},
+    {Elf::SPIR, ".spir", 1, SHT_PROGBITS, 0, "Vendor/Device-independent LLVM IR"},
+    {Elf::SPIRV, ".spirv", 1, SHT_PROGBITS, 0, "SPIR-V Binary"},
+    {Elf::RUNTIME_METADATA, ".AMDGPU.runtime_metadata", 1, SHT_PROGBITS, 0,
+     "AMDGPU runtime metadata"},
+};
+}  // namespace
 
 ///////////////////////////////////////////////////////////////
 ////////////////////// elf initializers ///////////////////////
 ///////////////////////////////////////////////////////////////
 
-Elf::Elf (
-    unsigned char eclass,
-    const char*   rawElfBytes,
-    uint64_t      rawElfSize,
-    const char*   elfFileName,
-    ElfCmd        elfcmd
-    )
-: _fname (elfFileName ? elfFileName : ""),
-  _eclass (eclass),
-  _rawElfBytes (rawElfBytes),
-  _rawElfSize (rawElfSize),
-  _elfCmd (elfcmd),
-  _elfMemory(),
-  _shstrtab_ndx (SHN_UNDEF),
-  _strtab_ndx (SHN_UNDEF),
-  _symtab_ndx (SHN_UNDEF),
-  _successful (false)
-{
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d, %s",
-             _fname.c_str(), _rawElfSize, _elfCmd, _elfCmd == ELF_C_WRITE ? "writer" : "reader");
+Elf::Elf(unsigned char eclass, const char* rawElfBytes, uint64_t rawElfSize,
+         const char* elfFileName, ElfCmd elfcmd)
+    : _fname(elfFileName ? elfFileName : ""),
+      _eclass(eclass),
+      _rawElfBytes(rawElfBytes),
+      _rawElfSize(rawElfSize),
+      _elfCmd(elfcmd),
+      _elfMemory(),
+      _shstrtab_ndx(SHN_UNDEF),
+      _strtab_ndx(SHN_UNDEF),
+      _symtab_ndx(SHN_UNDEF),
+      _successful(false) {
+  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d, %s", _fname.c_str(), _rawElfSize, _elfCmd,
+             _elfCmd == ELF_C_WRITE ? "writer" : "reader");
 
   if (rawElfBytes != NULL) {
     /*
@@ -203,15 +167,12 @@ Elf::Elf (
   (void)Init();
 }
 
-Elf::~Elf()
-{
-  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d",
-             _fname.c_str(), _rawElfSize, _elfCmd);
+Elf::~Elf() {
+  LogElfInfo("fname=%s, rawElfSize=%lu, elfcmd=%d", _fname.c_str(), _rawElfSize, _elfCmd);
   elfMemoryRelease();
 }
 
-bool Elf::Clear()
-{
+bool Elf::Clear() {
   ElfTrace(amd::LOG_INFO);
 
   _elfio.clean();
@@ -226,8 +187,7 @@ bool Elf::Clear()
 /*
  Initialize Elf object
  */
-bool Elf::Init()
-{
+bool Elf::Init() {
   _successful = false;
 
   switch (_elfCmd) {
@@ -236,12 +196,12 @@ bool Elf::Init()
       break;
 
     case ELF_C_READ:
-      if(_rawElfBytes == nullptr || _rawElfSize == 0) {
+      if (_rawElfBytes == nullptr || _rawElfSize == 0) {
         logElfError("failed: _rawElfBytes = nullptr or _rawElfSize = 0");
         return false;
       }
       {
-        std::istringstream is { std::string(_rawElfBytes, _rawElfSize) };
+        std::istringstream is{std::string(_rawElfBytes, _rawElfSize)};
         if (!_elfio.load(is)) {
           LogElfError("failed in _elfio.load(%p, %lu)", _rawElfBytes, _rawElfSize);
           return false;
@@ -251,7 +211,7 @@ bool Elf::Init()
 
     default:
       LogElfError("failed: unexpected cmd %d", _elfCmd);
-      return false; // Don't support other mode
+      return false;  // Don't support other mode
   }
 
   if (!InitElf()) {
@@ -264,14 +224,13 @@ bool Elf::Init()
   return true;
 }
 
-bool Elf::InitElf ()
-{
+bool Elf::InitElf() {
   if (_elfCmd == ELF_C_READ) {
     assert(_elfio.sections.size() > 0 && "elfio object should have been created already");
 
     // Set up _shstrtab_ndx
     _shstrtab_ndx = _elfio.get_section_name_str_index();
-    if(_shstrtab_ndx == SHN_UNDEF) {
+    if (_shstrtab_ndx == SHN_UNDEF) {
       logElfError("failed: _shstrtab_ndx = SHN_UNDEF");
       return false;
     }
@@ -291,7 +250,7 @@ bool Elf::InitElf ()
       _symtab_ndx = symtab_sec->get_index();
     }
     // It's ok for empty SYMTAB
-  } else if(_elfCmd == ELF_C_WRITE) {
+  } else if (_elfCmd == ELF_C_WRITE) {
     /*********************************/
     /******** ELF_C_WRITE ************/
     /*********************************/
@@ -320,7 +279,7 @@ bool Elf::InitElf ()
     //
     // 3. Create .strtab section
     //
-    auto *strtab_sec = _elfio.sections.add(ElfSecDesc[STRTAB].name);
+    auto* strtab_sec = _elfio.sections.add(ElfSecDesc[STRTAB].name);
     if (strtab_sec == nullptr) {
       logElfError("failed to add section STRTAB");
       return false;
@@ -328,9 +287,7 @@ bool Elf::InitElf ()
 
     // adding null string data associated with section
     // index 0 is reserved and must be there (NULL name)
-    constexpr char strtab[] = {
-      /* index 0 */ '\0'
-    };
+    constexpr char strtab[] = {/* index 0 */ '\0'};
     strtab_sec->set_data(const_cast<char*>(strtab), sizeof(strtab));
 
     if (!setupShdr(STRTAB, strtab_sec)) {
@@ -346,7 +303,7 @@ bool Elf::InitElf ()
 
     // Create the first reserved dummy symbol (undefined symbol)
     size_t sym_sz = (_eclass == ELFCLASS32) ? sizeof(Elf32_Sym) : sizeof(Elf64_Sym);
-    char* sym = static_cast<char *>(::calloc(1, sym_sz));
+    char* sym = static_cast<char*>(::calloc(1, sym_sz));
     if (sym == nullptr) {
       logElfError("failed to calloc memory for SYMTAB section");
       return false;
@@ -367,19 +324,14 @@ bool Elf::InitElf ()
   }
 
   LogElfInfo("succeeded: secs=%d, segs=%d, _shstrtab_ndx=%u, _strtab_ndx=%u, _symtab_ndx=%u",
-       _elfio.sections.size(), _elfio.segments.size(), _shstrtab_ndx, _strtab_ndx, _symtab_ndx);
+             _elfio.sections.size(), _elfio.segments.size(), _shstrtab_ndx, _strtab_ndx,
+             _symtab_ndx);
   return true;
 }
 
-bool Elf::createElfData(
-    section*&   sec,
-    ElfSections id,
-    const char* d_buf,
-    size_t      d_size
-    )
-{
+bool Elf::createElfData(section*& sec, ElfSections id, const char* d_buf, size_t d_size) {
   assert((ElfSecDesc[id].id == id) &&
-      "ElfSecDesc[] should be in the same order as enum ElfSections");
+         "ElfSecDesc[] should be in the same order as enum ElfSections");
 
   sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
@@ -391,12 +343,7 @@ bool Elf::createElfData(
   return true;
 }
 
-bool Elf::setupShdr (
-    ElfSections id,
-    section* section,
-    Elf64_Word shlink
-    ) const
-{
+bool Elf::setupShdr(ElfSections id, section* section, Elf64_Word shlink) const {
   section->set_addr_align(ElfSecDesc[id].d_align);
   section->set_type(ElfSecDesc[id].sh_type);
   section->set_flags(ElfSecDesc[id].sh_flags);
@@ -404,12 +351,11 @@ bool Elf::setupShdr (
 
   auto class_num = _elfio.get_class();
   size_t entry_size = 0;
-  switch(id) {
+  switch (id) {
     case SYMTAB:
       if (class_num == ELFCLASS32) {
         entry_size = sizeof(Elf32_Sym);
-      }
-      else {
+      } else {
         entry_size = sizeof(Elf64_Sym);
       }
       break;
@@ -417,25 +363,19 @@ bool Elf::setupShdr (
       // .dynsym and .relaNAME also have table entries
       break;
   }
-  if(entry_size > 0) {
+  if (entry_size > 0) {
     section->set_entry_size(entry_size);
   }
   return true;
 }
 
-bool Elf::getTarget(uint16_t& machine, ElfPlatform& platform) const
-{
+bool Elf::getTarget(uint16_t& machine, ElfPlatform& platform) const {
   Elf64_Half mach = _elfio.get_machine();
   if ((mach >= CPU_FIRST) && (mach <= CPU_LAST)) {
     platform = CPU_PLATFORM;
     machine = mach - CPU_BASE;
-  }
-  else if (mach == EM_386
-      || mach == EM_HSAIL
-      || mach == EM_HSAIL_64
-      || mach == EM_AMDIL
-      || mach == EM_AMDIL_64
-      || mach == EM_X86_64) {
+  } else if (mach == EM_386 || mach == EM_HSAIL || mach == EM_HSAIL_64 || mach == EM_AMDIL ||
+             mach == EM_AMDIL_64 || mach == EM_X86_64) {
     platform = COMPLIB_PLATFORM;
     machine = mach;
   } else {
@@ -447,8 +387,7 @@ bool Elf::getTarget(uint16_t& machine, ElfPlatform& platform) const
   return true;
 }
 
-bool Elf::setTarget(uint16_t machine, ElfPlatform platform)
-{
+bool Elf::setTarget(uint16_t machine, ElfPlatform platform) {
   Elf64_Half mach;
   if (platform == CPU_PLATFORM)
     mach = machine + CPU_BASE;
@@ -463,30 +402,29 @@ bool Elf::setTarget(uint16_t machine, ElfPlatform platform)
   return true;
 }
 
-bool Elf::getType(uint16_t &type) const {
+bool Elf::getType(uint16_t& type) const {
   type = _elfio.get_type();
   return true;
 }
 
-bool Elf::setType(uint16_t  type) {
+bool Elf::setType(uint16_t type) {
   _elfio.set_type(type);
   return true;
 }
 
-bool Elf::getFlags(uint32_t &flag) const {
+bool Elf::getFlags(uint32_t& flag) const {
   flag = _elfio.get_flags();
   return true;
 }
 
-bool Elf::setFlags(uint32_t  flag) {
+bool Elf::setFlags(uint32_t flag) {
   _elfio.set_flags(flag);
   return true;
 }
 
-bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const
-{
+bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const {
   assert((ElfSecDesc[id].id == id) &&
-      "ElfSecDesc[] should be in the same order as enum ElfSections");
+         "ElfSecDesc[] should be in the same order as enum ElfSections");
 
   section* sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
@@ -505,7 +443,7 @@ bool Elf::getSection(Elf::ElfSections id, char** dst, size_t* sz) const
 unsigned int Elf::getSymbolNum() const {
   if (_symtab_ndx == SHN_UNDEF) {
     logElfError(" failed: _symtab_ndx = SHN_UNDEF");
-    return 0; // No SYMTAB
+    return 0;  // No SYMTAB
   }
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
   auto num = symbol_reader.get_symbols_num() - 1;  // Exclude the first dummy symbol
@@ -513,9 +451,7 @@ unsigned int Elf::getSymbolNum() const {
   return num;
 }
 
-unsigned int Elf::getSegmentNum() const {
-  return _elfio.segments.size();
-}
+unsigned int Elf::getSegmentNum() const { return _elfio.segments.size(); }
 
 bool Elf::getSegment(const unsigned int index, segment*& seg) const {
   bool ret = false;
@@ -526,11 +462,10 @@ bool Elf::getSegment(const unsigned int index, segment*& seg) const {
   return ret;
 }
 
-bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const
-{
-  if(_symtab_ndx == SHN_UNDEF) {
+bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const {
+  if (_symtab_ndx == SHN_UNDEF) {
     logElfError(" failed: _symtab_ndx = SHN_UNDEF");
-    return false; // No SYMTAB
+    return false;  // No SYMTAB
   }
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
 
@@ -541,17 +476,16 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const
     return false;
   }
 
-  std::string   sym_name;
-  Elf64_Addr    value = 0;
-  Elf_Xword     size = 0;
+  std::string sym_name;
+  Elf64_Addr value = 0;
+  Elf_Xword size = 0;
   unsigned char bind = 0;
   unsigned char type = 0;
-  Elf_Half      sec_index = 0;
+  Elf_Half sec_index = 0;
   unsigned char other = 0;
 
   // index++ for real index on top of the first dummy symbol
-  bool ret = symbol_reader.get_symbol(++index, sym_name, value, size, bind, type,
-                                      sec_index, other);
+  bool ret = symbol_reader.get_symbol(++index, sym_name, value, size, bind, type, sec_index, other);
   if (!ret) {
     LogElfError("failed to get_symbol(%u)", index);
     return false;
@@ -564,8 +498,8 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const
 
   symInfo->sec_addr = sec->get_data();
   symInfo->sec_size = sec->get_size();
-  symInfo->address = symInfo->sec_addr + (size_t) value;
-  symInfo->size = (uint64_t) size;
+  symInfo->address = symInfo->sec_addr + (size_t)value;
+  symInfo->size = (uint64_t)size;
 
   symInfo->sec_name = sec->get_name();
   symInfo->sym_name = sym_name;
@@ -579,15 +513,9 @@ bool Elf::getSymbolInfo(unsigned int index, SymbolInfo* symInfo) const
   return true;
 }
 
-bool Elf::addSectionData (
-    Elf_Xword&  outOffset,
-    ElfSections id,
-    const void* buffer,
-    size_t      size
-    )
-{
+bool Elf::addSectionData(Elf_Xword& outOffset, ElfSections id, const void* buffer, size_t size) {
   assert(ElfSecDesc[id].id == id &&
-      "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
+         "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
 
   outOffset = 0;
   section* sec = _elfio.sections[ElfSecDesc[id].name];
@@ -598,16 +526,15 @@ bool Elf::addSectionData (
 
   outOffset = sec->get_size();
 
-  sec->append_data(static_cast<const char *>(buffer), size);
+  sec->append_data(static_cast<const char*>(buffer), size);
   LogElfInfo("succeeded: buffer=%p, size=%zu", buffer, size);
 
   return true;
 }
 
-bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name)
-{
+bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name) {
   outNdx = 0;
-  auto *section = _elfio.sections[name];
+  auto* section = _elfio.sections[name];
   if (section == nullptr) {
     LogElfError("failed: sections[%s] = nullptr", name);
     return false;
@@ -625,14 +552,9 @@ bool Elf::getShstrtabNdx(Elf64_Word& outNdx, const char* name)
   return true;
 }
 
-section* Elf::newSection (
-    Elf::ElfSections id,
-    const char*            d_buf,
-    size_t                 d_size
-    )
-{
+section* Elf::newSection(Elf::ElfSections id, const char* d_buf, size_t d_size) {
   assert(ElfSecDesc[id].id == id &&
-      "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
+         "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
 
   section* sec = _elfio.sections[ElfSecDesc[id].name];
   if (sec == nullptr) {
@@ -651,35 +573,28 @@ section* Elf::newSection (
     return nullptr;
   }
 
-  LogElfDebug("succeeded: name=%s, d_buf=%p, d_size=%zu",
-              ElfSecDesc[id].name, d_buf, d_size);
+  LogElfDebug("succeeded: name=%s, d_buf=%p, d_size=%zu", ElfSecDesc[id].name, d_buf, d_size);
   return sec;
 }
 
-bool Elf::addSection (
-    ElfSections id,
-    const void*    d_buf,
-    size_t         d_size
-    )
-{
+bool Elf::addSection(ElfSections id, const void* d_buf, size_t d_size) {
   assert(ElfSecDesc[id].id == id &&
-      "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
+         "struct ElfSecDesc should be ordered by id same as enum Elf::ElfSections");
 
   section* sec = _elfio.sections[ElfSecDesc[id].name];
 
   if (sec != nullptr) {
     Elf_Xword sec_offset = 0;
     if (!addSectionData(sec_offset, id, d_buf, d_size)) {
-      LogElfError("failed in addSectionData(name=%s, d_buf=%p, d_size=%zu)",
-                  ElfSecDesc[id].name, d_buf, d_size);
+      LogElfError("failed in addSectionData(name=%s, d_buf=%p, d_size=%zu)", ElfSecDesc[id].name,
+                  d_buf, d_size);
       return false;
     }
-  }
-  else {
+  } else {
     sec = newSection(id, static_cast<const char*>(d_buf), d_size);
     if (sec == nullptr) {
-      LogElfError("failed in newSection(name=%s, d_buf=%p, d_size=%zu)",
-                  ElfSecDesc[id].name, d_buf, d_size);
+      LogElfError("failed in newSection(name=%s, d_buf=%p, d_size=%zu)", ElfSecDesc[id].name, d_buf,
+                  d_size);
       return false;
     }
   }
@@ -688,19 +603,12 @@ bool Elf::addSection (
   return true;
 }
 
-bool Elf::addSymbol(
-    ElfSections id,
-    const char* symbolName,
-    const void* buffer,
-    size_t size
-    )
-{
-  assert(ElfSecDesc[id].id == id &&
-      "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
+bool Elf::addSymbol(ElfSections id, const char* symbolName, const void* buffer, size_t size) {
+  assert(ElfSecDesc[id].id == id && "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
 
-  if(_symtab_ndx == SHN_UNDEF) {
+  if (_symtab_ndx == SHN_UNDEF) {
     logElfError("failed: _symtab_ndx = SHN_UNDEF");
-    return false; // No SYMTAB
+    return false;  // No SYMTAB
   }
 
   const char* sectionName = ElfSecDesc[id].name;
@@ -724,19 +632,18 @@ bool Elf::addSymbol(
 
   // Put symbolName into .strtab section
   Elf_Xword strtab_offset = 0;
-  if (!addSectionData(strtab_offset, STRTAB, symbolName,
-        strlen(symbolName)+1)) {
+  if (!addSectionData(strtab_offset, STRTAB, symbolName, strlen(symbolName) + 1)) {
     LogElfError("failed in addSectionData(name=%s, symbolName=%s, length=%zu)",
-                ElfSecDesc[STRTAB].name, symbolName, strlen(symbolName)+1);
+                ElfSecDesc[STRTAB].name, symbolName, strlen(symbolName) + 1);
     return false;
   }
 
   // Put buffer into section
   Elf_Xword sec_offset = 0;
-  if ( (buffer != nullptr) && (size != 0) ) {
+  if ((buffer != nullptr) && (size != 0)) {
     if (!addSectionData(sec_offset, id, buffer, size)) {
-      LogElfError("failed in addSectionData(name=%s, buffer=%p, size=%zu)",
-                  sectionName, buffer, size);
+      LogElfError("failed in addSectionData(name=%s, buffer=%p, size=%zu)", sectionName, buffer,
+                  size);
       return false;
     }
   }
@@ -744,23 +651,18 @@ bool Elf::addSymbol(
   symbol_section_accessor symbol_writter(_elfio, _elfio.sections[_symtab_ndx]);
 
   auto ret = symbol_writter.add_symbol(strtab_offset, sec_offset, size, 0,
-                     (isFunction)? STT_FUNC : STT_OBJECT, 0, sec_ndx);
+                                       (isFunction) ? STT_FUNC : STT_OBJECT, 0, sec_ndx);
 
-  LogElfDebug("%s: sectionName=%s symbolName=%s strtab_offset=%lu, sec_offset=%lu, "
-      "size=%zu, sec_ndx=%zu, ret=%d", ret >= 1 ? "succeeded" : "failed",
-          sectionName, symbolName, strtab_offset, sec_offset, size, sec_ndx, ret);
+  LogElfDebug(
+      "%s: sectionName=%s symbolName=%s strtab_offset=%lu, sec_offset=%lu, "
+      "size=%zu, sec_ndx=%zu, ret=%d",
+      ret >= 1 ? "succeeded" : "failed", sectionName, symbolName, strtab_offset, sec_offset, size,
+      sec_ndx, ret);
   return ret >= 1;
 }
 
-bool Elf::getSymbol(
-    ElfSections id,
-    const char* symbolName,
-    char** buffer,
-    size_t* size
-    ) const
-{
-  assert(ElfSecDesc[id].id == id &&
-      "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
+bool Elf::getSymbol(ElfSections id, const char* symbolName, char** buffer, size_t* size) const {
+  assert(ElfSecDesc[id].id == id && "The order of ElfSecDesc[] and Elf::ElfSections mismatches.");
 
   if (!size || !buffer || !symbolName) {
     logElfError("failed: invalid parameters");
@@ -768,7 +670,7 @@ bool Elf::getSymbol(
   }
   if (_symtab_ndx == SHN_UNDEF) {
     logElfError("failed: _symtab_ndx = SHN_UNDEF");
-    return false; // No SYMTAB
+    return false;  // No SYMTAB
   }
 
   *size = 0;
@@ -776,15 +678,15 @@ bool Elf::getSymbol(
   symbol_section_accessor symbol_reader(_elfio, _elfio.sections[_symtab_ndx]);
 
   Elf64_Addr value = 0;
-  Elf_Xword  size0 = 0;
+  Elf_Xword size0 = 0;
   unsigned char bind = 0;
   unsigned char type = 0;
   unsigned char other = 0;
   Elf_Half sec_ndx = SHN_UNDEF;
 
   // Search by symbolName, sectionName
-  bool ret = symbol_reader.get_symbol(symbolName, ElfSecDesc[id].name, value, size0,
-                    bind, type, sec_ndx, other);
+  bool ret = symbol_reader.get_symbol(symbolName, ElfSecDesc[id].name, value, size0, bind, type,
+                                      sec_ndx, other);
 
   if (ret) {
     *buffer = const_cast<char*>(_elfio.sections[sec_ndx]->get_data() + value);
@@ -799,15 +701,8 @@ bool Elf::getSymbol(
   return ret;
 }
 
-bool Elf::addNote(
-    const char* noteName,
-    const char* noteDesc,
-    size_t descSize
-    )
-{
-  if (descSize == 0
-      || noteName == nullptr
-      || (descSize != 0 && noteDesc == nullptr)) {
+bool Elf::addNote(const char* noteName, const char* noteDesc, size_t descSize) {
+  if (descSize == 0 || noteName == nullptr || (descSize != 0 && noteDesc == nullptr)) {
     logElfError("failed: empty note");
     return false;
   }
@@ -831,12 +726,7 @@ bool Elf::addNote(
   return true;
 }
 
-bool Elf::getNote(
-    const char* noteName,
-    char** noteDesc,
-    size_t *descSize
-    )
-{
+bool Elf::getNote(const char* noteName, char** noteDesc, size_t* descSize) {
   if (!descSize || !noteDesc || !noteName) {
     logElfError("failed: empty note");
     return false;
@@ -862,9 +752,9 @@ bool Elf::getNote(
 
   for (unsigned int i = 0; i < num; i++) {
     std::string name;
-    if(note_reader.get_note(i, type, name, desc, descSize1)) {
-      if(name == noteName) {
-        *noteDesc = static_cast<char *>(desc);
+    if (note_reader.get_note(i, type, name, desc, descSize1)) {
+      if (name == noteName) {
+        *noteDesc = static_cast<char*>(desc);
         *descSize = descSize1;
         LogElfDebug("Succeed: get_note(%s, %s)", name.c_str(),
                     std::string(*noteDesc, *descSize).c_str());
@@ -907,8 +797,7 @@ std::string Elf::generateUUIDV4() {
   return ss.str();
 }
 
-bool Elf::dumpImage(char** buff, size_t* len)
-{
+bool Elf::dumpImage(char** buff, size_t* len) {
   bool ret = false;
   std::string dumpFile = _fname;
   if (_fname.empty()) {
@@ -924,7 +813,7 @@ bool Elf::dumpImage(char** buff, size_t* len)
 
   if (buff != nullptr && len != nullptr) {
     std::ifstream is;
-    is.open(dumpFile, std::ifstream::in | std::ifstream::binary); // open input file
+    is.open(dumpFile, std::ifstream::in | std::ifstream::binary);  // open input file
     if (!is.good()) {
       LogElfError("failed in is.open(%s)", dumpFile.c_str());
       return false;
@@ -940,7 +829,7 @@ bool Elf::dumpImage(char** buff, size_t* len)
   return ret;
 }
 
-bool Elf::dumpImage(std::istream &is, char **buff, size_t *len) const {
+bool Elf::dumpImage(std::istream& is, char** buff, size_t* len) const {
   if (buff == nullptr || len == nullptr) {
     return false;
   }
@@ -952,7 +841,7 @@ bool Elf::dumpImage(std::istream &is, char **buff, size_t *len) const {
   return true;
 }
 
-uint64_t Elf::getElfSize(const void *emi) {
+uint64_t Elf::getElfSize(const void* emi) {
   const unsigned char eclass = static_cast<const unsigned char*>(emi)[EI_CLASS];
   uint64_t total_size = 0;
   if (eclass == ELFCLASS32) {
@@ -993,16 +882,14 @@ uint64_t Elf::getElfSize(const void *emi) {
   return total_size;
 }
 
-bool Elf::isElfMagic(const char* p)
-{
+bool Elf::isElfMagic(const char* p) {
   if (p == nullptr || strncmp(p, ELFMAG, SELFMAG) != 0) {
     return false;
   }
   return true;
 }
 
-bool Elf::isCALTarget(const char* p, signed char ec)
-{
+bool Elf::isCALTarget(const char* p, signed char ec) {
   if (!isElfMagic(p)) {
     return false;
   }
@@ -1011,7 +898,7 @@ bool Elf::isCALTarget(const char* p, signed char ec)
 }
 
 void* Elf::xmalloc(const size_t len) {
-  void *retval = ::calloc(1, len);
+  void* retval = ::calloc(1, len);
   if (retval == nullptr) {
     logElfError("failed: out of memory");
     return nullptr;
@@ -1019,8 +906,7 @@ void* Elf::xmalloc(const size_t len) {
   return retval;
 }
 
-void* Elf::allocAndCopy(void* p, size_t sz)
-{
+void* Elf::allocAndCopy(void* p, size_t sz) {
   if (p == 0 || sz == 0) return p;
 
   void* buf = xmalloc(sz);
@@ -1030,28 +916,25 @@ void* Elf::allocAndCopy(void* p, size_t sz)
   }
 
   memcpy(buf, p, sz);
-  _elfMemory.insert( std::make_pair(buf, sz));
+  _elfMemory.insert(std::make_pair(buf, sz));
   return buf;
 }
 
-void* Elf::calloc(size_t sz)
-{
+void* Elf::calloc(size_t sz) {
   void* buf = xmalloc(sz);
   if (buf == nullptr) {
     logElfError("failed: out of memory");
     return 0;
   }
-  _elfMemory.insert( std::make_pair(buf, sz));
+  _elfMemory.insert(std::make_pair(buf, sz));
   return buf;
 }
 
-  void
-Elf::elfMemoryRelease()
-{
-  for(EMemory::iterator it = _elfMemory.begin(); it != _elfMemory.end(); ++it) {
+void Elf::elfMemoryRelease() {
+  for (EMemory::iterator it = _elfMemory.begin(); it != _elfMemory.end(); ++it) {
     free(it->first);
   }
   _elfMemory.clear();
 }
 
-} // namespace amd
+}  // namespace amd

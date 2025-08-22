@@ -36,14 +36,14 @@ static constexpr uint kMaxAsyncQueues = 8;
 constexpr bool kSkipCpuWait = true;
 
 enum HwQueueEngine : uint32_t {
-  Compute   = 0,
-  SdmaRead  = 1,
+  Compute = 0,
+  SdmaRead = 1,
   SdmaWrite = 2,
   SdmaIntra = 3,
   SdmaInter = 4,
-  Unknown   = 5
+  Unknown = 5
 };
 
-} // namespace amd::roc
+}  // namespace amd::roc
 
 #endif
