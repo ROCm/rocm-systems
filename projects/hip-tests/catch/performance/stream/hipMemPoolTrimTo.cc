@@ -32,9 +32,7 @@ class MemPoolTrimToBenchmark : public Benchmark<MemPoolTrimToBenchmark> {
     hipMemPoolProps pool_props = CreateMemPoolProps(0, hipMemHandleTypeNone);
     HIP_CHECK(hipMemPoolCreate(&mem_pool, &pool_props));
 
-    TIMED_SECTION(kTimerTypeCpu) {
-      HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold));
-    }
+    TIMED_SECTION(kTimerTypeCpu) { HIP_CHECK(hipMemPoolTrimTo(mem_pool, min_bytes_to_hold)); }
 
     HIP_CHECK(hipMemPoolDestroy(mem_pool));
   }
@@ -68,8 +66,9 @@ static void RunBenchmark(const size_t min_bytes_to_hold) {
  */
 TEST_CASE("Performance_hipMemPoolTrimTo") {
   if (!AreMemPoolsSupported(0)) {
-    HipTest::HIP_SKIP_TEST("GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
-                           "attribute. Hence skipping the testing with Pass result.\n");
+    HipTest::HIP_SKIP_TEST(
+        "GPU 0 doesn't support hipDeviceAttributeMemoryPoolsSupported "
+        "attribute. Hence skipping the testing with Pass result.\n");
     return;
   }
   size_t min_bytes_to_hold = GENERATE(4_KB, 4_MB, 16_MB);
@@ -77,6 +76,6 @@ TEST_CASE("Performance_hipMemPoolTrimTo") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

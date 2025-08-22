@@ -26,8 +26,8 @@ OCLProgramScopeVariables::OCLProgramScopeVariables() { _numSubTests = 3; }
 
 OCLProgramScopeVariables::~OCLProgramScopeVariables() {}
 
-void OCLProgramScopeVariables::open(unsigned int test, char* units,
-                                    double& conversion, unsigned int deviceId) {
+void OCLProgramScopeVariables::open(unsigned int test, char* units, double& conversion,
+                                    unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_RESULT((error_ != CL_SUCCESS), "error_ opening test");
   silentFailure = false;
@@ -36,13 +36,12 @@ void OCLProgramScopeVariables::open(unsigned int test, char* units,
   program_ = 0;
   kernel1_ = kernel2_ = 0;
   char* strVersion = 0;
-  error_ = _wrapper->clGetDeviceInfo(
-      devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_size);
+  error_ =
+      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, 0, 0, &param_size);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
   strVersion = (char*)malloc(param_size);
-  error_ =
-      _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION,
-                                param_size, strVersion, 0);
+  error_ = _wrapper->clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_OPENCL_C_VERSION, param_size,
+                                     strVersion, 0);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformInfo failed");
   if (strVersion[9] < '2') {
     printf("\nOpenCL C 2.0 not supported\n");
@@ -51,8 +50,7 @@ void OCLProgramScopeVariables::open(unsigned int test, char* units,
   free(strVersion);
 }
 
-static void CL_CALLBACK notify_callback(const char* errinfo,
-                                        const void* private_info, size_t cb,
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
                                         void* user_data) {}
 
 void OCLProgramScopeVariables::run(void) {
@@ -86,19 +84,17 @@ void OCLProgramScopeVariables::test0(void) {
         } \n";
   const size_t arrSize = 1000;
   cl_uint* output_arr = (cl_uint*)malloc(arrSize * sizeof(cl_uint));
-  cl_mem buffer = _wrapper->clCreateBuffer(
-      context_, CL_MEM_READ_WRITE, arrSize * sizeof(cl_uint), 0, &error_);
+  cl_mem buffer =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, arrSize * sizeof(cl_uint), 0, &error_);
   buffers_.push_back(buffer);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char log[400];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 400, log, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 400, log,
+                                    0);
     printf("\n\n%s\n\n", log);
   }
   CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram failed");
@@ -106,26 +102,21 @@ void OCLProgramScopeVariables::test0(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel1 failed");
   kernel2_ = _wrapper->clCreateKernel(program_, "test2", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel2 failed");
-  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
-  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
   cl_event evt;
   size_t global_work_size = arrSize;
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
-  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0],
-                                         CL_TRUE, 0, sizeof(cl_uint) * arrSize,
-                                         output_arr, 1, &evt, NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0], CL_TRUE, 0,
+                                         sizeof(cl_uint) * arrSize, output_arr, 1, &evt, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer failed");
   bool bResult = true;
   for (unsigned int i = 0; i < arrSize; ++i) {
@@ -152,19 +143,17 @@ void OCLProgramScopeVariables::test1(void) {
             if (id == 0) A[0] = temp; \n\
         } \n";
   cl_uint* output_arr = (cl_uint*)malloc(sizeof(cl_uint));
-  cl_mem buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                           sizeof(cl_uint), 0, &error_);
+  cl_mem buffer =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, sizeof(cl_uint), 0, &error_);
   buffers_.push_back(buffer);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char log[400];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 400, log, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 400, log,
+                                    0);
     printf("\n\n%s\n\n", log);
   }
   CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram failed");
@@ -172,26 +161,21 @@ void OCLProgramScopeVariables::test1(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel1 failed");
   kernel2_ = _wrapper->clCreateKernel(program_, "test2", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel2 failed");
-  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
-  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
   cl_event evt;
   size_t global_work_size = 1;
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
-  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0],
-                                         CL_TRUE, 0, sizeof(cl_uint),
-                                         output_arr, 1, &evt, NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0], CL_TRUE, 0,
+                                         sizeof(cl_uint), output_arr, 1, &evt, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer failed");
   bool bResult = (output_arr[0] == 55);
   free(output_arr);
@@ -213,19 +197,17 @@ void OCLProgramScopeVariables::test2(void) {
             if (id == 0) A[0] = *ptr[0]; \n\
         } \n";
   cl_uint* output_arr = (cl_uint*)malloc(sizeof(cl_uint));
-  cl_mem buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                           sizeof(cl_uint), 0, &error_);
+  cl_mem buffer =
+      _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, sizeof(cl_uint), 0, &error_);
   buffers_.push_back(buffer);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer failed");
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL,
-                                                 &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &kernel_str, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource failed");
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[_deviceId], "-cl-std=CL2.0", NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char log[400];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 400, log, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[_deviceId], CL_PROGRAM_BUILD_LOG, 400, log,
+                                    0);
     printf("\n\n%s\n\n", log);
   }
   CHECK_RESULT((error_ != CL_SUCCESS), "clBuildProgram failed");
@@ -233,26 +215,21 @@ void OCLProgramScopeVariables::test2(void) {
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel1 failed");
   kernel2_ = _wrapper->clCreateKernel(program_, "test2", &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateKernel2 failed");
-  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel1_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
-  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem),
-                                    (void*)&buffers_[0]);
+  error_ = _wrapper->clSetKernelArg(kernel2_, 0, sizeof(cl_mem), (void*)&buffers_[0]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg failed");
   cl_event evt;
   size_t global_work_size = 1;
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel1_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
   _wrapper->clFinish(cmdQueues_[_deviceId]);
-  error_ =
-      _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
-                                       &global_work_size, NULL, 0, NULL, &evt);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel2_, 1, NULL,
+                                            &global_work_size, NULL, 0, NULL, &evt);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel");
-  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0],
-                                         CL_TRUE, 0, sizeof(cl_uint),
-                                         output_arr, 1, &evt, NULL);
+  error_ = _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers_[0], CL_TRUE, 0,
+                                         sizeof(cl_uint), output_arr, 1, &evt, NULL);
   CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReadBuffer failed");
   bool bResult = (output_arr[0] == 65);
   free(output_arr);

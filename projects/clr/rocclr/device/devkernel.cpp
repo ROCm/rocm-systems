@@ -53,13 +53,12 @@ static constexpr clk_value_type_t ClkValueMapType[6][6] = {
 
 #if defined(USE_COMGR_LIBRARY)
 // ================================================================================================
-amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
-                   std::string* str) {
+amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta, std::string* str) {
   size_t size = 0;
   amd_comgr_status_t status = amd::Comgr::get_metadata_string(meta, &size, NULL);
 
   if (status == AMD_COMGR_STATUS_SUCCESS) {
-    str->resize(size-1);    // minus one to discount the null character
+    str->resize(size - 1);  // minus one to discount the null character
     status = amd::Comgr::get_metadata_string(meta, &size, &((*str)[0]));
   }
 
@@ -68,8 +67,7 @@ amd_comgr_status_t getMetaBuf(const amd_comgr_metadata_node_t meta,
 
 // ================================================================================================
 static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
-                                       const amd_comgr_metadata_node_t value,
-                                       void *data) {
+                                       const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;
   amd_comgr_metadata_kind_t kind;
   std::string buf;
@@ -103,74 +101,66 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
       lcArg->typeName_ = buf;
       break;
     case ArgField::Size:
-      lcArg->size_= atoi(buf.c_str());
+      lcArg->size_ = atoi(buf.c_str());
       break;
     case ArgField::Align:
       lcArg->alignment_ = atoi(buf.c_str());
       break;
-    case ArgField::ValueKind:
-      {
-        amd::KernelParameterDescriptor::Desc itValueKind
-          = amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>
-            (amd::Kernel::kArgValueKind, buf);
-        if (itValueKind == amd::KernelParameterDescriptor::Desc::MaxSize) {
-          lcArg->info_.hidden_ = true;
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->info_.oclObject_ = itValueKind;
-        switch (lcArg->info_.oclObject_) {
-          case amd::KernelParameterDescriptor::MemoryObject:
-            if (buf.compare("DynamicSharedPointer") == 0) {
-              lcArg->info_.shared_ = true;
-            }
-            break;
-          case amd::KernelParameterDescriptor::HiddenGlobalOffsetX:
-          case amd::KernelParameterDescriptor::HiddenGlobalOffsetY:
-          case amd::KernelParameterDescriptor::HiddenGlobalOffsetZ:
-          case amd::KernelParameterDescriptor::HiddenPrintfBuffer:
-          case amd::KernelParameterDescriptor::HiddenHostcallBuffer:
-          case amd::KernelParameterDescriptor::HiddenDefaultQueue:
-          case amd::KernelParameterDescriptor::HiddenCompletionAction:
-          case amd::KernelParameterDescriptor::HiddenMultiGridSync:
-          case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
-          case amd::KernelParameterDescriptor::HiddenNone:
-            lcArg->info_.hidden_ = true;
-            break;
-        }
+    case ArgField::ValueKind: {
+      amd::KernelParameterDescriptor::Desc itValueKind =
+          amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>(amd::Kernel::kArgValueKind,
+                                                                       buf);
+      if (itValueKind == amd::KernelParameterDescriptor::Desc::MaxSize) {
+        lcArg->info_.hidden_ = true;
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
+      lcArg->info_.oclObject_ = itValueKind;
+      switch (lcArg->info_.oclObject_) {
+        case amd::KernelParameterDescriptor::MemoryObject:
+          if (buf.compare("DynamicSharedPointer") == 0) {
+            lcArg->info_.shared_ = true;
+          }
+          break;
+        case amd::KernelParameterDescriptor::HiddenGlobalOffsetX:
+        case amd::KernelParameterDescriptor::HiddenGlobalOffsetY:
+        case amd::KernelParameterDescriptor::HiddenGlobalOffsetZ:
+        case amd::KernelParameterDescriptor::HiddenPrintfBuffer:
+        case amd::KernelParameterDescriptor::HiddenHostcallBuffer:
+        case amd::KernelParameterDescriptor::HiddenDefaultQueue:
+        case amd::KernelParameterDescriptor::HiddenCompletionAction:
+        case amd::KernelParameterDescriptor::HiddenMultiGridSync:
+        case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
+        case amd::KernelParameterDescriptor::HiddenNone:
+          lcArg->info_.hidden_ = true;
+          break;
+      }
+    } break;
     case ArgField::PointeeAlign:
       lcArg->info_.arrayIndex_ = atoi(buf.c_str());
       break;
-    case ArgField::AddrSpaceQual:
-      {
-        cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQual, buf);
-        if (itAddrSpaceQual == static_cast<cl_int>(0)) {
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->addressQualifier_ = itAddrSpaceQual;
+    case ArgField::AddrSpaceQual: {
+      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQual, buf);
+      if (itAddrSpaceQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
-    case ArgField::AccQual:
-      {
-        cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-        if (itAccQual == static_cast<cl_int>(0)) {
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->accessQualifier_ = itAccQual;
-        lcArg->info_.readOnly_ =
-            (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+      lcArg->addressQualifier_ = itAddrSpaceQual;
+    } break;
+    case ArgField::AccQual: {
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
-    case ArgField::ActualAccQual:
-      {
-        cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
-        if (itAccQual == static_cast<cl_int>(0)) {
-            return AMD_COMGR_STATUS_ERROR;
-        }
-        // lcArg->mActualAccQual = itAccQual->second;
+      lcArg->accessQualifier_ = itAccQual;
+      lcArg->info_.readOnly_ =
+          (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+    } break;
+    case ArgField::ActualAccQual: {
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQual, buf);
+      if (itAccQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
+      // lcArg->mActualAccQual = itAccQual->second;
+    } break;
     case ArgField::IsConst:
       lcArg->typeQualifier_ |= (buf.compare("true") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
       break;
@@ -190,8 +180,7 @@ static amd_comgr_status_t populateArgs(const amd_comgr_metadata_node_t key,
 }
 
 static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
-                                        const amd_comgr_metadata_node_t value,
-                                        void *data) {
+                                        const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;
   amd_comgr_metadata_kind_t kind;
   size_t size = 0;
@@ -214,55 +203,51 @@ static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
 
   device::Kernel* kernel = static_cast<device::Kernel*>(data);
   switch (itAttrField) {
-    case AttrField::ReqdWorkGroupSize:
-      {
-        status = amd::Comgr::get_metadata_list_size(value, &size);
-        if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
-          std::vector<size_t> wrkSize;
-          for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-            amd_comgr_metadata_node_t workgroupSize;
-            status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
+    case AttrField::ReqdWorkGroupSize: {
+      status = amd::Comgr::get_metadata_list_size(value, &size);
+      if (size == 3 && status == AMD_COMGR_STATUS_SUCCESS) {
+        std::vector<size_t> wrkSize;
+        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
+          amd_comgr_metadata_node_t workgroupSize;
+          status = amd::Comgr::index_list_metadata(value, i, &workgroupSize);
 
-            if (status == AMD_COMGR_STATUS_SUCCESS &&
-                getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-              wrkSize.push_back(atoi(buf.c_str()));
-            }
-            amd::Comgr::destroy_metadata(workgroupSize);
+          if (status == AMD_COMGR_STATUS_SUCCESS &&
+              getMetaBuf(workgroupSize, &buf) == AMD_COMGR_STATUS_SUCCESS) {
+            wrkSize.push_back(atoi(buf.c_str()));
           }
-          if (!wrkSize.empty()) {
-            kernel->setReqdWorkGroupSize(wrkSize[0], wrkSize[1], wrkSize[2]);
-          }
+          amd::Comgr::destroy_metadata(workgroupSize);
+        }
+        if (!wrkSize.empty()) {
+          kernel->setReqdWorkGroupSize(wrkSize[0], wrkSize[1], wrkSize[2]);
         }
       }
-      break;
-    case AttrField::WorkGroupSizeHint:
-      {
-        status = amd::Comgr::get_metadata_list_size(value, &size);
-        if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
-          std::vector<size_t> hintSize;
-          for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
-            amd_comgr_metadata_node_t workgroupSizeHint;
-            status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
+    } break;
+    case AttrField::WorkGroupSizeHint: {
+      status = amd::Comgr::get_metadata_list_size(value, &size);
+      if (status == AMD_COMGR_STATUS_SUCCESS && size == 3) {
+        std::vector<size_t> hintSize;
+        for (size_t i = 0; i < size && status == AMD_COMGR_STATUS_SUCCESS; i++) {
+          amd_comgr_metadata_node_t workgroupSizeHint;
+          status = amd::Comgr::index_list_metadata(value, i, &workgroupSizeHint);
 
-            if (status == AMD_COMGR_STATUS_SUCCESS &&
-                getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
-              hintSize.push_back(atoi(buf.c_str()));
-            }
-            amd::Comgr::destroy_metadata(workgroupSizeHint);
+          if (status == AMD_COMGR_STATUS_SUCCESS &&
+              getMetaBuf(workgroupSizeHint, &buf) == AMD_COMGR_STATUS_SUCCESS) {
+            hintSize.push_back(atoi(buf.c_str()));
           }
-          if (!hintSize.empty()) {
-            kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
-          }
+          amd::Comgr::destroy_metadata(workgroupSizeHint);
+        }
+        if (!hintSize.empty()) {
+          kernel->setWorkGroupSizeHint(hintSize[0], hintSize[1], hintSize[2]);
         }
       }
-      break;
+    } break;
     case AttrField::VecTypeHint:
-      if (getMetaBuf(value,&buf) == AMD_COMGR_STATUS_SUCCESS) {
+      if (getMetaBuf(value, &buf) == AMD_COMGR_STATUS_SUCCESS) {
         kernel->setVecTypeHint(buf);
       }
       break;
     case AttrField::RuntimeHandle:
-      if (getMetaBuf(value,&buf) == AMD_COMGR_STATUS_SUCCESS) {
+      if (getMetaBuf(value, &buf) == AMD_COMGR_STATUS_SUCCESS) {
         kernel->setRuntimeHandle(buf);
       }
       break;
@@ -274,8 +259,7 @@ static amd_comgr_status_t populateAttrs(const amd_comgr_metadata_node_t key,
 }
 
 static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
-                                            const amd_comgr_metadata_node_t value,
-                                            void *data) {
+                                            const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;
   amd_comgr_metadata_kind_t kind;
   std::string buf;
@@ -290,8 +274,8 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
     return AMD_COMGR_STATUS_ERROR;
   }
 
-  CodePropField itCodePropField = amd::Kernel::FindValue<CodePropField>
-                                  (amd::Kernel::kCodePropFieldMap, buf);
+  CodePropField itCodePropField =
+      amd::Kernel::FindValue<CodePropField>(amd::Kernel::kCodePropFieldMap, buf);
   if (itCodePropField == CodePropField::MaxSize) {
     return AMD_COMGR_STATUS_ERROR;
   }
@@ -301,7 +285,7 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
     status = getMetaBuf(value, &buf);
   }
 
-  device::Kernel*  kernel = static_cast<device::Kernel*>(data);
+  device::Kernel* kernel = static_cast<device::Kernel*>(data);
   switch (itCodePropField) {
     case CodePropField::KernargSegmentSize:
       kernel->SetKernargSegmentByteSize(atoi(buf.c_str()));
@@ -329,20 +313,16 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
       break;
     case CodePropField::IsDynamicCallStack: {
       size_t mIsDynamicCallStack = (buf.compare("true") == 0);
-      }
-      break;
+    } break;
     case CodePropField::IsXNACKEnabled: {
       size_t mIsXNACKEnabled = (buf.compare("true") == 0);
-      }
-      break;
+    } break;
     case CodePropField::NumSpilledSGPRs: {
       size_t mNumSpilledSGPRs = atoi(buf.c_str());
-      }
-      break;
+    } break;
     case CodePropField::NumSpilledVGPRs: {
       size_t mNumSpilledVGPRs = atoi(buf.c_str());
-      }
-      break;
+    } break;
     default:
       return AMD_COMGR_STATUS_ERROR;
   }
@@ -350,8 +330,7 @@ static amd_comgr_status_t populateCodeProps(const amd_comgr_metadata_node_t key,
 }
 
 static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
-                                         const amd_comgr_metadata_node_t value,
-                                         void *data) {
+                                         const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;
   amd_comgr_metadata_kind_t kind;
   std::string buf;
@@ -390,64 +369,55 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
     case ArgField::Offset:
       lcArg->offset_ = atoi(buf.c_str());
       break;
-    case ArgField::ValueKind:
-      {
-        amd::KernelParameterDescriptor::Desc itArgValue
-          = amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>
-                         (amd::Kernel::kArgValueKindV3, buf);
-        if (itArgValue == amd::KernelParameterDescriptor::MaxSize) {
-          LogPrintfError("Unknown Kernel arg metadata: %s", buf.c_str());
-          LogError("This may be due to running HIP app that requires a new HIP runtime version");
-          LogError("Please update the display driver");
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->info_.oclObject_ = itArgValue;
-        if (lcArg->info_.oclObject_ == amd::KernelParameterDescriptor::MemoryObject) {
-          if (buf.compare("dynamic_shared_pointer") == 0) {
-            lcArg->info_.shared_ = true;
-          }
-        } else if ((lcArg->info_.oclObject_ >= amd::KernelParameterDescriptor::HiddenNone) &&
-                   (lcArg->info_.oclObject_ < amd::KernelParameterDescriptor::HiddenLast)) {
-          lcArg->info_.hidden_ = true;
-        }
+    case ArgField::ValueKind: {
+      amd::KernelParameterDescriptor::Desc itArgValue =
+          amd::Kernel::FindValue<amd::KernelParameterDescriptor::Desc>(amd::Kernel::kArgValueKindV3,
+                                                                       buf);
+      if (itArgValue == amd::KernelParameterDescriptor::MaxSize) {
+        LogPrintfError("Unknown Kernel arg metadata: %s", buf.c_str());
+        LogError("This may be due to running HIP app that requires a new HIP runtime version");
+        LogError("Please update the display driver");
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
+      lcArg->info_.oclObject_ = itArgValue;
+      if (lcArg->info_.oclObject_ == amd::KernelParameterDescriptor::MemoryObject) {
+        if (buf.compare("dynamic_shared_pointer") == 0) {
+          lcArg->info_.shared_ = true;
+        }
+      } else if ((lcArg->info_.oclObject_ >= amd::KernelParameterDescriptor::HiddenNone) &&
+                 (lcArg->info_.oclObject_ < amd::KernelParameterDescriptor::HiddenLast)) {
+        lcArg->info_.hidden_ = true;
+      }
+    } break;
     case ArgField::PointeeAlign:
       lcArg->info_.arrayIndex_ = atoi(buf.c_str());
       break;
-    case ArgField::AddrSpaceQual:
-      {
-        cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, buf);
-        if (itAddrSpaceQual == static_cast<cl_int>(0)) {
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->addressQualifier_ = itAddrSpaceQual;
+    case ArgField::AddrSpaceQual: {
+      cl_int itAddrSpaceQual = amd::Kernel::FindValue(amd::Kernel::kArgAddrSpaceQualV3, buf);
+      if (itAddrSpaceQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
-    case ArgField::AccQual:
-      {
-        cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-        if (itAccQual == static_cast<cl_int>(0)) {
-          return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->accessQualifier_ = itAccQual;
-        if (!lcArg->info_.isReadOnlyByCompiler) {
-          lcArg->info_.readOnly_ =
-            (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
-        }
+      lcArg->addressQualifier_ = itAddrSpaceQual;
+    } break;
+    case ArgField::AccQual: {
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
       }
-      break;
-    case ArgField::ActualAccQual:
-      {
-        cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
-        if (itAccQual == static_cast<cl_int>(0)) {
-            return AMD_COMGR_STATUS_ERROR;
-        }
-        lcArg->info_.isReadOnlyByCompiler = true;
+      lcArg->accessQualifier_ = itAccQual;
+      if (!lcArg->info_.isReadOnlyByCompiler) {
         lcArg->info_.readOnly_ =
-          (itAccQual == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+            (lcArg->accessQualifier_ == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
       }
-      break;
+    } break;
+    case ArgField::ActualAccQual: {
+      cl_int itAccQual = amd::Kernel::FindValue(amd::Kernel::kArgAccQualV3, buf);
+      if (itAccQual == static_cast<cl_int>(0)) {
+        return AMD_COMGR_STATUS_ERROR;
+      }
+      lcArg->info_.isReadOnlyByCompiler = true;
+      lcArg->info_.readOnly_ = (itAccQual == CL_KERNEL_ARG_ACCESS_READ_ONLY) ? true : false;
+    } break;
     case ArgField::IsConst:
       lcArg->typeQualifier_ |= (buf.compare("1") == 0) ? CL_KERNEL_ARG_TYPE_CONST : 0;
       break;
@@ -467,8 +437,7 @@ static amd_comgr_status_t populateArgsV3(const amd_comgr_metadata_node_t key,
 }
 
 static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t key,
-                                               const amd_comgr_metadata_node_t value,
-                                               void *data) {
+                                               const amd_comgr_metadata_node_t value, void* data) {
   amd_comgr_status_t status;
   amd_comgr_metadata_kind_t kind;
   size_t size = 0;
@@ -483,15 +452,15 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
     return AMD_COMGR_STATUS_ERROR;
   }
 
-  KernelField itKernelField = amd::Kernel::FindValue<KernelField>
-                              (amd::Kernel::kKernelFieldMapV3, buf);
+  KernelField itKernelField =
+      amd::Kernel::FindValue<KernelField>(amd::Kernel::kKernelFieldMapV3, buf);
   if (itKernelField == KernelField::MaxSize) {
     return AMD_COMGR_STATUS_ERROR;
   }
 
   if (itKernelField != KernelField::ReqdWorkGroupSize &&
       itKernelField != KernelField::WorkGroupSizeHint) {
-      status = getMetaBuf(value,&buf);
+    status = getMetaBuf(value, &buf);
   }
   if (status != AMD_COMGR_STATUS_SUCCESS) {
     return AMD_COMGR_STATUS_ERROR;
@@ -569,12 +538,10 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
       break;
     case KernelField::NumSpilledSGPRs: {
       size_t mNumSpilledSGPRs = atoi(buf.c_str());
-      }
-      break;
+    } break;
     case KernelField::NumSpilledVGPRs: {
       size_t mNumSpilledVGPRs = atoi(buf.c_str());
-      }
-      break;
+    } break;
     case KernelField::SymbolName:
       kernel->SetSymbolName(buf);
       break;
@@ -599,10 +566,7 @@ static amd_comgr_status_t populateKernelMetaV3(const amd_comgr_metadata_node_t k
 
 // ================================================================================================
 Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& prog)
-  : dev_(dev)
-  , name_(name)
-  , prog_(prog)
-  , signature_(nullptr) {
+    : dev_(dev), name_(name), prog_(prog), signature_(nullptr) {
   // Instead of memset(&workGroupInfo_, '\0', sizeof(workGroupInfo_));
   // Due to std::string not being able to be memset to 0
   workGroupInfo_.size_ = 0;
@@ -637,9 +601,7 @@ Kernel::Kernel(const amd::Device& dev, const std::string& name, const Program& p
 }
 
 // ================================================================================================
-bool Kernel::createSignature(
-  const parameters_t& params, uint32_t numParameters,
-  uint32_t version) {
+bool Kernel::createSignature(const parameters_t& params, uint32_t numParameters, uint32_t version) {
   std::stringstream attribs;
   if (workGroupInfo_.compileSize_[0] != 0) {
     attribs << "reqd_work_group_size(";
@@ -692,7 +654,7 @@ std::string Kernel::openclMangledName(const std::string& name) {
 
 // ================================================================================================
 void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
-  amd::NDRange& lclWorkSize) const {
+                               amd::NDRange& lclWorkSize) const {
   // Initialize the default workgoup info
   // Check if the kernel has the compiled sizes
   if (workGroupInfo()->compileSize_[0] == 0) {
@@ -703,30 +665,27 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
 
       // Check if kernel uses images
       if (flags_.imageEna_ &&
-        // and thread group is a multiple value of wavefronts
-        ((thrPerGrp % workGroupInfo()->wavefrontSize_) == 0) &&
-        // and it's 2 or 3-dimensional workload
-        (workDim > 1) && (((gblWorkSize[0] % 16) == 0) && ((gblWorkSize[1] % 16) == 0))) {
+          // and thread group is a multiple value of wavefronts
+          ((thrPerGrp % workGroupInfo()->wavefrontSize_) == 0) &&
+          // and it's 2 or 3-dimensional workload
+          (workDim > 1) && (((gblWorkSize[0] % 16) == 0) && ((gblWorkSize[1] % 16) == 0))) {
         // Use 8x8 workgroup size if kernel has image writes
         if (flags_.imageWriteEna_ || (thrPerGrp != device().info().preferredWorkGroupSize_)) {
           lclWorkSize[0] = 8;
           lclWorkSize[1] = 8;
-        }
-        else {
+        } else {
           lclWorkSize[0] = 16;
           lclWorkSize[1] = 16;
         }
         if (workDim == 3) {
           lclWorkSize[2] = 1;
         }
-      }
-      else {
+      } else {
         size_t tmp = thrPerGrp;
         // Split the local workgroup into the most efficient way
         for (uint d = 0; d < workDim; ++d) {
           size_t div = tmp;
-          for (; (gblWorkSize[d] % div) != 0; div--)
-            ;
+          for (; (gblWorkSize[d] % div) != 0; div--);
           lclWorkSize[d] = div;
           tmp /= div;
         }
@@ -738,7 +697,7 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
           // Check if we couldn't find optimal workload
           if (((lclWorkSize.product() % workGroupInfo()->wavefrontSize_) != 0) ||
               // or size is too small for the cache line
-            (lclWorkSize[0] < cacheLineMatch)) {
+              (lclWorkSize[0] < cacheLineMatch)) {
             size_t maxSize = 0;
             size_t maxDim = 0;
             for (uint d = 0; d < workDim; ++d) {
@@ -758,8 +717,7 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
                   lclWorkSize[d] = 1;
                 }
               }
-            }
-            else {
+            } else {
               // Check if a local workgroup has the most optimal size
               if (thrPerGrp > maxSize) {
                 thrPerGrp = maxSize;
@@ -775,8 +733,7 @@ void Kernel::FindLocalWorkSize(size_t workDim, const amd::NDRange& gblWorkSize,
         }
       }
     }
-  }
-  else {
+  } else {
     for (uint d = 0; d < workDim; ++d) {
       lclWorkSize[d] = workGroupInfo()->compileSize_[d];
     }
@@ -790,44 +747,38 @@ static inline uint32_t GetOclArgumentTypeOCL(const aclArgData* argInfo, bool* is
     *isHidden = true;
     if (strcmp(&argInfo->argStr[2], "global_offset_0") == 0) {
       return amd::KernelParameterDescriptor::HiddenGlobalOffsetX;
-    }
-    else if (strcmp(&argInfo->argStr[2], "global_offset_1") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "global_offset_1") == 0) {
       return amd::KernelParameterDescriptor::HiddenGlobalOffsetY;
-    }
-    else if (strcmp(&argInfo->argStr[2], "global_offset_2") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "global_offset_2") == 0) {
       return amd::KernelParameterDescriptor::HiddenGlobalOffsetZ;
-    }
-    else if (strcmp(&argInfo->argStr[2], "printf_buffer") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "printf_buffer") == 0) {
       return amd::KernelParameterDescriptor::HiddenPrintfBuffer;
-    }
-    else if (strcmp(&argInfo->argStr[2], "hostcall_buffer") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "hostcall_buffer") == 0) {
       return amd::KernelParameterDescriptor::HiddenHostcallBuffer;
-    }
-    else if (strcmp(&argInfo->argStr[2], "vqueue_pointer") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "vqueue_pointer") == 0) {
       return amd::KernelParameterDescriptor::HiddenDefaultQueue;
-    }
-    else if (strcmp(&argInfo->argStr[2], "aqlwrap_pointer") == 0) {
+    } else if (strcmp(&argInfo->argStr[2], "aqlwrap_pointer") == 0) {
       return amd::KernelParameterDescriptor::HiddenCompletionAction;
     }
     return amd::KernelParameterDescriptor::HiddenNone;
   }
   switch (argInfo->type) {
-  case ARG_TYPE_POINTER:
-    return amd::KernelParameterDescriptor::MemoryObject;
-  case ARG_TYPE_QUEUE:
-    return amd::KernelParameterDescriptor::QueueObject;
-  case ARG_TYPE_VALUE:
-    return (argInfo->arg.value.data == DATATYPE_struct) ?
-      amd::KernelParameterDescriptor::ReferenceObject :
-      amd::KernelParameterDescriptor::ValueObject;
-  case ARG_TYPE_IMAGE:
-    return amd::KernelParameterDescriptor::ImageObject;
-  case ARG_TYPE_SAMPLER:
-    return amd::KernelParameterDescriptor::SamplerObject;
-  case ARG_TYPE_ERROR:
-  default:
-    return amd::KernelParameterDescriptor::HiddenNone;
-}
+    case ARG_TYPE_POINTER:
+      return amd::KernelParameterDescriptor::MemoryObject;
+    case ARG_TYPE_QUEUE:
+      return amd::KernelParameterDescriptor::QueueObject;
+    case ARG_TYPE_VALUE:
+      return (argInfo->arg.value.data == DATATYPE_struct)
+          ? amd::KernelParameterDescriptor::ReferenceObject
+          : amd::KernelParameterDescriptor::ValueObject;
+    case ARG_TYPE_IMAGE:
+      return amd::KernelParameterDescriptor::ImageObject;
+    case ARG_TYPE_SAMPLER:
+      return amd::KernelParameterDescriptor::SamplerObject;
+    case ARG_TYPE_ERROR:
+    default:
+      return amd::KernelParameterDescriptor::HiddenNone;
+  }
 }
 #endif
 
@@ -838,72 +789,68 @@ static inline clk_value_type_t GetOclTypeOCL(const aclArgData* argInfo, size_t s
   uint numElements;
   if (argInfo->type == ARG_TYPE_QUEUE) {
     return T_QUEUE;
-  }
-  else if (argInfo->type == ARG_TYPE_POINTER || argInfo->type == ARG_TYPE_IMAGE) {
+  } else if (argInfo->type == ARG_TYPE_POINTER || argInfo->type == ARG_TYPE_IMAGE) {
     return T_POINTER;
-  }
-  else if (argInfo->type == ARG_TYPE_VALUE) {
+  } else if (argInfo->type == ARG_TYPE_VALUE) {
     switch (argInfo->arg.value.data) {
-    case DATATYPE_i8:
-    case DATATYPE_u8:
-      sizeType = 0;
-      numElements = size;
-      break;
-    case DATATYPE_i16:
-    case DATATYPE_u16:
-      sizeType = 1;
-      numElements = size / 2;
-      break;
-    case DATATYPE_i32:
-    case DATATYPE_u32:
-      sizeType = 2;
-      numElements = size / 4;
-      break;
-    case DATATYPE_i64:
-    case DATATYPE_u64:
-      sizeType = 3;
-      numElements = size / 8;
-      break;
-    case DATATYPE_f16:
-      sizeType = 4;
-      numElements = size / 2;
-      break;
-    case DATATYPE_f32:
-      sizeType = 4;
-      numElements = size / 4;
-      break;
-    case DATATYPE_f64:
-      sizeType = 5;
-      numElements = size / 8;
-      break;
-    case DATATYPE_struct:
-    case DATATYPE_opaque:
-    case DATATYPE_ERROR:
-    default:
-      return T_VOID;
+      case DATATYPE_i8:
+      case DATATYPE_u8:
+        sizeType = 0;
+        numElements = size;
+        break;
+      case DATATYPE_i16:
+      case DATATYPE_u16:
+        sizeType = 1;
+        numElements = size / 2;
+        break;
+      case DATATYPE_i32:
+      case DATATYPE_u32:
+        sizeType = 2;
+        numElements = size / 4;
+        break;
+      case DATATYPE_i64:
+      case DATATYPE_u64:
+        sizeType = 3;
+        numElements = size / 8;
+        break;
+      case DATATYPE_f16:
+        sizeType = 4;
+        numElements = size / 2;
+        break;
+      case DATATYPE_f32:
+        sizeType = 4;
+        numElements = size / 4;
+        break;
+      case DATATYPE_f64:
+        sizeType = 5;
+        numElements = size / 8;
+        break;
+      case DATATYPE_struct:
+      case DATATYPE_opaque:
+      case DATATYPE_ERROR:
+      default:
+        return T_VOID;
     }
 
     switch (numElements) {
-    case 1:
-      return ClkValueMapType[sizeType][0];
-    case 2:
-      return ClkValueMapType[sizeType][1];
-    case 3:
-      return ClkValueMapType[sizeType][2];
-    case 4:
-      return ClkValueMapType[sizeType][3];
-    case 8:
-      return ClkValueMapType[sizeType][4];
-    case 16:
-      return ClkValueMapType[sizeType][5];
-    default:
-      return T_VOID;
+      case 1:
+        return ClkValueMapType[sizeType][0];
+      case 2:
+        return ClkValueMapType[sizeType][1];
+      case 3:
+        return ClkValueMapType[sizeType][2];
+      case 4:
+        return ClkValueMapType[sizeType][3];
+      case 8:
+        return ClkValueMapType[sizeType][4];
+      case 16:
+        return ClkValueMapType[sizeType][5];
+      default:
+        return T_VOID;
     }
-  }
-  else if (argInfo->type == ARG_TYPE_SAMPLER) {
+  } else if (argInfo->type == ARG_TYPE_SAMPLER) {
     return T_SAMPLER;
-  }
-  else {
+  } else {
     return T_VOID;
   }
 }
@@ -913,37 +860,37 @@ static inline clk_value_type_t GetOclTypeOCL(const aclArgData* argInfo, size_t s
 #if defined(WITH_COMPILER_LIB)
 static inline size_t GetArgAlignmentOCL(const aclArgData* argInfo) {
   switch (argInfo->type) {
-  case ARG_TYPE_POINTER:
-    return sizeof(void*);
-  case ARG_TYPE_VALUE:
-    switch (argInfo->arg.value.data) {
-    case DATATYPE_i8:
-    case DATATYPE_u8:
-      return 1;
-    case DATATYPE_u16:
-    case DATATYPE_i16:
-    case DATATYPE_f16:
-      return 2;
-    case DATATYPE_u32:
-    case DATATYPE_i32:
-    case DATATYPE_f32:
-      return 4;
-    case DATATYPE_i64:
-    case DATATYPE_u64:
-    case DATATYPE_f64:
-      return 8;
-    case DATATYPE_struct:
-      return 128;
-    case DATATYPE_ERROR:
+    case ARG_TYPE_POINTER:
+      return sizeof(void*);
+    case ARG_TYPE_VALUE:
+      switch (argInfo->arg.value.data) {
+        case DATATYPE_i8:
+        case DATATYPE_u8:
+          return 1;
+        case DATATYPE_u16:
+        case DATATYPE_i16:
+        case DATATYPE_f16:
+          return 2;
+        case DATATYPE_u32:
+        case DATATYPE_i32:
+        case DATATYPE_f32:
+          return 4;
+        case DATATYPE_i64:
+        case DATATYPE_u64:
+        case DATATYPE_f64:
+          return 8;
+        case DATATYPE_struct:
+          return 128;
+        case DATATYPE_ERROR:
+        default:
+          return -1;
+      }
+    case ARG_TYPE_IMAGE:
+      return sizeof(cl_mem);
+    case ARG_TYPE_SAMPLER:
+      return sizeof(cl_sampler);
     default:
       return -1;
-    }
-  case ARG_TYPE_IMAGE:
-    return sizeof(cl_mem);
-  case ARG_TYPE_SAMPLER:
-    return sizeof(cl_sampler);
-  default:
-    return -1;
   }
 }
 #endif
@@ -963,8 +910,7 @@ static inline size_t GetArgPointeeAlignmentOCL(const aclArgData* argInfo) {
 static inline bool GetReadOnlyOCL(const aclArgData* argInfo) {
   if (argInfo->type == ARG_TYPE_POINTER) {
     return (argInfo->arg.pointer.type == ACCESS_TYPE_RO) ? true : false;
-  }
-  else if (argInfo->type == ARG_TYPE_IMAGE) {
+  } else if (argInfo->type == ARG_TYPE_IMAGE) {
     return (argInfo->arg.image.type == ACCESS_TYPE_RO) ? true : false;
   }
   return false;
@@ -975,36 +921,36 @@ static inline bool GetReadOnlyOCL(const aclArgData* argInfo) {
 #if defined(WITH_COMPILER_LIB)
 inline static int GetArgSizeOCL(const aclArgData* argInfo) {
   switch (argInfo->type) {
-  case ARG_TYPE_POINTER:
-    return sizeof(void*);
-  case ARG_TYPE_VALUE:
-    switch (argInfo->arg.value.data) {
-    case DATATYPE_i8:
-    case DATATYPE_u8:
-    case DATATYPE_struct:
-      return 1 * argInfo->arg.value.numElements;
-    case DATATYPE_u16:
-    case DATATYPE_i16:
-    case DATATYPE_f16:
-      return 2 * argInfo->arg.value.numElements;
-    case DATATYPE_u32:
-    case DATATYPE_i32:
-    case DATATYPE_f32:
-      return 4 * argInfo->arg.value.numElements;
-    case DATATYPE_i64:
-    case DATATYPE_u64:
-    case DATATYPE_f64:
-      return 8 * argInfo->arg.value.numElements;
-    case DATATYPE_ERROR:
+    case ARG_TYPE_POINTER:
+      return sizeof(void*);
+    case ARG_TYPE_VALUE:
+      switch (argInfo->arg.value.data) {
+        case DATATYPE_i8:
+        case DATATYPE_u8:
+        case DATATYPE_struct:
+          return 1 * argInfo->arg.value.numElements;
+        case DATATYPE_u16:
+        case DATATYPE_i16:
+        case DATATYPE_f16:
+          return 2 * argInfo->arg.value.numElements;
+        case DATATYPE_u32:
+        case DATATYPE_i32:
+        case DATATYPE_f32:
+          return 4 * argInfo->arg.value.numElements;
+        case DATATYPE_i64:
+        case DATATYPE_u64:
+        case DATATYPE_f64:
+          return 8 * argInfo->arg.value.numElements;
+        case DATATYPE_ERROR:
+        default:
+          return -1;
+      }
+    case ARG_TYPE_IMAGE:
+    case ARG_TYPE_SAMPLER:
+    case ARG_TYPE_QUEUE:
+      return sizeof(void*);
     default:
       return -1;
-    }
-  case ARG_TYPE_IMAGE:
-  case ARG_TYPE_SAMPLER:
-  case ARG_TYPE_QUEUE:
-    return sizeof(void*);
-  default:
-    return -1;
   }
 }
 #endif
@@ -1014,24 +960,23 @@ inline static int GetArgSizeOCL(const aclArgData* argInfo) {
 static inline cl_kernel_arg_address_qualifier GetOclAddrQualOCL(const aclArgData* argInfo) {
   if (argInfo->type == ARG_TYPE_POINTER) {
     switch (argInfo->arg.pointer.memory) {
-    case PTR_MT_UAV_CONSTANT:
-    case PTR_MT_CONSTANT_EMU:
-    case PTR_MT_CONSTANT:
-      return CL_KERNEL_ARG_ADDRESS_CONSTANT;
-    case PTR_MT_UAV:
-    case PTR_MT_GLOBAL:
-    case PTR_MT_SCRATCH_EMU:
-      return CL_KERNEL_ARG_ADDRESS_GLOBAL;
-    case PTR_MT_LDS_EMU:
-    case PTR_MT_LDS:
-      return CL_KERNEL_ARG_ADDRESS_LOCAL;
-    case PTR_MT_ERROR:
-    default:
-      LogError("Unsupported address type");
-      return CL_KERNEL_ARG_ADDRESS_PRIVATE;
+      case PTR_MT_UAV_CONSTANT:
+      case PTR_MT_CONSTANT_EMU:
+      case PTR_MT_CONSTANT:
+        return CL_KERNEL_ARG_ADDRESS_CONSTANT;
+      case PTR_MT_UAV:
+      case PTR_MT_GLOBAL:
+      case PTR_MT_SCRATCH_EMU:
+        return CL_KERNEL_ARG_ADDRESS_GLOBAL;
+      case PTR_MT_LDS_EMU:
+      case PTR_MT_LDS:
+        return CL_KERNEL_ARG_ADDRESS_LOCAL;
+      case PTR_MT_ERROR:
+      default:
+        LogError("Unsupported address type");
+        return CL_KERNEL_ARG_ADDRESS_PRIVATE;
     }
-  }
-  else if ((argInfo->type == ARG_TYPE_IMAGE) || (argInfo->type == ARG_TYPE_QUEUE)) {
+  } else if ((argInfo->type == ARG_TYPE_IMAGE) || (argInfo->type == ARG_TYPE_QUEUE)) {
     return CL_KERNEL_ARG_ADDRESS_GLOBAL;
   }
 
@@ -1045,12 +990,12 @@ static inline cl_kernel_arg_address_qualifier GetOclAddrQualOCL(const aclArgData
 static inline cl_kernel_arg_access_qualifier GetOclAccessQualOCL(const aclArgData* argInfo) {
   if (argInfo->type == ARG_TYPE_IMAGE) {
     switch (argInfo->arg.image.type) {
-    case ACCESS_TYPE_RO:
-      return CL_KERNEL_ARG_ACCESS_READ_ONLY;
-    case ACCESS_TYPE_WO:
-      return CL_KERNEL_ARG_ACCESS_WRITE_ONLY;
-    default:
-      return CL_KERNEL_ARG_ACCESS_READ_WRITE;
+      case ACCESS_TYPE_RO:
+        return CL_KERNEL_ARG_ACCESS_READ_ONLY;
+      case ACCESS_TYPE_WO:
+        return CL_KERNEL_ARG_ACCESS_WRITE_ONLY;
+      default:
+        return CL_KERNEL_ARG_ACCESS_READ_WRITE;
     }
   }
   return CL_KERNEL_ARG_ACCESS_NONE;
@@ -1075,13 +1020,13 @@ static inline cl_kernel_arg_type_qualifier GetOclTypeQualOCL(const aclArgData* a
       rv |= CL_KERNEL_ARG_TYPE_CONST;
     }
     switch (argInfo->arg.pointer.memory) {
-    case PTR_MT_CONSTANT:
-    case PTR_MT_UAV_CONSTANT:
-    case PTR_MT_CONSTANT_EMU:
-      rv |= CL_KERNEL_ARG_TYPE_CONST;
-      break;
-    default:
-      break;
+      case PTR_MT_CONSTANT:
+      case PTR_MT_UAV_CONSTANT:
+      case PTR_MT_CONSTANT_EMU:
+        rv |= CL_KERNEL_ARG_TYPE_CONST;
+        break;
+      default:
+        break;
     }
   }
   return rv;
@@ -1093,8 +1038,7 @@ static inline cl_kernel_arg_type_qualifier GetOclTypeQualOCL(const aclArgData* a
 bool Kernel::GetAttrCodePropMetadata() {
   amd_comgr_metadata_node_t kernelMetaNode;
   if (!prog().getKernelMetadata(name(), &kernelMetaNode)) {
-    DevLogPrintfError("Cannot get program kernel metadata for %s \n",
-                      name().c_str());
+    DevLogPrintfError("Cannot get program kernel metadata for %s \n", name().c_str());
     return false;
   }
 
@@ -1108,38 +1052,37 @@ bool Kernel::GetAttrCodePropMetadata() {
 
   switch (codeObjectVer()) {
     case 2: {
-        amd_comgr_metadata_node_t symbolName;
-        status = amd::Comgr::metadata_lookup(kernelMetaNode, "SymbolName", &symbolName);
-        if (status == AMD_COMGR_STATUS_SUCCESS) {
-          std::string name;
-          status = getMetaBuf(symbolName, &name);
-          amd::Comgr::destroy_metadata(symbolName);
-          SetSymbolName(name);
-        }
+      amd_comgr_metadata_node_t symbolName;
+      status = amd::Comgr::metadata_lookup(kernelMetaNode, "SymbolName", &symbolName);
+      if (status == AMD_COMGR_STATUS_SUCCESS) {
+        std::string name;
+        status = getMetaBuf(symbolName, &name);
+        amd::Comgr::destroy_metadata(symbolName);
+        SetSymbolName(name);
+      }
 
-        amd_comgr_metadata_node_t attrMeta;
-        if (status == AMD_COMGR_STATUS_SUCCESS) {
-          if (amd::Comgr::metadata_lookup(kernelMetaNode, "Attrs", &attrMeta) ==
-              AMD_COMGR_STATUS_SUCCESS) {
-            status = amd::Comgr::iterate_map_metadata(attrMeta, populateAttrs,
-                                                      static_cast<void*>(this));
-            amd::Comgr::destroy_metadata(attrMeta);
-          }
-        }
-
-        // extract the code properties metadata
-        amd_comgr_metadata_node_t codePropsMeta;
-        if (status == AMD_COMGR_STATUS_SUCCESS) {
-          status = amd::Comgr::metadata_lookup(kernelMetaNode, "CodeProps", &codePropsMeta);
-        }
-
-        if (status == AMD_COMGR_STATUS_SUCCESS) {
-          status = amd::Comgr::iterate_map_metadata(codePropsMeta, populateCodeProps,
-                                                    static_cast<void*>(this));
-          amd::Comgr::destroy_metadata(codePropsMeta);
+      amd_comgr_metadata_node_t attrMeta;
+      if (status == AMD_COMGR_STATUS_SUCCESS) {
+        if (amd::Comgr::metadata_lookup(kernelMetaNode, "Attrs", &attrMeta) ==
+            AMD_COMGR_STATUS_SUCCESS) {
+          status =
+              amd::Comgr::iterate_map_metadata(attrMeta, populateAttrs, static_cast<void*>(this));
+          amd::Comgr::destroy_metadata(attrMeta);
         }
       }
-      break;
+
+      // extract the code properties metadata
+      amd_comgr_metadata_node_t codePropsMeta;
+      if (status == AMD_COMGR_STATUS_SUCCESS) {
+        status = amd::Comgr::metadata_lookup(kernelMetaNode, "CodeProps", &codePropsMeta);
+      }
+
+      if (status == AMD_COMGR_STATUS_SUCCESS) {
+        status = amd::Comgr::iterate_map_metadata(codePropsMeta, populateCodeProps,
+                                                  static_cast<void*>(this));
+        amd::Comgr::destroy_metadata(codePropsMeta);
+      }
+    } break;
     default:
       status = amd::Comgr::iterate_map_metadata(kernelMetaNode, populateKernelMetaV3,
                                                 static_cast<void*>(this));
@@ -1159,10 +1102,10 @@ bool Kernel::GetPrintfStr(std::vector<std::string>* printfStr) {
   const amd_comgr_metadata_node_t programMD = prog().metadata();
   amd_comgr_metadata_node_t printfMeta;
 
-  amd_comgr_status_t status = amd::Comgr::metadata_lookup(programMD,
-                                codeObjectVer() == 2 ? "Printf" : "amdhsa.printf", &printfMeta);
+  amd_comgr_status_t status = amd::Comgr::metadata_lookup(
+      programMD, codeObjectVer() == 2 ? "Printf" : "amdhsa.printf", &printfMeta);
   if (status != AMD_COMGR_STATUS_SUCCESS) {
-    return true;   // printf string metadata is not provided so just exit
+    return true;  // printf string metadata is not provided so just exit
   }
 
   // handle the printf string
@@ -1204,10 +1147,8 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
   bool hsaArgsMeta = false;
   size_t argsSize = 0;
 
-  amd_comgr_status_t status =  amd::Comgr::metadata_lookup(
-                                          kernelMD,
-                                          (codeObjectVer() == 2) ? "Args" : ".args",
-                                          &argsMeta);
+  amd_comgr_status_t status =
+      amd::Comgr::metadata_lookup(kernelMD, (codeObjectVer() == 2) ? "Args" : ".args", &argsMeta);
   // Assume no arguments if lookup fails.
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hsaArgsMeta = true;
@@ -1231,11 +1172,10 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
       status = AMD_COMGR_STATUS_ERROR;
     }
     if (status == AMD_COMGR_STATUS_SUCCESS) {
-      void *data = static_cast<void*>(&desc);
+      void* data = static_cast<void*>(&desc);
       if (codeObjectVer() == 2) {
         status = amd::Comgr::iterate_map_metadata(argsNode, populateArgs, data);
-      }
-      else if (codeObjectVer() >= 3) {
+      } else if (codeObjectVer() >= 3) {
         status = amd::Comgr::iterate_map_metadata(argsNode, populateArgsV3, data);
       }
     }
@@ -1281,7 +1221,7 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
     }
 
     if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-        (desc.typeQualifier_  & CL_KERNEL_ARG_TYPE_PIPE)) {
+        (desc.typeQualifier_ & CL_KERNEL_ARG_TYPE_PIPE)) {
       // LC doesn't report correct address qualifier for images and pipes,
       // hence overwrite it
       // We will remove this when newer LC is ready
@@ -1310,13 +1250,12 @@ void Kernel::InitParameters(const amd_comgr_metadata_node_t kernelMD) {
     // These objects have forced data size to uint64_t
     if (codeObjectVer() == 2) {
       if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-        (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
-        (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
+          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
+          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
         offset = amd::alignUp(offset, sizeof(uint64_t));
         desc.offset_ = offset;
         offset += sizeof(uint64_t);
-      }
-      else {
+      } else {
         offset = amd::alignUp(offset, desc.alignment_);
         desc.offset_ = offset;
         offset += size;
@@ -1386,21 +1325,19 @@ void Kernel::InitParameters(const aclArgData* aclArg, uint32_t argBufferSize) {
       desc.offset_ = offsetStruct;
       // Align the offset reference
       offset = amd::alignUp(offset, sizeof(size_t));
-      patchReferences_.insert({ desc.offset_, offset });
+      patchReferences_.insert({desc.offset_, offset});
       offsetStruct += size;
       // Adjust the offset of arguments
       offset += sizeof(size_t);
-    }
-    else {
+    } else {
       // These objects have forced data size to uint64_t
       if ((desc.info_.oclObject_ == amd::KernelParameterDescriptor::ImageObject) ||
-        (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
-        (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
+          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::SamplerObject) ||
+          (desc.info_.oclObject_ == amd::KernelParameterDescriptor::QueueObject)) {
         offset = amd::alignUp(offset, sizeof(uint64_t));
         desc.offset_ = offset;
         offset += sizeof(uint64_t);
-      }
-      else {
+      } else {
         offset = amd::alignUp(offset, alignment);
         desc.offset_ = offset;
         offset += size;
@@ -1448,12 +1385,11 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
     pos = 0;
     size_t printfInfoID;
 
-    if(amd::IS_HIP) {
+    if (amd::IS_HIP) {
       printfInfoID = HIPPrintfInfoID++;
       printf_.resize(HIPPrintfInfoID);
       pos++;
-    }
-    else {
+    } else {
       printfInfoID = std::stoi(tokens[pos++]);
       if (printf_.size() <= printfInfoID) {
         printf_.resize(printfInfoID + 1);
@@ -1479,8 +1415,8 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
     // FIXME: We should not need this! [
     std::string fmt;
     // Format string itself might contain ':' characters
-    for(int i = 0; pos < tokens.size(); i++) {
-      if(i) fmt += ':';
+    for (int i = 0; pos < tokens.size(); i++) {
+      if (i) fmt += ':';
       fmt += tokens[pos++];
     }
 
@@ -1491,39 +1427,39 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
       need_nl = true;
       if (symbol == '\\') {
         switch (fmt[pos + 1]) {
-        case 'a':
-          pos++;
-          symbol = '\a';
-          break;
-        case 'b':
-          pos++;
-          symbol = '\b';
-          break;
-        case 'f':
-          pos++;
-          symbol = '\f';
-          break;
-        case 'n':
-          pos++;
-          symbol = '\n';
-          need_nl = false;
-          break;
-        case 'r':
-          pos++;
-          symbol = '\r';
-          break;
-        case 'v':
-          pos++;
-          symbol = '\v';
-          break;
-        case '7':
-          if (fmt[pos + 2] == '2') {
-            pos += 2;
-            symbol = '\72';
-          }
-          break;
-        default:
-          break;
+          case 'a':
+            pos++;
+            symbol = '\a';
+            break;
+          case 'b':
+            pos++;
+            symbol = '\b';
+            break;
+          case 'f':
+            pos++;
+            symbol = '\f';
+            break;
+          case 'n':
+            pos++;
+            symbol = '\n';
+            need_nl = false;
+            break;
+          case 'r':
+            pos++;
+            symbol = '\r';
+            break;
+          case 'v':
+            pos++;
+            symbol = '\v';
+            break;
+          case '7':
+            if (fmt[pos + 2] == '2') {
+              pos += 2;
+              symbol = '\72';
+            }
+            break;
+          default:
+            break;
         }
       }
       info.fmtString_.push_back(symbol);
@@ -1541,11 +1477,10 @@ void Kernel::InitPrintf(const std::vector<std::string>& printfInfoStrings) {
 void Kernel::InitPrintf(const aclPrintfFmt* aclPrintf) {
   uint index = 0, HIPIndex = 0;
   for (; aclPrintf->struct_size != 0; aclPrintf++) {
-    if(amd::IS_HIP) {
+    if (amd::IS_HIP) {
       index = HIPIndex++;
       printf_.resize(HIPIndex);
-    }
-    else {
+    } else {
       index = aclPrintf->ID;
       if (printf_.size() <= index) {
         printf_.resize(index + 1);
@@ -1560,39 +1495,39 @@ void Kernel::InitPrintf(const aclPrintfFmt* aclPrintf) {
       need_nl = true;
       if (symbol == '\\') {
         switch (pfmt[pos + 1]) {
-        case 'a':
-          pos++;
-          symbol = '\a';
-          break;
-        case 'b':
-          pos++;
-          symbol = '\b';
-          break;
-        case 'f':
-          pos++;
-          symbol = '\f';
-          break;
-        case 'n':
-          pos++;
-          symbol = '\n';
-          need_nl = false;
-          break;
-        case 'r':
-          pos++;
-          symbol = '\r';
-          break;
-        case 'v':
-          pos++;
-          symbol = '\v';
-          break;
-        case '7':
-          if (pfmt[pos + 2] == '2') {
-            pos += 2;
-            symbol = '\72';
-          }
-          break;
-        default:
-          break;
+          case 'a':
+            pos++;
+            symbol = '\a';
+            break;
+          case 'b':
+            pos++;
+            symbol = '\b';
+            break;
+          case 'f':
+            pos++;
+            symbol = '\f';
+            break;
+          case 'n':
+            pos++;
+            symbol = '\n';
+            need_nl = false;
+            break;
+          case 'r':
+            pos++;
+            symbol = '\r';
+            break;
+          case 'v':
+            pos++;
+            symbol = '\v';
+            break;
+          case '7':
+            if (pfmt[pos + 2] == '2') {
+              pos += 2;
+              symbol = '\72';
+            }
+            break;
+          default:
+            break;
         }
       }
       info.fmtString_.push_back(symbol);
@@ -1606,5 +1541,5 @@ void Kernel::InitPrintf(const aclPrintfFmt* aclPrintf) {
     }
   }
 }
-#endif // defined(WITH_COMPILER_LIB)
-} // namespace amd::device
+#endif  // defined(WITH_COMPILER_LIB)
+}  // namespace amd::device

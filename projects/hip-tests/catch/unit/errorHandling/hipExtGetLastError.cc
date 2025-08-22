@@ -31,24 +31,24 @@ static constexpr size_t N = 1024 * 1024;
 static constexpr size_t Nbytes = N * sizeof(int);
 
 /**
-* @addtogroup hipExtGetLastError hipExtGetLastError
-* @{
-* @ingroup ErrorHandlingTest
-* `hipError_t hipExtGetLastError ( void )` -
-* Returns the last error from a runtime call.
-*/
+ * @addtogroup hipExtGetLastError hipExtGetLastError
+ * @{
+ * @ingroup ErrorHandlingTest
+ * `hipError_t hipExtGetLastError ( void )` -
+ * Returns the last error from a runtime call.
+ */
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMalloc api invalid arg call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMalloc api invalid arg call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_Positive_Basic") {
   HIP_CHECK(hipExtGetLastError());
@@ -58,30 +58,23 @@ TEST_CASE("Unit_hipExtGetLastError_Positive_Basic") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with ThreadedZigZagTest api call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with ThreadedZigZagTest api call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_Positive_Threaded") {
-  class HipGetLastErrorThreadedTest : public
-                       ThreadedZigZagTest<HipGetLastErrorThreadedTest> {
+  class HipGetLastErrorThreadedTest : public ThreadedZigZagTest<HipGetLastErrorThreadedTest> {
    public:
-    void TestPart2() {
-      REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue);
-    }
-    void TestPart3() {
-      HIP_CHECK(hipExtGetLastError());
-    }
-    void TestPart4() {
-      REQUIRE_THREAD(hipExtGetLastError() == hipErrorInvalidValue);
-    }
+    void TestPart2() { REQUIRE_THREAD(hipMalloc(nullptr, 1) == hipErrorInvalidValue); }
+    void TestPart3() { HIP_CHECK(hipExtGetLastError()); }
+    void TestPart4() { REQUIRE_THREAD(hipExtGetLastError() == hipErrorInvalidValue); }
   };
 
   HipGetLastErrorThreadedTest test;
@@ -89,16 +82,16 @@ TEST_CASE("Unit_hipExtGetLastError_Positive_Threaded") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpyPeerAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpyPeerAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyPeerAsync") {
   const auto device_count = HipTest::getDeviceCount();
@@ -130,8 +123,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyPeerAsync") {
     HIP_CHECK(hipStreamCreate(&stream));
 
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpyPeerAsync(B_d, dst_device, A_d, src_device,
-                                       Nbytes * 2, stream),
+    HIP_CHECK_ERROR(hipMemcpyPeerAsync(B_d, dst_device, A_d, src_device, Nbytes * 2, stream),
                     hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
     HIP_CHECK(hipExtGetLastError());
@@ -142,69 +134,66 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyPeerAsync") {
     HIP_CHECK(hipSetDevice(dst_device));
     HIP_CHECK(hipFree(B_d));
   } else {
-    INFO("Peer access cannot be enabled between devices " << src_device <<
-         " and devices " << dst_device);
+    INFO("Peer access cannot be enabled between devices " << src_device << " and devices "
+                                                          << dst_device);
   }
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpyDtoHAsync api invalid arg call
-*    Verify hipExtGetLastError status with hipMemcpyDtoDAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpyDtoHAsync api invalid arg call
+ *    Verify hipExtGetLastError status with hipMemcpyDtoDAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyDtoHAsync") {
   int *A_d, *B_d, *A_h;
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  HipTest::initArrays<int>(&A_d, &B_d, nullptr,
-                           &A_h, nullptr, nullptr, N, false);
+  HipTest::initArrays<int>(&A_d, &B_d, nullptr, &A_h, nullptr, nullptr, N, false);
 
   SECTION("Verify with hipMemcpyDtoHAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpyDtoHAsync(A_h, (hipDeviceptr_t)A_d,
-                                       Nbytes * 2, stream),
-                                       hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMemcpyDtoHAsync(A_h, (hipDeviceptr_t)A_d, Nbytes * 2, stream),
+                    hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
     HIP_CHECK(hipExtGetLastError());
   }
   SECTION("Verify with hipMemcpyDtoDAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpyDtoDAsync((hipDeviceptr_t)A_d,
-                       (hipDeviceptr_t)B_d, Nbytes * 2, stream),
-                                       hipErrorInvalidValue);
+    HIP_CHECK_ERROR(
+        hipMemcpyDtoDAsync((hipDeviceptr_t)A_d, (hipDeviceptr_t)B_d, Nbytes * 2, stream),
+        hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
     HIP_CHECK(hipExtGetLastError());
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<int>(A_d, B_d, nullptr,
-                           A_h, nullptr, nullptr, false);
+  HipTest::freeArrays<int>(A_d, B_d, nullptr, A_h, nullptr, nullptr, false);
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpyParam2DAsync api invalid arg
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpyParam2DAsync api invalid arg
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync") {
   CHECK_IMAGE_SUPPORT
 
-  float* A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, * A_d{nullptr};
+  float *A_h{nullptr}, *B_h{nullptr}, *C_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(float)};
   constexpr auto memsetval{100};
@@ -212,11 +201,9 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   // Allocating and Initializing the data
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d),
-                           &pitch_A, width, HEIGHT));
-  HipTest::initArrays<float>(nullptr, nullptr, nullptr,
-                             &A_h, &B_h, &C_h, width*HEIGHT, false);
-  HipTest::setDefaultData<float>(WIDTH*HEIGHT, A_h, B_h, C_h);
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, HEIGHT));
+  HipTest::initArrays<float>(nullptr, nullptr, nullptr, &A_h, &B_h, &C_h, width * HEIGHT, false);
+  HipTest::setDefaultData<float>(WIDTH * HEIGHT, A_h, B_h, C_h);
   HIP_CHECK(hipMemset2D(A_d, pitch_A, memsetval, WIDTH, HEIGHT));
 
   // Device to Host
@@ -233,54 +220,51 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpyParam2DAsync") {
   desc.Height = HEIGHT;
 
   HIP_CHECK(hipExtGetLastError());
-  desc.WidthInBytes = pitch_A+1;
-  HIP_CHECK_ERROR(hipMemcpyParam2DAsync(&desc, stream),
-                  hipErrorInvalidValue);
+  desc.WidthInBytes = pitch_A + 1;
+  HIP_CHECK_ERROR(hipMemcpyParam2DAsync(&desc, stream), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 
   // DeAllocating the memory
   HIP_CHECK(hipFree(A_d));
   HIP_CHECK(hipStreamDestroy(stream));
-  HipTest::freeArrays<float>(nullptr, nullptr, nullptr,
-                             A_h, B_h, C_h, false);
+  HipTest::freeArrays<float>(nullptr, nullptr, nullptr, A_h, B_h, C_h, false);
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipDrvMemcpy3DAsync api invalid arg
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipDrvMemcpy3DAsync api invalid arg
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipDrvMemcpy3DAsync") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipDrvMemcpy3DAsync(nullptr, hipStreamPerThread),
-                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipDrvMemcpy3DAsync(nullptr, hipStreamPerThread), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
   HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpy3DAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpy3DAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy3DAsync") {
   CHECK_IMAGE_SUPPORT
@@ -292,31 +276,29 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy3DAsync") {
   hipStream_t stream;
   HIP_CHECK(hipStreamCreate(&stream));
 
-  int *hData = reinterpret_cast<int*>(malloc(size));
+  int* hData = reinterpret_cast<int*>(malloc(size));
   REQUIRE(hData != nullptr);
   memset(hData, 0, size);
 
   // Initialize host buffer
-  HipTest::setDefaultData<int>(width*height*depth, hData, nullptr, nullptr);
+  HipTest::setDefaultData<int>(width * height * depth, hData, nullptr, nullptr);
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                        0, 0, 0, hipChannelFormatKindSigned);
-  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc,
-                       make_hipExtent(width, height, 2), hipArrayDefault));
+  hipChannelFormatDesc channelDesc =
+      hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, hipChannelFormatKindSigned);
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width, height, 2), hipArrayDefault));
 
   hipMemcpy3DParms myparams;
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, height, depth);
-  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                       width, height);
+  myparams.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparams.dstArray = devArray;
   myparams.kind = hipMemcpyHostToDevice;
 
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipMemcpy3DAsync(&myparams, stream),
-                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipMemcpy3DAsync(&myparams, stream), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 
@@ -327,20 +309,20 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy3DAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpy2DToArrayAsync api invalid arg
-*  Verify hipExtGetLastError status with hipMemcpy2DFromArrayAsync api invalid arg
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpy2DToArrayAsync api invalid arg
+ *  Verify hipExtGetLastError status with hipMemcpy2DFromArrayAsync api invalid arg
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
-  int *hData = reinterpret_cast<int*>(malloc(WIDTH));
+  int* hData = reinterpret_cast<int*>(malloc(WIDTH));
   REQUIRE(hData != nullptr);
   memset(hData, 0, WIDTH);
   hipStream_t stream;
@@ -348,16 +330,16 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
 
   SECTION("Verify with hipMemcpyDtoHAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync(nullptr, 0, 0, hData, WIDTH,
-                       WIDTH, HEIGHT, hipMemcpyHostToDevice, stream),
+    HIP_CHECK_ERROR(hipMemcpy2DToArrayAsync(nullptr, 0, 0, hData, WIDTH, WIDTH, HEIGHT,
+                                            hipMemcpyHostToDevice, stream),
                     hipErrorInvalidHandle);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidHandle);
     HIP_CHECK(hipExtGetLastError());
   }
   SECTION("Verify with hipMemcpyDtoHAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpy2DFromArrayAsync(hData, WIDTH, nullptr, 0, 0,
-                       WIDTH, HEIGHT, hipMemcpyDeviceToHost, stream),
+    HIP_CHECK_ERROR(hipMemcpy2DFromArrayAsync(hData, WIDTH, nullptr, 0, 0, WIDTH, HEIGHT,
+                                              hipMemcpyDeviceToHost, stream),
                     hipErrorInvalidHandle);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidHandle);
     HIP_CHECK(hipExtGetLastError());
@@ -368,112 +350,108 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2D_To_From_ArrayAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipStreamAttachMemAsync api invalid arg
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipStreamAttachMemAsync api invalid arg
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipStreamAttachMemAsync") {
   void* d_memory{nullptr};
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory),
-                        0, hipMemAttachHost, 0),
+  HIP_CHECK_ERROR(hipMemPrefetchAsync(reinterpret_cast<void*>(d_memory), 0, hipMemAttachHost, 0),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipWaitExternalSemaphoresAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipWaitExternalSemaphoresAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipWaitExternalSemaphoresAsync") {
   hipExternalSemaphoreWaitParams wait_params = {};
   wait_params.params.fence.value = 1;
 
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipWaitExternalSemaphoresAsync(nullptr,
-                                   &wait_params, 1, nullptr),
+  HIP_CHECK_ERROR(hipWaitExternalSemaphoresAsync(nullptr, &wait_params, 1, nullptr),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipSignalExternalSemaphoresAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipSignalExternalSemaphoresAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipSignalExternalSemaphoresAsync") {
   hipExternalSemaphoreSignalParams signal_params = {};
   signal_params.params.fence.value = 1;
 
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipSignalExternalSemaphoresAsync(nullptr,
-                                   &signal_params, 1, nullptr),
+  HIP_CHECK_ERROR(hipSignalExternalSemaphoresAsync(nullptr, &signal_params, 1, nullptr),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemPrefetchAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemPrefetchAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemPrefetchAsync") {
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, 1024, 0),
-                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipMemPrefetchAsync(nullptr, 1024, 0), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpy2DAsync api invalid arg call
-*    Verify hipExtGetLastError status with hipMemset2DAsync api invalid arg call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpy2DAsync api invalid arg call
+ *    Verify hipExtGetLastError status with hipMemset2DAsync api invalid arg call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2DAsync") {
   CHECK_IMAGE_SUPPORT
 
-  int* A_h{nullptr}, *A_d{nullptr};
+  int *A_h{nullptr}, *A_d{nullptr};
   size_t pitch_A;
   size_t width{WIDTH * sizeof(int)};
   hipStream_t stream;
@@ -482,25 +460,23 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2DAsync") {
   // Allocating memory
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
-  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d),
-                           &pitch_A, width, WIDTH));
+  HIP_CHECK(hipMallocPitch(reinterpret_cast<void**>(&A_d), &pitch_A, width, WIDTH));
   REQUIRE(A_d != nullptr);
 
   // Initialize the data
-  HipTest::setDefaultData<int>(WIDTH*HEIGHT, A_h, nullptr, nullptr);
+  HipTest::setDefaultData<int>(WIDTH * HEIGHT, A_h, nullptr, nullptr);
 
   SECTION("Verify with hipMemcpy2DAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemcpy2DAsync(A_h, WIDTH*2, A_d, pitch_A,
-                      WIDTH*sizeof(int), WIDTH, hipMemcpyDeviceToHost, stream),
+    HIP_CHECK_ERROR(hipMemcpy2DAsync(A_h, WIDTH * 2, A_d, pitch_A, WIDTH * sizeof(int), WIDTH,
+                                     hipMemcpyDeviceToHost, stream),
                     hipErrorInvalidPitchValue);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidPitchValue);
     HIP_CHECK(hipExtGetLastError());
   }
   SECTION("Verify with hipMemset2DAsync api invalid arg call") {
     HIP_CHECK(hipExtGetLastError());
-    HIP_CHECK_ERROR(hipMemset2DAsync(A_d, pitch_A, 22,
-                       WIDTH*sizeof(int), WIDTH*9, stream),
+    HIP_CHECK_ERROR(hipMemset2DAsync(A_d, pitch_A, 22, WIDTH * sizeof(int), WIDTH * 9, stream),
                     hipErrorInvalidValue);
     HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
     HIP_CHECK(hipExtGetLastError());
@@ -513,19 +489,19 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemcpy2DAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemsetAsync api invalid arg call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemsetAsync api invalid arg call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipMemsetAsync") {
-  int *A_d;
+  int* A_d;
   HIP_CHECK(hipMalloc(&A_d, Nbytes));
   REQUIRE(A_d != nullptr);
 
@@ -533,8 +509,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemsetAsync") {
   HIP_CHECK(hipStreamCreate(&stream));
 
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipMemsetAsync(A_d, 0, Nbytes * 2, stream),
-                  hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipMemsetAsync(A_d, 0, Nbytes * 2, stream), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 
@@ -543,16 +518,16 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipMemsetAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpyAsync api invalid arg call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpyAsync api invalid arg call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
   int *A_d, *B_d, *C_d;
@@ -573,7 +548,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
   HIP_CHECK(hipStreamSynchronize(stream));
 
   // testing to check error manually
-  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes+N, hipMemcpyDeviceToHost, 0),
+  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, 0),
                   hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
@@ -585,17 +560,17 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipMemcpyAsync api invalid arg call
-*    Check in other thread this error should not report by hipExtGetLastError()
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipMemcpyAsync api invalid arg call
+ *    Check in other thread this error should not report by hipExtGetLastError()
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 // Inside thread, both hipExtGetLastError() api call should not return error
 static void thread_wait_func(int sleep_time) {
@@ -626,7 +601,7 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
   std::thread t(thread_wait_func, 2);
 
   // testing to check error manually
-  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes+N, hipMemcpyDeviceToHost, 0),
+  HIP_CHECK_ERROR(hipMemcpyAsync(C_h, C_d, Nbytes + N, hipMemcpyDeviceToHost, 0),
                   hipErrorInvalidValue);
 
   t.join();
@@ -641,18 +616,18 @@ TEST_CASE("Unit_hipExtGetLastError_with_MemCpyAsync_thread") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipGraphAddMemcpyNode1D api
-*    Create graph with one node as error consciously so it produces an error,
-*    which will be used to verify the behavior of hipExtGetLastError api.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipGraphAddMemcpyNode1D api
+ *    Create graph with one node as error consciously so it produces an error,
+ *    which will be used to verify the behavior of hipExtGetLastError api.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
   constexpr auto blocksPerCU = 6;  // to hide latency
@@ -671,16 +646,16 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
 
   HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h,
-                                    Nbytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d,
-                                    Nbytes, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_A, graph, nullptr, 0, A_d, A_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_B, graph, nullptr, 0, B_d, B_h, Nbytes,
+                                    hipMemcpyHostToDevice));
+  HIP_CHECK(hipGraphAddMemcpyNode1D(&memcpy_C, graph, nullptr, 0, C_h, C_d, Nbytes,
+                                    hipMemcpyDeviceToHost));
 
   hipKernelNodeParams kNodeParams{};
-  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void *>(&NElem)};
-  kNodeParams.func = reinterpret_cast<void *>(HipTest::vectorADD<int>);
+  void* kernelArgs[] = {&A_d, &B_d, &C_d, reinterpret_cast<void*>(&NElem)};
+  kNodeParams.func = reinterpret_cast<void*>(HipTest::vectorADD<int>);
   kNodeParams.gridDim = dim3(blocks);
   kNodeParams.blockDim = dim3(threadsPerBlock);
   kNodeParams.sharedMemBytes = 0;
@@ -692,9 +667,9 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
   //  so that it produces an error, which will be used to verify the
   //  behavior of hipExtGetLastError api.
   HIP_CHECK(hipExtGetLastError());
-  HIP_CHECK_ERROR(hipGraphAddMemcpyNode1D(&memcpy_E, graph, nullptr, 0, C_h,
-                                     C_d, Nbytes * 2, hipMemcpyDeviceToHost),
-                                     hipErrorInvalidValue);
+  HIP_CHECK_ERROR(hipGraphAddMemcpyNode1D(&memcpy_E, graph, nullptr, 0, C_h, C_d, Nbytes * 2,
+                                          hipMemcpyDeviceToHost),
+                  hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
   HIP_CHECK(hipExtGetLastError());
 
@@ -720,20 +695,20 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipGraphAddMemcpyNode1D") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipStreamEndCapture api invalid arg call
-*    Create a graph1 with stream with ketnelNode as vector_ADD and
-*    hipStreamEndCapture on graph1 with hipGraphInstantiate to create graphExec
-*    Again hipStreamEndCapture on graph2 which will return hipErrorIllegalState
-*    now verify the behavior of hipExtGetLastError api with this call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipStreamEndCapture api invalid arg call
+ *    Create a graph1 with stream with ketnelNode as vector_ADD and
+ *    hipStreamEndCapture on graph1 with hipGraphInstantiate to create graphExec
+ *    Again hipStreamEndCapture on graph2 which will return hipErrorIllegalState
+ *    now verify the behavior of hipExtGetLastError api with this call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
   int *A_d, *B_d, *C_d, *A_h, *B_h, *C_h;
@@ -772,16 +747,16 @@ TEST_CASE("Unit_hipExtGetLastError_with_hipStreamBegin_EndCapture") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with hipGraphCreate api invalid arg call.
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with hipGraphCreate api invalid arg call.
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_error_check_with_hipGraphCreate") {
   hipGraph_t graph;
@@ -795,19 +770,19 @@ TEST_CASE("Unit_hipExtGetLastError_error_check_with_hipGraphCreate") {
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status should update with new api invalid arg call.
-*    Api hipGraphCreate -> return error hipErrorInvalidValue
-*    Api hipDeviceGetGraphMemAttribute -> return error hipErrorInvalidDevice
-*    Now hipExtGetLastError() api shoud return hipErrorInvalidDevice
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status should update with new api invalid arg call.
+ *    Api hipGraphCreate -> return error hipErrorInvalidValue
+ *    Api hipDeviceGetGraphMemAttribute -> return error hipErrorInvalidDevice
+ *    Now hipExtGetLastError() api shoud return hipErrorInvalidDevice
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
 TEST_CASE("Unit_hipExtGetLastError_success_before_error_check_again") {
   int value = 0;
@@ -817,30 +792,28 @@ TEST_CASE("Unit_hipExtGetLastError_success_before_error_check_again") {
   HIP_CHECK_ERROR(hipGraphCreate(&graph, 1), hipErrorInvalidValue);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidValue);
 
-  HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1,
-      hipGraphMemAttrUsedMemCurrent, &value), hipErrorInvalidDevice);
+  HIP_CHECK_ERROR(hipDeviceGetGraphMemAttribute(-1, hipGraphMemAttrUsedMemCurrent, &value),
+                  hipErrorInvalidDevice);
   HIP_CHECK_ERROR(hipExtGetLastError(), hipErrorInvalidDevice);
   HIP_CHECK(hipExtGetLastError());
 }
 
 /**
-* Test Description
-* ------------------------
-*  - Verify hipExtGetLastError status with divide_by_zero kernel call
-* Test source
-* ------------------------
-*  - unit/errorHandling/hipExtGetLastError.cc
-* Test requirements
-* ------------------------
-*  - HIP_VERSION >= 6.4
-*/
+ * Test Description
+ * ------------------------
+ *  - Verify hipExtGetLastError status with divide_by_zero kernel call
+ * Test source
+ * ------------------------
+ *  - unit/errorHandling/hipExtGetLastError.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.4
+ */
 
-static void __global__ devideKernl(int *i, int x, int y) {
-  *i = x/(x-y);
-}
+static void __global__ devideKernl(int* i, int x, int y) { *i = x / (x - y); }
 
 TEST_CASE("Unit_hipExtGetLastError_with_Kernel_divide_by_zero") {
-  int *i_d;
+  int* i_d;
   int i = 9;
   HIP_CHECK(hipMalloc(&i_d, sizeof(int)));
   REQUIRE(i_d != nullptr);

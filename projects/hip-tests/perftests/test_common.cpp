@@ -37,7 +37,7 @@ char memsetD8val = 0xDE;
 int iterations = 1;
 unsigned blocksPerCU = 6;  // to hide latency
 unsigned threadsPerBlock = 256;
-int textureFilterMode = 0; // 0: hipFilterModePoint; 1: hipFilterModeLinear
+int textureFilterMode = 0;  // 0: hipFilterModePoint; 1: hipFilterModeLinear
 int p_gpuDevice = 0;
 unsigned p_verbose = 0;
 int p_tests = -1; /*which tests to run. Interpretation is left to each test.  default:all*/
@@ -105,15 +105,13 @@ bool IsGfx11() {
   // Get GCN Arch Name and compare to check if it is gfx11
   std::string arch = std::string(props.gcnArchName);
   auto pos = arch.find(":");
-  if (pos != std::string::npos)
-    arch = arch.substr(0, pos);
+  if (pos != std::string::npos) arch = arch.substr(0, pos);
 
-  if(arch.size() >= 5)
-    arch = arch.substr(0,5);
+  if (arch.size() >= 5) arch = arch.substr(0, 5);
 
   return (arch == std::string("gfx11")) ? true : false;
 #else
-  std::cout<<"Have to be either Nvidia or AMD platform, asserting"<<std::endl;
+  std::cout << "Have to be either Nvidia or AMD platform, asserting" << std::endl;
   assert(false);
 #endif
 }
@@ -122,140 +120,140 @@ namespace HipTest {
 
 
 double elapsed_time(long long startTimeUs, long long stopTimeUs) {
-    return ((double)(stopTimeUs - startTimeUs)) / ((double)(1000));
+  return ((double)(stopTimeUs - startTimeUs)) / ((double)(1000));
 }
 
 
 int parseSize(const char* str, size_t* output) {
-    char* next;
-    *output = strtoull(str, &next, 0);
-    int l = strlen(str);
-    if (l) {
-        char c = str[l - 1];  // last char.
-        if ((c == 'k') || (c == 'K')) {
-            *output *= 1024;
-        }
-        if ((c == 'm') || (c == 'M')) {
-            *output *= (1024 * 1024);
-        }
-        if ((c == 'g') || (c == 'G')) {
-            *output *= (1024 * 1024 * 1024);
-        }
+  char* next;
+  *output = strtoull(str, &next, 0);
+  int l = strlen(str);
+  if (l) {
+    char c = str[l - 1];  // last char.
+    if ((c == 'k') || (c == 'K')) {
+      *output *= 1024;
     }
-    return 1;
+    if ((c == 'm') || (c == 'M')) {
+      *output *= (1024 * 1024);
+    }
+    if ((c == 'g') || (c == 'G')) {
+      *output *= (1024 * 1024 * 1024);
+    }
+  }
+  return 1;
 }
 
 
 int parseUInt(const char* str, unsigned int* output) {
-    char* next;
-    *output = strtoul(str, &next, 0);
-    return !strlen(next);
+  char* next;
+  *output = strtoul(str, &next, 0);
+  return !strlen(next);
 }
 
 
 int parseInt(const char* str, int* output) {
-    char* next;
-    *output = strtol(str, &next, 0);
-    return !strlen(next);
+  char* next;
+  *output = strtol(str, &next, 0);
+  return !strlen(next);
 }
 
 
 int parseStandardArguments(int argc, char* argv[], bool failOnUndefinedArg) {
-    int extraArgs = 1;
-    for (int i = 1; i < argc; i++) {
-        const char* arg = argv[i];
+  int extraArgs = 1;
+  for (int i = 1; i < argc; i++) {
+    const char* arg = argv[i];
 
-        if (!strcmp(arg, " ")) {
-            // skip NULL args.
-        } else if (!strcmp(arg, "--N") || (!strcmp(arg, "-N"))) {
-            if (++i >= argc || !HipTest::parseSize(argv[i], &N)) {
-                failed("Bad N size argument");
-            }
-        } else if (!strcmp(arg, "--threadsPerBlock")) {
-            if (++i >= argc || !HipTest::parseUInt(argv[i], &threadsPerBlock)) {
-                failed("Bad threadsPerBlock argument");
-            }
-        } else if (!strcmp(arg, "--blocksPerCU")) {
-            if (++i >= argc || !HipTest::parseUInt(argv[i], &blocksPerCU)) {
-                failed("Bad blocksPerCU argument");
-            }
-        } else if (!strcmp(arg, "--memsetval")) {
-            int ex;
-            if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
-                failed("Bad memsetval argument");
-            }
-            memsetval = ex;
-        } else if (!strcmp(arg, "--memsetD32val")) {
-            int ex;
-            if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
-                failed("Bad memsetD32val argument");
-            }
-            memsetD32val = ex;
-        } else if (!strcmp(arg, "--memsetD16val")) {
-            int ex;
-            if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
-                failed("Bad memsetD16val argument");
-            }
-            memsetD16val = ex;
-        } else if (!strcmp(arg, "--memsetD8val")) {
-            int ex;
-            if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
-                failed("Bad memsetD8val argument");
-            }
-            memsetD8val = ex;
-        } else if (!strcmp(arg, "--textureFilterMode")) {
-          int mode;
-          if (++i >= argc || !HipTest::parseInt(argv[i], &mode)) {
-              failed("Bad textureFilterMode argument");
-          }
-          textureFilterMode = mode;
-        } else if (!strcmp(arg, "--iterations") || (!strcmp(arg, "-i"))) {
-            if (++i >= argc || !HipTest::parseInt(argv[i], &iterations)) {
-                failed("Bad iterations argument");
-            }
-        } else if (!strcmp(arg, "--gpu") || (!strcmp(arg, "-gpuDevice")) || (!strcmp(arg, "-g"))) {
-            if (++i >= argc || !HipTest::parseInt(argv[i], &p_gpuDevice)) {
-                failed("Bad gpuDevice argument");
-            }
+    if (!strcmp(arg, " ")) {
+      // skip NULL args.
+    } else if (!strcmp(arg, "--N") || (!strcmp(arg, "-N"))) {
+      if (++i >= argc || !HipTest::parseSize(argv[i], &N)) {
+        failed("Bad N size argument");
+      }
+    } else if (!strcmp(arg, "--threadsPerBlock")) {
+      if (++i >= argc || !HipTest::parseUInt(argv[i], &threadsPerBlock)) {
+        failed("Bad threadsPerBlock argument");
+      }
+    } else if (!strcmp(arg, "--blocksPerCU")) {
+      if (++i >= argc || !HipTest::parseUInt(argv[i], &blocksPerCU)) {
+        failed("Bad blocksPerCU argument");
+      }
+    } else if (!strcmp(arg, "--memsetval")) {
+      int ex;
+      if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
+        failed("Bad memsetval argument");
+      }
+      memsetval = ex;
+    } else if (!strcmp(arg, "--memsetD32val")) {
+      int ex;
+      if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
+        failed("Bad memsetD32val argument");
+      }
+      memsetD32val = ex;
+    } else if (!strcmp(arg, "--memsetD16val")) {
+      int ex;
+      if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
+        failed("Bad memsetD16val argument");
+      }
+      memsetD16val = ex;
+    } else if (!strcmp(arg, "--memsetD8val")) {
+      int ex;
+      if (++i >= argc || !HipTest::parseInt(argv[i], &ex)) {
+        failed("Bad memsetD8val argument");
+      }
+      memsetD8val = ex;
+    } else if (!strcmp(arg, "--textureFilterMode")) {
+      int mode;
+      if (++i >= argc || !HipTest::parseInt(argv[i], &mode)) {
+        failed("Bad textureFilterMode argument");
+      }
+      textureFilterMode = mode;
+    } else if (!strcmp(arg, "--iterations") || (!strcmp(arg, "-i"))) {
+      if (++i >= argc || !HipTest::parseInt(argv[i], &iterations)) {
+        failed("Bad iterations argument");
+      }
+    } else if (!strcmp(arg, "--gpu") || (!strcmp(arg, "-gpuDevice")) || (!strcmp(arg, "-g"))) {
+      if (++i >= argc || !HipTest::parseInt(argv[i], &p_gpuDevice)) {
+        failed("Bad gpuDevice argument");
+      }
 
-        } else if (!strcmp(arg, "--verbose") || (!strcmp(arg, "-v"))) {
-            if (++i >= argc || !HipTest::parseUInt(argv[i], &p_verbose)) {
-                failed("Bad verbose argument");
-            }
-        } else if (!strcmp(arg, "--tests") || (!strcmp(arg, "-t"))) {
-            if (++i >= argc || !HipTest::parseInt(argv[i], &p_tests)) {
-                failed("Bad tests argument");
-            }
+    } else if (!strcmp(arg, "--verbose") || (!strcmp(arg, "-v"))) {
+      if (++i >= argc || !HipTest::parseUInt(argv[i], &p_verbose)) {
+        failed("Bad verbose argument");
+      }
+    } else if (!strcmp(arg, "--tests") || (!strcmp(arg, "-t"))) {
+      if (++i >= argc || !HipTest::parseInt(argv[i], &p_tests)) {
+        failed("Bad tests argument");
+      }
 
-        } else if (!strcmp(arg, "--debug") || (!strcmp(arg, "-d"))) {
-            if (++i >= argc || !HipTest::parseInt(argv[i], &debug_test)) {
-                failed("Bad tests argument");
-            }
-        } else {
-            if (failOnUndefinedArg) {
-                failed("Bad argument '%s'", arg);
-            } else {
-                argv[extraArgs++] = argv[i];
-            }
-        }
-    };
+    } else if (!strcmp(arg, "--debug") || (!strcmp(arg, "-d"))) {
+      if (++i >= argc || !HipTest::parseInt(argv[i], &debug_test)) {
+        failed("Bad tests argument");
+      }
+    } else {
+      if (failOnUndefinedArg) {
+        failed("Bad argument '%s'", arg);
+      } else {
+        argv[extraArgs++] = argv[i];
+      }
+    }
+  };
 
-    return extraArgs;
+  return extraArgs;
 }
 
 
 unsigned setNumBlocks(unsigned blocksPerCU, unsigned threadsPerBlock, size_t N) {
-    int device;
-    HIPCHECK(hipGetDevice(&device));
-    hipDeviceProp_t props;
-    HIPCHECK(hipGetDeviceProperties(&props, device));
+  int device;
+  HIPCHECK(hipGetDevice(&device));
+  hipDeviceProp_t props;
+  HIPCHECK(hipGetDeviceProperties(&props, device));
 
-    unsigned blocks = props.multiProcessorCount * blocksPerCU;
-    if (blocks * threadsPerBlock > N) {
-        blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
-    }
+  unsigned blocks = props.multiProcessorCount * blocksPerCU;
+  if (blocks * threadsPerBlock > N) {
+    blocks = (N + threadsPerBlock - 1) / threadsPerBlock;
+  }
 
-    return blocks;
+  return blocks;
 }
 
 }  // namespace HipTest

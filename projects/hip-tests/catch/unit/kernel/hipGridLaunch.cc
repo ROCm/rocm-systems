@@ -21,7 +21,7 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_checkers.hh>
 #include <hip_test_common.hh>
- 
+
 
 static unsigned threadsPerBlock = 256;
 static unsigned blocksPerCU = 6;
@@ -30,15 +30,14 @@ static unsigned blocksPerCU = 6;
 __device__ int foo(int i) { return i + 1; }
 
 
-template <typename T>
-__global__ void vectorADD2(T* A_d, T* B_d, T* C_d, size_t N) {
-    size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
-    size_t stride = blockDim.x * gridDim.x;
+template <typename T> __global__ void vectorADD2(T* A_d, T* B_d, T* C_d, size_t N) {
+  size_t offset = (blockIdx.x * blockDim.x + threadIdx.x);
+  size_t stride = blockDim.x * gridDim.x;
 
-    for (size_t i = offset; i < N; i += stride) {
-        double foo = __hiloint2double(A_d[i], B_d[i]);
-        C_d[i] = __double2loint(foo) + __double2hiint(foo);
-    }
+  for (size_t i = offset; i < N; i += stride) {
+    double foo = __hiloint2double(A_d[i], B_d[i]);
+    C_d[i] = __double2loint(foo) + __double2hiint(foo);
+  }
 }
 
 int test_gl2(size_t N) {
@@ -52,8 +51,7 @@ int test_gl2(size_t N) {
   // Full vadd in one large chunk, to get things started:
   HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
   HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-  hipLaunchKernelGGL(vectorADD2, dim3(blocks), dim3(threadsPerBlock),
-                      0, 0, A_d, B_d, C_d, N);
+  hipLaunchKernelGGL(vectorADD2, dim3(blocks), dim3(threadsPerBlock), 0, 0, A_d, B_d, C_d, N);
   HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
   // verify
@@ -107,18 +105,14 @@ int test_triple_chevron(size_t N) {
 
 TEST_CASE("Unit_hipGridLaunch") {
   size_t N = 4 * 1024 * 1024;
-  SECTION("Test test_gl2") {
-    test_gl2(N);
-  }
+  SECTION("Test test_gl2") { test_gl2(N); }
 
 #if __HIP__
-  SECTION("Test triple_chevron") {
-    test_triple_chevron(N);
-  }
+  SECTION("Test triple_chevron") { test_triple_chevron(N); }
 #endif
 }
 
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

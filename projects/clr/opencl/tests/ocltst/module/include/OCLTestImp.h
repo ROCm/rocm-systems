@@ -37,10 +37,9 @@ class OCLTestImp : public BaseTestImp {
 
  public:
   //! Abstract functions being defined here
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId, unsigned int platformIndex);
-  virtual void open(unsigned int test, char* units, double& conversion,
-                    unsigned int deviceId);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId,
+                    unsigned int platformIndex);
+  virtual void open(unsigned int test, char* units, double& conversion, unsigned int deviceId);
   virtual void run(void) = 0;
   virtual unsigned int close(void);
   //! Functions to set class members

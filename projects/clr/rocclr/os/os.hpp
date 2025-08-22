@@ -52,7 +52,6 @@ class Thread;  // For Os::createOsThread()
 
 class Os : AllStatic {
  public:
-
 // File Desc abstraction between OS
 #if defined(_WIN32)
   typedef void* FileDesc;
@@ -373,7 +372,7 @@ ALWAYSINLINE address Os::currentStackPtr() {
 #else
       ""
 #endif
-          );
+  );
 #else   // !__GNUC__
   __asm mov value, esp;
 #endif  // !__GNUC__

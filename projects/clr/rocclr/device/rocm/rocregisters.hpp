@@ -201,6 +201,6 @@ union SQ_IMG_RSRC_WORD7 {
   signed int i32All;
   float f32All;
 };
-}
+}  // namespace amd::roc
 
 #endif

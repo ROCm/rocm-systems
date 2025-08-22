@@ -31,11 +31,11 @@
 // Internal structure for stream callback handler
 namespace hip {
 class StreamCallback {
-protected:
+ protected:
   void* userData_;
+
  public:
-  StreamCallback(void* userData)
-      : userData_(userData) {}
+  StreamCallback(void* userData) : userData_(userData) {}
 
   virtual void CL_CALLBACK callback() = 0;
 
@@ -45,7 +45,8 @@ protected:
 class StreamAddCallback : public StreamCallback {
   hipStreamCallback_t callBack_;
   hipStream_t stream_;
-public:
+
+ public:
   StreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData)
       : StreamCallback(userData) {
     stream_ = stream;
@@ -60,9 +61,9 @@ public:
 
 class LaunchHostFuncCallback : public StreamCallback {
   hipHostFn_t callBack_;
+
  public:
-  LaunchHostFuncCallback(hipHostFn_t callback, void* userData)
-      : StreamCallback(userData) {
+  LaunchHostFuncCallback(hipHostFn_t callback, void* userData) : StreamCallback(userData) {
     callBack_ = callback;
   }
 
@@ -100,18 +101,19 @@ class Event {
   hipStream_t captureStream_ = nullptr;
   /// Previous captured nodes before event record
   std::vector<hip::GraphNode*> nodesPrevToRecorded_;
+
  protected:
   bool CheckHwEvent() {
-    amd::SyncPolicy policy = (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking :
-                                                                amd::SyncPolicy::Auto;
+    amd::SyncPolicy policy =
+        (flags_ == hipEventBlockingSync) ? amd::SyncPolicy::Blocking : amd::SyncPolicy::Auto;
     return g_devices[deviceId()]->devices()[0]->IsHwEventReady(*event_, false, policy);
   }
 
  public:
   constexpr static bool kBatchFlush = true;  //!< Flushes CPU command batch in direct dispatch mode
 
-  Event(uint32_t flags) : flags_(flags), lock_(true) /* hipEvent_t lock*/,
-                              event_(nullptr), stream_(nullptr) {
+  Event(uint32_t flags)
+      : flags_(flags), lock_(true) /* hipEvent_t lock*/, event_(nullptr), stream_(nullptr) {
     device_id_ = hip::getCurrentDevice()->deviceId();  // Created in current device ctx
   }
 
@@ -120,7 +122,7 @@ class Event {
       event_->release();
     }
   }
-  uint32_t flags_; //!< flags associated with the event
+  uint32_t flags_;  //!< flags associated with the event
 
   virtual hipError_t query();
   virtual hipError_t synchronize();
@@ -132,8 +134,7 @@ class Event {
   virtual hipError_t recordCommand(amd::Command*& command, amd::HostQueue* stream,
                                    uint32_t flags = 0, bool batch_flush = true);
   virtual hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command);
-  hipError_t addMarker(hip::Stream* stream, amd::Command* command,
-                       bool batch_flush = true);
+  hipError_t addMarker(hip::Stream* stream, amd::Command* command, bool batch_flush = true);
 
   void BindCommand(amd::Command& command) {
     amd::ScopedLock lock(lock_);
@@ -202,7 +203,7 @@ class IPCEvent : public Event {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
       hipError_t status = synchronize();
-      status  = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
+      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
@@ -226,8 +227,8 @@ class IPCEvent : public Event {
 
   hipError_t streamWait(hip::Stream* stream, uint flags);
 
-  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue,
-                           uint32_t flags = 0, bool batch_flush = true) override;
+  hipError_t recordCommand(amd::Command*& command, amd::HostQueue* queue, uint32_t flags = 0,
+                           bool batch_flush = true) override;
   hipError_t enqueueRecordCommand(hip::Stream* stream, amd::Command* command);
 };
 

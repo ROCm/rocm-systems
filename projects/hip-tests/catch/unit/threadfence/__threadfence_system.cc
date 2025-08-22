@@ -131,6 +131,6 @@ TEST_CASE("Unit___threadfence_system_Positive_Basic_Host") {
 }
 
 /**
-* End doxygen group ThreadfenceTest.
-* @}
-*/
+ * End doxygen group ThreadfenceTest.
+ * @}
+ */

@@ -75,6 +75,6 @@ TEST_CASE("Performance_hipMemset2DAsync") {
 }
 
 /**
-* End doxygen group PerformanceTest.
-* @}
-*/
+ * End doxygen group PerformanceTest.
+ * @}
+ */

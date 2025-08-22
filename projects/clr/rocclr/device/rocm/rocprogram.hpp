@@ -61,8 +61,8 @@ class Program : public device::Program {
     return hsaExecutable_;
   }
 
-  virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr,
-                                  size_t* bytes, const char* global_name) const;
+  virtual bool createGlobalVarObj(amd::Memory** amd_mem_obj, void** device_pptr, size_t* bytes,
+                                  const char* global_name) const;
 
  protected:
   /*! \brief Compiles LLVM binary to HSAIL code (compiler backend: link+opt+codegen)
@@ -70,7 +70,7 @@ class Program : public device::Program {
    *  \return The build error code
    */
   int compileBinaryToHSAIL(amd::option::Options* options  //!< options for compilation
-                           );
+  );
   virtual bool createBinary(amd::option::Options* options) = 0;
 
  protected:
@@ -80,10 +80,11 @@ class Program : public device::Program {
   Program& operator=(const Program&) = delete;
 
   virtual bool defineGlobalVar(const char* name, void* dptr);
-protected:
+
+ protected:
   /* HSA executable */
-  hsa_executable_t hsaExecutable_;               //!< Handle to HSA executable
-  hsa_code_object_reader_t hsaCodeObjectReader_; //!< Handle to HSA code reader
+  hsa_executable_t hsaExecutable_;                //!< Handle to HSA executable
+  hsa_code_object_reader_t hsaCodeObjectReader_;  //!< Handle to HSA code reader
 };
 
 class HSAILProgram : public roc::Program {
@@ -98,33 +99,33 @@ class HSAILProgram : public roc::Program {
                           amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
                           std::string uri = std::string()) override;
 
-private:
+ private:
   std::string codegenOptions(amd::option::Options* options);
 
   bool saveBinaryAndSetType(type_t type) override;
 };
 
 class LightningProgram final : public roc::Program {
-public:
+ public:
   LightningProgram(roc::NullDevice& device, amd::Program& owner);
   virtual ~LightningProgram() {}
 
-protected:
+ protected:
   bool createBinary(amd::option::Options* options) final;
 
   bool saveBinaryAndSetType(type_t type) final { return true; }
 
-private:
+ private:
   bool saveBinaryAndSetType(type_t type, void* rawBinary, size_t size);
 
   bool createKernels(void* binary, size_t binSize, bool useUniformWorkGroupSize,
                      bool internalKernel) override final;
 
-  bool setKernels(void* binary, size_t binSize,
-                  amd::Os::FileDesc fdesc = amd::Os::FDescInit(), size_t foffset = 0,
-                  std::string uri = std::string()) override final;
+  bool setKernels(void* binary, size_t binSize, amd::Os::FileDesc fdesc = amd::Os::FDescInit(),
+                  size_t foffset = 0, std::string uri = std::string()) override final;
 };
 
-/*@}*/} // namespace amd::roc
+/*@}*/  // namespace amd::roc
+}  // namespace amd::roc
 
 #endif /*WITHOUT_HSA_BACKEND*/

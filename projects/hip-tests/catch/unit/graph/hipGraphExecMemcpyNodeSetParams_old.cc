@@ -20,16 +20,17 @@ THE SOFTWARE.
 /**
 Testcase Scenarios :
 Functional-
-1) Instantiate a graph with memcpy node, obtain executable graph and update the hipMemcpy3DParms node params with set. Make sure they are taking effect.
-Negative-
-1) Pass hGraphExec as nullptr and verify api returns error code.
-2) Pass node as nullptr and verify api returns error code.
-3) Pass pNodeParams as nullptr and verify api returns error code.
-4) Pass pNodeParams as empty structure object and verify api returns error code.
-5) API expects atleast one memcpy src pointer to be set. When hipMemcpy3DParms::srcArray and hipMemcpy3DParms::srcPtr.ptr both are nullptr, api expected to return error code.
-6) API expects atleast one memcpy dst pointer to be set. When hipMemcpy3DParms::dstArray and hipMemcpy3DParms::dstPtr.ptr both are nullptr, api expected to return error code.
-7) Passing different element size for hipMemcpy3DParms::srcArray and hipMemcpy3DParms::dstArray is expected to return error code.
-8) Pass node of different graph and verify api returns error code.
+1) Instantiate a graph with memcpy node, obtain executable graph and update the hipMemcpy3DParms
+node params with set. Make sure they are taking effect. Negative- 1) Pass hGraphExec as nullptr and
+verify api returns error code. 2) Pass node as nullptr and verify api returns error code. 3) Pass
+pNodeParams as nullptr and verify api returns error code. 4) Pass pNodeParams as empty structure
+object and verify api returns error code. 5) API expects atleast one memcpy src pointer to be set.
+When hipMemcpy3DParms::srcArray and hipMemcpy3DParms::srcPtr.ptr both are nullptr, api expected to
+return error code. 6) API expects atleast one memcpy dst pointer to be set. When
+hipMemcpy3DParms::dstArray and hipMemcpy3DParms::dstPtr.ptr both are nullptr, api expected to return
+error code. 7) Passing different element size for hipMemcpy3DParms::srcArray and
+hipMemcpy3DParms::dstArray is expected to return error code. 8) Pass node of different graph and
+verify api returns error code.
 */
 
 #include <hip_test_common.hh>
@@ -53,22 +54,20 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative") {
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width + k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                              0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width,
-                             height, depth), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width+1,
-                             height+1, depth+1), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(hipMalloc3DArray(&devArray, &channelDesc, make_hipExtent(width, height, depth),
+                             hipArrayDefault));
+  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
+                             make_hipExtent(width + 1, height + 1, depth + 1), hipArrayDefault));
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.extent = make_hipExtent(width , height, depth);
-  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+  myparms.extent = make_hipExtent(width, height, depth);
+  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
   myparms.dstArray = devArray;
   myparms.kind = hipMemcpyHostToDevice;
 
@@ -102,7 +101,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative") {
     memset(&temp, 0x0, sizeof(hipMemcpy3DParms));
     temp.srcPos = make_hipPos(0, 0, 0);
     temp.dstPos = make_hipPos(0, 0, 0);
-    temp.extent = make_hipExtent(width , height, depth);
+    temp.extent = make_hipExtent(width, height, depth);
     temp.dstArray = devArray;
     temp.kind = hipMemcpyHostToDevice;
     ret = hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode, &temp);
@@ -113,22 +112,21 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Negative") {
     memset(&temp, 0x0, sizeof(hipMemcpy3DParms));
     temp.srcPos = make_hipPos(0, 0, 0);
     temp.dstPos = make_hipPos(0, 0, 0);
-    temp.extent = make_hipExtent(width , height, depth);
-    temp.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+    temp.extent = make_hipExtent(width, height, depth);
+    temp.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
     temp.kind = hipMemcpyHostToDevice;
     ret = hipGraphExecMemcpyNodeSetParams(graphExec, memcpyNode, &temp);
     REQUIRE(hipErrorInvalidValue == ret);
   }
-  SECTION("Passing different element size for hipMemcpy3DParms::srcArray"
-                   "and hipMemcpy3DParms::dstArray") {
+  SECTION(
+      "Passing different element size for hipMemcpy3DParms::srcArray"
+      "and hipMemcpy3DParms::dstArray") {
     hipMemcpy3DParms temp;
     memset(&temp, 0x0, sizeof(hipMemcpy3DParms));
     temp.srcPos = make_hipPos(0, 0, 0);
     temp.dstPos = make_hipPos(0, 0, 0);
-    temp.extent = make_hipExtent(width , height, depth);
-    temp.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int),
-                                      width, height);
+    temp.extent = make_hipExtent(width, height, depth);
+    temp.srcPtr = make_hipPitchedPtr(hData, width * sizeof(int), width, height);
     temp.kind = hipMemcpyHostToDevice;
     temp.srcArray = devArray;
     temp.dstArray = devArray2;
@@ -175,13 +173,12 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
     harray1D[i] = i + 1;
   }
 
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int)*8,
-                                                          0, 0, 0, formatKind);
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(int) * 8, 0, 0, 0, formatKind);
   // Allocate 1D device array by passing depth(0), height(0)
-  HIP_CHECK(hipMalloc3DArray(&devArray1, &channelDesc,
-                       make_hipExtent(width, 0, 0), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&devArray2, &channelDesc,
-                       make_hipExtent(width, 0, 0), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray1, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray2, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
   HIP_CHECK(hipGraphCreate(&graph, 0));
 
   // Host to Device
@@ -189,8 +186,7 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, 1, 1);
-  myparams.srcPtr = make_hipPitchedPtr(harray1D, width * sizeof(int),
-                                       width, 1);
+  myparams.srcPtr = make_hipPitchedPtr(harray1D, width * sizeof(int), width, 1);
   myparams.dstArray = devArray1;
   myparams.kind = hipMemcpyHostToDevice;
 
@@ -206,8 +202,8 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
   myparams.extent = make_hipExtent(width, 1, 1);
   myparams.kind = hipMemcpyDeviceToDevice;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                  dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
   dependencies.clear();
   dependencies.push_back(memcpyNode);
 
@@ -216,29 +212,27 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, 1, 1);
-  myparams.dstPtr = make_hipPitchedPtr(harray1Dres, width * sizeof(int),
-                                       width, 1);
+  myparams.dstPtr = make_hipPitchedPtr(harray1Dres, width * sizeof(int), width, 1);
   myparams.srcArray = devArray2;
   myparams.kind = hipMemcpyDeviceToHost;
 
-  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(),
-                                  dependencies.size(), &myparams));
+  HIP_CHECK(hipGraphAddMemcpyNode(&memcpyNode, graph, dependencies.data(), dependencies.size(),
+                                  &myparams));
 
   // Instantiate the graph
   HIP_CHECK(hipGraphInstantiate(&graphExec, graph, nullptr, nullptr, 0));
 
   int harray1Dupdate[XSIZE]{};
   hipArray_t devArray3;
-  HIP_CHECK(hipMalloc3DArray(&devArray3, &channelDesc,
-                       make_hipExtent(width, 0, 0), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&devArray3, &channelDesc, make_hipExtent(width, 0, 0), hipArrayDefault));
 
   // D2H updated with different pointer harray1Dres -> harray1Dupdate
   memset(&myparams, 0x0, sizeof(hipMemcpy3DParms));
   myparams.srcPos = make_hipPos(0, 0, 0);
   myparams.dstPos = make_hipPos(0, 0, 0);
   myparams.extent = make_hipExtent(width, 1, 1);
-  myparams.dstPtr = make_hipPitchedPtr(harray1Dupdate, width * sizeof(int),
-                                      width, 1);
+  myparams.dstPtr = make_hipPitchedPtr(harray1Dupdate, width * sizeof(int), width, 1);
   myparams.srcArray = devArray2;
   myparams.kind = hipMemcpyDeviceToHost;
 
@@ -250,8 +244,8 @@ TEST_CASE("Unit_hipGraphExecMemcpyNodeSetParams_Functional") {
   // Validate result
   for (int i = 0; i < XSIZE; i++) {
     if (harray1D[i] != harray1Dupdate[i]) {
-      INFO("harray1D: " << harray1D[i] << " harray1Dupdate: " <<
-                      harray1Dupdate[i] << " mismatch at : " << i);
+      INFO("harray1D: " << harray1D[i] << " harray1Dupdate: " << harray1Dupdate[i]
+                        << " mismatch at : " << i);
       REQUIRE(false);
     }
   }

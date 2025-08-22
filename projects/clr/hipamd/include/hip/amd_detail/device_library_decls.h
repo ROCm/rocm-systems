@@ -111,23 +111,24 @@ extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_and_i32(int a
 extern "C" __device__ __attribute__((convergent)) int __ockl_wgred_or_i32(int a);
 
 extern "C" __device__ __hip_uint64_t __ockl_fprintf_stderr_begin();
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_args(__hip_uint64_t msg_desc, __hip_uint32_t num_args,
-                                                          __hip_uint64_t value0, __hip_uint64_t value1,
-                                                          __hip_uint64_t value2, __hip_uint64_t value3,
-                                                          __hip_uint64_t value4, __hip_uint64_t value5,
-                                                          __hip_uint64_t value6, __hip_uint32_t is_last);
-extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64_t msg_desc, const char* data,
-                                                              __hip_uint64_t length, __hip_uint32_t is_last);
+extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_args(
+    __hip_uint64_t msg_desc, __hip_uint32_t num_args, __hip_uint64_t value0, __hip_uint64_t value1,
+    __hip_uint64_t value2, __hip_uint64_t value3, __hip_uint64_t value4, __hip_uint64_t value5,
+    __hip_uint64_t value6, __hip_uint32_t is_last);
+extern "C" __device__ __hip_uint64_t __ockl_fprintf_append_string_n(__hip_uint64_t msg_desc,
+                                                                    const char* data,
+                                                                    __hip_uint64_t length,
+                                                                    __hip_uint32_t is_last);
 
 // Introduce local address space
 #define __local __attribute__((address_space(3)))
 
 #ifdef __HIP_DEVICE_COMPILE__
 __device__ inline static __local void* __to_local(unsigned x) { return (__local void*)x; }
-#endif //__HIP_DEVICE_COMPILE__
+#endif  //__HIP_DEVICE_COMPILE__
 
 // Using hip.amdgcn.bc - sync threads
-#define __CLK_LOCAL_MEM_FENCE    0x01
+#define __CLK_LOCAL_MEM_FENCE 0x01
 typedef unsigned __cl_mem_fence_flags;
 
 #endif

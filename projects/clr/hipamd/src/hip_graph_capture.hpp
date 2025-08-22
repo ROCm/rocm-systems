@@ -108,7 +108,8 @@ hipError_t capturehipMemset3DAsync(hipStream_t& stream, hipPitchedPtr& pitchedDe
 
 hipError_t capturehipLaunchHostFunc(hipStream_t& stream, hipHostFn_t& fn, void*& userData);
 
-hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size_t size, void** dev_ptr);
+hipError_t capturehipMallocAsync(hipStream_t stream, hipMemPool_t mem_pool, size_t size,
+                                 void** dev_ptr);
 
 hipError_t capturehipFreeAsync(hipStream_t stream, void* dev_ptr);
-}
+}  // namespace hip
