@@ -240,7 +240,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .value("logical_node_type", tool::agent_indexing::logical_node_type);
 
     // demo for creating python bindings to a class
-    py::class_<rocpd::types::agent>(pyrocpd, "agent")
+    py::class_<rocpd::types::agent>(pyrocpd, "Agent")
+        .def_readonly("id", &rocpd::types::agent::id)
+        .def_readonly("guid", &rocpd::types::agent::guid)
         .def_readonly("node_id", &rocpd::types::agent::node_id)
         .def_readonly("logical_node_id", &rocpd::types::agent::logical_node_id)
         .def_readonly("gpu_index", &rocpd::types::agent::gpu_index)
@@ -248,9 +250,10 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readonly("user_name", &rocpd::types::agent::user_name)
         .def_readonly("product_name", &rocpd::types::agent::product_name);
 
-    py::class_<rocpd::types::node>(pyrocpd, "node")
+    py::class_<rocpd::types::node>(pyrocpd, "Node")
         .def(py::init<>())
-        .def_readonly("nid", &rocpd::types::node::id)
+        .def_readonly("id", &rocpd::types::node::id)
+        .def_readonly("guid", &rocpd::types::node::guid)
         .def_readonly("hash", &rocpd::types::node::hash)
         .def_readonly("machine_id", &rocpd::types::node::machine_id)
         .def_readonly("hostname", &rocpd::types::node::hostname)
@@ -258,8 +261,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readonly("system_release", &rocpd::types::node::release)
         .def_readonly("system_version", &rocpd::types::node::version);
 
-    py::class_<rocpd::types::process>(pyrocpd, "process")
+    py::class_<rocpd::types::process>(pyrocpd, "Process")
         .def(py::init<>())
+        .def_readonly("guid", &rocpd::types::process::guid)
         .def_readonly("nid", &rocpd::types::process::nid)
         .def_readonly("machine_id", &rocpd::types::process::machine_id)
         .def_readonly("hostname", &rocpd::types::process::hostname)
@@ -274,8 +278,9 @@ PYBIND11_MODULE(libpyrocpd, pyrocpd)
         .def_readonly("fini", &rocpd::types::process::fini)
         .def_readonly("command", &rocpd::types::process::command);
 
-    py::class_<rocpd::types::thread>(pyrocpd, "thread")
+    py::class_<rocpd::types::thread>(pyrocpd, "Thread")
         .def(py::init<>())
+        .def_readonly("guid", &rocpd::types::thread::guid)
         .def_readonly("nid", &rocpd::types::thread::nid)
         .def_readonly("machine_id", &rocpd::types::thread::machine_id)
         .def_readonly("hostname", &rocpd::types::thread::hostname)
