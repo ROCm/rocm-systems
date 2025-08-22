@@ -6309,6 +6309,8 @@ amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count,
                                                       nullptr, &cpu_per_soc);
         if (status != AMDSMI_STATUS_SUCCESS)
             return status;
+        if (cpu_per_soc == 0)
+            continue;
 
         // Allocate the memory for the cpus
         std::vector<amdsmi_processor_handle> plist(cpu_per_soc);
