@@ -32,6 +32,7 @@ from pathlib import Path
 
 import pandas as pd
 
+import config
 from utils import file_io, parser, schema
 from utils.logger import (
     console_debug,
@@ -76,9 +77,14 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = file_io.top_stats_build_in_config
         else:
-            arch_panel_config = (
+            arch_panel_config = [
                 config_dir if single_panel_config else config_dir.joinpath(arch)
-            )
+            ]
+            # Use restructured perf metrics in TUI analyze mode
+            if self.__args.tui and arch in ["gfx942", "gfx950"]:
+                arch_panel_config.append(
+                    f"{config.rocprof_compute_home}/rocprof_compute_tui/utils/{arch}"
+                )
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
