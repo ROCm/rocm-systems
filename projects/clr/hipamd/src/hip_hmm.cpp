@@ -397,4 +397,7 @@ hipError_t ihipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advi
 
   return hipSuccess;
 }
+
+// test
+
 } //namespace hip
