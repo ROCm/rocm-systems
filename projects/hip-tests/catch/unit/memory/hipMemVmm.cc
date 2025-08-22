@@ -54,6 +54,7 @@ TEST_CASE("Unit_hipMemVmm_Basic") {
   memAllocationProp.type = hipMemAllocationTypePinned;
   memAllocationProp.location.id = 0;
   memAllocationProp.location.type = hipMemLocationTypeDevice;
+  // memAllocationProp.requestedHandleTypes = hipMemHandleTypeNone;
 
   HIP_CHECK(hipMemGetAllocationGranularity(&granularity, &memAllocationProp,
                                            hipMemAllocationGranularityRecommended));

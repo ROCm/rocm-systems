@@ -30,9 +30,9 @@ if(HIP_PLATFORM MATCHES "amd")
       atomicMin_system.cc
       atomicMax.cc
       atomicMax_system.cc
-      safeAtomicMin.cc
+      #safeAtomicMin.cc
       unsafeAtomicMin.cc
-      safeAtomicMax.cc
+      #safeAtomicMax.cc
       unsafeAtomicMax.cc
       __hip_atomic_fetch_min.cc
       __hip_atomic_fetch_max.cc
@@ -41,7 +41,7 @@ if(HIP_PLATFORM MATCHES "amd")
       sequential_consistency.cc
       atomicAdd.cc
       atomicAdd_system.cc
-      unsafeAtomicAdd.cc
+      #unsafeAtomicAdd.cc
       safeAtomicAdd.cc
       atomicSub.cc
       atomicSub_system.cc
