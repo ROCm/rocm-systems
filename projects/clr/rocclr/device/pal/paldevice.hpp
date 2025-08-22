@@ -490,10 +490,10 @@ class Device : public NullDevice {
   //! Returns the number of available compute rings
   uint numExclusiveComputeEngines() const {
     return exclusiveComputeEnginesId_.size() +
-        ((exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) ==
-          exclusiveComputeEnginesId().end())
-             ? 1
-             : 0);
+           ((exclusiveComputeEnginesId().find(ExclusiveQueueType::RealTime1) ==
+             exclusiveComputeEnginesId().end())
+                ? 1
+                : 0);
   }
 
   //! Returns the map of available exclusive compute rings with the engine index

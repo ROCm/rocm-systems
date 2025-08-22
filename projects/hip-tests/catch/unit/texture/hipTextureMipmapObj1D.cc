@@ -59,9 +59,8 @@ static __global__ void populateMipmapNextLevelArray(hipSurfaceObject_t surfOut,
 #endif
 }
 
-template <typename T>
-__global__ void getMipmap(hipTextureObject_t texMipmap, unsigned int width, float offsetX,
-                          float lod, T* data = nullptr) {
+template <typename T> __global__ void getMipmap(hipTextureObject_t texMipmap, unsigned int width,
+                                                float offsetX, float lod, T* data = nullptr) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   float px = 1.0 / float(width);

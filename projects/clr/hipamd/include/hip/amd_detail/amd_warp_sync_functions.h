@@ -443,7 +443,7 @@ __device__ inline T __reduce_op_sync(MaskT mask, T val, BinaryOp op, WfReduce wf
     return backwardPermute(firstLane << 2, result);
   else {
     auto tmp = (static_cast<unsigned long long>(backwardPermute(firstLane << 2, result[1])) << 32) |
-        static_cast<unsigned int>(backwardPermute(firstLane << 2, result[0]));
+               static_cast<unsigned int>(backwardPermute(firstLane << 2, result[0]));
     return *reinterpret_cast<T*>(&tmp);
   }
 }

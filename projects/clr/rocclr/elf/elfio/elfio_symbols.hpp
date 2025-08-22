@@ -255,10 +255,10 @@ template <class S> class symbol_section_accessor_template {
   }
 
   //------------------------------------------------------------------------------
-  template <class T>
-  bool generic_get_symbol(Elf_Xword index, std::string& name, Elf64_Addr& value, Elf_Xword& size,
-                          unsigned char& bind, unsigned char& type, Elf_Half& section_index,
-                          unsigned char& other) const {
+  template <class T> bool generic_get_symbol(Elf_Xword index, std::string& name, Elf64_Addr& value,
+                                             Elf_Xword& size, unsigned char& bind,
+                                             unsigned char& type, Elf_Half& section_index,
+                                             unsigned char& other) const {
     bool ret = false;
 
     if (0 != symbol_section->get_data() && index < get_symbols_num()) {
@@ -287,9 +287,9 @@ template <class S> class symbol_section_accessor_template {
   }
 
   //------------------------------------------------------------------------------
-  template <class T>
-  Elf_Word generic_add_symbol(Elf_Word name, Elf64_Addr value, Elf_Xword size, unsigned char info,
-                              unsigned char other, Elf_Half shndx) {
+  template <class T> Elf_Word generic_add_symbol(Elf_Word name, Elf64_Addr value, Elf_Xword size,
+                                                 unsigned char info, unsigned char other,
+                                                 Elf_Half shndx) {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
     T entry;

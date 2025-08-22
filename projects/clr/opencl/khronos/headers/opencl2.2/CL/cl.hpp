@@ -1009,9 +1009,9 @@ inline cl_int getInfoHelper(Func f, cl_uint name, VECTOR_CLASS<T>* param, long) 
  * does not work, because when using a derived type (e.g. Context) the generic
  * template will provide a better match.
  */
-template <typename Func, typename T>
-inline cl_int getInfoHelper(Func f, cl_uint name, VECTOR_CLASS<T>* param, int,
-                            typename T::cl_type = 0) {
+template <typename Func, typename T> inline cl_int getInfoHelper(Func f, cl_uint name,
+                                                                 VECTOR_CLASS<T>* param, int,
+                                                                 typename T::cl_type = 0) {
   ::size_t required;
   cl_int err = f(name, 0, NULL, &required);
   if (err != CL_SUCCESS) {
@@ -2736,12 +2736,10 @@ template <typename IteratorType>
 cl_int copy(IteratorType startIterator, IteratorType endIterator, cl::Buffer& buffer);
 template <typename IteratorType>
 cl_int copy(const cl::Buffer& buffer, IteratorType startIterator, IteratorType endIterator);
-template <typename IteratorType>
-cl_int copy(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-            cl::Buffer& buffer);
-template <typename IteratorType>
-cl_int copy(const CommandQueue& queue, const cl::Buffer& buffer, IteratorType startIterator,
-            IteratorType endIterator);
+template <typename IteratorType> cl_int copy(const CommandQueue& queue, IteratorType startIterator,
+                                             IteratorType endIterator, cl::Buffer& buffer);
+template <typename IteratorType> cl_int copy(const CommandQueue& queue, const cl::Buffer& buffer,
+                                             IteratorType startIterator, IteratorType endIterator);
 
 
 /*! \brief Class interface for Buffer Memory Objects.
@@ -2797,9 +2795,9 @@ class Buffer : public Memory {
    * IteratorType must be random access.
    * If useHostPtr is specified iterators must represent contiguous data.
    */
-  template <typename IteratorType>
-  Buffer(IteratorType startIterator, IteratorType endIterator, bool readOnly,
-         bool useHostPtr = false, cl_int* err = NULL) {
+  template <typename IteratorType> Buffer(IteratorType startIterator, IteratorType endIterator,
+                                          bool readOnly, bool useHostPtr = false,
+                                          cl_int* err = NULL) {
     typedef typename std::iterator_traits<IteratorType>::value_type DataType;
     cl_int error;
 
@@ -2843,17 +2841,17 @@ class Buffer : public Memory {
    * IteratorType must be random access.
    * If useHostPtr is specified iterators must represent contiguous data.
    */
-  template <typename IteratorType>
-  Buffer(const Context& context, IteratorType startIterator, IteratorType endIterator,
-         bool readOnly, bool useHostPtr = false, cl_int* err = NULL);
+  template <typename IteratorType> Buffer(const Context& context, IteratorType startIterator,
+                                          IteratorType endIterator, bool readOnly,
+                                          bool useHostPtr = false, cl_int* err = NULL);
 
   /*!
    * \brief Construct a Buffer from a host container via iterators using a specified queue.
    * If useHostPtr is specified iterators must represent contiguous data.
    */
-  template <typename IteratorType>
-  Buffer(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-         bool readOnly, bool useHostPtr = false, cl_int* err = NULL);
+  template <typename IteratorType> Buffer(const CommandQueue& queue, IteratorType startIterator,
+                                          IteratorType endIterator, bool readOnly,
+                                          bool useHostPtr = false, cl_int* err = NULL);
 
   //! \brief Default constructor - initializes to NULL.
   Buffer() : Memory() {}
@@ -5314,8 +5312,8 @@ class CommandQueue : public detail::Wrapper<cl_command_queue> {
                              const VECTOR_CLASS<const void*>* mem_locs = NULL,
                              const VECTOR_CLASS<Event>* events = NULL, Event* event = NULL) const {
     cl_mem* mems = (mem_objects != NULL && mem_objects->size() > 0)
-        ? (cl_mem*)alloca(mem_objects->size() * sizeof(cl_mem))
-        : NULL;
+                       ? (cl_mem*)alloca(mem_objects->size() * sizeof(cl_mem))
+                       : NULL;
 
     if (mems != NULL) {
       for (unsigned int i = 0; i < mem_objects->size(); i++) {
@@ -5505,9 +5503,9 @@ __attribute__((weak)) CommandQueue CommandQueue::default_;
 __attribute__((weak)) volatile cl_int CommandQueue::default_error_ = CL_SUCCESS;
 #endif  // !_WIN32
 
-template <typename IteratorType>
-Buffer::Buffer(const Context& context, IteratorType startIterator, IteratorType endIterator,
-               bool readOnly, bool useHostPtr, cl_int* err) {
+template <typename IteratorType> Buffer::Buffer(const Context& context, IteratorType startIterator,
+                                                IteratorType endIterator, bool readOnly,
+                                                bool useHostPtr, cl_int* err) {
   typedef typename std::iterator_traits<IteratorType>::value_type DataType;
   cl_int error;
 
@@ -5709,9 +5707,9 @@ inline cl_int copy(const cl::Buffer& buffer, IteratorType startIterator, Iterato
  * Host to Device.
  * Uses specified queue.
  */
-template <typename IteratorType>
-inline cl_int copy(const CommandQueue& queue, IteratorType startIterator, IteratorType endIterator,
-                   cl::Buffer& buffer) {
+template <typename IteratorType> inline cl_int copy(const CommandQueue& queue,
+                                                    IteratorType startIterator,
+                                                    IteratorType endIterator, cl::Buffer& buffer) {
   typedef typename std::iterator_traits<IteratorType>::value_type DataType;
   cl_int error;
 

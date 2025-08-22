@@ -629,8 +629,8 @@ template <typename T> __FP8_DEVICE__ void e4m3_ocp_fp8_cvt(T val, float* cvt1, f
 
   __hip_fp8_e4m3 tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E4M3);
   ;
   *cvt2 = tmp1;
 #else
@@ -647,8 +647,8 @@ template <typename T> __FP8_DEVICE__ void e5m2_ocp_fp8_cvt(T val, float* cvt1, f
 
   __hip_fp8_e5m2 tmp1;
   tmp1.__x = std::is_same<T, float>::value
-      ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
-      : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
+                 ? __hip_cvt_float_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2)
+                 : __hip_cvt_double_to_fp8(val, __HIP_SATFINITE, __HIP_E5M2);
   ;
   *cvt2 = tmp1;
 #else

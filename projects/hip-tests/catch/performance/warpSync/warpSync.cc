@@ -124,8 +124,8 @@ __global__ void reduceOpSync(T* __restrict__ output, const T* __restrict__ input
   }
 }
 
-template <class T, template <typename> class Op>
-class AtomicBenchmark : public Benchmark<AtomicBenchmark<T, Op>> {
+template <class T, template <typename> class Op> class AtomicBenchmark
+    : public Benchmark<AtomicBenchmark<T, Op>> {
  public:
   void operator()(T* output, const T* input, int numItems, unsigned long long mask) {
     dim3 blockDim = {kBlockDim};
@@ -157,8 +157,8 @@ class AtomicBenchmark : public Benchmark<AtomicBenchmark<T, Op>> {
   }
 };
 
-template <class T, template <typename> class Op>
-class ReduceSyncBenchmark : public Benchmark<ReduceSyncBenchmark<T, Op>> {
+template <class T, template <typename> class Op> class ReduceSyncBenchmark
+    : public Benchmark<ReduceSyncBenchmark<T, Op>> {
  public:
   void operator()(T* output, T* input, int numItems, unsigned long long mask) {
     dim3 blockDim = {kBlockDim};
