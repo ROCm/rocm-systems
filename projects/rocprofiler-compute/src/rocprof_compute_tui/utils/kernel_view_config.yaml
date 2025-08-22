@@ -32,6 +32,9 @@ sections:
           - "2. System Speed-of-Light"
           - "3. Memory Chart"
           - "4. Roofline"
+          - "32. GPU Speed-of-Light"
+          - "33. Compute Throughput"
+          - "34. Memory Throughput"
         collapsed: true
 
   - title: "Source Level Analysis"

@@ -22,9 +22,9 @@ THE SOFTWARE.
 #include <hip_test_checkers.hh>
 #include <hip_texture_helper.hh>
 
-template <bool normalizedCoords>
-__global__ void tex1DRGBAKernel(float4* outputData, hipTextureObject_t textureObject, int width,
-                                float offsetX) {
+template <bool normalizedCoords> __global__ void tex1DRGBAKernel(float4* outputData,
+                                                                 hipTextureObject_t textureObject,
+                                                                 int width, float offsetX) {
 #if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   outputData[x] =

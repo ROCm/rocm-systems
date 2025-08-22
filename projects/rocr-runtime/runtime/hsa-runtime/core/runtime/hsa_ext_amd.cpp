@@ -881,6 +881,9 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
   if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
     alloc_flag |= core::MemoryRegion::AllocateExecutable;
 
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
     alloc_flag |= core::MemoryRegion::AllocateAsan;

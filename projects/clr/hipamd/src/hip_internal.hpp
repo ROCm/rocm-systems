@@ -327,9 +327,9 @@ class Stream : public amd::HostQueue {
   unsigned long long captureID_;
 
   static inline CommandQueue::Priority convertToQueuePriority(Priority p) {
-    return p == Priority::High ? amd::CommandQueue::Priority::High
-        : p == Priority::Low   ? amd::CommandQueue::Priority::Low
-                               : amd::CommandQueue::Priority::Normal;
+    return p == Priority::High  ? amd::CommandQueue::Priority::High
+           : p == Priority::Low ? amd::CommandQueue::Priority::Low
+                                : amd::CommandQueue::Priority::Normal;
   }
 
  public:

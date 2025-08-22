@@ -183,8 +183,8 @@ void OCLMultiQueue::open(unsigned int test, char* units, double& conversion,
                                      sizeof(maxComputeUnits), &maxComputeUnits, NULL);
   computePower *= 32 * maxComputeUnits;
   NumElements = (NumElements < static_cast<size_t>(computePower))
-      ? static_cast<size_t>(computePower)
-      : NumElements;
+                    ? static_cast<size_t>(computePower)
+                    : NumElements;
   program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed");
   error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
