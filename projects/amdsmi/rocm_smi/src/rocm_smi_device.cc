@@ -1137,7 +1137,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   GpuMetricsCache* cache_ptr = nullptr;
   {
     std::lock_guard<std::mutex> map_lk(g_gpu_metrics_cache_map_mu);
-    cache_ptr = &g_gpu_metrics_cache_map[key];  // safe now
+    cache_ptr = &g_gpu_metrics_cache_map[key];
   }
 
   // Only cache for kDevGpuMetrics
