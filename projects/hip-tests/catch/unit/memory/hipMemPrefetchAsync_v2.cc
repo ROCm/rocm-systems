@@ -20,6 +20,8 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <numaif.h>
+#include <numa.h>
 
 /**
  * Kernel to fill value for each element in the given array
@@ -39,8 +41,6 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
  *  - This test case checks the following scenarios
  *  - 1) With Location type Device
  *  - 2) With Location type Host
- *  - 3) With Location type Host Numa
- *  - 4) With Location type Host Numa Current
  * Test source
  * ------------------------
  *  - unit/memory/hipMemPrefetchAsync_v2.cc
@@ -48,7 +48,7 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
   const int N = 1024;
   const int Nbytes = N * sizeof(int);
   int value = 10;
@@ -78,6 +78,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
     }
   }
 
+#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
   SECTION("With Host") {
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
@@ -90,19 +91,79 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
       memPtr[i] = value;
     }
   }
+#endif
+
+  // Validate data
+  for (int i = 0; i < N; i++) {
+    REQUIRE(memPtr[i] == value);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(memPtr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenarios
+ *  - 1) With Location type Host Numa
+ *  - 2) With Location type Host Numa Current
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemPrefetchAsync_v2.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
+  if (numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("NUMA not available on this system");
+  }
+
+  int maxNode = numa_max_node();
+  REQUIRE(maxNode >= 0);
+
+  const int N = 1024;
+  const int Nbytes = N * sizeof(int);
+  int value = 10;
+
+  int* memPtr = nullptr;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  REQUIRE(memPtr != nullptr);
 
   SECTION("With Host NUMA") {
     hipMemLocation location;
-    location.type = hipMemLocationTypeHostNuma;
-    // Get numa nodes count and pass values based on that
-    location.id = GENERATE(0, 1);
 
-    HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
-    HIP_CHECK(hipStreamSynchronize(stream));
+    for (int node = 0; node <= maxNode; ++node) {
+      location.type = hipMemLocationTypeHostNuma;
+      location.id = node;
 
-    // Fill data in Host
-    for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      HIP_CHECK(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream));
+      HIP_CHECK(hipStreamSynchronize(stream));
+
+      // Fill data in Host
+      for (int i = 0; i < N; i++) {
+        memPtr[i] = value;
+      }
+
+      // Validate data
+      for (int i = 0; i < N; i++) {
+        REQUIRE(memPtr[i] == value);
+      }
+
+#if 0  // To work this part, fix provided in SWDEV-502329 is required
+      // verify placement
+      void* page = memPtr;
+      int status = -1;
+      int ret = move_pages(0, 1, &page, nullptr, &status, 0);
+      REQUIRE(ret == 0);
+      REQUIRE(status == node);
+#endif
     }
   }
 
@@ -117,16 +178,29 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
     for (int i = 0; i < N; i++) {
       memPtr[i] = value;
     }
-  }
 
-  // Validate data
-  for (int i = 0; i < N; i++) {
-    REQUIRE(memPtr[i] == value);
+    // Validate data
+    for (int i = 0; i < N; i++) {
+      REQUIRE(memPtr[i] == value);
+    }
+
+    // determine current CPU’s NUMA node
+    int cpu = sched_getcpu();
+    int cur_node = numa_node_of_cpu(cpu);
+    REQUIRE(cur_node >= 0);
+
+    // verify that the page is on the current node
+    void* page = memPtr;
+    int status = -1;
+    int ret = move_pages(0, 1, &page, nullptr, &status, 0);
+    REQUIRE(ret == 0);
+    REQUIRE(status == cur_node);
   }
 
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
+#endif
 
 /**
  * Test Description
@@ -136,7 +210,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Basic_Positive") {
  *  - 2) With count 0
  *  - 3) With count larger than actual size
  *  - 4) With invalid device
- *  - 5) With Invalid location
+ *  - 5) With Invalid location type(Invalid, None)
  *  - 6) With Invalid location -1
  *  - 7) With invalid numa node
  * Test source
@@ -157,7 +231,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
   HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
 
   hipMemLocation location;
-  location.type = hipMemLocationTypeHost;
+  location.type = hipMemLocationTypeDevice;
 
   SECTION("With dev_ptr as nullptr") {
     HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(nullptr, Nbytes, location, 0, stream),
@@ -184,29 +258,46 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
   }
 
 #if 0
-  SECTION("With Invalid location") {
+  /**
+   * Commenting below section due to,
+   * In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+   * In AMD, not giving expected error code : SWDEV-551254
+   */
+  SECTION("With Invalid location type Invalid, None") {
     hipMemLocation location;
-    location.type = GENERATE(hipMemLocationTypeInvalid, hipMemLocationTypeNone);
+    location.type = GENERATE(hipMemLocationTypeInvalid,
+                             hipMemLocationTypeNone);
 
     HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
                     hipErrorInvalidValue);
   }
+#endif
 
-  SECTION("With Invalid location -1") {
+#if HT_NVIDIA  // In AMD not giving expected error code : SWDEV-551254
+  SECTION("With Invalid location type -1") {
     hipMemLocation location;
     location.type = static_cast<hipMemLocationType>(-1);
 
     HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, location, 0, stream),
                     hipErrorInvalidValue);
   }
+#endif
 
+#if 0
+  /**
+   * Commenting below section due to,
+   * In NVIDIA, getting compilation issues for HostNuma Flag : SWDEV-551244
+   * In AMD, not giving expected error code : SWDEV-551254
+   */
   SECTION("With invalid numa node") {
-    hipMemLocation dstLocation;
-    dstLocation.type = hipMemLocationTypeHostNuma;
-    // Get numa nodes count and pass below
-    dstLocation.id = 2;
-    HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
-                    hipErrorInvalidDevice);
+    if (numa_available() >= 0) {
+      int maxNode = numa_max_node();
+      hipMemLocation dstLocation;
+      dstLocation.type = hipMemLocationTypeHostNuma;
+      dstLocation.id = maxNode+1;
+      HIP_CHECK_ERROR(hipMemPrefetchAsync_v2(memPtr, Nbytes, dstLocation, 0, stream),
+                      hipErrorInvalidValue);
+    }
   }
 #endif
 

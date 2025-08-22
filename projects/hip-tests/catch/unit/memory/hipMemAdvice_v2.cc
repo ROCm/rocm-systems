@@ -20,6 +20,8 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <numaif.h>
+#include <numa.h>
 
 /**
  * Kernel to fill value for each element in the given array
@@ -39,8 +41,6 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
  *  - This test case checks the following scenarios
  *  - 1) With Location type Device
  *  - 2) With Location type Host
- *  - 3) With Location type Host Numa
- *  - 4) With Location type Host Numa Current
  * Test source
  * ------------------------
  *  - unit/memory/hipMemAdvise_v2.cc
@@ -48,7 +48,7 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-TEST_CASE("Unit_hipMemAdvise_v2_Basic_Positive") {
+TEST_CASE("Unit_hipMemAdvise_v2_Device_Host") {
   const int N = 1024;
   const int Nbytes = N * sizeof(int);
   int value = 10;
@@ -77,6 +77,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Basic_Positive") {
     }
   }
 
+#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
   SECTION("With Host") {
     hipMemLocation location;
     location.type = hipMemLocationTypeHost;
@@ -87,18 +88,61 @@ TEST_CASE("Unit_hipMemAdvise_v2_Basic_Positive") {
       memPtr[i] = value;
     }
   }
+#endif
+
+  for (int i = 0; i < N; i++) {
+    REQUIRE(memPtr[i] == value);
+  }
+
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(memPtr));
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - This test case checks the following scenarios
+ *  - 1) With Location type Host Numa
+ *  - 2) With Location type Host Numa Current
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipMemAdvise_v2.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 7.1
+ */
+#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+TEST_CASE("Unit_hipMemAdvise_v2_HostNuma_HostNumaCurrent") {
+  if (numa_available() < 0) {
+    HipTest::HIP_SKIP_TEST("NUMA not available on this system");
+  }
+
+  int maxNode = numa_max_node();
+  REQUIRE(maxNode >= 0);
+
+  const int N = 1024;
+  const int Nbytes = N * sizeof(int);
+  int value = 10;
+
+  int* memPtr = nullptr;
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  HIP_CHECK(hipMallocManaged(reinterpret_cast<void**>(&memPtr), Nbytes, hipMemAttachGlobal));
+  REQUIRE(memPtr != nullptr);
 
   SECTION("With Host NUMA") {
-    hipMemLocation location;
-    location.type = hipMemLocationTypeHostNuma;
+    for (int node = 0; node <= maxNode; ++node) {
+      hipMemLocation location;
+      location.type = hipMemLocationTypeHostNuma;
+      location.id = node;
 
-    // Get numa nodes count and pass values based on that
-    location.id = GENERATE(0, 1);
+      HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
 
-    HIP_CHECK(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location));
-
-    for (int i = 0; i < N; i++) {
-      memPtr[i] = value;
+      for (int i = 0; i < N; i++) {
+        memPtr[i] = value;
+      }
     }
   }
 
@@ -120,6 +164,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Basic_Positive") {
   HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(memPtr));
 }
+#endif
 
 /**
  * Test Description
@@ -129,9 +174,9 @@ TEST_CASE("Unit_hipMemAdvise_v2_Basic_Positive") {
  *  - 2) With count 0
  *  - 3) With count larger than actual size
  *  - 4) With invalid device
- *  - 5) With Invalid location
- *  - 6) With Invalid location -1
- *  - 7) With invalid numa node
+ *  - 5) With invalid numa node
+ *  - 6) With Invalid location type(Invalid, None)
+ *  - 7) With Invalid location -1
  *  - 8) With Invalid Advise
  * Test source
  * ------------------------
@@ -151,7 +196,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
   HIP_CHECK(hipMallocManaged(&memPtr, Nbytes, hipMemAttachGlobal));
 
   hipMemLocation location;
-  location.type = hipMemLocationTypeHost;
+  location.type = hipMemLocationTypeDevice;
 
   SECTION("With dev_ptr as nullptr") {
     HIP_CHECK_ERROR(hipMemAdvise_v2(nullptr, Nbytes, hipMemAdviseSetReadMostly, location),
@@ -168,7 +213,7 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
                     hipErrorInvalidValue);
   }
 
-#if 0
+#if 0  // Commenting below sections as not giving expected error : SWDEV-551259
   SECTION("With invalid device") {
     hipMemLocation dstLocation;
     dstLocation.type = hipMemLocationTypeDevice;
@@ -178,15 +223,28 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
     HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
                     hipErrorInvalidDevice);
   }
+
+  SECTION("With invalid numa node") {
+    if (numa_available() >= 0) {
+      hipMemLocation dstLocation;
+      dstLocation.type = hipMemLocationTypeHostNuma;
+      int maxNode = numa_max_node();
+      dstLocation.id = maxNode+1;
+      HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, dstLocation),
+                      hipErrorInvalidDevice);
+    }
+  }
 #endif
 
-  SECTION("With Invalid location") {
+#if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
+  SECTION("With Invalid location type") {
     hipMemLocation location;
     location.type = GENERATE(hipMemLocationTypeInvalid, hipMemLocationTypeNone);
 
     HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
                     hipErrorInvalidValue);
   }
+#endif
 
   SECTION("With Invalid location -1") {
     hipMemLocation location;
@@ -195,17 +253,6 @@ TEST_CASE("Unit_hipMemAdvise_v2_Negative") {
     HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, location),
                     hipErrorInvalidValue);
   }
-
-#if 0
-  SECTION("With invalid numa node") {
-    hipMemLocation dstLocation;
-    dstLocation.type = hipMemLocationTypeHostNuma;
-    // Get numa nodes count and pass below
-    dstLocation.id = 2;
-    HIP_CHECK_ERROR(hipMemAdvise_v2(memPtr, Nbytes, hipMemAdviseSetReadMostly, dstLocation),
-                    hipErrorInvalidDevice);
-  }
-#endif
 
   SECTION("With Invalid Advise") {
     hipMemLocation location;
