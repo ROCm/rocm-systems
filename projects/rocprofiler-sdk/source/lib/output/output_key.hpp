@@ -37,25 +37,33 @@ namespace tool
 {
 struct output_key
 {
-    output_key(std::string _key, std::string _val, std::string _desc = {});
+    output_key(std::string _key,
+               std::string _val,
+               std::string _desc                   = {},
+               bool        _is_multiprocess_stable = true);
 
     template <typename Tp,
               typename Up                                                    = Tp,
               std::enable_if_t<!common::mpl::is_string_type<Up>::value, int> = 0>
-    output_key(std::string _key, Tp&& _val, std::string _desc = {});
+    output_key(std::string _key,
+               Tp&&        _val,
+               std::string _desc                   = {},
+               bool        _is_multiprocess_stable = true);
 
     operator std::pair<std::string, std::string>() const;
 
-    std::string key         = {};
-    std::string value       = {};
-    std::string description = {};
+    std::string key                    = {};
+    std::string value                  = {};
+    std::string description            = {};
+    bool        is_multiprocess_stable = true;
 };
 
 template <typename Tp, typename Up, std::enable_if_t<!common::mpl::is_string_type<Up>::value, int>>
-output_key::output_key(std::string _key, Tp&& _val, std::string _desc)
+output_key::output_key(std::string _key, Tp&& _val, std::string _desc, bool _is_multiprocess_stable)
 : key{std::move(_key)}
 , value{fmt::format("{}", std::forward<Tp>(_val))}
 , description{std::move(_desc)}
+, is_multiprocess_stable{_is_multiprocess_stable}
 {}
 
 std::vector<output_key>

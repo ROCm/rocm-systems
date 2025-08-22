@@ -49,5 +49,9 @@ get_mpi_rank();
 
 std::string
 format_path(std::string _fpath, const std::string& _tag = {});
+
+// Format the path for multi-process stable output, e.g. remove references to process IDs, etc.
+std::string
+format_mp_stable_path(std::string _fpath, const std::string& _tag = {});
 }  // namespace tool
 }  // namespace rocprofiler

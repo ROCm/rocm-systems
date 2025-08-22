@@ -29,6 +29,7 @@
 #include "lib/common/utility.hpp"
 
 #include <linux/limits.h>
+#include <unistd.h>
 #include <array>
 #include <fstream>
 
@@ -141,12 +142,27 @@ get_num_siblings(pid_t _id = getppid())
 {
     return get_siblings(_id).size();
 }
+
+template <typename Tp>
+Tp
+get_variable_env(Tp _default_v, std::initializer_list<std::string_view>&& _options)
+{
+    // set env variables towards end override preceding environment variables
+    auto _val = _default_v;
+    for(auto itr : _options)
+        _val = common::get_env<Tp>(itr, std::move(_val));
+    return _val;
+}
 }  // namespace
 
-output_key::output_key(std::string _key, std::string _val, std::string _desc)
+output_key::output_key(std::string _key,
+                       std::string _val,
+                       std::string _desc,
+                       bool        _is_multiprocess_stable)
 : key{std::move(_key)}
 , value{std::move(_val)}
 , description{std::move(_desc)}
+, is_multiprocess_stable{_is_multiprocess_stable}
 {}
 
 std::vector<output_key>
@@ -207,9 +223,10 @@ output_keys(std::string _tag)
     auto _pgroup_id     = fmt::format("{}", getpgid(getpid()));
     auto _session_id    = fmt::format("{}", getsid(getpid()));
     auto _proc_size     = fmt::format("{}", get_num_siblings());
-    auto _pwd_string    = common::get_env<std::string>("PWD", ".");
-    auto _slurm_job_id  = common::get_env<std::string>("SLURM_JOB_ID", "0");
     auto _slurm_proc_id = common::get_env("SLURM_PROCID", _dmp_rank);
+    auto _job_id = get_variable_env<std::string>(".UNKNOWN_JOB_ID.", {"JOB_ID", "SLURM_JOB_ID"});
+    auto _job_name =
+        get_variable_env<std::string>(".UNKNOWN_JOB_NAME.", {"JOB_NAME", "SLURM_JOB_NAME"});
 
     auto _uniq_id = _proc_id;
     if(common::get_env<int32_t>("SLURM_PROCID", -1) >= 0)
@@ -229,8 +246,12 @@ output_keys(std::string _tag)
             {"args", _args_string, "All command line arguments condensed into a single string"},
             {"tag", _tag0_string, "Basename of first command line argument"}})
     {
-        _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
-        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
+        _options.emplace_back(
+            fmt::format("%{}%", itr.key), itr.value, itr.description, itr.is_multiprocess_stable);
+        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'),
+                              itr.value,
+                              itr.description,
+                              itr.is_multiprocess_stable);
     }
 
     if(!_cmdline.empty())
@@ -239,42 +260,60 @@ output_keys(std::string _tag)
         {
             auto _v  = _cmdline.at(i);
             auto itr = output_key{fmt::format("arg{}", i), _v, fmt::format("Argument #{}", i)};
-            _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
-            _options.emplace_back(
-                fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
+            _options.emplace_back(fmt::format("%{}%", itr.key),
+                                  itr.value,
+                                  itr.description,
+                                  itr.is_multiprocess_stable);
+            _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'),
+                                  itr.value,
+                                  itr.description,
+                                  itr.is_multiprocess_stable);
         }
     }
 
     auto _launch_time = (launch_datetime) ? *launch_datetime : std::string{".UNKNOWN_LAUNCH_TIME."};
     auto _launch_date = (launch_date) ? *launch_date : std::string{".UNKNOWN_LAUNCH_DATE."};
     auto _hostname    = get_hostname();
+    auto _user        = common::get_env("USER", getlogin());
+    auto _cwd         = fs::absolute(fs::current_path()).lexically_normal().string();
+    auto _pwd = fs::absolute(fs::path{common::get_env("PWD", _cwd)}).lexically_normal().string();
 
     for(auto&& itr : std::initializer_list<output_key>{
             {"hostname", _hostname, "Network hostname"},
-            {"pid", _proc_id, "Process identifier"},
-            {"ppid", _parent_id, "Parent process identifier"},
-            {"pgid", _pgroup_id, "Process group identifier"},
-            {"psid", _session_id, "Process session identifier"},
+            {"pid", _proc_id, "Process identifier", false},
+            {"ppid", _parent_id, "Parent process identifier", false},
+            {"pgid", _pgroup_id, "Process group identifier", false},
+            {"psid", _session_id, "Process session identifier", false},
             {"psize", _proc_size, "Number of sibling process"},
-            {"job", _slurm_job_id, "SLURM_JOB_ID env variable"},
-            {"rank", _slurm_proc_id, "MPI/UPC++ rank"},
+            {"job", _job_id, "SLURM_JOB_ID or JOB_ID env variable"},
+            {"job_name", _job_name, "SLURM_JOB_NAME or JOB_NAME env variable"},
+            {"rank", _slurm_proc_id, "MPI/UPC++ rank", false},
             {"size", _dmp_size, "MPI/UPC++ size"},
-            {"nid", _uniq_id, "%rank% if possible, otherwise %pid%"},
-            {"cwd", fs::current_path().string(), "Current working path"},
+            {"nid", _uniq_id, "%rank% if possible, otherwise %pid%", false},
+            {"cwd", _cwd, "Current working path"},
+            {"pwd", _pwd, "$env{PWD} if set, otherwise %cwd%"},
+            {"user", _user, "$env{USER} if set, otherwise %username%"},
             {"launch_date", _launch_date, "Date according to date format ROCPROF_DATE_FORMAT"},
-            {"launch_time", _launch_time, "Date and/or time according to ROCPROF_TIME_FORMAT"},
+            {"launch_time",
+             _launch_time,
+             "Date and/or time according to ROCPROF_TIME_FORMAT",
+             false},
         })
     {
-        _options.emplace_back(fmt::format("%{}%", itr.key), itr.value, itr.description);
-        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'), itr.value, itr.description);
+        _options.emplace_back(
+            fmt::format("%{}%", itr.key), itr.value, itr.description, itr.is_multiprocess_stable);
+        _options.emplace_back(fmt::format("{}{}{}", '{', itr.key, '}'),
+                              itr.value,
+                              itr.description,
+                              itr.is_multiprocess_stable);
     }
 
     for(auto&& itr : std::initializer_list<output_key>{
             {"%h", _hostname, "Shorthand for %hostname%"},
-            {"%p", _proc_id, "Shorthand for %pid%"},
-            {"%j", _slurm_job_id, "Shorthand for %job%"},
-            {"%r", _slurm_proc_id, "Shorthand for %rank%"},
-            {"%s", _dmp_size, "Shorthand for %size"},
+            {"%p", _proc_id, "Shorthand for %pid%", false},
+            {"%j", _job_id, "Shorthand for %job%"},
+            {"%r", _slurm_proc_id, "Shorthand for %rank%", false},
+            {"%s", _dmp_size, "Shorthand for %size%"},
         })
     {
         _options.emplace_back(itr);

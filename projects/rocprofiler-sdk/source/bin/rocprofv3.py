@@ -276,7 +276,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-o",
         "--output-file",
-        help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
+        help="For the output file name. If nothing specified default path is `{hostname}/{pid}`",
         default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
         type=str,
         required=False,
@@ -284,7 +284,7 @@ For attachment profiling of running processes:
     io_options.add_argument(
         "-d",
         "--output-directory",
-        help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
+        help="For adding output path where the output files will be saved. If nothing specified default path is `{pwd}`",
         default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
         type=str,
         required=False,
@@ -1155,9 +1155,10 @@ def run(app_args, args, **kwargs):
     )
 
     _output_file = args.output_file
-    _output_path = (
-        args.output_directory if args.output_directory is not None else os.getcwd()
-    )
+    _output_path = args.output_directory
+    # _output_path = (
+    #     args.output_directory if args.output_directory is not None else os.path.join(os.getcwd(), "rocprofv3-output")
+    # )
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)

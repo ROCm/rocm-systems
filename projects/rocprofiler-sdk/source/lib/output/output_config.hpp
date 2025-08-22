@@ -73,13 +73,14 @@ struct output_config
     bool                     group_by_queue              = false;
     bool                     annotate_args               = false;
     bool                     annotate_pmc                = false;
+    bool                     require_mp_stable_folder    = true;
     uint64_t                 stats_summary_unit_value    = 1;
     size_t                   perfetto_shmem_size_hint    = defaults::perfetto_shmem_size_hint_kb;
     size_t                   perfetto_buffer_size        = defaults::perfetto_buffer_size_kb;
     agent_indexing           agent_index_value           = agent_indexing::logical_node;
     std::string              stats_summary_unit          = "nsec";
-    std::string              output_path                 = "%cwd%";
-    std::string              output_file                 = "%hostname%/%pid%";
+    std::string              output_path                 = "{pwd}";
+    std::string              output_file                 = "{hostname}/{pid}";
     std::string              tmp_directory               = output_path;
     std::string              stats_summary_file          = "stderr";
     std::string              perfetto_backend            = "inprocess";

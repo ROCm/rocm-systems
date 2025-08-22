@@ -147,16 +147,117 @@ format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)
 }
 
 std::string
-format_path(std::string&& _fpath, const std::vector<output_key>& _keys)
+format_path(std::string&& _fpath, const std::vector<output_key>& _keys, bool require_mp_stable)
 {
     if(_fpath.find('%') == std::string::npos && _fpath.find('{') == std::string::npos &&
        _fpath.find('$') == std::string::npos)
         return _fpath;
 
+    // save the original path
     auto _ref = _fpath;
-    _fpath    = format_path_impl(std::move(_fpath), _keys);
 
-    return (_fpath == _ref) ? _fpath : format_path(std::move(_fpath), _keys);
+    // removes multiprocess unstable keys
+    if(require_mp_stable)
+    {
+        for(const auto& kitr : _keys)
+        {
+            if(!kitr.is_multiprocess_stable)
+            {
+                auto pos = std::string::npos;
+                while((pos = _fpath.find(kitr.key)) != std::string::npos)
+                {
+                    constexpr auto join_chars = std::string_view{".-_/:;'"};
+
+                    auto _replace = [&_fpath](
+                        std::string_view _key, auto _offset, std::string_view _log_label) -> auto&
+                    {
+                        // verify key is found in correct position before removing
+                        if(auto _pos = _fpath.find(_key, _offset);
+                           _pos != std::string::npos && _pos < _offset + _key.length())
+                        {
+                            // save for logging
+                            auto _key_ref = std::string{_key};
+                            _fpath        = _fpath.replace(_pos, _key.length(), std::string{});
+                            ROCP_INFO << fmt::format("[{:<16}] replace(\"{}\", {}) -> \"{}\"",
+                                                     _log_label,
+                                                     _key_ref,
+                                                     _offset,
+                                                     _fpath);
+                        }
+                        return _fpath;
+                    };
+
+                    // preceding character
+                    auto _prefix = std::string{};
+                    if(pos > 0) _prefix = _fpath.substr(pos - 1, 1);
+
+                    // succeeding character
+                    auto _suffix = std::string{};
+                    if(pos + kitr.key.length() + 1 < _fpath.length())
+                        _suffix = _fpath.substr(pos + kitr.key.length(), 1);
+
+                    ROCP_TRACE << fmt::format(
+                        "key = '{}', input = '{}', prefix = '{}', suffix = '{}'",
+                        kitr.key,
+                        _fpath,
+                        _prefix,
+                        _suffix);
+
+                    auto _orig_fpath = _fpath;
+                    _fpath           = _replace(kitr.key, pos, "key remove");
+
+                    // if the preceding and succeeding characters are the same, delete one of them,
+                    // e.g. out-{rank}-{size} should become out-{size}, not out--{size}
+                    //
+                    // if the preceding and succeeding characters are both join characters, delete
+                    // trailing character, e.g. out.{rank}_{size} should become out.{size}, not
+                    // out._{size}
+                    if(!_prefix.empty() && !_suffix.empty())
+                    {
+                        if(_prefix == _suffix)
+                        {
+                            _fpath = _replace(_prefix, pos - 1, "equal remove");
+                        }
+                        else if(_prefix.find_first_of(join_chars) != std::string::npos ||
+                                _suffix.find_first_of(join_chars) != std::string::npos)
+                        {
+                            _fpath = _replace(_suffix, pos, "either remove");
+                        }
+                    }
+                    // if the preceding character is now the last character in the string and a join
+                    // character, remove it
+                    else if(!_prefix.empty() && _suffix.empty() && _fpath.length() > 1)
+                    {
+                        if(_prefix.find_first_of(join_chars) != std::string::npos)
+                        {
+                            _fpath = _replace(_prefix, _fpath.length() - 1, "preceding remove");
+                        }
+                    }
+                    // if the succeeding character is now the first character in the string and a
+                    // join character, remove it
+                    else if(_prefix.empty() && !_suffix.empty() && _fpath.length() > 1)
+                    {
+                        if(_suffix.find_first_of(join_chars) != std::string::npos)
+                        {
+                            _fpath = _replace(_suffix, 0, "succeeding remove");
+                        }
+                    }
+
+                    ROCP_INFO << fmt::format("format_path remove non-multi-process stable key '{}' "
+                                             "at position {} :: {} -> {}",
+                                             kitr.key,
+                                             pos,
+                                             _orig_fpath,
+                                             _fpath);
+                }
+            }
+        }
+    }
+
+    // substitute any output keys
+    _fpath = format_path_impl(std::move(_fpath), _keys);
+
+    return (_fpath == _ref) ? _fpath : format_path(std::move(_fpath), _keys, require_mp_stable);
 }
 
 template <typename Tp>
@@ -179,7 +280,8 @@ get_mpi_size()
                                            "MPI_LOCALNRANKS",
                                            "MPI_NRANKS",
                                            "MV2_COMM_WORLD_SIZE",
-                                           "OMPI_COMM_WORLD_SIZE"});
+                                           "OMPI_COMM_WORLD_SIZE",
+                                           "SLURM_NPROCS"});
     return _v;
 }
 
@@ -191,14 +293,21 @@ get_mpi_rank()
                                            "MPI_LOCALRANKID",
                                            "MPI_RANKID",
                                            "MV2_COMM_WORLD_RANK",
-                                           "OMPI_COMM_WORLD_RANK"});
+                                           "OMPI_COMM_WORLD_RANK",
+                                           "SLURM_PROCID"});
     return _v;
 }
 
 std::string
 format_path(std::string _fpath, const std::string& _tag)
 {
-    return format_path(std::move(_fpath), output_keys(_tag));
+    return format_path(std::move(_fpath), output_keys(_tag), false);
+}
+
+std::string
+format_mp_stable_path(std::string _fpath, const std::string& _tag)
+{
+    return format_path(std::move(_fpath), output_keys(_tag), true);
 }
 }  // namespace tool
 }  // namespace rocprofiler

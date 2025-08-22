@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "generateRocpd.hpp"
+#include "format_path.hpp"
 #include "metadata.hpp"
 #include "output_stream.hpp"
 #include "stream_info.hpp"
@@ -575,8 +576,22 @@ write_rocpd(
         get_uuid() = fmt::format("{}", replace_all(uuid_v7, '-', "_"));
 
         // reading schemata
-        auto table_schema = read_schema_file(ROCPD_SQL_SCHEMA_ROCPD_TABLES);
-        auto output_file  = get_output_filename(cfg, "results", "db");
+        auto table_schema  = read_schema_file(ROCPD_SQL_SCHEMA_ROCPD_TABLES);
+        auto output_folder = get_output_folder(cfg, "results", "rpdb");
+
+        if(auto output_index = fs::path{output_folder} / "index.yml"; fs::exists(output_index))
+        {
+            ROCP_CI_LOG(WARNING) << fmt::format(
+                "rocpd index file already exists at {}. User should remove it before proceeding.",
+                output_index.string());
+        }
+
+        auto output_file =
+            fs::path{fs::path{output_folder} /
+                     format_path(fmt::format(
+                         "{}.{}.{}.{}.db", "{hostname}", "{ppid}", "{pid}", get_uuid()))}
+                .string();
+
         if(fs::exists(output_file)) fs::remove(output_file);
 
         SQLITE3_CHECK(sqlite3_open_v2(

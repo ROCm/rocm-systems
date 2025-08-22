@@ -24,6 +24,7 @@
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/output/format_path.hpp"
 
 #include <fmt/core.h>
 #include <fmt/format.h>
@@ -85,6 +86,58 @@ get_output_filename(const output_config& cfg, std::string_view fname, std::strin
         ROCP_FATAL << fmt::format(
             "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
             output_path.string());
+    }
+
+    return _ofname;
+}
+
+std::string
+get_output_folder(const output_config& cfg, std::string_view fname, std::string_view ext)
+{
+    // add a period to provided file extension if necessary
+    constexpr auto period   = std::string_view{"."};
+    constexpr auto noperiod = std::string_view{};
+    const auto     _ext =
+        fmt::format("{}{}", (!ext.empty() && ext.find('.') != 0) ? period : noperiod, ext);
+
+    bool force_mp_stable = cfg.require_mp_stable_folder;
+    auto _format_path    = [force_mp_stable](auto _path) {
+        return (force_mp_stable) ? tool::format_mp_stable_path(std::string{_path})
+                                    : tool::format_path(std::string{_path});
+    };
+
+    auto output_path   = _format_path(cfg.output_path);
+    auto output_prefix = _format_path(cfg.output_file);
+
+    if(fs::exists(fs::path{output_path}) && !fs::is_directory(fs::status(fs::path{output_path})))
+    {
+        ROCP_FATAL << fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", output_path);
+    }
+    else if(!fs::exists(fs::path{output_path}))
+    {
+        fs::create_directories(fs::path{output_path});
+    }
+
+    if(!_ext.empty())
+    {
+        if(auto extpos = fname.rfind(_ext);
+           extpos < fname.size() && extpos + _ext.size() == fname.size())
+            fname = fname.substr(0, extpos);
+    }
+
+    auto _ofname =
+        _format_path(fs::path{output_path} / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+
+    // the prefix may contain a subdirectory
+    if(!fs::exists(fs::path{_ofname}))
+    {
+        fs::create_directories(fs::path{_ofname});
+    }
+    else if(fs::exists(fs::path{_ofname}) && !fs::is_directory(fs::status(fs::path{_ofname})))
+    {
+        ROCP_FATAL << fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory", output_path);
     }
 
     return _ofname;

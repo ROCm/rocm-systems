@@ -92,6 +92,9 @@ struct output_stream
 std::string
 get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext);
 
+std::string
+get_output_folder(const output_config& cfg, std::string_view fname, std::string_view ext);
+
 output_stream
 get_output_stream(const output_config& cfg,
                   std::string_view     fname,

@@ -76,3 +76,7 @@ target_compile_definitions(rocprofiler-sdk-output-library
                            PRIVATE PROJECT_BINARY_DIR="${PROJECT_BINARY_DIR}")
 
 add_subdirectory(sql)
+
+if(ROCPROFILER_BUILD_TESTS)
+    add_subdirectory(tests)
+endif()
