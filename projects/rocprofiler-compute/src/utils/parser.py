@@ -25,11 +25,13 @@
 
 import ast
 import json
+import multiprocessing
 import re
 import sys
 import warnings
 from collections import defaultdict
 from pathlib import Path
+from typing import Union
 
 import astunparse
 import numpy as np
@@ -388,18 +390,16 @@ def build_eval_string(equation, coll_level, config):
     # correct column name/label in df with [], such as TCC_HIT[0],
     # the target is df['TCC_HIT[0]']
     s = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", s)
-    # use .get() to catch any potential KeyErrors
-    s = re.sub(r"raw_pmc_df\['(.*?)']", r'raw_pmc_df.get("\1")', s)
     # print("--- intermediate string: ", s)
     # apply coll_level
     if config.get("format_rocprof_output") == "rocpd":
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
         s = re.sub("SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
         s = re.sub(
-            r"raw_pmc_df", "raw_pmc_df.get('" + schema.pmc_perf_file_prefix + "')", s
+            r"raw_pmc_df", "raw_pmc_df['" + schema.pmc_perf_file_prefix + "']", s
         )
     else:
-        s = re.sub(r"raw_pmc_df", "raw_pmc_df.get('" + coll_level + "')", s)
+        s = re.sub(r"raw_pmc_df", "raw_pmc_df['" + coll_level + "']", s)
     # print("--- build_eval_string, return: ", s)
     return s
 
@@ -768,6 +768,57 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
+def init_metric_evaluator(
+    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict
+) -> None:
+    if isinstance(raw_pmc_df, dict):
+        raw_pmc_df_keys = set(raw_pmc_df.keys())
+
+    elif isinstance(raw_pmc_df, pd.DataFrame):
+        raw_pmc_df_keys = set(raw_pmc_df.columns.get_level_values(0))
+
+    else:
+        raise ValueError(f"Unknown `raw_pmc_df` type '{type(raw_pmc_df)}'.")
+
+    raw_pmc_df_items = {f"raw_pmc_df_{key}": raw_pmc_df[key] for key in raw_pmc_df_keys}
+
+    # The globals here are not shared across all processes,
+    # they exist only within the subprocess's context,
+    # and their lifetime ends when the process terminates.
+    # The process-local globals are used for performance optimization.
+    globals().update(raw_pmc_df_items)
+    globals().update(ammolite_vars)
+
+
+def run_metric_evaluator(row_expr: str) -> str:
+    try:
+        # cache dataframes of 'raw_pmc_df'
+        # this may replace some KeyErrors with NameErrors
+        # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
+        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", row_expr)
+        out = eval(compile(row_expr, "<string>", "eval"))
+
+        if np.isnan(out):
+            return ""
+
+        else:
+            return out
+
+    except (TypeError, NameError, KeyError) as e:
+        if "empirical_peak" in str(e):
+            console_warning(f"Missing empirical peak data: {e}. Using empty value.")
+            return ""
+        else:
+            return ""
+
+    except AttributeError as ae:
+        if str(ae) == "'NoneType' object has no attribute 'get'":
+            return ""
+
+        else:
+            console_error("analysis", str(ae))
+
+
 @demarcate
 def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
     """
@@ -913,6 +964,8 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
         except TypeError:
             ammolite__build_in[key] = None
+        except KeyError:
+            ammolite__build_in[key] = None
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
@@ -930,12 +983,17 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
         except TypeError:
             ammolite__build_in[key] = None
+        except KeyError:
+            ammolite__build_in[key] = None
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
     ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]  # noqa: F841 - Ruff: var utilized during runtime
     ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]  # noqa: F841 - Ruff: var utilized during runtime
     ammolite__hbmBandwidth = ammolite__build_in["hbmBandwidth"]  # noqa: F841 - Ruff: var utilized during runtime
+
+    row_expr_indexes = []
+    row_exprs = []
 
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(
@@ -950,6 +1008,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                     if expr in schema.supported_field:
                         if expr.lower() != "alias":
                             if row[expr]:
+                                row_expr_indexes.append((id, idx, expr))
+                                row_exprs.append(row[expr])
+
                                 if debug:  # debug won't impact the regular calc
                                     print("~" * 40 + "\nExpression:")
                                     print(expr, "=", row[expr])
@@ -973,15 +1034,22 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                             m = re.match(
                                                 r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", c
                                             )
-                                            t = raw_pmc_df[m.group(1)][  # noqa: F841
-                                                m.group(2)
-                                            ].to_list()
-                                            print(c)
-                                            print(
-                                                raw_pmc_df[m.group(1)][
+                                            try:
+                                                t = raw_pmc_df[m.group(1)][  # noqa: F841
                                                     m.group(2)
                                                 ].to_list()
-                                            )
+                                                print(c)
+                                                print(
+                                                    raw_pmc_df[m.group(1)][
+                                                        m.group(2)
+                                                    ].to_list()
+                                                )
+                                            except KeyError as ke:
+                                                console_warning(
+                                                    "Skipping entry. "
+                                                    "Encountered a missing "
+                                                    "key\n{}".format(str(ke))
+                                                )
                                             # print(
                                             #     tabulate(raw_pmc_df[m.group(1)][
                                             #         m.group(2)],
@@ -1002,6 +1070,12 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                                 np.nan,
                                             )
                                         )
+                                    except KeyError as ke:
+                                        # We can't guarantee that [] accesses are safe.
+                                        console_warning(
+                                            "Skipping entry. Encountered a missing "
+                                            "key\n{}".format(str(ke))
+                                        )
                                     except AttributeError as ae:
                                         if (
                                             str(ae)
@@ -1014,36 +1088,30 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                             )
                                         else:
                                             console_error("analysis", str(ae))
-
-                                try:
-                                    out = eval(compile(row[expr], "<string>", "eval"))
-
-                                    if np.isnan(out):
-                                        row[expr] = ""
-                                    else:
-                                        row[expr] = out
-                                except (TypeError, NameError) as e:
-                                    if "empirical_peak" in str(e):
-                                        console_warning(
-                                            f"Missing empirical peak data: {e}. "
-                                            "Using empty value."
-                                        )
-                                    row[expr] = ""
-                                except AttributeError as ae:
-                                    if (
-                                        str(ae)
-                                        == "'NoneType' object has no attribute 'get'"
-                                    ):
-                                        row[expr] = ""
-                                    else:
-                                        console_error("analysis", str(ae))
-
                             else:
                                 # If not insert nan, the whole col might be treated
                                 # as string but not nubmer if there is NONE
                                 row[expr] = ""
 
             # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
+
+    ammolite_vars = {
+        key: val for key, val in locals().items() if key.startswith("ammolite__")
+    }
+
+    # Empirically, 16 is about as much as we need.
+    processes = min(16, multiprocessing.cpu_count() // 2)
+
+    # breakpoint()
+    with multiprocessing.Pool(
+        processes=processes,
+        initializer=init_metric_evaluator,
+        initargs=(raw_pmc_df, ammolite_vars),
+    ) as pool:
+        outs = pool.map(run_metric_evaluator, row_exprs)
+
+    for (df_id, row, col), out in zip(row_expr_indexes, outs):
+        dfs[df_id].loc[row, col] = out
 
 
 @demarcate
