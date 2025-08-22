@@ -2420,7 +2420,8 @@ void Device::fillHwSampler(uint32_t state, void* hwState, uint32_t hwStateSize,
   iDev()->CreateSamplerSrds(1, &samplerInfo, hwState);
 }
 
-void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg) const {
+void* Device::hostAlloc(size_t size, size_t alignment, MemorySegment mem_seg,
+                        const void* agentInfo) const {
   // for discrete gpu, we only reserve,no commit yet.
   return amd::Os::reserveMemory(nullptr, size, alignment, amd::Os::MEM_PROT_NONE);
 }
