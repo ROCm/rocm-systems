@@ -35,4 +35,4 @@ set(OCCUPANCY ../sample/occupancy.hip)
 set_source_files_properties(${OCCUPANCY} PROPERTIES LANGUAGE HIP)
 add_executable(occupancy ${OCCUPANCY})
 set_target_properties(occupancy PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                ${CMAKE_SOURCE_DIR}/tests)
+                                           ${CMAKE_SOURCE_DIR}/tests)
