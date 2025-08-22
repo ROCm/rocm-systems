@@ -1010,6 +1010,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                     if expr in schema.supported_field:
                         if expr.lower() != "alias":
                             if row[expr]:
+                                row_expr_indexes.append((id, idx, expr))
+                                row_exprs.append(row[expr])
+                                
                                 if debug:  # debug won't impact the regular calc
                                     print("~" * 40 + "\nExpression:")
                                     print(expr, "=", row[expr])
@@ -1063,7 +1066,8 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                     except TypeError:
                                         console_warning(
                                             "Skipping entry. Encountered a missing "
-                                            "counter\n{} has been assigned to None\n{}".format(
+                                            "counter\n"
+                                            "{} has been assigned to None\n{}".format(
                                                 expr,
                                                 np.nan,
                                             )
@@ -1086,8 +1090,6 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                             )
                                         else:
                                             console_error("analysis", str(ae))
-                                row_expr_indexes.append((id, idx, expr))
-                                row_exprs.append(row[expr])
                             else:
                                 # If not insert nan, the whole col might be treated
                                 # as string but not nubmer if there is NONE
@@ -1152,7 +1154,8 @@ def apply_filters(workload, dir, is_gui, debug):
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
                     console_error(
-                        "{} is an invalid kernel id. Please enter an id between 0-{}".format(
+                        "{} is an invalid kernel id. "
+                        "Please enter an id between 0-{}".format(
                             kernel_id,
                             len(kernels_df["Kernel_Name"]) - 1,
                         )
