@@ -65,13 +65,16 @@
 
 // a global instance of std::mutex to protect data passed during threads
 std::mutex myMutex;
-static bool initialized_lib = false;
+
+// To enable multiple init and shutdown calls, the reference count is used
+// to track the number of times the library has been initialized.
+static int init_ref_count = 0;
 
 #define	SIZE	10
 char proc_id[SIZE] = "\0";
 
 #define AMDSMI_CHECK_INIT() do { \
-	if (!initialized_lib) { \
+	if (init_ref_count == 0) { \
 		return AMDSMI_STATUS_NOT_INIT; \
 	} \
 } while (0)
@@ -178,25 +181,31 @@ amdsmi_status_t rsmi_wrapper(F && f,
 
 amdsmi_status_t
 amdsmi_init(uint64_t flags) {
-    if (initialized_lib) {
+    if (init_ref_count > 0 ) {
+        init_ref_count++;
         return AMDSMI_STATUS_SUCCESS;
     }
 
     amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().init(flags);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        initialized_lib = true;
+        init_ref_count++;
     }
     return status;
 }
 
 amdsmi_status_t
 amdsmi_shut_down() {
-    if (!initialized_lib)
+    if (init_ref_count == 0) {
         return AMDSMI_STATUS_SUCCESS;
-    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        initialized_lib = false;
     }
+    // Decrement the reference count
+    init_ref_count--;
+    // If the reference count is still greater than 0, return success
+    if (init_ref_count > 0) {
+        return AMDSMI_STATUS_SUCCESS;
+    }
+    amdsmi_status_t status = amd::smi::AMDSmiSystem::getInstance().cleanup();
+
     return status;
 }
 
@@ -1045,7 +1054,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint64_t>::max());
-    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->acc_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint64_t>::max());
     fill_2d_array(violation_status->acc_low_utilization,
         std::numeric_limits<uint64_t>::max());
@@ -1054,7 +1063,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->per_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint64_t>::max());
-    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->per_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint64_t>::max());
     fill_2d_array(violation_status->per_low_utilization,
         std::numeric_limits<uint64_t>::max());
@@ -1063,7 +1072,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     fill_2d_array(violation_status->active_gfx_clk_below_host_limit_pwr,
         std::numeric_limits<uint8_t>::max());
-    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thrm,
+    fill_2d_array(violation_status->active_gfx_clk_below_host_limit_thm,
         std::numeric_limits<uint8_t>::max());
     fill_2d_array(violation_status->active_low_utilization,
         std::numeric_limits<uint8_t>::max());
@@ -1175,7 +1184,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     };
     copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_pwr,
                     &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_ppt_acc);
-    copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_thrm,
+    copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_gfx_clk_below_host_limit_thm,
                     &amdsmi_gpu_xcp_metrics_t::gfx_below_host_limit_thm_acc);
     copy_xcp_metric(metric_info_b.xcp_stats, violation_status->acc_low_utilization,
                     &amdsmi_gpu_xcp_metrics_t::gfx_low_utilization_acc);
@@ -1419,13 +1428,13 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         metric_members,
         {
             std::ref(violation_status->per_gfx_clk_below_host_limit_pwr),
-            std::ref(violation_status->per_gfx_clk_below_host_limit_thrm),
+            std::ref(violation_status->per_gfx_clk_below_host_limit_thm),
             std::ref(violation_status->per_low_utilization),
             std::ref(violation_status->per_gfx_clk_below_host_limit_total)
         },
         {
             std::ref(violation_status->active_gfx_clk_below_host_limit_pwr),
-            std::ref(violation_status->active_gfx_clk_below_host_limit_thrm),
+            std::ref(violation_status->active_gfx_clk_below_host_limit_thm),
             std::ref(violation_status->active_low_utilization),
             std::ref(violation_status->active_gfx_clk_below_host_limit_total)
         });
@@ -1492,6 +1501,15 @@ amdsmi_status_t amdsmi_reset_gpu_fan(amdsmi_processor_handle processor_handle,
 
 amdsmi_status_t amdsmi_set_gpu_fan_speed(amdsmi_processor_handle processor_handle,
                                 uint32_t sensor_ind, uint64_t speed) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+                                    
     return rsmi_wrapper(rsmi_dev_fan_speed_set, processor_handle, 0,
                         sensor_ind, speed);
 }
@@ -3383,18 +3401,35 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle,
 }
 
 amdsmi_status_t
- amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
+amdsmi_set_power_cap(amdsmi_processor_handle processor_handle,
             uint32_t sensor_ind, uint64_t cap) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+                
     return rsmi_wrapper(rsmi_dev_power_cap_set, processor_handle, 0,
             sensor_ind, cap);
 }
 
 amdsmi_status_t
- amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle processor_handle,
+amdsmi_get_gpu_power_profile_presets(amdsmi_processor_handle processor_handle,
                         uint32_t sensor_ind,
                         amdsmi_power_profile_status_t *status) {
     AMDSMI_CHECK_INIT();
     // nullptr api supported
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
 
     return rsmi_wrapper(rsmi_dev_power_profile_presets_get, processor_handle, 0,
                     sensor_ind, reinterpret_cast<rsmi_power_profile_status_t*>(status));
@@ -3407,8 +3442,17 @@ amdsmi_status_t amdsmi_set_gpu_perf_determinism_mode(
 }
 
 amdsmi_status_t
- amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle,
+amdsmi_set_gpu_power_profile(amdsmi_processor_handle processor_handle,
         uint32_t reserved, amdsmi_power_profile_preset_masks_t profile) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+
     return rsmi_wrapper(rsmi_dev_power_profile_set, processor_handle, 0,
                 reserved,
                 static_cast<rsmi_power_profile_preset_masks_t>(profile));
@@ -3434,6 +3478,15 @@ amdsmi_status_t
 
 amdsmi_status_t  amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_handle,
                 uint64_t bw_bitmask) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+                    
     return rsmi_wrapper(rsmi_dev_pci_bandwidth_set, processor_handle, 0,
                         bw_bitmask);
 }
@@ -3530,6 +3583,14 @@ amdsmi_status_t  amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
             return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+
     return rsmi_wrapper(rsmi_dev_gpu_clk_freq_set, processor_handle, 0,
                     static_cast<rsmi_clk_type_t>(clk_type), freq_bitmask);
 }
@@ -3610,6 +3671,15 @@ amdsmi_status_t amdsmi_get_gpu_memory_usage(amdsmi_processor_handle processor_ha
 amdsmi_status_t amdsmi_get_gpu_overdrive_level(
             amdsmi_processor_handle processor_handle,
             uint32_t *od) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+
     return rsmi_wrapper(rsmi_dev_overdrive_level_get, processor_handle, 0, od);
 }
 
@@ -3621,6 +3691,15 @@ amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(
 
 amdsmi_status_t  amdsmi_set_gpu_overdrive_level(
             amdsmi_processor_handle processor_handle, uint32_t od) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+
     return rsmi_wrapper(rsmi_dev_overdrive_level_set_v1, processor_handle, 0, od);
 }
 amdsmi_status_t  amdsmi_get_gpu_pci_replay_counter(
@@ -3675,6 +3754,15 @@ amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handl
                                     uint64_t minclkvalue,
                                     uint64_t maxclkvalue,
                                     amdsmi_clk_type_t clkType) {
+
+    // Bare Metal and passthrough only feature
+    amdsmi_virtualization_mode_t virt_mode;
+    if (amdsmi_get_gpu_virtualization_mode(processor_handle, &virt_mode) == AMDSMI_STATUS_SUCCESS) {
+        if (virt_mode == AMDSMI_VIRTUALIZATION_MODE_GUEST) {
+        return AMDSMI_STATUS_NOT_SUPPORTED;
+        }
+    }
+                                        
     return rsmi_wrapper(rsmi_dev_clk_range_set, processor_handle, 0,
                 minclkvalue, maxclkvalue,
                 static_cast<rsmi_clk_type_t>(clkType));
@@ -4792,7 +4880,7 @@ amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
 }
 
 static const std::map<amdsmi_virtualization_mode_t, std::string>
-  virtualization_mode_map = {
+virtualization_mode_map = {
   {AMDSMI_VIRTUALIZATION_MODE_UNKNOWN, "UNKNOWN"},
   {AMDSMI_VIRTUALIZATION_MODE_BAREMETAL, "BAREMETAL"},
   { AMDSMI_VIRTUALIZATION_MODE_HOST, "HOST"},

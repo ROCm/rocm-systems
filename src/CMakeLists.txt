@@ -111,7 +111,3 @@ install(
     FILES ${PROJECT_SOURCE_DIR}/include/amd_smi/amdsmi.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
     COMPONENT dev)
-install(
-    FILES ${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi/kfd_ioctl.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/amd_smi
-    COMPONENT dev)

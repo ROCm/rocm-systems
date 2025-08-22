@@ -62,6 +62,8 @@ using namespace amd::smi;
 namespace amd::smi
 {
 
+std::mutex GpuMetricsBase_t::s_base_tbl_mu;
+
 constexpr uint16_t join_metrics_version(uint8_t format_rev, uint8_t content_rev)
 {
   return static_cast<uint16_t>((format_rev << 8 | content_rev));
@@ -509,11 +511,9 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
        << stringfy_metric_header_version(disjoin_metrics_version(gpu_metrics_version)) << " |";
     LOG_TRACE(ss);
 
-    // firmware_timestamp is at 10ns resolution
-    ss << __PRETTY_FUNCTION__ << " | ======= Changes ======= "
-       << " | {m_firmware_timestamp} from: " << m_gpu_metrics_tbl.m_firmware_timestamp
-       << " to: " << (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
-    m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    // firmware_timestamp is at 10ns resolution; leave as-is.
+    ss << __PRETTY_FUNCTION__ << " | firmware_timestamp (10ns) = "
+        << m_gpu_metrics_tbl.m_firmware_timestamp;
     LOG_DEBUG(ss);
   };
 
@@ -744,10 +744,12 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
      << " | Returning = " << getRSMIStatusString(status_code) << " |";
   LOG_TRACE(ss);
 
-  // Copy to base class
-  std::copy(m_metrics_dynamic_tbl.begin(), m_metrics_dynamic_tbl.end(),
-            std::inserter(GpuMetricsBase_t::m_base_metrics_dynamic_tbl,
-                          GpuMetricsBase_t::m_base_metrics_dynamic_tbl.end()));
+
+  {
+    std::lock_guard<std::mutex> lk(s_base_tbl_mu);
+    // Copy to base class
+    this->m_base_metrics_dynamic_tbl = m_metrics_dynamic_tbl;
+  }
 
   return status_code;
 }

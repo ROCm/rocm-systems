@@ -19,6 +19,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- Fixed `amd-smi monitor` errors on guest systems
+```shell
+$ amd-smi monitor
+AttributeError: 'Namespace' object has no attribute 'violation'
+```
+
+Now properly shows:
+```shell
+$ amd-smi monitor
+GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
+  0    0   12 W   40 °C   44 °C     9 MHz    8 %    1 %    N/A    0 %    0.2/ 25.4 GB
+```
+
 ### Upcoming Changes
 
 - N/A
@@ -178,6 +191,11 @@ $ amd-smi
 
 - **Updated `amdsmi_bdf_t` in `amdsmi.h`**.  
   - The `amdsmi_bdf_t` union was changed to have an identical unnamed struct for backwards compatiblity
+
+- **Updated `amdsmi_get_temp_metric` and `amdsmi_temperature_type_t` with new values**.  
+  - New values have added to `amdsmi_temperature_type_t` representing various baseboard and gpuboard temperature measures.
+  - `amdsmi_get_temp_metric` API has also been updated to be able to take in and return the respective values for the new
+  temperature types.
 
 ### Removed
 
@@ -358,7 +376,9 @@ $ amd-smi
 
 ### Upcoming changes
 
-- N/A
+- **`amd-smi metric` will also display gpuboard and baseboard temperatures**.  
+  - This change is meant to follow the API change to amdsmi_get_temp_metric. If these measures are not available due
+  to hardware incompatibility, then they will simply not be displayed in the results when using the metric command.
 
 ### Known issues
 
@@ -625,7 +645,11 @@ $ amd-smi
 
 ### Known issues
 
-- N/A
+- `amd-smi monitor` does not work on guest systems
+```shell
+$ amd-smi monitor
+AttributeError: 'Namespace' object has no attribute 'violation'
+```
 
 ## amd_smi_lib for ROCm 6.4.0
 
