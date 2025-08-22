@@ -27,11 +27,11 @@ from .importer import RocpdImportData
 from .time_window import apply_time_window
 from .filter import apply_filter
 from . import output_config
-from . import libpyrocpd
+from . import bindings
 
 
 def write_pftrace(importData, config):
-    return libpyrocpd.write_perfetto(importData, config)
+    return bindings.write_perfetto(importData, config)
 
 
 def execute(input, config=None, window_args=None, filter_args=None, **kwargs):

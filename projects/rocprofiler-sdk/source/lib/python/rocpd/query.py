@@ -30,7 +30,7 @@ from typing import Union, Tuple, List, Optional
 from datetime import datetime
 
 from . import output_config
-from . import libpyrocpd
+from . import bindings
 from .importer import RocpdImportData
 from .time_window import apply_time_window
 from .filter import apply_filter
@@ -90,12 +90,15 @@ def export_sqlite_query(
         export_path = export_path or f"query_output.{ext}"
         if not export_path.endswith(f".{ext}"):
             export_path = f"{export_path}.{ext}"
-        export_path = os.path.abspath(libpyrocpd.format_path(export_path, "rocpd"))
+        export_path = os.path.abspath(bindings.format_path(export_path, "rocpd"))
 
         os.makedirs(os.path.dirname(export_path), exist_ok=True)
 
-        def write_export(content):
-            with open(export_path, "w") as ofs:
+        def write_export(content, header=None):
+            open_mode = kwargs.get("open_mode", "w")
+            with open(export_path, open_mode) as ofs:
+                if header is not None:
+                    ofs.write(f"{header}\n")
                 ofs.write(f"{content}\n")
                 ofs.flush()
 
@@ -122,11 +125,30 @@ def export_sqlite_query(
 
         elif export_format == "md":
             # pandas 1.0+ has to_markdown
+            _header = (
+                f"# ROCpd Query Results\n\n## `{query}`\n"
+                if kwargs.get("markdown_header", True)
+                else None
+            )
+
+            # make the columns
+            if kwargs.get("title_columns", True):
+                cols = [f"{itr}" for itr in df.columns.tolist()]
+                col_names = dict(
+                    [[itr, " ".join(f"{itr}".title().split("_"))] for itr in cols]
+                )
+                df = df.rename(columns=col_names)
+
             try:
-                write_export(df.to_markdown(index=False))
+                write_export(
+                    df.to_markdown(
+                        index=False,
+                    ),
+                    header=_header,
+                )
             except AttributeError:
                 # fallback: manually write markdown table
-                _df_to_markdown_fallback(df, export_path)
+                _df_to_markdown_fallback(df, export_path, header=_header, **kwargs)
 
         elif export_format == "pdf":
             _export_df_to_pdf(df, export_path)
@@ -151,12 +173,15 @@ def export_sqlite_query(
         return None
 
 
-def _df_to_markdown_fallback(df, path: str):
+def _df_to_markdown_fallback(df, path: str, header=None, **kwargs):
     """
     Simple fallback if pandas.DataFrame.to_markdown(...) is unavailable.
     """
     headers = list(df.columns)
-    with open(path, "w", encoding="utf-8") as f:
+    open_mode = kwargs.get("open_mode", "w")
+    with open(path, open_mode, encoding="utf-8") as f:
+        if header is not None:
+            f.write(f"{header}\n")
         # Header row
         f.write("| " + " | ".join(headers) + " |\n")
         # Separator
@@ -388,6 +413,7 @@ def add_args(parser):
     )
 
     query_options.add_argument(
+        "-f",
         "--format",
         help="Export format",
         choices=("console", "csv", "html", "json", "md", "pdf", "dashboard", "clipboard"),

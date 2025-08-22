@@ -39,8 +39,7 @@ try:
 except Exception:
     pass
 
-from . import libpyrocpd
-from .importer import RocpdImportData
+from . import bindings
 
 __all__ = [
     "connect",
@@ -73,10 +72,12 @@ version_info = {
 
 
 def format_path(path, tag=os.path.basename(sys.executable)):
-    return libpyrocpd.format_path(path, tag)
+    return bindings.format_path(path, tag)
 
 
 def connect(input, *args, **kwargs):
+    from .importer import RocpdImportData
+
     return RocpdImportData(input, *args, **kwargs)
 
 
@@ -85,19 +86,19 @@ def execute(data, *args, **kwargs):
 
 
 def read_agents(data, condition=""):
-    return libpyrocpd.read_agents(data, condition)
+    return bindings.read_agents(data, condition)
 
 
 def read_nodes(data, condition=""):
-    return libpyrocpd.read_nodes(data, condition)
+    return bindings.read_nodes(data, condition)
 
 
 def read_processes(data, condition=""):
-    return libpyrocpd.read_processes(data, condition)
+    return bindings.read_processes(data, condition)
 
 
 def read_threads(data, condition=""):
-    return libpyrocpd.read_threads(data, condition)
+    return bindings.read_threads(data, condition)
 
 
 def write_perfetto(connection, config=None, **kwargs):
@@ -121,7 +122,7 @@ def write_perfetto(connection, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    return libpyrocpd.write_perfetto(connection, config)
+    return bindings.write_perfetto(connection, config)
 
 
 def write_csv(connection, config=None, **kwargs):
@@ -145,7 +146,7 @@ def write_csv(connection, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    return libpyrocpd.write_csv(connection, config)
+    return bindings.write_csv(connection, config)
 
 
 def write_otf2(connection, config=None, **kwargs):
@@ -169,4 +170,4 @@ def write_otf2(connection, config=None, **kwargs):
         else config.update(**kwargs)
     )
 
-    return libpyrocpd.write_otf2(connection, config)
+    return bindings.write_otf2(connection, config)

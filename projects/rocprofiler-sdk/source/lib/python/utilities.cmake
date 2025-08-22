@@ -75,11 +75,14 @@ function(rocprofiler_rocpd_python_bindings _VERSION)
     set(rocpd_PYTHON_OUTPUT_DIRECTORY
         ${PROJECT_BINARY_DIR}/${rocpd_PYTHON_INSTALL_DIRECTORY})
     set(rocpd_PYTHON_SOURCES
+        bindings.py
         csv.py
         filter.py
+        functions.py
         importer.py
         __init__.py
         __main__.py
+        merge.py
         output_config.py
         otf2.py
         pftrace.py

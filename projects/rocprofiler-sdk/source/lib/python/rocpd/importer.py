@@ -27,16 +27,53 @@
 #
 #
 
+import os
 import sys
+import yaml
 import sqlite3
 
 from .schema import RocpdSchema
-from . import libpyrocpd
+from . import bindings
 
 __all__ = ["RocpdImportData", "execute_statement"]
 
 
-class RocpdImportData(libpyrocpd.RocpdImportData):
+def list_rocpd_input_databases(input):
+    if isinstance(input, list):
+        _input = input[:]
+    else:
+        _input = [input]
+
+    _files = []
+    for iitr in _input:
+        if os.path.isdir(iitr):
+            if os.path.exists(os.path.join(iitr, "index.yml")):
+                with open(os.path.join(iitr, "index.yml")) as ifs:
+                    _content = yaml.safe_load(ifs)
+                    if "rocpd" not in _content:
+                        return []
+                    if "input" not in _content["rocpd"]:
+                        return []
+                    for ritr in _content["rocpd"]["input"]:
+                        if "relative_path" in ritr or "files" in ritr:
+                            _relative_path = ritr.get("relative_path", ".")
+                            _files += [
+                                os.path.join(iitr, _relative_path, itr)
+                                for itr in ritr.get("files", [])
+                            ]
+            else:
+                _files += [os.path.join(iitr, f) for f in os.listdir(iitr)]
+        else:
+            _files += [iitr]
+
+    return [
+        os.path.realpath(f)
+        for f in _files
+        if os.path.exists(f) and os.path.isfile(f) and f.endswith(".db")
+    ]
+
+
+class RocpdImportData(bindings.RocpdImportData):
 
     def __init__(self, input, dbname=":memory:"):
         if isinstance(input, RocpdImportData):
@@ -46,19 +83,30 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
         else:
 
             def internal_init(_input, _output):
-                _connection = libpyrocpd.connect(_output)
+                from . import bindings
+
+                _input = list_rocpd_input_databases(_input)
+                assert not os.path.isdir(
+                    _output
+                ), "Output database name must not be a directory"
+                assert _input, "Input database list must not be empty"
+                _connection = bindings.connect(_output)
                 _connection.execute("PRAGMA foreign_keys = ON")
                 _table_info = _create_temp_views(_connection, _input)
                 _create_meta_views(_connection)
+                if not bindings.supported():
+                    from . import functions
+
+                    functions.create(_connection)
                 return (_connection, _input, _table_info)
 
             if isinstance(input, sqlite3.Connection):
                 raise ValueError(
                     "RocpdImportData does not accept existing sqlite3 connections"
                 )
-            elif isinstance(input, str):
-                _connection, _filenames, _table_info = internal_init([input], dbname)
-            elif isinstance(input, list) and len(input) > 0 and isinstance(input[0], str):
+            elif isinstance(input, str) or (
+                isinstance(input, list) and len(input) > 0 and isinstance(input[0], str)
+            ):
                 _connection, _filenames, _table_info = internal_init(input, dbname)
             else:
                 raise ValueError(

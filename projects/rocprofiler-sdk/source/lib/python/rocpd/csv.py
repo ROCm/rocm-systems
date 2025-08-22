@@ -31,7 +31,6 @@ from .query import export_sqlite_query
 from .time_window import apply_time_window
 from .filter import apply_filter
 from . import output_config
-from . import libpyrocpd
 
 
 def write_sql_query_to_csv(

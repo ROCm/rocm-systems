@@ -33,7 +33,7 @@ try:
 except Exception:
     pass
 
-from . import libpyrocpd
+from . import bindings
 
 
 __all__ = ["format_path", "output_config", "add_args", "process_args"]
@@ -51,10 +51,10 @@ def _generate_attribute_docs(data):
     return "\n\t- ".join(properties)
 
 
-class output_config(libpyrocpd.output_config):
+class output_config(bindings.output_config):
     __doc__ = f"""Output configuration
 
-    Read/Write properties:\n\t- {_generate_attribute_docs(libpyrocpd.output_config.__dict__)}
+    Read/Write properties:\n\t- {_generate_attribute_docs(bindings.output_config.__dict__)}
 
     Example:
         # folder for output data
@@ -81,11 +81,11 @@ class output_config(libpyrocpd.output_config):
                 #     print(f"  - output_config.{key} = {itr}")
                 if key == "agent_index_value":
                     if itr == "absolute":
-                        setattr(self, key, libpyrocpd.agent_indexing.node)
+                        setattr(self, key, bindings.agent_indexing.node)
                     elif itr == "type-relative":
-                        setattr(self, key, libpyrocpd.agent_indexing.logical_node_type)
+                        setattr(self, key, bindings.agent_indexing.logical_node_type)
                     else:
-                        setattr(self, key, libpyrocpd.agent_indexing.logical_node)
+                        setattr(self, key, bindings.agent_indexing.logical_node)
                 else:
                     setattr(self, key, itr)
             elif _strict:
@@ -94,7 +94,7 @@ class output_config(libpyrocpd.output_config):
 
 
 def format_path(path, tag=os.path.basename(sys.executable)):
-    return libpyrocpd.format_path(path, tag)
+    return bindings.format_path(path, tag)
 
 
 def check_file_exists(filename):
@@ -103,7 +103,7 @@ def check_file_exists(filename):
     return filename
 
 
-def add_args(parser):
+def add_args(parser, extensions=True):
     """Add output arguments to an existing parser."""
 
     io_options = parser.add_argument_group("I/O options")
@@ -119,34 +119,39 @@ def add_args(parser):
     io_options.add_argument(
         "-d",
         "--output-path",
-        help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
-        default=os.environ.get("ROCPD_OUTPUT_PATH", "./rocpd-output-data"),
+        help="Sets the output path where the output files will be saved (default path: `.`)",
+        default=os.environ.get("ROCPD_OUTPUT_PATH", "."),
         type=str,
         required=False,
     )
 
-    agent_index_options = parser.add_argument_group("Agent index options")
+    if extensions:
+        agent_index_options = parser.add_argument_group("Agent index options")
 
-    agent_index_options.add_argument(
-        "--agent-index-value",
-        choices=("absolute", "relative", "type-relative"),
-        help="""Device identification format in CSV/Perfetto/OTF2 output (default: relative):
-        absolute: uses node_id (Agent-0, Agent-2, Agent-4) ignoring cgroups restrictions.
-        relative: uses logical_node_id (Agent-0, Agent-1, Agent-2) considering cgroups restrictions.
-        type-relative: uses logical_node_type_id (CPU-0, GPU-0, GPU-1) with numbering that resets for each device type.""",
-        default="relative",
+        agent_index_options.add_argument(
+            "--agent-index-value",
+            choices=("absolute", "relative", "type-relative"),
+            help="""Device identification format in CSV/Perfetto/OTF2 output (default: relative):
+            absolute: uses node_id (Agent-0, Agent-2, Agent-4) ignoring cgroups restrictions.
+            relative: uses logical_node_id (Agent-0, Agent-1, Agent-2) considering cgroups restrictions.
+            type-relative: uses logical_node_type_id (CPU-0, GPU-0, GPU-1) with numbering that resets for each device type.""",
+            default="relative",
+        )
+
+        kernel_naming_options = parser.add_argument_group("Kernel naming options")
+
+        kernel_naming_options.add_argument(
+            "--kernel-rename",
+            help="Use ROCTx marker names instead of kernel names",
+            action="store_true",
+            default=False,
+        )
+
+    return (
+        ["output_file", "output_path", "agent_index_value", "kernel_rename"]
+        if extensions
+        else ["output_file", "output_path"]
     )
-
-    kernel_naming_options = parser.add_argument_group("Kernel naming options")
-
-    kernel_naming_options.add_argument(
-        "--kernel-rename",
-        help="Use ROCTx marker names instead of kernel names",
-        action="store_true",
-        default=False,
-    )
-
-    return ["output_file", "output_path", "agent_index_value", "kernel_rename"]
 
 
 def process_args(args, valid_args):
