@@ -229,9 +229,9 @@ class RocProfCompute:
             arch = self.__args.list_metrics
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
-                [self.__args.config_dir.joinpath(arch)]
-            )
+            ac.panel_configs = file_io.load_panel_configs([
+                self.__args.config_dir.joinpath(arch)
+            ])
             sys_info = self.__mspec.get_class_members().iloc[0]
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
