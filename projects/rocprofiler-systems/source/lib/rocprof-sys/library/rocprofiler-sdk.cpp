@@ -387,7 +387,7 @@ ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& rec
         return "";
 
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
-    // connect
+    // connect. This will be changed in the future
     if(ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin ||
        ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_end)
         return "omp_parallel";
@@ -1037,7 +1037,7 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
 
 #    if(!(ROCPROFSYS_OMPT_EXPERIMENTAL_TYPE_NAMES > 0))
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
-    // connect
+    // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin) _name = "omp_parallel";
 #    endif
 
@@ -1100,7 +1100,7 @@ ompt_tracing_callback_stop(
 
 #    if(!(ROCPROFSYS_OMPT_EXPERIMENTAL_TYPE_NAMES > 0))
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
-    // connect
+    // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_end) _name = "omp_parallel";
 #    endif
 
@@ -1423,6 +1423,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
+#if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 auto ompt_operation_type =
@@ -1471,8 +1472,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 else if(ompt_instant_events.find(ompt_operation_type) !=
                         ompt_instant_events.end())
                 {
-                    // These callbacks are considered instant events and should be start
-                    // and stopped as no corresponding "end" will be received
+                    // These callbacks are considered instant events and should start
+                    // and immediately call stop as no corresponding "end" will be
+                    // received
                     ompt_tracing_callback_start(record, user_data, ts);
                     ROCPROFILER_CALL(
                         rocprofiler_get_timestamp(&ts));  // Set artificial end ts
@@ -1487,6 +1489,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 }
             }
             break;
+#endif
             default:
             {
                 ROCPROFSYS_WARNING_F(1,
