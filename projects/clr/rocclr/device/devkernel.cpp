@@ -769,8 +769,8 @@ static inline uint32_t GetOclArgumentTypeOCL(const aclArgData* argInfo, bool* is
       return amd::KernelParameterDescriptor::QueueObject;
     case ARG_TYPE_VALUE:
       return (argInfo->arg.value.data == DATATYPE_struct)
-          ? amd::KernelParameterDescriptor::ReferenceObject
-          : amd::KernelParameterDescriptor::ValueObject;
+                 ? amd::KernelParameterDescriptor::ReferenceObject
+                 : amd::KernelParameterDescriptor::ValueObject;
     case ARG_TYPE_IMAGE:
       return amd::KernelParameterDescriptor::ImageObject;
     case ARG_TYPE_SAMPLER:

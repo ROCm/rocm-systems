@@ -375,8 +375,7 @@ class coalesced_group : public thread_group {
   friend __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
                                                           unsigned int tile_size);
   friend __CG_QUALIFIER__ coalesced_group binary_partition(const coalesced_group& cgrp, bool pred);
-  template <unsigned int fsize, class fparent>
-  friend __CG_QUALIFIER__ coalesced_group
+  template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
   __CG_QUALIFIER__ coalesced_group new_tiled_group(unsigned int tile_size) const {
@@ -393,8 +392,8 @@ class coalesced_group : public thread_group {
       unsigned int masklength =
           min(static_cast<unsigned int>(num_threads()) - base_offset, tile_size);
       lane_mask full_mask = (static_cast<int>(warpSize) == 32)
-          ? static_cast<lane_mask>((1u << 32) - 1)
-          : static_cast<lane_mask>(-1ull);
+                                ? static_cast<lane_mask>((1u << 32) - 1)
+                                : static_cast<lane_mask>(-1ull);
       lane_mask member_mask = full_mask >> (warpSize - masklength);
 
       member_mask <<= (__lane_id() & ~(tile_size - 1));
@@ -485,9 +484,9 @@ class coalesced_group : public thread_group {
     srcRank = srcRank % static_cast<int>(num_threads());
 
     int lane = (num_threads() == warpSize) ? srcRank
-        : (static_cast<int>(warpSize) == 64)
-        ? __fns64(coalesced_info.member_mask, 0, (srcRank + 1))
-        : __fns32(coalesced_info.member_mask, 0, (srcRank + 1));
+               : (static_cast<int>(warpSize) == 64)
+                   ? __fns64(coalesced_info.member_mask, 0, (srcRank + 1))
+                   : __fns32(coalesced_info.member_mask, 0, (srcRank + 1));
 
     return __shfl(var, lane, warpSize);
   }
@@ -835,8 +834,7 @@ template <unsigned int size> class thread_block_tile_base : public tile_base<siz
                 "Tile size is either not a power of 2 or greater than the wavefront size");
   using tile_base<size>::numThreads;
 
-  template <unsigned int fsize, class fparent>
-  friend __CG_QUALIFIER__ coalesced_group
+  template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
 #if !defined(HIP_DISABLE_WARP_SYNC_BUILTINS)
@@ -910,10 +908,10 @@ template <unsigned int tileSize, typename ParentCGTy> class parent_group_info {
  *  \note     This type is implemented on Linux, under development
  *            on Microsoft Windows.
  */
-template <unsigned int tileSize, class ParentCGTy>
-class thread_block_tile_type : public thread_block_tile_base<tileSize>,
-                               public tiled_group,
-                               public parent_group_info<tileSize, ParentCGTy> {
+template <unsigned int tileSize, class ParentCGTy> class thread_block_tile_type
+    : public thread_block_tile_base<tileSize>,
+      public tiled_group,
+      public parent_group_info<tileSize, ParentCGTy> {
   _CG_STATIC_CONST_DECL_ unsigned int numThreads = tileSize;
   typedef thread_block_tile_base<numThreads> tbtBase;
 
@@ -931,9 +929,8 @@ class thread_block_tile_type : public thread_block_tile_base<tileSize>,
 };
 
 // Partial template specialization
-template <unsigned int tileSize>
-class thread_block_tile_type<tileSize, void> : public thread_block_tile_base<tileSize>,
-                                               public tiled_group {
+template <unsigned int tileSize> class thread_block_tile_type<tileSize, void>
+    : public thread_block_tile_base<tileSize>, public tiled_group {
   _CG_STATIC_CONST_DECL_ unsigned int numThreads = tileSize;
 
   typedef thread_block_tile_base<numThreads> tbtBase;
@@ -1013,11 +1010,10 @@ __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
 namespace impl {
 template <unsigned int size, class ParentCGTy> class thread_block_tile_internal;
 
-template <unsigned int size, class ParentCGTy>
-class thread_block_tile_internal : public thread_block_tile_type<size, ParentCGTy> {
+template <unsigned int size, class ParentCGTy> class thread_block_tile_internal
+    : public thread_block_tile_type<size, ParentCGTy> {
  protected:
-  template <unsigned int tbtSize, class tbtParentT>
-  __CG_QUALIFIER__ thread_block_tile_internal(
+  template <unsigned int tbtSize, class tbtParentT> __CG_QUALIFIER__ thread_block_tile_internal(
       const thread_block_tile_internal<tbtSize, tbtParentT>& g)
       : thread_block_tile_type<size, ParentCGTy>(g.meta_group_rank(), g.meta_group_size()) {}
 
@@ -1034,8 +1030,8 @@ class thread_block_tile_internal : public thread_block_tile_type<size, ParentCGT
  *  \note     This type is implemented on Linux, under development
  *            on Microsoft Windows.
  */
-template <unsigned int size, class ParentCGTy>
-class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCGTy> {
+template <unsigned int size, class ParentCGTy> class thread_block_tile
+    : public impl::thread_block_tile_internal<size, ParentCGTy> {
  protected:
   __CG_QUALIFIER__ thread_block_tile(const ParentCGTy& g)
       : impl::thread_block_tile_internal<size, ParentCGTy>(g) {}
@@ -1171,8 +1167,8 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
 #endif
 };
 
-template <unsigned int size>
-class thread_block_tile<size, void> : public impl::thread_block_tile_internal<size, void> {
+template <unsigned int size> class thread_block_tile<size, void>
+    : public impl::thread_block_tile_internal<size, void> {
   template <unsigned int, class ParentCGTy> friend class thread_block_tile;
 
  protected:
@@ -1187,8 +1183,8 @@ template <unsigned int size, class ParentCGTy = void> class thread_block_tile;
 namespace impl {
 template <unsigned int size, class ParentCGTy> struct tiled_partition_internal;
 
-template <unsigned int size>
-struct tiled_partition_internal<size, thread_block> : public thread_block_tile<size, thread_block> {
+template <unsigned int size> struct tiled_partition_internal<size, thread_block>
+    : public thread_block_tile<size, thread_block> {
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block& g)
       : thread_block_tile<size, thread_block>(g) {}
 };

@@ -30,8 +30,7 @@
 
 using namespace std;
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
     void vectors_not_equal(int n, const double* __restrict__ x, const double* __restrict__ y,
                            double* __restrict__ workspace) {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
@@ -90,8 +89,7 @@ __launch_bounds__(BLOCKSIZE) __global__
   }
 }
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
     void vectors_equal(int n, const double* __restrict__ x, double* __restrict__ workspace) {
   int gid = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -149,8 +147,8 @@ __launch_bounds__(BLOCKSIZE) __global__
   }
 }
 
-template <unsigned int BLOCKSIZE>
-__launch_bounds__(BLOCKSIZE) __global__ void dot_reduction(double* __restrict__ workspace) {
+template <unsigned int BLOCKSIZE> __launch_bounds__(BLOCKSIZE) __global__
+    void dot_reduction(double* __restrict__ workspace) {
   __shared__ double sdata[BLOCKSIZE];
 
   sdata[threadIdx.x] = workspace[threadIdx.x];
