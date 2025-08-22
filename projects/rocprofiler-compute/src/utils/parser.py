@@ -768,8 +768,9 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def init_metric_evaluator(raw_pmc_df: Union[pd.DataFrame, dict],
-                          ammolite_vars: dict) -> None:
+def init_metric_evaluator(
+    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict
+) -> None:
     if isinstance(raw_pmc_df, dict):
         raw_pmc_df_keys = set(raw_pmc_df.keys())
 
@@ -794,7 +795,7 @@ def run_metric_evaluator(row_expr: str) -> str:
         # cache dataframes of 'raw_pmc_df'
         # this may replace some KeyErrors with NameErrors
         # e.g. row_pmc_df['key'] -> row_pmc_df_key will throw NameError now
-        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r'raw_pmc_df_\1', row_expr)
+        row_expr = re.sub(r"raw_pmc_df\['(.*?)'\]", r"raw_pmc_df_\1", row_expr)
         out = eval(compile(row_expr, "<string>", "eval"))
 
         if np.isnan(out):
@@ -805,18 +806,13 @@ def run_metric_evaluator(row_expr: str) -> str:
 
     except (TypeError, NameError, KeyError) as e:
         if "empirical_peak" in str(e):
-            console_warning(
-                f"Missing empirical peak data: {e}. Using empty value."
-            )
+            console_warning(f"Missing empirical peak data: {e}. Using empty value.")
             return ""
         else:
             return ""
 
     except AttributeError as ae:
-        if (
-            str(ae)
-            == "'NoneType' object has no attribute 'get'"
-        ):
+        if str(ae) == "'NoneType' object has no attribute 'get'":
             return ""
 
         else:
@@ -1044,9 +1040,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                                 ].to_list()
                                                 print(c)
                                                 print(
-                                                raw_pmc_df[m.group(1)][
-                                                    m.group(2)
-                                                ].to_list()
+                                                    raw_pmc_df[m.group(1)][
+                                                        m.group(2)
+                                                    ].to_list()
                                                 )
                                             except KeyError as ke:
                                                 console_warning(
@@ -1100,17 +1096,18 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
     ammolite_vars = {
-        key: val
-        for key, val in locals().items()
-        if key.startswith("ammolite__")
+        key: val for key, val in locals().items() if key.startswith("ammolite__")
     }
 
     # Empirically, 16 is about as much as we need.
     processes = min(16, multiprocessing.cpu_count() // 2)
 
     # breakpoint()
-    with multiprocessing.Pool(processes=processes, initializer=init_metric_evaluator,
-                              initargs=(raw_pmc_df, ammolite_vars)) as pool:
+    with multiprocessing.Pool(
+        processes=processes,
+        initializer=init_metric_evaluator,
+        initargs=(raw_pmc_df, ammolite_vars),
+    ) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)
 
     for (df_id, row, col), out in zip(row_expr_indexes, outs):
