@@ -49,7 +49,8 @@ class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
 # Custom Help Formatter for not duplicating the metavar in the subparsers
 class AMDSMISubparserHelpFormatter(argparse.RawTextHelpFormatter):
     def __init__(self, prog):
-        super().__init__(prog, max_help_position=80, width=90)
+        super().__init__(prog, indent_increment=2, max_help_position=24, width=90)
+        self._action_max_length = 20
 
     def _format_action_invocation(self, action):
         if not action.option_strings or action.nargs == 0:
@@ -96,19 +97,20 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         self.vf_choices = ['3', '2', '1']
 
-        version_string = f"Version: {__version__}"
-        platform_string = f"Platform: {self.helpers.os_info()}"
-        rocm_version = self.helpers.get_rocm_version()
-        rocm_version_string = f"ROCm version: {rocm_version}"
-        program_name = 'amd-smi'
+        self.version_string = f"Version: {__version__}"
+        self.platform_string = f"Platform: {self.helpers.os_info()}"
+        self.rocm_version = self.helpers.get_rocm_version()
+        self.rocm_version_string = f"ROCm version: {self.rocm_version}"
+        self.program_name = 'amd-smi'
+        self.description = f"AMD System Management Interface | {self.version_string} | {self.rocm_version_string} | {self.platform_string}"
 
         # Adjust argument parser options
         super().__init__(
             formatter_class= lambda prog: AMDSMIParserHelpFormatter(prog),
-            description=f"AMD System Management Interface | {version_string} | {rocm_version_string} | {platform_string}",
+            description=self.description,
             epilog="For detailed help on specific commands: amd-smi [command] -h",
             add_help=True,
-            prog=program_name)
+            prog=self.program_name)
 
         # Setup subparsers
         self.subparsers = self.add_subparsers(
@@ -710,9 +712,10 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _add_version_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         version_help = "Display version information"
+        description = self.description
 
         # Create version subparser
-        version_parser = subparsers.add_parser('version', help=version_help, description=None)
+        version_parser = subparsers.add_parser('version', help=version_help, description=description)
         version_parser._optionals.title = None
         version_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         version_parser.set_defaults(func=func)
@@ -737,7 +740,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         list_help = "List GPU information"
         list_optionals_title = "List Arguments"
-        list_subcommand_help = "Lists all detected devices on the system.\
+        list_subcommand_help = f"{self.description}\n\nLists all detected devices on the system.\
                             \nLists the BDF, UUID, KFD_ID, NODE_ID, and Partition ID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
@@ -761,7 +764,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _add_static_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         static_help = "Gets static information about the specified GPU"
-        static_subcommand_help = "If no GPU is specified, returns static information for all GPUs on the system.\
+        static_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns static information for all GPUs on the system.\
                                 \nIf no static argument is provided, all static information will be displayed."
         static_optionals_title = "Static Arguments"
 
@@ -853,7 +856,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         firmware_help = "Gets firmware information about the specified GPU"
-        firmware_subcommand_help = "If no GPU is specified, return firmware information for all GPUs on the system."
+        firmware_subcommand_help = f"{self.description}\n\nIf no GPU is specified, return firmware information for all GPUs on the system."
         firmware_optionals_title = "Firmware Arguments"
 
         # Optional arguments help text
@@ -890,7 +893,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         bad_pages_help = "Gets bad page information about the specified GPU"
-        bad_pages_subcommand_help = "If no GPU is specified, return bad page information for all GPUs on the system."
+        bad_pages_subcommand_help = f"{self.description}\n\nIf no GPU is specified, return bad page information for all GPUs on the system."
         bad_pages_optionals_title = "Bad Pages Arguments"
 
         # Optional arguments help text
@@ -917,7 +920,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
         metric_help = "Gets metric/performance information about the specified GPU"
-        metric_subcommand_help = "If no GPU is specified, returns metric information for all GPUs on the system.\
+        metric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns metric information for all GPUs on the system.\
                                 \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"
 
@@ -1077,7 +1080,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         process_help = "Lists general process information running on the specified GPU"
-        process_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
+        process_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no process argument is provided, all process information will be displayed."
         process_optionals_title = "Process arguments"
 
@@ -1115,7 +1118,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         profile_help = "Displays information about all profiles and current profile"
-        profile_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system."
+        profile_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system."
         profile_optionals_title = "Profile Arguments"
 
         # Create profile subparser
@@ -1136,7 +1139,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         event_help = "Displays event information for the given GPU"
-        event_subcommand_help = "If no GPU is specified, returns event information for all GPUs on the system."
+        event_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns event information for all GPUs on the system."
         event_optionals_title = "Event Arguments"
 
         # Create event subparser
@@ -1157,7 +1160,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         topology_help = "Displays topology information of the devices"
-        topology_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
+        topology_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no topology argument is provided, all topology information will be displayed."
         topology_optionals_title = "Topology arguments"
 
@@ -1201,7 +1204,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         set_value_help = "Set options for devices"
-        set_value_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
+        set_value_subcommand_help = f"{self.description}\n\nIf no GPU is specified, will select all GPUs on the system.\
                                     \nA set argument must be provided; Multiple set arguments are accepted.\
                                     \nRequires 'sudo' privileges."
         set_value_optionals_title = "Set Arguments"
@@ -1220,17 +1223,21 @@ class AMDSMIParser(argparse.ArgumentParser):
                 memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
                 set_compute_partition_help = f"Set one of the following the accelerator TYPE or profile INDEX:\n\t{accelerator_set_choices}.\n\tUse `sudo amd-smi partition --accelerator` to find acceptable values."
                 set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
-                power_cap_min, power_cap_max = self.helpers.get_power_caps()
-                power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
-                power_cap_min = self.helpers.convert_SI_unit(power_cap_min, AMDSMIHelpers.SI_Unit.MICRO)
-                set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min} W, max cap: {power_cap_max} W"
                 soc_pstate_help_info = ", ".join(self.helpers.get_soc_pstates())
                 set_soc_pstate_help = f"Set the GPU soc pstate policy using policy id, an integer. Valid id's include:\n\t{soc_pstate_help_info}"
                 xgmi_plpd_help_info = ", ".join(self.helpers.get_xgmi_plpd_policies())
                 set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id, an integer. Valid id's include:\n\t{xgmi_plpd_help_info}"
                 set_clock_freq_help = "Set one or more sclk (aka gfxclk), mclk, fclk, pcie, or socclk frequency levels.\n\tUse `amd-smi static --clock` to find acceptable levels."
+            power_cap_min, power_cap_max = self.helpers.get_power_caps()
+            if power_cap_max != "N/A":
+                power_cap_max = self.helpers.convert_SI_unit(power_cap_max, AMDSMIHelpers.SI_Unit.MICRO)
+                power_cap_max = str(power_cap_max) + ' W'
+            if power_cap_min != "N/A":
+                power_cap_min = self.helpers.convert_SI_unit(power_cap_min, AMDSMIHelpers.SI_Unit.MICRO)
+                power_cap_min = str(power_cap_min) + ' W'
+            set_power_cap_help = f"Set power capacity limit:\n\tmin cap: {power_cap_min}, max cap: {power_cap_max}"
             set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \n\tex: amd-smi set -L (sclk | mclk) (min | max) value"
-            set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
+            set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n    0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -1266,7 +1273,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_exclusive_group.add_argument('-C', '--compute-partition', action='store', choices=accelerator_set_choices, type=lambda value: self._is_command_supported(value, accelerator_set_choices, '--compute-partition'),
                                                        required=False, help=set_compute_partition_help, metavar=('TYPE/INDEX'))
                 set_value_exclusive_group.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
-                set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._positive_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
+            # Power cap is enabled on guest, maintain order
+            set_value_exclusive_group.add_argument('-o', '--power-cap', action='store', type=lambda value: self._not_negative_int(value, '--power-cap'), required=False, help=set_power_cap_help, metavar='WATTS')
+            if self.helpers.is_baremetal():
                 set_value_exclusive_group.add_argument('-p', '--soc-pstate', action='store', required=False, type=lambda value: self._not_negative_int(value, '--soc-pstate'), help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=lambda value: self._not_negative_int(value, '--xgmi-plpd'), help=set_xgmi_plpd_help, metavar='POLICY_ID')
                 set_value_exclusive_group.add_argument('-c', '--clk-level', action=self._level_select(), nargs='+', required=False, help=set_clock_freq_help, metavar=('CLK_TYPE', 'FREQ_LEVELS'))
@@ -1309,7 +1318,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         reset_help = "Reset options for devices"
-        reset_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
+        reset_subcommand_help = f"{self.description}\n\nIf no GPU is specified, will select all GPUs on the system.\
                                 \nA reset argument must be provided; Multiple reset arguments are accepted.\
                                 \nRequires 'sudo' privileges."
         reset_optionals_title = "Reset Arguments"
@@ -1365,7 +1374,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         monitor_help = "Monitor metrics for target devices"
-        monitor_subcommand_help = "Monitor a target device for the specified arguments.\
+        monitor_subcommand_help = f"{self.description}\n\nMonitor a target device for the specified arguments.\
                                   \nIf no arguments are provided, all arguments will be enabled.\
                                   \nUse the watch arguments to run continuously."
         monitor_optionals_title = "Monitor Arguments"
@@ -1416,7 +1425,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         xgmi_help = "Displays xgmi information of the devices"
-        xgmi_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
+        xgmi_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no xgmi argument is provided, all xgmi information will be displayed."
         xgmi_optionals_title = "XGMI arguments"
 
@@ -1446,7 +1455,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         partition_help = "Displays partition information of the devices"
-        partition_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
+        partition_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns information for all GPUs on the system.\
                                 \nIf no partition argument is provided, all partition information will be displayed."
         partition_optionals_title = "Partition arguments"
 
@@ -1483,6 +1492,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         ras_help = "Retrieve RAS (CPER) entries from the driver"
         ras_description = (
+            f"{self.description}\n\n"
             "Retrieve and decode RAS (CPER) entries from the kernel driver.\n"
             "Supports filtering by severity, exporting to different formats, and continuous monitoring.\n"
             "This command accepts options only; no positional arguments are required."
@@ -1491,13 +1501,13 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Help text for RAS arguments
         cper_help = "Trigger current CPER data retrieval"
-        afid_help = "Generate an AFID (AMD Field ID) using a CPER record, which is similar to XID."
+        afid_help = "Generate an AFID (AMD Field ID) given a CPER record file"
         severity_choices = ["nonfatal-uncorrected", "fatal", "nonfatal-corrected", "all"]
         severity_choices_str = ", ".join(severity_choices)
         severity_help = f"Set the SEVERITY filters from the following:\n    {severity_choices_str}"
         folder_help = "Folder to dump current CPER report files"
         file_limit_help = "Maximum number of current CPER files in target folder\n    Older files beyond limit will be deleted"
-        cper_file_help = "Full path of a retrieved cper record file to generate the AFID"
+        cper_file_help = "Full path of a retrieved CPER record file to generate the AFID"
         follow_help = "Continuously monitor for new CPER entries"
 
         ras_parser = subparsers.add_parser("ras", help=ras_help, description=ras_description)

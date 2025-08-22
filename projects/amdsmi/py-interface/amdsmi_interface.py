@@ -2448,7 +2448,7 @@ def amdsmi_get_violation_status(
         "acc_hbm_thrm": _validate_if_max_uint(violation_status.acc_hbm_thrm, MaxUIntegerTypes.UINT64_T),
         "acc_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.acc_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T),
         "acc_gfx_clk_below_host_limit_pwr": list(violation_status.acc_gfx_clk_below_host_limit_pwr),
-        "acc_gfx_clk_below_host_limit_thrm": list(violation_status.acc_gfx_clk_below_host_limit_thrm),
+        "acc_gfx_clk_below_host_limit_thm": list(violation_status.acc_gfx_clk_below_host_limit_thm),
         "acc_gfx_clk_below_host_limit_total": list(violation_status.acc_gfx_clk_below_host_limit_total),
         "acc_low_utilization": list(violation_status.acc_low_utilization),
         "per_prochot_thrm": _validate_if_max_uint(violation_status.per_prochot_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
@@ -2458,7 +2458,7 @@ def amdsmi_get_violation_status(
         "per_hbm_thrm": _validate_if_max_uint(violation_status.per_hbm_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.per_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_gfx_clk_below_host_limit_pwr": list(violation_status.per_gfx_clk_below_host_limit_pwr),
-        "per_gfx_clk_below_host_limit_thrm": list(violation_status.per_gfx_clk_below_host_limit_thrm),
+        "per_gfx_clk_below_host_limit_thm": list(violation_status.per_gfx_clk_below_host_limit_thm),
         "per_gfx_clk_below_host_limit_total": list(violation_status.per_gfx_clk_below_host_limit_total),
         "per_low_utilization": list(violation_status.per_low_utilization),
         "active_prochot_thrm": _validate_if_max_uint(violation_status.active_prochot_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
@@ -2468,7 +2468,7 @@ def amdsmi_get_violation_status(
         "active_hbm_thrm": _validate_if_max_uint(violation_status.active_hbm_thrm, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_gfx_clk_below_host_limit": _validate_if_max_uint(violation_status.active_gfx_clk_below_host_limit, MaxUIntegerTypes.UINT8_T, isBool=True),
         "active_gfx_clk_below_host_limit_pwr": list(violation_status.active_gfx_clk_below_host_limit_pwr),
-        "active_gfx_clk_below_host_limit_thrm": list(violation_status.active_gfx_clk_below_host_limit_thrm),
+        "active_gfx_clk_below_host_limit_thm": list(violation_status.active_gfx_clk_below_host_limit_thm),
         "active_gfx_clk_below_host_limit_total": list(violation_status.active_gfx_clk_below_host_limit_total),
         "active_low_utilization": list(violation_status.active_low_utilization),
     }
@@ -2480,12 +2480,12 @@ def amdsmi_get_violation_status(
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
             dict_return['acc_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'acc_gfx_clk_below_host_limit_thrm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_thrm']):
+    if 'acc_gfx_clk_below_host_limit_thm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['acc_gfx_clk_below_host_limit_thm']):
             xcp_detail = []
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T))
-            dict_return['acc_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
+            dict_return['acc_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
     if 'acc_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['acc_low_utilization']):
             xcp_detail = []
@@ -2505,12 +2505,12 @@ def amdsmi_get_violation_status(
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
             dict_return['per_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'per_gfx_clk_below_host_limit_thrm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['per_gfx_clk_below_host_limit_thrm']):
+    if 'per_gfx_clk_below_host_limit_thm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['per_gfx_clk_below_host_limit_thm']):
             xcp_detail = []
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT64_T, isActivity=True))
-            dict_return['per_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
+            dict_return['per_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
     if 'per_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['per_low_utilization']):
             xcp_detail = []
@@ -2530,12 +2530,12 @@ def amdsmi_get_violation_status(
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT8_T, isBool=True))
             dict_return['active_gfx_clk_below_host_limit_pwr'][xcp_index] = xcp_detail
-    if 'active_gfx_clk_below_host_limit_thrm' in dict_return:
-        for xcp_index, xcp_metrics in enumerate(dict_return['active_gfx_clk_below_host_limit_thrm']):
+    if 'active_gfx_clk_below_host_limit_thm' in dict_return:
+        for xcp_index, xcp_metrics in enumerate(dict_return['active_gfx_clk_below_host_limit_thm']):
             xcp_detail = []
             for val in xcp_metrics:
                 xcp_detail.append(_validate_if_max_uint(val, MaxUIntegerTypes.UINT8_T, isBool=True))
-            dict_return['active_gfx_clk_below_host_limit_thrm'][xcp_index] = xcp_detail
+            dict_return['active_gfx_clk_below_host_limit_thm'][xcp_index] = xcp_detail
     if 'active_low_utilization' in dict_return:
         for xcp_index, xcp_metrics in enumerate(dict_return['active_low_utilization']):
             xcp_detail = []
