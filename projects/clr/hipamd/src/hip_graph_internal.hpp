@@ -746,6 +746,10 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
     for (auto stream : parallel_streams_) {
       if (stream != nullptr) {
         constexpr bool kForceDestroy = true;
+        amd::Command* command = stream->getLastQueuedCommand(false);
+        if (command != nullptr) {
+          command->release();
+        }
         hip::Stream::Destroy(stream, kForceDestroy);
       }
     }

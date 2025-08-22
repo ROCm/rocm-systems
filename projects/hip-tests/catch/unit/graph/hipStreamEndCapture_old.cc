@@ -124,6 +124,7 @@ TEST_CASE("Unit_hipStreamEndCapture_Negative") {
     HIP_CHECK(hipFree(A_d));
     HIP_CHECK(hipFree(C_d));
     HIP_CHECK(hipStreamDestroy(stream));
+    HIP_CHECK(hipGraphDestroy(graph));
   }
 }
 
@@ -140,7 +141,6 @@ static void StreamEndCaptureThreadNegative(float* A_d, float* A_h, float* C_d, f
   size_t Nbytes = N * sizeof(float);
 
   HIP_CHECK(hipStreamCreate(&stream));
-  HIP_CHECK(hipGraphCreate(&graph, 0));
   HIP_CHECK(hipStreamBeginCapture(stream, mode));
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, Nbytes, hipMemcpyHostToDevice, stream));
 
@@ -277,6 +277,7 @@ TEST_CASE("Unit_hipStreamEndCapture_chkError_on_wrongStream") {
   int *A_d{nullptr}, *A_h{nullptr};
   hipStream_t stream1{nullptr}, stream2{nullptr};
   hipEvent_t forkStreamEvent{nullptr};
+  hipEvent_t joinStreamEvent{nullptr};
   hipGraph_t graph{nullptr};
   hipError_t err;
   constexpr unsigned blocks = 512;
@@ -286,7 +287,7 @@ TEST_CASE("Unit_hipStreamEndCapture_chkError_on_wrongStream") {
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
   HIP_CHECK(hipEventCreate(&forkStreamEvent));
-
+  HIP_CHECK(hipEventCreate(&joinStreamEvent));
   A_h = reinterpret_cast<int*>(malloc(Nbytes));
   REQUIRE(A_h != nullptr);
   // Initialize the Host data
@@ -305,10 +306,15 @@ TEST_CASE("Unit_hipStreamEndCapture_chkError_on_wrongStream") {
 
   err = hipStreamEndCapture(stream2, &graph);
   REQUIRE(err == hipErrorStreamCaptureUnmatched);
+  HIP_CHECK(hipEventRecord(joinStreamEvent, stream2));
+  HIP_CHECK(hipStreamWaitEvent(stream1, joinStreamEvent, 0));
+  err = hipStreamEndCapture(stream1, &graph);
 
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(joinStreamEvent));
+  HIP_CHECK(hipGraphDestroy(graph));
   free(A_h);
   HIP_CHECK(hipFree(A_d));
 }
@@ -404,6 +410,7 @@ TEST_CASE("Unit_hipStreamEndCapture_streamMerge_in_thread") {
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipStreamDestroy(stream2));
   HIP_CHECK(hipEventDestroy(forkStreamEvent));
+  HIP_CHECK(hipEventDestroy(event));
   HIP_CHECK(hipStreamDestroy(streamForGraph));
 
   // Release the memory
