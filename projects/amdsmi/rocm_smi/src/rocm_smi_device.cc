@@ -1110,6 +1110,7 @@ namespace {
   GpuMetricsCache g_gpu_metrics_cache;
   // Keep 1 cache map, with an entry for each gpu
   std::unordered_map<std::string, GpuMetricsCache> g_gpu_metrics_cache_map;
+  std::mutex g_gpu_metrics_cache_map_mu;
   static const std::chrono::milliseconds kGpuMetricsCacheDuration(
     read_env_ms("AMDSMI_GPU_METRICS_CACHE_MS", 1)
   );
@@ -1132,20 +1133,25 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   // is the issue, so should remain.
   const std::string key = path_ + "/device/" + kDevAttribNameMap.at(type)
                                 + "#" + std::to_string(b_size);
-  auto& cache = g_gpu_metrics_cache_map[key];
+                                
+  GpuMetricsCache* cache_ptr = nullptr;
+  {
+    std::lock_guard<std::mutex> map_lk(g_gpu_metrics_cache_map_mu);
+    cache_ptr = &g_gpu_metrics_cache_map[key];  // safe now
+  }
 
   // Only cache for kDevGpuMetrics
   if (type == DevInfoTypes::kDevGpuMetrics) {
-    std::lock_guard<std::mutex> lock(cache.mtx);
+    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
     auto now = std::chrono::steady_clock::now();
-    auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - cache.last_read);
+    auto last_read_delta = std::chrono::duration_cast<std::chrono::milliseconds>(now - cache_ptr->last_read);
 
-    if (!cache.data.empty() &&
+    if (!cache_ptr->data.empty() &&
         kGpuMetricsCacheDuration > std::chrono::milliseconds::zero() &&
         last_read_delta < kGpuMetricsCacheDuration &&
-        cache.data.size() == b_size) {
+        cache_ptr->data.size() == b_size) {
 
-      std::memcpy(p_binary_data, cache.data.data(), b_size);
+      std::memcpy(p_binary_data, cache_ptr->data.data(), b_size);
 
       if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
         ss << "Returned cached DevInfoBinary for DevInfoType ("
@@ -1206,12 +1212,12 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   if (type == DevInfoTypes::kDevGpuMetrics &&
       kGpuMetricsCacheDuration > std::chrono::milliseconds::zero()) {
     auto now = std::chrono::steady_clock::now();
-    auto& cache = g_gpu_metrics_cache_map[key];
-    std::lock_guard<std::mutex> lock(cache.mtx);
-    cache.data.assign(
-      reinterpret_cast<uint8_t*>(p_binary_data),
-      reinterpret_cast<uint8_t*>(p_binary_data) + b_size);
-    cache.last_read = now;
+    
+    std::lock_guard<std::mutex> lock(cache_ptr->mtx);
+    cache_ptr->data.assign(
+        reinterpret_cast<uint8_t*>(p_binary_data),
+        reinterpret_cast<uint8_t*>(p_binary_data) + b_size);
+    cache_ptr->last_read = now;
 
     if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
       ss << "Successfully Cached GPU Metrics binaryData = " << p_binary_data

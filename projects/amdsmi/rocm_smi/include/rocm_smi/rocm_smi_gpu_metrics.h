@@ -1068,7 +1068,9 @@ class GpuMetricsBase_t {
     virtual AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() = 0;
     virtual void set_device_id(uint32_t device_id) { m_device_id = device_id; }
     virtual void set_partition_id(uint32_t partition_id) { m_partition_id = partition_id; }
+    static std::mutex s_base_tbl_mu;
     virtual AMDGpuDynamicMetricsTbl_t get_metrics_dynamic_tbl() {
+      std::lock_guard<std::mutex> lk(s_base_tbl_mu);
       return m_base_metrics_dynamic_tbl;
     }
 
