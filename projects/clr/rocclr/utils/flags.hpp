@@ -21,6 +21,7 @@
 #ifndef FLAGS_HPP_
 #define FLAGS_HPP_
 
+// clang-format off
 
 #define RUNTIME_FLAGS(debug, release, release_on_stg)                           \
                                                                               \
@@ -273,7 +274,7 @@ release(bool, HIP_FORCE_SPIRV_CODEOBJECT, false,                              \
         "Force use of SPIRV instead of device specific code object.")         \
 release(uint, DEBUG_CLR_BATCH_CPU_SYNC_SIZE, 8,                               \
         "Forces the minimum batch size for CPU sync")
-
+// clang-format on
 namespace amd {
 
 extern bool IS_HIP;
@@ -297,7 +298,7 @@ struct Flag {
   enum Name { RUNTIME_FLAGS(DEFINE_FLAG_NAME, DEFINE_FLAG_NAME, DEFINE_FLAG_NAME) numFlags_ };
 #undef DEFINE_FLAG_NAME
 
-#define CAN_SET(type, name, v, h)    static const bool cannotSet##name = false;
+#define CAN_SET(type, name, v, h) static const bool cannotSet##name = false;
 #define CANNOT_SET(type, name, v, h) static const bool cannotSet##name = true;
 
 #ifdef DEBUG
@@ -329,13 +330,12 @@ struct Flag {
   static bool isDefault(Name name) { return flags_[name].isDefault_; }
 };
 
-#define flagIsDefault(name) \
-  (amd::Flag::cannotSet##name || amd::Flag::isDefault(amd::Flag::k##name))
+#define flagIsDefault(name) (amd::Flag::cannotSet##name || amd::Flag::isDefault(amd::Flag::k##name))
 
-#define setIfNotDefault(var, opt, other) \
-  if (!flagIsDefault(opt)) \
-    var = (opt);\
-  else \
+#define setIfNotDefault(var, opt, other)                                                           \
+  if (!flagIsDefault(opt))                                                                         \
+    var = (opt);                                                                                   \
+  else                                                                                             \
     var = (other);
 
 //  @}
