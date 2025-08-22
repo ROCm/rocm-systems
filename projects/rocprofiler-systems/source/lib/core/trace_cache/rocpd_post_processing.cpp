@@ -385,42 +385,65 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         std::vector<uint16_t> jpeg_busy;
     };
 
-    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& data,
-                                      xcp_metrics_t&              result) {
-        constexpr size_t elem_size = sizeof(uint16_t) / sizeof(uint8_t);
-
-        size_t  offset    = 0;
-        uint8_t vcn_size  = 0;
-        uint8_t jpeg_size = 0;
-
-        vcn_size = *(data.data() + offset);
-        offset++;
-        offset += vcn_size * elem_size;
-
-        jpeg_size = *(data.data() + offset);
-
-        if(data.size() != (2 + ((vcn_size + jpeg_size) * elem_size)))
+    auto deserialize_xcp_metrics = [](const std::vector<uint8_t>& serialized_data,
+                                      bool& _is_vcn_supported, bool& _is_jpeg_supported,
+                                      std::vector<xcp_metrics_t>& result) {
+        if(serialized_data.size() < 5)
         {
-            throw std::invalid_argument("XCP metric data is corrupted");
+            throw std::runtime_error("Invalid serialized data: insufficient header size");
         }
 
-        result.vcn_busy.resize(vcn_size);
-        result.jpeg_busy.resize(jpeg_size);
+        size_t offset = 0;
 
-        const auto* vcn_data  = data.data() + 1;
-        const auto* jpeg_data = data.data() + 2 + vcn_size;
+        // Read header
+        _is_vcn_supported   = static_cast<bool>(serialized_data[offset++]);
+        _is_jpeg_supported  = static_cast<bool>(serialized_data[offset++]);
+        uint8_t chunk_count = serialized_data[offset++];
+        uint8_t vcn_count   = serialized_data[offset++];
+        uint8_t jpeg_count  = serialized_data[offset++];
 
-        for(size_t i = 0; i < vcn_size; ++i)
+        constexpr size_t elem_size  = sizeof(uint16_t) / sizeof(uint8_t);
+        const size_t     chunk_size = (vcn_count + jpeg_count) * elem_size;
+
+        // Validate total size
+        const size_t expected_size = 5 + (chunk_count * chunk_size);
+        if(serialized_data.size() != expected_size)
         {
-            result.vcn_busy[i] = static_cast<uint8_t>(*vcn_data) |
-                                 (static_cast<uint8_t>(*(vcn_data + 1)) << 8);
-            vcn_data += elem_size;
+            throw std::runtime_error("Invalid serialized data: size mismatch");
         }
-        for(size_t i = 0; i < jpeg_size; ++i)
+
+        auto deserialize_uint16_array = [](const std::vector<uint8_t>& data,
+                                           size_t& offset, int array_size) {
+            std::vector<uint16_t> result;
+            result.reserve(array_size);
+
+            for(int i = 0; i < array_size; ++i)
+            {
+                if(offset + 1 >= data.size())
+                {
+                    throw std::runtime_error(
+                        "Invalid serialized data: unexpected end of data");
+                }
+
+                uint16_t value = static_cast<uint16_t>(data[offset]) |
+                                 (static_cast<uint16_t>(data[offset + 1]) << 8);
+                result.push_back(value);
+                offset += 2;
+            }
+
+            return result;
+        };
+
+        result.reserve(chunk_count);
+
+        for(size_t count = 0; count < chunk_count; ++count)
         {
-            result.jpeg_busy[i] = static_cast<uint8_t>(*jpeg_data) |
-                                  (static_cast<uint8_t>(*(jpeg_data + 1)) << 8);
-            jpeg_data += elem_size;
+            xcp_metrics_t entry;
+            entry.vcn_busy = deserialize_uint16_array(serialized_data, offset, vcn_count);
+            entry.jpeg_busy =
+                deserialize_uint16_array(serialized_data, offset, jpeg_count);
+
+            result.emplace_back(std::move(entry));
         }
     };
 
@@ -438,10 +461,11 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
             _agent_manager.get_agent_by_type_index(_amd_smi.device_id, agent_type::GPU)
                 .base_id;
 
-        auto insert_event_and_sample = [&](bool enabled, const char* name, double value) {
+        auto insert_event_and_sample = [&](bool enabled, const char* pmc_name,
+                                           const char* track_name, double value) {
             if(!enabled) return;
-            data_processor.insert_pmc_event(event_id, base_id, name, value);
-            data_processor.insert_sample(name, _amd_smi.timestamp, event_id);
+            data_processor.insert_pmc_event(event_id, base_id, pmc_name, value);
+            data_processor.insert_sample(track_name, _amd_smi.timestamp, event_id);
         };
 
         using pos = trace_cache::amd_smi_sample::settings_positions;
@@ -454,69 +478,91 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         bool is_vcn_enabled  = settings_bits.test(static_cast<int>(pos::vcn_activity));
         bool is_jpeg_enabled = settings_bits.test(static_cast<int>(pos::jpeg_activity));
 
-        insert_event_and_sample(is_busy_enabled,
-                                trait::name<category::amd_smi_gfx_busy>::value,
-                                _amd_smi.gfx_activity);
-        insert_event_and_sample(is_busy_enabled,
-                                trait::name<category::amd_smi_umc_busy>::value,
-                                _amd_smi.umc_activity);
-        insert_event_and_sample(is_busy_enabled,
-                                trait::name<category::amd_smi_mm_busy>::value,
-                                _amd_smi.mm_activity);
-        insert_event_and_sample(is_temp_enabled,
-                                trait::name<category::amd_smi_temp>::value,
-                                _amd_smi.temperature);
+        insert_event_and_sample(
+            is_busy_enabled, trait::name<category::amd_smi_gfx_busy>::value,
+            info::annotate_with_device_id<category::amd_smi_gfx_busy>(_amd_smi.device_id)
+                .c_str(),
+            _amd_smi.gfx_activity);
+        insert_event_and_sample(
+            is_busy_enabled, trait::name<category::amd_smi_umc_busy>::value,
+            info::annotate_with_device_id<category::amd_smi_umc_busy>(_amd_smi.device_id)
+                .c_str(),
+            _amd_smi.umc_activity);
+        insert_event_and_sample(
+            is_busy_enabled, trait::name<category::amd_smi_mm_busy>::value,
+            info::annotate_with_device_id<category::amd_smi_mm_busy>(_amd_smi.device_id)
+                .c_str(),
+            _amd_smi.mm_activity);
+        insert_event_and_sample(
+            is_temp_enabled, trait::name<category::amd_smi_temp>::value,
+            info::annotate_with_device_id<category::amd_smi_temp>(_amd_smi.device_id)
+                .c_str(),
+            _amd_smi.temperature);
 
-        insert_event_and_sample(is_power_enabled,
-                                trait::name<category::amd_smi_power>::value,
-                                _amd_smi.power);
-        insert_event_and_sample(is_mem_usage_enabled,
-                                trait::name<category::amd_smi_memory_usage>::value,
-                                _amd_smi.mem_usage);
+        insert_event_and_sample(
+            is_power_enabled, trait::name<category::amd_smi_power>::value,
+            info::annotate_with_device_id<category::amd_smi_power>(_amd_smi.device_id)
+                .c_str(),
+            _amd_smi.power);
+        insert_event_and_sample(
+            is_mem_usage_enabled, trait::name<category::amd_smi_memory_usage>::value,
+            info::annotate_with_device_id<category::amd_smi_memory_usage>(
+                _amd_smi.device_id)
+                .c_str(),
+            _amd_smi.mem_usage);
 
-        if(is_vcn_enabled || is_jpeg_enabled)
+        if(!is_vcn_enabled && !is_jpeg_enabled)
         {
-            xcp_metrics_t xcp_metrics;
-            deserialize_xcp_metrics(_amd_smi.xcp_activity, xcp_metrics);
+            return;
+        }
 
-            if(is_vcn_enabled)
+        std::vector<xcp_metrics_t> xcp_metrics;
+        bool                       is_vcn_activity_supported;
+        bool                       is_jpeg_activity_supported;
+        deserialize_xcp_metrics(_amd_smi.xcp_activity, is_vcn_activity_supported,
+                                is_jpeg_activity_supported, xcp_metrics);
+
+        auto insert_xcp_metrics = [&](auto category, bool _is_enabled,
+                                      const std::vector<uint16_t>& data,
+                                      std::optional<size_t>        _idx = std::nullopt) {
+            if(!_is_enabled)
             {
-                for(size_t clk = 0; clk < xcp_metrics.vcn_busy.size(); ++clk)
-                {
-                    const auto value = xcp_metrics.vcn_busy[clk];
-                    if(value == std::numeric_limits<uint16_t>::max())
-                    {
-                        continue;
-                    }
-
-                    std::stringstream ss;
-                    ss << trait::name<category::amd_smi_vcn_activity>::value;
-                    ss << "_" << std::to_string(clk);
-
-                    insert_event_and_sample(is_vcn_enabled, ss.str().c_str(), value);
-                }
+                return;
             }
 
-            if(is_jpeg_enabled)
+            using Category = std::decay_t<decltype(category)>;
+
+            for(size_t clk = 0; clk < data.size(); ++clk)
             {
-                for(size_t clk = 0; clk < xcp_metrics.jpeg_busy.size(); ++clk)
+                const auto value = data[clk];
+                if(value == std::numeric_limits<uint16_t>::max())
                 {
-                    const auto value = xcp_metrics.jpeg_busy[clk];
-                    if(value == std::numeric_limits<uint16_t>::max())
-                    {
-                        continue;
-                    }
-
-                    std::stringstream ss;
-                    ss << trait::name<category::amd_smi_jpeg_activity>::value;
-                    ss << "_" << std::to_string(clk);
-
-                    insert_event_and_sample(is_jpeg_enabled, ss.str().c_str(), value);
+                    continue;
                 }
+
+                auto pmc_name   = info::annotate_category<Category>(_idx, clk);
+                auto track_name = info::annotate_with_device_id<Category>(
+                    _amd_smi.device_id, _idx, clk);
+
+                insert_event_and_sample(_is_enabled, pmc_name.c_str(), track_name.c_str(),
+                                        value);
             }
+        };
+
+        for(size_t idx = 0; idx < xcp_metrics.size(); ++idx)
+        {
+            auto dimension =
+                xcp_metrics.size() == 1 ? std::nullopt : std::make_optional<size_t>(idx);
+
+            insert_xcp_metrics(category::amd_smi_vcn_activity{}, is_vcn_enabled,
+                               xcp_metrics[idx].vcn_busy, dimension);
+
+            insert_xcp_metrics(category::amd_smi_jpeg_activity{}, is_jpeg_enabled,
+                               xcp_metrics[idx].jpeg_busy, dimension);
         }
     };
 }
+
 postprocessing_callback
 rocpd_post_processing::get_cpu_freq_sample_callback() const
 {
@@ -530,7 +576,7 @@ rocpd_post_processing::get_cpu_freq_sample_callback() const
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
-        while(offset != data.size())
+        while(offset + sizeof(float) + sizeof(size_t) <= data.size())
         {
             core_freq_sample core_sample;
             core_sample.id = *reinterpret_cast<size_t*>(data.data() + offset);

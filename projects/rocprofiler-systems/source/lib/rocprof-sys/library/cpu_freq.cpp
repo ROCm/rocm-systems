@@ -30,6 +30,7 @@
 #include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/metadata_registry.hpp"
 #include "core/trace_cache/sample_type.hpp"
 #include "library/components/cpu_freq.hpp"
 #include "library/thread_info.hpp"
@@ -68,14 +69,6 @@ init_perfetto_counter_tracks(type_list<Types...>)
     (perfetto_counter_track<Types>::init(), ...);
 }
 
-template <typename Category>
-inline std::string
-get_cpu_freq_track_name(uint64_t cpu_id)
-{
-    return std::string(trait::name<Category>::value) + " [" + std::to_string(cpu_id) +
-           "]";
-}
-
 template <typename Func>
 void
 do_for_enabled_cpus(Func&& func)
@@ -99,8 +92,9 @@ metadata_initialize_cpu_freq_tracks()
 {
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_track(
-            { get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), std::nullopt,
-              "{}" });
+            { trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
+                  .c_str(),
+              std::nullopt, "{}" });
     });
 }
 
@@ -141,9 +135,10 @@ metadata_initialize_cpu_freq_pmc(size_t dev_id)
     do_for_enabled_cpus([&](size_t cpu_id) {
         trace_cache::get_metadata_registry().add_pmc_info(
             { agent_type::CPU, dev_id, TARGET_ARCH, EVENT_CODE, INSTANCE_ID,
-              get_cpu_freq_track_name<category::cpu_freq>(cpu_id).c_str(), "Frequency",
-              trait::name<category::cpu_freq>::description, LONG_DESCRIPTION, COMPONENT,
-              component::cpu_freq::display_unit().c_str(),
+              trace_cache::info::annotate_with_device_id<category::cpu_freq>(cpu_id)
+                  .c_str(),
+              "Frequency", trait::name<category::cpu_freq>::description, LONG_DESCRIPTION,
+              COMPONENT, component::cpu_freq::display_unit().c_str(),
               rocprofsys::trace_cache::ABSOLUTE, BLOCK, EXPRESSION, 0, 0 });
     });
 

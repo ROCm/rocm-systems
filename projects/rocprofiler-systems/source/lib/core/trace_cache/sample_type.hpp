@@ -197,7 +197,7 @@ struct amd_smi_sample : storage_parsed_type_base
         jpeg_activity
     };
 
-    size_t               settings;
+    uint64_t             settings;  // bitfield
     uint32_t             device_id;
     size_t               timestamp;
     uint32_t             gfx_activity;
