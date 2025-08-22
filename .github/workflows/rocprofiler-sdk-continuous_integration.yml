@@ -701,6 +701,7 @@ jobs:
       shell: bash
       working-directory: projects/rocprofiler-sdk
       run:
+        sudo sysctl -w vm.mmap_rnd_bits=28;
         LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         python3 ./source/scripts/run-ci.py -B build
