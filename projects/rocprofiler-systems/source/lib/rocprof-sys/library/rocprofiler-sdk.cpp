@@ -364,7 +364,7 @@ ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& rec
     auto ompt_operation_type =
         static_cast<rocprofiler_ompt_operation_t>(record.operation);
 
-    // We ignore ompt_thread_begin and ompt_device_initialize's potential types
+    // ompt_device_initialize's type is the gfx arg, so we ignore
     static std::set<rocprofiler_ompt_operation_t> ompt_typed_callbacks = {
         ROCPROFILER_OMPT_ID_mutex_released,
         ROCPROFILER_OMPT_ID_sync_region_wait,
@@ -381,6 +381,7 @@ ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& rec
         ROCPROFILER_OMPT_ID_target_submit_emi,
         ROCPROFILER_OMPT_ID_parallel_begin,
         ROCPROFILER_OMPT_ID_parallel_end,
+        // ROCPROFILER_OMPT_ID_thread_begin,
     };
 
     if(ompt_typed_callbacks.find(ompt_operation_type) == ompt_typed_callbacks.end())
