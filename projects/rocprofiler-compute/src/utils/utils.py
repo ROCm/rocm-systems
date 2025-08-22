@@ -23,6 +23,7 @@
 
 ##############################################################################
 
+import ctypes
 import glob
 import io
 import json
@@ -31,15 +32,14 @@ import logging
 import os
 import pathlib
 import re
+import select
 import selectors
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
-import sys
-import ctypes
-import select
 from pathlib import Path as path
 from typing import Optional
 

@@ -36,4 +36,4 @@ set_source_files_properties(${DYNAMIC_SHARED_SOURCES} PROPERTIES LANGUAGE HIP)
 add_executable(hip_dynamic_shared ${DYNAMIC_SHARED_SOURCES})
 target_include_directories(hip_dynamic_shared PRIVATE ../sample/dynamic_shared)
 set_target_properties(hip_dynamic_shared PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-                                                ${CMAKE_SOURCE_DIR}/tests)
+                                                    ${CMAKE_SOURCE_DIR}/tests)
