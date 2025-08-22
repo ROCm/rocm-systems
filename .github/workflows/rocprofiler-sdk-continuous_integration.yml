@@ -555,7 +555,7 @@ jobs:
       matrix:
         runner: ['mi325']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
-        os: ['ubuntu-24.04']
+        os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
@@ -583,7 +583,7 @@ jobs:
         apt-get update
         apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
         mkdir --parents --mode=0755 /etc/apt/keyrings
-        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/.7.0/ubuntu/noble/amdgpu-install_7.0.70000-1_all.deb
+        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/.7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
         apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
         sed -i "s/\/30.10/\/.30.10/" /etc/apt/sources.list.d/amdgpu*.list
         sed -i "s|rocm/apt/7.0|rocm/apt/.apt_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/apt/sources.list.d/rocm.list
