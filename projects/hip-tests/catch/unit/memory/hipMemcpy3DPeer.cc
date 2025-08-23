@@ -37,8 +37,8 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-#if HT_NVIDIA
 TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
+  CHECK_IMAGE_SUPPORT
   int numW = 16;
   int numH = 16;
   int depth = 4;
@@ -63,7 +63,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
 
   // Set the array memory
   char* tmpHost = (char*)malloc(volume);
-  memset(tmpHost, 'b', volume);
+  memset(tmpHost, 0xb, volume);
   hipMemcpy3DParms fillParms{};
   fillParms.srcPos = make_hipPos(0, 0, 0);
   fillParms.dstPos = make_hipPos(0, 0, 0);
@@ -97,6 +97,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
   HIP_CHECK(hipMemcpy3DPeer(&peerCopyParams));
   // Copy data from Device Array- host ptr
   char* hostBuf = (char*)malloc(volume);
+  memset(hostBuf, 0xa, volume);
   hipMemcpy3DParms copyParms{};
   copyParms.srcArray = array_2;
   copyParms.dstPtr = make_hipPitchedPtr(hostBuf, numW, numW, numH);
@@ -106,15 +107,15 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
 
   // Validation
   for (size_t i = 0; i < volume; ++i) {
-    if (hostBuf[i] != 'b') {
+    if (hostBuf[i] != 0xb) {
       printf("Array FAILURE : i %zu, val : %x\n", i, hostBuf[i]);
+      REQUIRE(false);
     }
   }
   free(hostBuf);
   HIP_CHECK(hipFreeArray(array_1));
   HIP_CHECK(hipFreeArray(array_2));
 }
-#endif
 /**
  * Test Description
  * ------------------------
@@ -135,6 +136,7 @@ TEST_CASE("Unit_hipMemcpy3DPeer_BasicFunctional") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemcpy3DPeer_NegativeTsts") {
+  CHECK_IMAGE_SUPPORT
   SECTION("Memcpy3DPeer Params struct as nullptr") {
     HIP_CHECK_ERROR(hipMemcpy3D(nullptr), hipErrorInvalidValue);
   }

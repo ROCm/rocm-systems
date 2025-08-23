@@ -32,7 +32,7 @@
  * ------------------------
  * - Test case to verify the 1D batch memory copy.
  * 1. Create Array of device pointers(Src, Dst).
- * 2. Set the MemcpyBatch params.
+ * 2. Set the MemcpyBatch params. As of now no support for memcpy Attributes.
  * 3. Perform batch memcpy operation.
  * 4. Validate data on host.
  * Test source
@@ -42,10 +42,9 @@
  * ------------------------
  *  - HIP_VERSION >= 7.1
  */
-#if HT_NVIDIA
 TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   const size_t count = 2;
-  size_t numAttrs = 1;
+  size_t numAttrs = 0;
   size_t size = 4096 * sizeof(char);
   hipStream_t stream = NULL;
   HIP_CHECK(hipStreamCreate(&stream));
@@ -63,18 +62,10 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
     hostPtr[i] = new char[size];
   }
 
-  hipMemcpyAttributes attr[1];
-  attr[0].dstLocHint.type = hipMemLocationTypeDevice;
-  attr[0].dstLocHint.id = 0;
-  attr[0].srcLocHint.type = hipMemLocationTypeDevice;
-  attr[0].srcLocHint.id = 0;
-  attr[0].flags = hipMemcpyFlagDefault;
-  attr[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
-
   attrsIdxs[0] = 0;
   size_t failIdx;
 
-  HIP_CHECK(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, attrsIdxs, numAttrs, &failIdx,
+  HIP_CHECK(hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, nullptr, attrsIdxs, numAttrs, &failIdx,
                                 stream));
   HIP_CHECK(hipStreamSynchronize(stream));
   // validation
@@ -93,7 +84,6 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
   delete[] hostPtr;
   HIP_CHECK(hipStreamDestroy(stream));
 }
-#endif
 /**
  * Test Description
  * ------------------------
@@ -126,37 +116,30 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
     HIP_CHECK(hipMalloc(&dstPtr[i], size));
     sizes[i] = size;
   }
-  hipMemcpyAttributes attr[1];
-  attr[0].dstLocHint.type = hipMemLocationTypeDevice;
-  attr[0].dstLocHint.id = 0;
-  attr[0].srcLocHint.type = hipMemLocationTypeDevice;
-  attr[0].srcLocHint.id = 0;
-  attr[0].flags = hipMemcpyFlagDefault;
-  attr[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
 
   attrsIdxs[0] = 0;
   size_t failIdx;
   SECTION("Dst Array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpyBatchAsync(nullptr, srcPtr, sizes, count, attr, attrsIdxs, numAttrs,
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(nullptr, srcPtr, sizes, count, nullptr, attrsIdxs, numAttrs,
                                         &failIdx, stream),
                     hipErrorInvalidValue);
   }
   SECTION("Src Array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, nullptr, sizes, count, attr, attrsIdxs, numAttrs,
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, nullptr, sizes, count, nullptr, attrsIdxs, numAttrs,
                                         &failIdx, stream),
                     hipErrorInvalidValue);
   }
   SECTION("Count as zero") {
     HIP_CHECK_ERROR(
-        hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, 0, attr, attrsIdxs, numAttrs, &failIdx, stream),
+        hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, 0, nullptr, attrsIdxs, numAttrs, &failIdx, stream),
         hipErrorInvalidValue);
   }
   SECTION("sizes Array as nullptr") {
-    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, nullptr, count, attr, attrsIdxs, numAttrs,
+    HIP_CHECK_ERROR(hipMemcpyBatchAsync(dstPtr, srcPtr, nullptr, count, nullptr, attrsIdxs, numAttrs,
                                         &failIdx, stream),
                     hipErrorInvalidValue);
   }
-#if HT_NVIDIA
+#if 0 // Enable these tests when support for memcpy attributes is enabled.
   SECTION("Number of Attributes as zero") {
     HIP_CHECK_ERROR(
         hipMemcpyBatchAsync(dstPtr, srcPtr, sizes, count, attr, attrsIdxs, 0, &failIdx, stream),
