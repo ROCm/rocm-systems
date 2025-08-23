@@ -212,10 +212,17 @@ template <typename F> auto GetOccupancyMaxPotentialBlockSize(F kernel) {
 inline size_t GetMaxAllowedDeviceMemoryUsage() {
   hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
-  return props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);
+  return props.totalGlobalMem > cmd_options.max_memory
+      ? cmd_options.max_memory
+      : props.totalGlobalMem * (cmd_options.accuracy_max_memory * 0.01f);
 }
 
-inline uint64_t GetTestIterationCount() { return cmd_options.accuracy_iterations; }
+inline double GetTestReductionFactor() { return cmd_options.reduction_factor * 0.01; }
+
+inline uint64_t GetTestIterationCount() {
+  return static_cast<uint64_t>(
+      std::ceil(cmd_options.accuracy_iterations * GetTestReductionFactor()));
+}
 
 template <typename T, typename... Ts> using kernel_sig = void (*)(T*, const size_t, Ts*...);
 
