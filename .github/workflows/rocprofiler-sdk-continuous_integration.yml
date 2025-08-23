@@ -135,7 +135,7 @@ jobs:
           ENV HIP_COMPILER=amdclang++
           ENV LLVM_PATH=/opt/rocm/llvm
           ENV CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}
-          ENV PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
+          ENV PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:/usr/local/bin:~/.local/bin:${PATH}
           ENV LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:${LD_LIBRARY_PATH}
           RUN set -euo pipefail; \
               if [ -f /etc/debian_version ]; then \
@@ -187,12 +187,11 @@ jobs:
                 zypper --gpg-auto-import-keys refresh; \
                 zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
                 python3 -m pip install --upgrade pip pipx; \
-                python3 -m pipx install awscli cmake; \
+                python3 -m pipx install awscli; \
                 python3 -m pipx ensurepath; \
                 source ~/.bashrc; \
                 python3 -m venv rocprofiler-sdk; \
                 source rocprofiler-sdk/bin/activate; \
-                export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
                 python3 -m pip install --upgrade pip || true; \
                 python3 -m pip install --upgrade -r /root/requirements.txt || true; \
               fi
