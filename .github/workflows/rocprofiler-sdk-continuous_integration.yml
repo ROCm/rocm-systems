@@ -637,6 +637,7 @@ jobs:
           key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}
           max-size: 2G
           save: true
+          variant: sccache
 
       - name: Build and Install ROCProfiler-Register
         shell: bash
