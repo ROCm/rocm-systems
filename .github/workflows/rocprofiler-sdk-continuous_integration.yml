@@ -186,12 +186,12 @@ jobs:
                 echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/sle/15.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
                 zypper --gpg-auto-import-keys refresh; \
                 zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
-                python3 -m pip install -U awscli pipx; \
+                python3 -m pip install -U awscli pipx || true; \
                 python3 -m venv rocprofiler-sdk; \
                 source rocprofiler-sdk/bin/activate; \
                 export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
-                python3 -m pip install --upgrade pip; \
-                python3 -m pip install --upgrade -r /root/requirements.txt; \
+                python3 -m pip install --upgrade pip || true; \
+                python3 -m pip install --upgrade -r /root/requirements.txt || true; \
               fi
           RUN set -euo pipefail; \
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
