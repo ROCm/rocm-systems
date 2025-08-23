@@ -186,7 +186,10 @@ jobs:
                 echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/sle/15.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/zypp/repos.d/amdgpu.repo; \
                 zypper --gpg-auto-import-keys refresh; \
                 zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
-                python3 -m pip install -U awscli pipx || true; \
+                python3 -m pip install --upgrade pip pipx; \
+                python3 -m pipx install awscli cmake; \
+                python3 -m pipx ensurepath; \
+                source ~/.bashrc; \
                 python3 -m venv rocprofiler-sdk; \
                 source rocprofiler-sdk/bin/activate; \
                 export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH; \
@@ -195,12 +198,24 @@ jobs:
               fi
           RUN python3 -m pip install -U awscli
           RUN set -euo pipefail; \
+              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                python3 -m pipx ensurepath; \
+                source ~/.bashrc; \
+              fi; \
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
               mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz
           RUN set -euo pipefail; \
+              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                python3 -m pipx ensurepath; \
+                source ~/.bashrc; \
+              fi; \
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
               mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz
           RUN set -euo pipefail; \
+              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                python3 -m pipx ensurepath; \
+                source ~/.bashrc; \
+              fi; \
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
               mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz
           EOF
