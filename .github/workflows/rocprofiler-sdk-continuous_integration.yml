@@ -348,7 +348,6 @@ jobs:
           key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           max-size: 2G
           save: true
-          create-symlink: true
 
       - name: Install Missing ROCm Dependencies
         shell: bash
@@ -358,8 +357,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             ${GITHUB_WORKSPACE}/rocDecode
           cmake --build build-rocdecode --target all --parallel 16
           cmake --build build-rocdecode --target install
@@ -369,8 +368,8 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
             -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             ${GITHUB_WORKSPACE}/rocJPEG
           cmake --build build-rocjpeg --target all --parallel 16
           cmake --build build-rocjpeg --target install
@@ -387,8 +386,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build-rocprofiler-register --target all --parallel 16
           cmake --build build-rocprofiler-register --target install
@@ -405,8 +404,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
@@ -423,8 +422,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build-aqlprofile --target all --parallel 16
           cmake --build build-aqlprofile --target install
@@ -638,7 +637,6 @@ jobs:
           key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}
           max-size: 2G
           save: true
-          create-symlink: true
 
       - name: Build and Install ROCProfiler-Register
         shell: bash
@@ -649,8 +647,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build-rocprofiler-register --target all --parallel 16
           cmake --build build-rocprofiler-register --target install
@@ -667,8 +665,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build --target all --parallel 16
           cmake --build build --target install
@@ -685,8 +683,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
           cmake --build build-aqlprofile --target all --parallel 16
           cmake --build build-aqlprofile --target install
@@ -846,7 +844,6 @@ jobs:
         key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}-${{ matrix.sanitizer}}
         max-size: 2G
         save: true
-        create-symlink: true
 
     - name: Build and Install ROCProfiler-Register
       shell: bash
@@ -857,8 +854,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
         cmake --build build-rocprofiler-register --target all --parallel 16
         cmake --build build-rocprofiler-register --target install
@@ -873,8 +870,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
@@ -889,8 +886,8 @@ jobs:
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
-            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
-            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
         cmake --build build-aqlprofile --target all --parallel 16
         cmake --build build-aqlprofile --target install
