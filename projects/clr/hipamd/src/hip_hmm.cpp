@@ -24,6 +24,8 @@
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
+#include <numa.h>
+#include <numaif.h>
 
 namespace hip {
 
@@ -104,7 +106,8 @@ hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count, hipMemLocat
                                   unsigned int flags, hipStream_t stream) {
   HIP_INIT_API(hipMemPrefetchAsync_v2, dev_ptr, count, location, flags, stream);
   CHECK_STREAM_CAPTURE_SUPPORTED();
-  if (flags != 0) {
+  if ((flags != 0) || (location.type == hipMemLocationTypeInvalid) ||
+      (location.type == hipMemLocationTypeNone) || (location.id < 0)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   HIP_RETURN(ihipMemPrefetchAsync(dev_ptr, count, location, stream));
@@ -131,6 +134,10 @@ hipError_t hipMemAdvise_v2(const void* dev_ptr, size_t count, hipMemoryAdvise ad
                            hipMemLocation location) {
   HIP_INIT_API(hipMemAdvise_v2, dev_ptr, count, advice, location);
   CHECK_STREAM_CAPTURE_SUPPORTED();
+  if ((location.type == hipMemLocationTypeInvalid) || (location.type == hipMemLocationTypeNone) ||
+      (location.id < 0)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   HIP_RETURN(ihipMemAdvise(dev_ptr, count, advice, location));
 }
 
