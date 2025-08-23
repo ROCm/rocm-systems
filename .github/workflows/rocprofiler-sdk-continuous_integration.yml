@@ -193,6 +193,7 @@ jobs:
                 python3 -m pip install --upgrade pip || true; \
                 python3 -m pip install --upgrade -r /root/requirements.txt || true; \
               fi
+          RUN python3 -m pip install -U awscli
           RUN set -euo pipefail; \
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
               mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz
