@@ -1,4 +1,4 @@
-# ROCR Runtime
+# ROCR Runtime 
 
 This ROCm Runtime (ROCr) repo combines 2 previously separate repos into a single repo:
 - The HSA Runtime (`hsa-runtime`) for AMD GPU application development and
