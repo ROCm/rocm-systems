@@ -174,7 +174,7 @@ jobs:
                   echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/rhel/9.5/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
                 fi; \
                 dnf clean all; \
-                dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers libsqlite3x-devel elfutils-devel; \
+                dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang libsqlite3x-devel elfutils-devel; \
                 python3 -m pip install -U awscli pipx; \
                 python3 -m venv rocprofiler-sdk; \
                 source rocprofiler-sdk/bin/activate; \
@@ -182,11 +182,10 @@ jobs:
                 python3 -m pip install --upgrade pip; \
                 python3 -m pip install --upgrade -r /root/requirements.txt; \
               else \
-                zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/.7.0/sle/15.6/amdgpu-install-7.0.70000-1.noarch.rpm; \
-                sed -i "s/\/30.10/\/.30.10/" /etc/zypp/repos.d/amdgpu*.repo; \
-                sed -i "s|rocm/zyp/7.0|rocm/zyp/.zypper_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/zypp/repos.d/rocm.repo; \
+                echo -e "[ROCm-7.0.0]\nname=ROCm7.0.0\nbaseurl=https://repo.radeon.com/rocm/zyp/7.0_rc1/main\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/rocm.repo; \
+                echo -e "[amdgpu]\nname=amdgpu\nbaseurl=https://repo.radeon.com/amdgpu/30.10_rc1/sle/15.6/main/x86_64/\nenabled=1\npriority=50\ngpgcheck=1\ngpgkey=https://repo.radeon.com/rocm/rocm.gpg.key" > /etc/yum.repos.d/amdgpu.repo; \
                 zypper --gpg-auto-import-keys refresh; \
-                zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers sqlite3-devel python3-pip; \
+                zypper --non-interactive install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel hipify-clang sqlite3-devel python3-pip; \
                 python3 -m pip install -U awscli pipx; \
                 python3 -m venv rocprofiler-sdk; \
                 source rocprofiler-sdk/bin/activate; \
