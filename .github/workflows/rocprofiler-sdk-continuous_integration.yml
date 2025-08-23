@@ -631,6 +631,10 @@ jobs:
             ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
             ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk*
 
+      - name: Install Curl for RHEL 8.8
+        if: ${{ matrix.os == 'rhel-8.8' }}
+        run: dnf install -y curl
+
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
