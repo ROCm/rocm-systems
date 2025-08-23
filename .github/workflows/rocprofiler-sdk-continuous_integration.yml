@@ -663,7 +663,7 @@ jobs:
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
-          source rocprofiler-sdk/bin/activate
+          source ../rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
@@ -684,7 +684,7 @@ jobs:
         working-directory: projects/aqlprofile
         run: |
           echo "Install Aqlprofile."
-          source rocprofiler-sdk/bin/activate
+          source ../rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
