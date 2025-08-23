@@ -622,6 +622,8 @@ jobs:
         working-directory: projects/rocprofiler-sdk
         run: |
           git config --global --add safe.directory '*'
+          python3 -m venv rocprofiler-sdk
+          source rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pip install --upgrade pip
           python3 -m pip install --upgrade -r requirements.txt
@@ -715,6 +717,7 @@ jobs:
         shell: bash
         working-directory: projects/rocprofiler-sdk
         run:
+          source rocprofiler-sdk/bin/activate;
           PATH=~/.local/bin:/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 ./source/scripts/run-ci.py -B build
             --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
