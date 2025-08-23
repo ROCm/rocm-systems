@@ -77,7 +77,7 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
         with open(yaml_path, "r") as f:
             meta = yaml.safe_load(f)
             rocpd_meta = meta.get("rocprofiler-sdk", {}).get("rocpd", {})
-            version = rocpd_meta.get(rocpd_metadata_param_version, "0.1")
+            version = rocpd_meta.get(rocpd_metadata_param_version, "0")
             if version < rocpd_package_version:
                 print(
                     f"Warning: {yaml_path} is using an outdated version of rocpd package ({version})."
@@ -114,11 +114,15 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
         elif item.endswith((".yaml", ".yml")):
             input_files.extend(parse_yaml_file(item))
         else:
-            # Expand wildcards in direct input parameters as well
-            if "*" in item or "?" in item or "[" in item:
-                input_files.extend(glob.glob(item))
+            # If a directory, check inside for *.db files
+            if os.path.isdir(item):
+                input_files.extend(glob.glob(os.path.join(item, "*.db")))
             else:
-                input_files.append(item)
+                # Expand wildcards in direct input parameters as well
+                if "*" in item or "?" in item or "[" in item:
+                    input_files.extend(glob.glob(item))
+                else:
+                    input_files.append(item)
 
     num_dbs = len(input_files)
     print(f"Found {num_dbs} database files.")
@@ -150,31 +154,43 @@ def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -
     """
     from . import merge
 
-    # Implement merging and repackaging logic here
+    # Maybe this try is not necessary since uuid is standard python lib
+    try:
+        import uuid
+
+        unique_str = uuid.uuid4()
+    except Exception as e:
+        print(
+            f"Warning: could not import uuid, falling back to time as unique string. {e}"
+        )
+        unique_str = datetime.datetime.now().strftime("%H%M%S")
 
     original_num_dbs = len(input_files)
 
+    # If within the LIMIT, then return the DBs, no automerge required
     if original_num_dbs <= max_limit:
         print(
             f"Number of database files ({original_num_dbs}) is within the limit ({max_limit}). No merging needed."
         )
         return input_files
 
-    target_num_dbs_to_merge = (original_num_dbs // IDEAL_NUMBER_OF_DATABASE_FILES) + (
-        original_num_dbs % IDEAL_NUMBER_OF_DATABASE_FILES > 0
+    # Otherwise, calculate how many DBs to merge
+    target_num_dbs_to_merge = (original_num_dbs // max_limit) + (
+        original_num_dbs % max_limit > 0
     )
     print(
-        f"Original number of DBs: {original_num_dbs}, Target number of DBs to merge: {target_num_dbs_to_merge}"
+        f"Original number of DBs: {original_num_dbs}, Target number of DBs to merge during each batch: {target_num_dbs_to_merge}"
     )
 
+    # Create an output folder to store the merged DBs to
     merged_output_folder = create_output_folder(".", consolidate=True)
     os.makedirs(merged_output_folder, exist_ok=True)
 
+    # Beging batch processing the DBs
     reduced_file_list = []
     for i in range(0, original_num_dbs, target_num_dbs_to_merge):
         batch_files = input_files[i : i + target_num_dbs_to_merge]
-        time_str = datetime.datetime.now().strftime("%H%M%S")
-        merged_filename = f"merged_db_{i // target_num_dbs_to_merge}_{time_str}.db"
+        merged_filename = f"merged_db_{i // target_num_dbs_to_merge}_{unique_str}.db"
         args = {"output_path": merged_output_folder, "output_file": merged_filename}
         if len(batch_files) > 1:
             reduced_file_list.append(str(merge.execute(batch_files, **args)))
@@ -187,7 +203,7 @@ def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -
     for item in reduced_file_list:
         print(f"Reduced file list: {item}")
 
-    # package and create the metadata .yaml file
+    # Once # of dbs is reduced (merged), then package and create the metadata .yaml file
     create_metadata_file(reduced_file_list, output_path=merged_output_folder)
 
     print(
@@ -197,9 +213,7 @@ def merge_and_repackage(input_files, max_limit=IDEAL_NUMBER_OF_DATABASE_FILES) -
     return reduced_file_list
 
 
-def create_metadata_file(
-    db_files, output_path=".", metadata_filename="index.yaml", consolidate=False
-):
+def create_metadata_file(db_files, output_path=".", metadata_filename="index.yaml"):
     """
     Creates a metadata file in a custom YAML format for rocprofiler-sdk/rocpd.
 
@@ -284,6 +298,7 @@ def execute(input_files, **kwargs):
     consolidate = kwargs.get("consolidate", False)
 
     output_path = create_output_folder(output_path_kw, consolidate)
+    db_files = input_files
 
     if consolidate:
         # Create a new folder with current date and time
@@ -295,18 +310,18 @@ def execute(input_files, **kwargs):
             if os.path.abspath(db_file) != os.path.abspath(dest_file):
                 shutil.copy2(db_file, dest_file)
             copied_files.append(dest_file)
-        metadata_path = create_metadata_file(copied_files, output_path, consolidate=True)
-    else:
-        # If not consolidating, just create metadata file with relative paths to current directory
-        metadata_path = create_metadata_file(input_files, output_path)
+        db_files = copied_files
+
+    metadata_path = create_metadata_file(db_files, output_path)
 
     print(f"rocPD package created at: {metadata_path}")
 
 
 def main(argv=None):
     """
-    Main function to demonstrate the creation of a metadata file.
-    Supports copying database files to a new folder if --copy-db is specified.
+    Main function to demonstrate the creation of a metadata file and .rpdb package
+
+    Consolidates to a .rpdb package if --consolidate is specified.
     """
 
     parser = argparse.ArgumentParser(
@@ -330,7 +345,12 @@ def main(argv=None):
 
     package_args = process_args(args, valid_args)
 
-    input_files = flatten_rocpd_yaml_input_file(args.input)
+    input_files = flatten_rocpd_yaml_input_file(args.input, skip_auto_merge=True)
+
+    # error check for databases before trying to use the data
+    if not input_files:
+        print("Error, no databases found\n")
+        return
 
     execute(input_files, **package_args)
 

@@ -292,14 +292,10 @@ Example usage:
     else:
         input_files = package.flatten_rocpd_yaml_input_file(args.input)
 
-    db_count = len(input_files)
-
-    # TODO: add logic to determine how many DBs to merge into
-    # SQLITE_MAX_ATTACHED == 10, can query once you have connection
-    # if db_count > 10
-    #  call merge to combine to fewer DBs
-    #  optionally, can also package up into own .rpdb package
-    # Only after DBs have been merged and < SQLITE_MAX_ATTACHED, then we can call importer to attach DBs for analysis/convert
+    # error check for databases before trying to use the data
+    if not input_files:
+        print("Error, no databases found\n")
+        return
 
     # if the user requested converter, process the conversion
     if args.command == "convert":

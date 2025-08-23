@@ -55,6 +55,10 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
                 _connection = libpyrocpd.connect(":memory:")
                 _filenames = input[:]
                 _connection.execute("PRAGMA foreign_keys = ON")
+                if not _check_for_valid_dbs(input):
+                    raise ValueError(
+                        "RocpdImportData error, invalid SQLite3 database provided"
+                    )
                 self.table_info = _create_temp_views(_connection, input)
                 _create_meta_views(_connection)
             else:
@@ -73,6 +77,22 @@ class RocpdImportData(libpyrocpd.RocpdImportData):
 
     def __exit__(self, exc_type, exc, tb):
         return self.connection.__exit__(exc_type, exc, tb)
+
+
+def _is_sqlite_db(file_path):
+    with open(file_path, "rb") as f:
+        header = f.read(16)
+    return header == b"SQLite format 3\x00"
+
+
+def _check_for_valid_dbs(input_files) -> bool:
+    # check the list of .db files to confirm they are SQLite3 DBs
+    for file in input_files:
+        sqlite_db = _is_sqlite_db(file)
+        if not sqlite_db:
+            print(f"Error: {file} is not an SQLite3 database. File not supported.")
+            return False
+    return True
 
 
 def execute_statement(conn, statement, is_script=False):

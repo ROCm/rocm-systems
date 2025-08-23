@@ -119,7 +119,7 @@ class RocpdMerger:
 
             cur_orig.execute("SELECT name FROM sqlite_master WHERE type='table';")
             tables = cur_orig.fetchall()
-            print(f"Tables found: {len(tables) -1}")
+            print(f"Tables found: {len(tables) - 1}")
 
             uuid_statement = "SELECT value FROM rocpd_metadata WHERE tag='uuid'"
             _uuid = [itr[0] for itr in cur_orig.execute(uuid_statement).fetchall()][0]
@@ -260,7 +260,24 @@ def main(argv=None) -> int:
 
     merged_args = process_args(args, valid_args)
 
-    execute(args.input, **merged_args)
+    try:
+        from . import package
+
+        input_files = package.flatten_rocpd_yaml_input_file(
+            args.input, skip_auto_merge=True
+        )
+    except Exception as e:
+        print(
+            f"Warning: Could not import module to parse input package ({e}), using raw input list."
+        )
+        input_files = args.input
+
+    # error check for databases before trying to use the data
+    if not input_files:
+        print("Error, no databases found\n")
+        return
+
+    execute(input_files, **merged_args)
 
 
 if __name__ == "__main__":

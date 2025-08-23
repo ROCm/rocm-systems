@@ -482,7 +482,22 @@ def main(argv=None):
         **csv_args,
     }
 
-    execute(args.input, window_args=window_args, **all_args)
+    try:
+        from . import package
+
+        input_files = package.flatten_rocpd_yaml_input_file(args.input)
+    except Exception as e:
+        print(
+            f"Warning: Could not import module to parse input package ({e}), using raw input list."
+        )
+        input_files = args.input
+
+    # error check for databases before trying to use the data
+    if not input_files:
+        print("Error, no databases found\n")
+        return
+
+    execute(input_files, window_args=window_args, **all_args)
 
 
 if __name__ == "__main__":
