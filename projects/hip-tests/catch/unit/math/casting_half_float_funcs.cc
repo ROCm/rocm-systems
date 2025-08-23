@@ -36,7 +36,7 @@ THE SOFTWARE.
   TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Limited_Positive") {                              \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
-                                  std::numeric_limits<float>::min(), 0.f);                         \
+                                  std::numeric_limits<float>::lowest(), 0.f);                      \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
                                   0.0001f, std::numeric_limits<float>::max());                     \
   }
@@ -48,7 +48,7 @@ THE SOFTWARE.
   TEST_CASE("Unit_Device_" #kern_name "_Accuracy_Positive") {                                      \
     Float16 (*ref)(float) = kern_name##_ref;                                                       \
     UnarySinglePrecisionRangeTest(kern_name##_kernel, ref, EqValidatorBuilderFactory<Float16>(),   \
-                                  std::numeric_limits<float>::min(),                               \
+                                  std::numeric_limits<float>::lowest(),                            \
                                   std::numeric_limits<float>::max());                              \
   }
 

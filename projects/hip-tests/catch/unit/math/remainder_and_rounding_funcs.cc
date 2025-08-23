@@ -91,7 +91,7 @@ template <typename T> __global__ void remquo_kernel(std::pair<T, int>* const ys,
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       ys[i].first = remquof(x1s[i], x2s[i], &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {
@@ -123,7 +123,7 @@ __global__ void modf_kernel(std::pair<T, T>* const ys, const size_t num_xs, T* c
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     if constexpr (std::is_same_v<float, T>) {
       ys[i].first = modff(xs[i], &ys[i].second);
     } else if constexpr (std::is_same_v<double, T>) {

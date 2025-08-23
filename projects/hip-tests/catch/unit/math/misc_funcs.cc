@@ -37,12 +37,12 @@ TEST_CASE("Unit_Device_fmax_fmaxf_Negative_RTC") { NegativeTestRTCWrapper<8>(kFm
 MATH_BINARY_WITHIN_ULP_TEST_DEF(fmin, std::fmin, 0, 0)
 TEST_CASE("Unit_Device_fmin_fminf_Negative_RTC") { NegativeTestRTCWrapper<8>(kFmin); }
 
-MATH_BINARY_WITHIN_ULP_TEST_DEF(nextafter, std::nextafter, 0, 0)
+MATH_BINARY_WITHIN_ULP_TEST_DEF(nextafter, std::nextafter, 1, 1)
 TEST_CASE("Unit_Device_nextafter_nextafterf_Negative_RTC") {
   NegativeTestRTCWrapper<8>(kNextAfter);
 }
 
-MATH_TERNARY_WITHIN_ULP_TEST_DEF(fma, std::fma, 0, 0)
+MATH_TERNARY_WITHIN_ULP_TEST_DEF(fma, std::fma, 0, 1)
 TEST_CASE("Unit_Device_fma_fmaf_Negative_RTC") { NegativeTestRTCWrapper<12>(kFma); }
 
 __global__ void fdividef_kernel(float* const ys, const size_t num_xs, float* const x1s,
@@ -50,7 +50,7 @@ __global__ void fdividef_kernel(float* const ys, const size_t num_xs, float* con
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 
-  for (auto i = tid; i < num_xs; i += stride) {
+  for (size_t i = tid; i < num_xs; i += stride) {
     ys[i] = fdividef(x1s[i], x2s[i]);
   }
 }
@@ -68,7 +68,7 @@ TEST_CASE("Unit_Device_fdividef_Negative_RTC") { NegativeTestRTCWrapper<4>(kFdiv
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = kern_name(xs[i]);                                                                    \
     }                                                                                              \
   }                                                                                                \

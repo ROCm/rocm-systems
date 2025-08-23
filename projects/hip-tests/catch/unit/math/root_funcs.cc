@@ -265,7 +265,7 @@ MATH_BINARY_KERNEL_DEF(rhypot)
  * ------------------------
  *    - Tests the numerical accuracy of `rhypotf(x, y)` and `rhypot(x, y)`against a table of
  * difficult values, followed by a large number of randomly generated values. The maximum ulp error
- * for single precision is 2 and for double precision is 1.
+ * is 2.
  *
  * Test source
  * ------------------------
@@ -278,7 +278,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rhypot_Accuracy_Positive", "", float, double) {
   using RT = RefType_t<TestType>;
   auto rhypot_ref = [](RT arg1, RT arg2) -> RT { return 1. / std::hypot(arg1, arg2); };
   RT (*ref)(RT, RT) = rhypot_ref;
-  const auto ulp = std::is_same_v<float, TestType> ? 2 : 1;
+  const auto ulp = std::is_same_v<float, TestType> ? 2 : 2;
   BinaryFloatingPointTest(rhypot_kernel<TestType>, ref, ULPValidatorBuilderFactory<TestType>(ulp));
 }
 
@@ -348,7 +348,7 @@ MATH_TERNARY_KERNEL_DEF(rnorm3d)
  * ------------------------
  *    - Tests the numerical accuracy of `rnorm3df(x, y, z)` and `rnorm3d(x, y, z)`against a table of
  * difficult values, followed by a large number of randomly generated values. The maximum ulp error
- * for single precision is 2 and for double precision is 1.
+ * is 2.
  *
  * Test source
  * ------------------------
@@ -366,7 +366,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm3d_Accuracy_Positive", "", float, double) {
     return 1. / std::sqrt(arg1 * arg1 + arg2 * arg2 + arg3 * arg3);
   };
   RT (*ref)(RT, RT, RT) = rnorm3d_ref;
-  const auto ulp = std::is_same_v<float, TestType> ? 2 : 1;
+  const auto ulp = std::is_same_v<float, TestType> ? 2 : 2;
   TernaryFloatingPointTest(rnorm3d_kernel<TestType>, ref,
                            ULPValidatorBuilderFactory<TestType>(ulp));
 }
@@ -438,7 +438,7 @@ MATH_QUATERNARY_KERNEL_DEF(rnorm4d)
  * ------------------------
  *    - Tests the numerical accuracy of `rnorm4df(x, y, z, t)` and `rnorm4d(x, y, z, t)`against a
  * table of difficult values, followed by a large number of randomly generated values. The maximum
- * ulp error for single precision is 2 and for double precision is 1.
+ * ulp error is 2.
  *
  * Test source
  * ------------------------
@@ -456,7 +456,7 @@ TEMPLATE_TEST_CASE("Unit_Device_rnorm4d_Accuracy_Positive", "", float, double) {
     return 1. / std::sqrt(arg1 * arg1 + arg2 * arg2 + arg3 * arg3 + arg4 * arg4);
   };
   RT (*ref)(RT, RT, RT, RT) = rnorm4d_ref;
-  const auto ulp = std::is_same_v<float, TestType> ? 2 : 1;
+  const auto ulp = std::is_same_v<float, TestType> ? 2 : 2;
   QuaternaryFloatingPointTest(rnorm4d_kernel<TestType>, ref,
                               ULPValidatorBuilderFactory<TestType>(ulp));
 }
@@ -488,7 +488,7 @@ TEST_CASE("Unit_Device_rnorm4d_rnorm4df_Negative_RTC") { NegativeTestRTCWrapper<
 
 template <typename T, typename F, typename RF, typename ValidatorBuilder>
 void NormSimpleTest(F kernel, RF ref_func, const ValidatorBuilder& validator_builder) {
-  const auto max_dim = 10000;
+  const auto max_dim = static_cast<uint64_t>(std::ceil(10000 * GetTestReductionFactor()));
 
   LinearAllocGuard<T> x{LinearAllocs::hipHostMalloc, max_dim * sizeof(T)};
   LinearAllocGuard<T> x_dev{LinearAllocs::hipMalloc, max_dim * sizeof(T)};

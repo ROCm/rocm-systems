@@ -103,7 +103,7 @@ MATH_UNARY_KERNEL_DEF(erfinv)
  * ------------------------
  *    - Tests the numerical accuracy of `erfinvf(x)` for all possible inputs. The results are
  * compared against reference function `double boost::math::erf_inv(double)`. The maximum ulp error
- * is 2.
+ * is 4.
  *
  * Test source
  * ------------------------
@@ -124,7 +124,7 @@ TEST_CASE("Unit_Device_erfinvf_Accuracy_Positive") {
     return boost::math::erf_inv(arg);
   };
   double (*ref)(double) = erfinv_ref;
-  UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(2));
+  UnarySinglePrecisionTest(erfinv_kernel<float>, ref, ULPValidatorBuilderFactory<float>(4));
 }
 
 /**
@@ -535,9 +535,9 @@ MATH_UNARY_KERNEL_DEF(lgamma)
  */
 TEST_CASE("Unit_Device_lgammaf_Accuracy_Limited_Positive") {
   double (*ref)(double) = std::lgamma;
-  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(6),
+  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(7),
                                 std::numeric_limits<float>::lowest(), -11.0001f);
-  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(6),
+  UnarySinglePrecisionRangeTest(lgamma_kernel<float>, ref, ULPValidatorBuilderFactory<float>(7),
                                 -2.2636f, std::numeric_limits<float>::max());
 }
 

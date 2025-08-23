@@ -31,7 +31,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(__half2{xs[i], -xs[i]});                                                   \
     }                                                                                              \
   }
@@ -42,7 +42,7 @@ namespace cg = cooperative_groups;
     const auto tid = cg::this_grid().thread_rank();                                                \
     const auto stride = cg::this_grid().size();                                                    \
                                                                                                    \
-    for (auto i = tid; i < num_xs; i += stride) {                                                  \
+    for (size_t i = tid; i < num_xs; i += stride) {                                                \
       ys[i] = func_name(__half2{x1s[i], -x1s[i]}, __half2{x2s[i], -x2s[i]});                       \
     }                                                                                              \
   }

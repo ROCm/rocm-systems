@@ -123,9 +123,9 @@ class Dummy {
   __device__ ~Dummy() {}
 };
 __global__ void fdividef_kernel_v1(float* x, float y) { float result = fdividef(x, y); }
-__global__ void fdividef_kernel_v2(Dummy x, float y) { float result = fdivide(x); }
-__global__ void fdividef_kernel_v3(float x, float* y) { float result = fdivide(x); }
-__global__ void fdividef_kernel_v4(float x, Dummy y) { float result = fdivide(x); }
+__global__ void fdividef_kernel_v2(Dummy x, float y) { float result = fdividef(x, y); }
+__global__ void fdividef_kernel_v3(float x, float* y) { float result = fdividef(x, y); }
+__global__ void fdividef_kernel_v4(float x, Dummy y) { float result = fdividef(x, y); }
 )"};
 
 static constexpr auto kIsFinite{R"(

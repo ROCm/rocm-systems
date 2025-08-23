@@ -36,6 +36,8 @@ struct CmdOptions {
   uint64_t reduce_iterations = 1;
   uint64_t reduce_input_size = 50;
   int accuracy_max_memory = 80;
+  uint64_t max_memory = 2147483648; // 2 GB
+  double reduction_factor = 0.1;
 };
 
 extern CmdOptions cmd_options;
