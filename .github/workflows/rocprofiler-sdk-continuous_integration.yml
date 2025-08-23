@@ -403,7 +403,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -664,7 +664,7 @@ jobs:
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
@@ -869,7 +869,7 @@ jobs:
         cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
-            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0
+            -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
             -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
             .
