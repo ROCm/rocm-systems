@@ -165,15 +165,45 @@ jobs:
                   make prefix=/usr all -j 32; \
                   make prefix=/usr install; \
                   cd ..; rm -rf git-2.51.0*; \
-                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/8.8/amdgpu-install-7.0.70000-1.el8.noarch.rpm; \
-                  sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo; \
-                  sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo; \
+                  tee /etc/yum.repos.d/rocm.repo <<EOF \
+                    [ROCm-7.0.0] \
+                    name=ROCm7.0.0 \
+                    baseurl=https://repo.radeon.com/rocm/el8/7.0_rc1/main \
+                    enabled=1 \
+                    priority=50 \
+                    gpgcheck=1 \
+                    gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+                    EOF ; \
+                  tee /etc/yum.repos.d/amdgpu.repo <<EOF \
+                    [amdgpu] \
+                    name=amdgpu \
+                    baseurl=https://repo.radeon.com/amdgpu/latest/rhel/8.8/main/x86_64/ \
+                    enabled=1 \
+                    priority=50 \
+                    gpgcheck=1 \
+                    gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+                    EOF ; \
                 else \
                   rm -rf /etc/yum.repos.d/RHEL-partners.repo; \
                   dnf clean all; \
-                  dnf install -y https://repo.radeon.com/amdgpu-install/.7.0/rhel/9.5/amdgpu-install-7.0.70000-1.el9.noarch.rpm; \
-                  sed -i "s/\/30.10/\/.30.10/" /etc/yum.repos.d/amdgpu*.repo; \
-                  sed -i "s|rocm/el\([0-9]\+\)/7\.0|rocm/el\1/.yum_7.0|; s|graphics/7\.0|graphics/.7.0|" /etc/yum.repos.d/rocm.repo; \
+                  tee /etc/yum.repos.d/rocm.repo <<EOF \
+                    [ROCm-7.0.0] \
+                    name=ROCm7.0.0 \
+                    baseurl=https://repo.radeon.com/rocm/el9/7.0_rc1/main \
+                    enabled=1 \
+                    priority=50 \
+                    gpgcheck=1 \
+                    gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+                    EOF ; \
+                  tee /etc/yum.repos.d/amdgpu.repo <<EOF \
+                    [amdgpu] \
+                    name=amdgpu \
+                    baseurl=https://repo.radeon.com/amdgpu/30.10_rc1/rhel/9.5/main/x86_64/ \
+                    enabled=1 \
+                    priority=50 \
+                    gpgcheck=1 \
+                    gpgkey=https://repo.radeon.com/rocm/rocm.gpg.key \
+                    EOF ; \
                 fi; \
                 dnf clean all; \
                 dnf install -y rocm-openmp rocm-openmp-sdk rocm-llvm-devel libva-amdgpu-devel hipify-clang llvm-amdgpu-libs mesa-amdgpu-va-drivers libsqlite3x-devel elfutils-devel; \
