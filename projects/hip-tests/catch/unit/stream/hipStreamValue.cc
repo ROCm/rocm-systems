@@ -41,8 +41,7 @@ template <typename UIntT, typename... Args> auto writeFunc(Args... args) {
 // Random predefined 32 and 64 bit values
 using value32_t = std::integral_constant<uint32_t, 0x70F0F0FF>;
 using value64_t = std::integral_constant<uint64_t, 0x7FFF0000FFFF0000>;
-template <typename UIntT>
-using testValue =
+template <typename UIntT> using testValue =
     typename std::conditional<std::is_same<UIntT, uint32_t>::value, value32_t, value64_t>::type;
 
 constexpr uint32_t DATA_INIT = 0x1234;
@@ -387,18 +386,14 @@ DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("Mask_And",
                                             hipStreamWaitValueAnd, 0xFF, 0xF4A, 0xF35, 0X02))
 
 // Not Using Mask
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Eq",
-                                        TEST_WAIT32(hipStreamWaitValueEq, 0x7FFFFFFF, 0x7FFF0000,
-                                                    0x7FFFFFFF))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Gte",
-                                        TEST_WAIT32(hipStreamWaitValueGte, 0x7FFF0001, 0x7FFF0000,
-                                                    0x7FFF0010))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_And",
-                                        TEST_WAIT32(hipStreamWaitValueAnd, 0x70F0F0F0, 0x0F0F0F0F,
-                                                    0X1F0F0F0F))
-DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Nor",
-                                        TEST_WAIT32(hipStreamWaitValueNor, 0x7AAAAAAA, 0x85555555,
-                                                    0x9AAAAAAA))
+DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Eq", TEST_WAIT32(hipStreamWaitValueEq, 0x7FFFFFFF,
+                                                                 0x7FFF0000, 0x7FFFFFFF))
+DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Gte", TEST_WAIT32(hipStreamWaitValueGte, 0x7FFF0001,
+                                                                  0x7FFF0000, 0x7FFF0010))
+DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_And", TEST_WAIT32(hipStreamWaitValueAnd, 0x70F0F0F0,
+                                                                  0x0F0F0F0F, 0X1F0F0F0F))
+DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32("NoMask_Nor", TEST_WAIT32(hipStreamWaitValueNor, 0x7AAAAAAA,
+                                                                  0x85555555, 0x9AAAAAAA))
 
 #undef DEFINE_STREAM_WAIT_VAL_TEST_CASES_INT32
 

@@ -187,7 +187,7 @@ inline long long get_time() {
   return (tv.tv_sec * 1000000) + tv.tv_usec;
 #else
   return std::chrono::high_resolution_clock::now().time_since_epoch() /
-      std::chrono::microseconds(1);
+         std::chrono::microseconds(1);
 #endif
 }
 
@@ -333,9 +333,8 @@ void initArraysForHost(T** A_h, T** B_h, T** C_h, size_t N, bool usePinnedHost =
 }
 
 
-template <typename T>
-void initArrays(T** A_d, T** B_d, T** C_d, T** A_h, T** B_h, T** C_h, size_t N,
-                bool usePinnedHost = false) {
+template <typename T> void initArrays(T** A_d, T** B_d, T** C_d, T** A_h, T** B_h, T** C_h,
+                                      size_t N, bool usePinnedHost = false) {
   size_t Nbytes = N * sizeof(T);
 
   if (A_d) {
@@ -392,9 +391,9 @@ void freeArrays(T* A_d, T* B_d, T* C_d, T* A_h, T* B_h, T* C_h, bool usePinnedHo
 }
 
 #if defined(__HIP_PLATFORM_AMD__)
-template <typename T>
-void initArrays2DPitch(T** A_d, T** B_d, T** C_d, size_t* pitch_A, size_t* pitch_B, size_t* pitch_C,
-                       size_t numW, size_t numH) {
+template <typename T> void initArrays2DPitch(T** A_d, T** B_d, T** C_d, size_t* pitch_A,
+                                             size_t* pitch_B, size_t* pitch_C, size_t numW,
+                                             size_t numH) {
   if (A_d) {
     HIPCHECK(hipMallocPitch((void**)A_d, pitch_A, numW * sizeof(T), numH));
   }
@@ -426,9 +425,8 @@ inline void initHIPArrays(hipArray** A_d, hipArray** B_d, hipArray** C_d,
 
 // Assumes C_h contains vector add of A_h + B_h
 // Calls the test "failed" macro if a mismatch is detected.
-template <typename T>
-size_t checkVectorADD(T* A_h, T* B_h, T* result_H, size_t N, bool expectMatch = true,
-                      bool reportMismatch = true) {
+template <typename T> size_t checkVectorADD(T* A_h, T* B_h, T* result_H, size_t N,
+                                            bool expectMatch = true, bool reportMismatch = true) {
   size_t mismatchCount = 0;
   size_t firstMismatch = 0;
   size_t mismatchesToPrint = 10;

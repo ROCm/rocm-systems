@@ -530,7 +530,7 @@ class Image : public Memory {
     //! Compare 2 image formats.
     bool operator==(const Format& rhs) const {
       return image_channel_order == rhs.image_channel_order &&
-          image_channel_data_type == rhs.image_channel_data_type;
+             image_channel_data_type == rhs.image_channel_data_type;
     }
     bool operator!=(const Format& rhs) const { return !(*this == rhs); }
 
