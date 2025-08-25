@@ -77,6 +77,8 @@ static void LegacyInitGLX() {
     GlxExport =
         (PFNMESAGLINTEROPGLXEXPORTOBJECTPROC*)dlsym(RTLD_DEFAULT, "MesaGLInteropGLXExportObject");
   }
+
+  LogInfo("Legacy Init GLX");
 }
 
 static void LegacyInitEGL() {
@@ -89,6 +91,7 @@ static void LegacyInitEGL() {
     EglExport =
         (PFNMESAGLINTEROPEGLEXPORTOBJECTPROC*)dlsym(RTLD_DEFAULT, "MesaGLInteropEGLExportObject");
   }
+  LogInfo("Legacy Init EGL");
 }
 #endif
 

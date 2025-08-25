@@ -1774,6 +1774,7 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
 #if defined(_WIN32)
   return false;
 #else
+  LogPrintfInfo("bind external device Flags %d , %d", flags, amd::Context::GLDeviceKhr);
   if ((flags & amd::Context::GLDeviceKhr) == 0) return false;
 
   MesaInterop::MESA_INTEROP_KIND kind = MesaInterop::MESA_INTEROP_NONE;
@@ -1781,10 +1782,12 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   MesaInterop::ContextHandle context;
 
   if ((flags & amd::Context::EGLDeviceKhr) != 0) {
+    LogInfo("Mesa Interop EGL");
     kind = MesaInterop::MESA_INTEROP_EGL;
     display.eglDisplay = reinterpret_cast<EGLDisplay>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
     context.eglContext = reinterpret_cast<EGLContext>(gfxContext);
   } else {
+    LogInfo("Mesa Interop GLX");
     kind = MesaInterop::MESA_INTEROP_GLX;
     display.glxDisplay = reinterpret_cast<Display*>(gfxDevice[amd::Context::GLDeviceKhrIdx]);
     context.glxContext = reinterpret_cast<GLXContext>(gfxContext);
@@ -1793,13 +1796,27 @@ bool Device::bindExternalDevice(uint flags, void* const gfxDevice[], void* gfxCo
   mesa_glinterop_device_info info;
   info.version = MESA_GLINTEROP_DEVICE_INFO_VERSION;
   if (!MesaInterop::Init(kind)) {
+    LogInfo("Bind External Device Init Failed");
     return false;
   }
 
   if (!MesaInterop::GetInfo(info, kind, display, context)) {
+    LogInfo("Bind External Device Info Failed");
     return false;
   }
 
+  LogPrintfInfo("Bind External Device 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x 0x%x",
+   info_.deviceTopology_.pcie.bus,
+   info.pci_bus,
+   info_.deviceTopology_.pcie.device,
+   info.pci_device,
+   info_.deviceTopology_.pcie.function,
+   info.pci_function,
+   info_.vendorId_,
+   info.vendor_id, 
+   pciDeviceId_,
+   info.device_id,
+  info.version);
   return info_.deviceTopology_.pcie.bus == info.pci_bus &&
          info_.deviceTopology_.pcie.device == info.pci_device &&
          info_.deviceTopology_.pcie.function == info.pci_function &&

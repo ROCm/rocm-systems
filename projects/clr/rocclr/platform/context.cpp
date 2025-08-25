@@ -22,6 +22,7 @@
 #include "platform/interop_gl.hpp"
 #include "vdi_common.hpp"
 #include "platform/commandqueue.hpp"
+#include "utils/debug.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -103,6 +104,7 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
 
   // Process all properties
   while (p->name != 0) {
+    LogPrintfInfo("Check properties: %d", p->name);
     switch (p->name) {
       case CL_CONTEXT_INTEROP_USER_SYNC:
         if (p->ptr == reinterpret_cast<void*>(true)) {
@@ -180,7 +182,9 @@ int Context::checkProperties(const cl_context_properties* properties, Context::I
         break;
       case CL_CONTEXT_PLATFORM:
         pfmId = reinterpret_cast<cl_platform_id>(p->ptr);
+        LogPrintfInfo("CL_CONTEXT_PLATFORM : pfmid %p , %p", pfmId, AMD_PLATFORM);
         if ((NULL != pfmId) && (AMD_PLATFORM != pfmId)) {
+          LogPrintfInfo("CL_CONTEXT_PLATFORM FAILURE");
           return CL_INVALID_VALUE;
         }
         break;
@@ -209,6 +213,7 @@ int Context::create(const intptr_t* properties) {
   if (properties != NULL) {
     properties_ = new cl_context_properties[info().propertiesSize_ / sizeof(cl_context_properties)];
     if (properties_ == NULL) {
+      LogInfo("create properties out of memory");
       return CL_OUT_OF_HOST_MEMORY;
     }
 
@@ -264,7 +269,9 @@ int Context::create(const intptr_t* properties) {
                       D3D9DeviceEXKhr | D3D9DeviceVAKhr)) {
     // Loop through all devices
     for (const auto& it : devices_) {
+      LogPrintfInfo("GL Device %x, %p %p", info_.flags_, info_.hDev_, info_.hCtx_);
       if (!it->bindExternalDevice(info_.flags_, info_.hDev_, info_.hCtx_, VALIDATE_ONLY)) {
+        LogInfo("create properties Failued due to external device binding");
         result = CL_INVALID_VALUE;
       }
     }
@@ -304,6 +311,7 @@ int Context::create(const intptr_t* properties) {
     }
   }
 
+  LogPrintfInfo("create properties status %d\n", result);
   return result;
 }
 

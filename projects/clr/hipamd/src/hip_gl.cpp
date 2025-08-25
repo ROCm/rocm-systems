@@ -38,6 +38,8 @@ namespace hip {
 void setupGLInteropOnce() {
   amd::Context* amdContext = hip::getCurrentDevice()->asContext();
 
+  LogPrintfInfo("Context %p", amdContext);
+
   // current context will be read in amdContext->create
   cl_context_properties properties[] = {CL_CONTEXT_PLATFORM,
                                         (cl_context_properties)AMD_PLATFORM,
@@ -54,13 +56,13 @@ void setupGLInteropOnce() {
 
   amd::Context::Info info;
   if (CL_SUCCESS != amd::Context::checkProperties(properties, &info)) {
-    LogError("Context setup failed");
+    LogError("Context validation failed");
     return;
   }
 
   amdContext->setInfo(info);
   if (CL_SUCCESS != amdContext->create(properties)) {
-    LogError("Context setup failed");
+    LogError("Context creation failed");
   }
 }
 
