@@ -413,25 +413,25 @@ rocpd_post_processing::get_amd_smi_sample_callback() const
         }
 
         auto deserialize_uint16_array = [](const std::vector<uint8_t>& data,
-                                           size_t& offset, int array_size) {
-            std::vector<uint16_t> result;
-            result.reserve(array_size);
+                                           size_t& _offset, int array_size) {
+            std::vector<uint16_t> _result;
+            _result.reserve(array_size);
 
             for(int i = 0; i < array_size; ++i)
             {
-                if(offset + 1 >= data.size())
+                if(_offset + 1 >= data.size())
                 {
                     throw std::runtime_error(
                         "Invalid serialized data: unexpected end of data");
                 }
 
-                uint16_t value = static_cast<uint16_t>(data[offset]) |
-                                 (static_cast<uint16_t>(data[offset + 1]) << 8);
-                result.push_back(value);
-                offset += 2;
+                uint16_t value = static_cast<uint16_t>(data[_offset]) |
+                                 (static_cast<uint16_t>(data[_offset + 1]) << 8);
+                _result.push_back(value);
+                _offset += 2;
             }
 
-            return result;
+            return _result;
         };
 
         result.reserve(chunk_count);
