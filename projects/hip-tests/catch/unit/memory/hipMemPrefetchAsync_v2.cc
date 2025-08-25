@@ -20,6 +20,7 @@ THE SOFTWARE.
 */
 
 #include <hip_test_common.hh>
+#include <utils.hh>
 #include <numaif.h>
 #include <numa.h>
 
@@ -36,6 +37,23 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
 }
 
 /**
+ * Helper function to get the list of devices which supports
+ * Managed memory
+ */
+static std::vector<int> getSupportedDevices() {
+  const auto deviceCount = HipTest::getDeviceCount();
+  std::vector<int> supportedDevices;
+  supportedDevices.reserve(deviceCount + 1);
+  for (int i = 0; i < deviceCount; ++i) {
+    if (DeviceAttributesSupport(i, hipDeviceAttributeManagedMemory,
+                                hipDeviceAttributeConcurrentManagedAccess)) {
+      supportedDevices.push_back(i);
+    }
+  }
+  return supportedDevices;
+}
+
+/**
  * Test Description
  * ------------------------
  *  - This test case checks the following scenarios
@@ -49,6 +67,13 @@ static __global__ void fillDataKernel(int* arr, size_t size, int value) {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
+  auto supportedDevices = getSupportedDevices();
+  if (supportedDevices.empty()) {
+    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+  }
+
+  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+
   const int N = 1024;
   const int Nbytes = N * sizeof(int);
   int value = 10;
@@ -65,7 +90,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
     int deviceCount = 0;
     HIP_CHECK(hipGetDeviceCount(&deviceCount));
 
-    for (int deviceId = 0; deviceId < deviceCount; deviceId++) {
+    for (int deviceId : supportedDevices) {
       hipMemLocation location;
       location.type = hipMemLocationTypeDevice;
       location.id = deviceId;
@@ -117,6 +142,13 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_Device_Host") {
  */
 #if HT_AMD  // In NVIDIA, getting compilation issues for Flags : SWDEV-551244
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
+  auto supportedDevices = getSupportedDevices();
+  if (supportedDevices.empty()) {
+    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+  }
+
+  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+
   if (numa_available() < 0) {
     HipTest::HIP_SKIP_TEST("NUMA not available on this system");
   }
@@ -156,7 +188,7 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
         REQUIRE(memPtr[i] == value);
       }
 
-#if 0  // To work this part, fix provided in SWDEV-502329 is required
+#if 0  // To work this part, fix provided in SWDEV-548802 is required
       // verify placement
       void* page = memPtr;
       int status = -1;
@@ -221,6 +253,13 @@ TEST_CASE("Unit_hipMemPrefetchAsync_v2_HostNuma_HostNumaCurrent") {
  *  - HIP_VERSION >= 7.1
  */
 TEST_CASE("Unit_hipMemPrefetchAsync_v2_Negative") {
+  auto supportedDevices = getSupportedDevices();
+  if (supportedDevices.empty()) {
+    HipTest::HIP_SKIP_TEST("Test need at least one device with managed memory support");
+  }
+
+  HIP_CHECK(hipSetDevice(supportedDevices[0]));
+
   const int N = 16;
   const int Nbytes = N * sizeof(int);
 
