@@ -388,9 +388,9 @@ TEST_CASE("Unit_Coalesced_Group_Getters_Via_Non_Member_Functions_Positive_Basic"
   }
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl_up(T* const out, const unsigned int delta,
-                                        const uint64_t active_mask) {
+template <typename T> __global__ void coalesced_group_shfl_up(T* const out,
+                                                              const unsigned int delta,
+                                                              const uint64_t active_mask) {
 #if (__GFX8__ || __GFX9__)
   constexpr unsigned int ksize = 64;
 #else
@@ -468,9 +468,9 @@ TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Up_Positive_Basic", "", int, unsig
   CoalescedGroupShflUpTestImpl<TestType>();
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl_down(T* const out, const unsigned int delta,
-                                          const uint64_t active_mask) {
+template <typename T> __global__ void coalesced_group_shfl_down(T* const out,
+                                                                const unsigned int delta,
+                                                                const uint64_t active_mask) {
 #if (__GFX8__ || __GFX9__)
   constexpr unsigned int ksize = 64;
 #else
@@ -558,9 +558,8 @@ TEMPLATE_TEST_CASE("Unit_Coalesced_Group_Shfl_Down_Positive_Basic", "", int, uns
   CoalescedGroupShflDownTest<TestType>();
 }
 
-template <typename T>
-__global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
-                                     const uint64_t active_mask) {
+template <typename T> __global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
+                                                           const uint64_t active_mask) {
 #if (__GFX8__ || __GFX9__)
   constexpr unsigned int ksize = 64;
 #else

@@ -205,8 +205,8 @@ bool test_printf_conststr(uint32_t num_blocks, uint32_t threads_per_block, uint3
   uint32_t sizePrintString = (sizeof(CONST_STR) - 1);  // Excluding NULL character
   // Calculate the number of iterations from print_limit.
   size_t stress_limit_bytes = ((size_t)print_limit * 1024 * 1024 * 1024);
-  iterCount = static_cast<uint32_t>(
-      1 + stress_limit_bytes / (num_blocks * threads_per_block * sizePrintString));
+  iterCount = static_cast<uint32_t>(1 + stress_limit_bytes /
+                                            (num_blocks * threads_per_block * sizePrintString));
   // Calculate expected lines of print and file size.
   uint32_t totalExpectedLines = num_blocks * threads_per_block * iterCount;
   size_t expectedFileSize = ((size_t)totalExpectedLines * sizePrintString);
@@ -255,15 +255,15 @@ bool test_printf_two_conditionalstr(uint32_t num_blocks, uint32_t threads_per_bl
   avgsizePrintString = (sizePrintStringEven + sizePrintStringOdd) / 2;
   // Calculate the number of iterations from print_limit
   size_t stress_limit_bytes = ((size_t)print_limit * 1024 * 1024 * 1024);
-  iterCount = static_cast<uint32_t>(
-      1 + stress_limit_bytes / (num_blocks * threads_per_block * avgsizePrintString));
+  iterCount = static_cast<uint32_t>(1 + stress_limit_bytes /
+                                            (num_blocks * threads_per_block * avgsizePrintString));
   // Calculate expected lines of print and file size.
   uint32_t totalExpectedEvenLines, totalExpectedOddLines;
   // 0, 1, 2, 3
   // 0, 1, 2
   totalExpectedEvenLines = ((num_blocks * threads_per_block) % 2 == 0)
-      ? (num_blocks * threads_per_block * iterCount) / 2
-      : (((num_blocks * threads_per_block) / 2) + 1) * iterCount;
+                               ? (num_blocks * threads_per_block * iterCount) / 2
+                               : (((num_blocks * threads_per_block) / 2) + 1) * iterCount;
   totalExpectedOddLines = (num_blocks * threads_per_block * iterCount - totalExpectedEvenLines);
   size_t expectedFileSize = ((size_t)totalExpectedEvenLines * sizePrintStringEven +
                              (size_t)totalExpectedOddLines * sizePrintStringOdd);
@@ -322,8 +322,8 @@ bool test_printf_single_conditionalstr(uint32_t num_blocks, uint32_t threads_per
   // Calculate expected lines of print and file size.
   uint32_t totalExpectedLines;
   totalExpectedLines = ((num_blocks * threads_per_block) % 2 == 0)
-      ? (num_blocks * threads_per_block * iterCount) / 2
-      : (((num_blocks * threads_per_block) / 2) + 1) * iterCount;
+                           ? (num_blocks * threads_per_block * iterCount) / 2
+                           : (((num_blocks * threads_per_block) / 2) + 1) * iterCount;
   size_t expectedFileSize = (size_t)totalExpectedLines * sizePrintStringEven;
   size_t actualFileSize = 0;
   uint32_t totalActualLines = 0;

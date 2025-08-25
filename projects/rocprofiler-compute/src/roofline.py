@@ -676,7 +676,8 @@ class Roofline:
             console_log("roofline", "{} does not exist".format(roofline_csv))
             return
 
-        # if workload is detected, utilize Roofline yamls. If not, fallback to legacy calc_ai
+        # if workload is detected, utilize Roofline yamls.
+        # If not, fallback to legacy calc_ai
         if workload is not None:
             self.__ai_data = calc_ai_analyze(
                 workload=workload,
@@ -692,6 +693,9 @@ class Roofline:
                 console_error("roofline", "{} does not exist".format(pmc_perf_csv))
             t_df = OrderedDict()
             t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
+            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
+            if profiling_config.get("format_rocprof_output") == "rocpd":
+                t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
             self.__ai_data = calc_ai_profile(
                 self.__mspec, self.__run_parameters["sort_type"], t_df
@@ -713,10 +717,6 @@ class Roofline:
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
-
-        profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
         color_scheme = {
             "HBM": "blue+",

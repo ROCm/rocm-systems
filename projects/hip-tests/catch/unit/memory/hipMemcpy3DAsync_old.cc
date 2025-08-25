@@ -77,9 +77,8 @@ template <typename T> void Memcpy3DAsync<T>::SetDefaultData() {
 /*
  * Constructor initalized width,depth and height
  */
-template <typename T>
-Memcpy3DAsync<T>::Memcpy3DAsync(int l_width, int l_height, int l_depth,
-                                hipChannelFormatKind l_format) {
+template <typename T> Memcpy3DAsync<T>::Memcpy3DAsync(int l_width, int l_height, int l_depth,
+                                                      hipChannelFormatKind l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;

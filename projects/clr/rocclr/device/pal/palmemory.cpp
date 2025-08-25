@@ -367,8 +367,8 @@ bool Memory::createInterop() {
       vkRes.nt_handle_ = ((ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueFd) &&
                           (ext_memory->Type() != amd::ExternalMemory::HandleType::OpaqueWin32Kmt) &&
                           (ext_memory->Type() != amd::ExternalMemory::HandleType::D3D11ResourceKmt))
-          ? true
-          : false;
+                             ? true
+                             : false;
     }
 
     else if (glObject != nullptr) {

@@ -104,8 +104,8 @@ template <class S> class relocation_section_accessor_template {
     unsigned char other;
 
     symbol_section_accessor symbols(elf_file, elf_file.sections[get_symbol_table_index()]);
-    ret = ret &&
-        symbols.get_symbol(symbol, symbolName, symbolValue, size, bind, symbolType, section, other);
+    ret = ret && symbols.get_symbol(symbol, symbolName, symbolValue, size, bind, symbolType,
+                                    section, other);
 
     if (ret) {  // Was it successful?
       switch (type) {
@@ -207,9 +207,9 @@ template <class S> class relocation_section_accessor_template {
   Elf_Half get_symbol_table_index() const { return (Elf_Half)relocation_section->get_link(); }
 
   //------------------------------------------------------------------------------
-  template <class T>
-  void generic_get_entry_rel(Elf_Xword index, Elf64_Addr& offset, Elf_Word& symbol, Elf_Word& type,
-                             Elf_Sxword& addend) const {
+  template <class T> void generic_get_entry_rel(Elf_Xword index, Elf64_Addr& offset,
+                                                Elf_Word& symbol, Elf_Word& type,
+                                                Elf_Sxword& addend) const {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
     const T* pEntry = reinterpret_cast<const T*>(relocation_section->get_data() +
@@ -222,9 +222,9 @@ template <class S> class relocation_section_accessor_template {
   }
 
   //------------------------------------------------------------------------------
-  template <class T>
-  void generic_get_entry_rela(Elf_Xword index, Elf64_Addr& offset, Elf_Word& symbol, Elf_Word& type,
-                              Elf_Sxword& addend) const {
+  template <class T> void generic_get_entry_rela(Elf_Xword index, Elf64_Addr& offset,
+                                                 Elf_Word& symbol, Elf_Word& type,
+                                                 Elf_Sxword& addend) const {
     const endianess_convertor& convertor = elf_file.get_convertor();
 
     const T* pEntry = reinterpret_cast<const T*>(relocation_section->get_data() +

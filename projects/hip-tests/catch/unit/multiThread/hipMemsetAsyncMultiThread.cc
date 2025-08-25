@@ -35,19 +35,15 @@ enum TestType { SameStream = 0, DifferentStreams };
 // allocated buffer
 template <typename Func, typename T> void threadCall(Func f, hipStream_t stream) {
   // Should match hipMemsetAsync or hipMemsetD*Async arguments
-  static_assert(
-      (std::is_same<Func,
-                    hipError_t (*)(void*, int, size_t, hipStream_t)>::value ||  // hipMemsetAsync
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, int, size_t,
-                                   hipStream_t)>::value ||  // hipMemsetD32Async
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, unsigned short, size_t,
-                                   hipStream_t)>::value ||  // hipMemsetD16Async
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, unsigned char, size_t,
-                                   hipStream_t)>::value) &&  // hipMemsetD8Async
-      "Func f should be hipMemsetAsync or hipMemsetD*Async");
+  static_assert((std::is_same<Func, hipError_t (*)(void*, int, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetAsync
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, int, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetD32Async
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, unsigned short, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetD16Async
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, unsigned char, size_t,
+                                                   hipStream_t)>::value) &&  // hipMemsetD8Async
+                "Func f should be hipMemsetAsync or hipMemsetD*Async");
 
   constexpr bool cast_2_void =
       std::is_same<Func, hipError_t (*)(void*, int, size_t, hipStream_t)>::value;
@@ -104,25 +100,21 @@ template <typename Func, typename T> void launchThreads(Func f, TestType type) {
   static_assert(!std::is_pointer<T>::value && "Argument cant be a pointer");
 
   // Should match hipMemsetAsync or hipMemsetD*Async arguments
-  static_assert(
-      (std::is_same<Func,
-                    hipError_t (*)(void*, int, size_t, hipStream_t)>::value ||  // hipMemsetAsync
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, int, size_t,
-                                   hipStream_t)>::value ||  // hipMemsetD32Async
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, unsigned short, size_t,
-                                   hipStream_t)>::value ||  // hipMemsetD16Async
-       std::is_same<Func,
-                    hipError_t (*)(hipDeviceptr_t, unsigned char, size_t,
-                                   hipStream_t)>::value) &&  // hipMemsetD8Async
-      "Func f should be hipMemsetAsync or hipMemsetD*Async");
+  static_assert((std::is_same<Func, hipError_t (*)(void*, int, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetAsync
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, int, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetD32Async
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, unsigned short, size_t,
+                                                   hipStream_t)>::value ||  // hipMemsetD16Async
+                 std::is_same<Func, hipError_t (*)(hipDeviceptr_t, unsigned char, size_t,
+                                                   hipStream_t)>::value) &&  // hipMemsetD8Async
+                "Func f should be hipMemsetAsync or hipMemsetD*Async");
 
   const size_t num_threads = (std::thread::hardware_concurrency() > 8)
-      ? (((std::thread::hardware_concurrency() / 4) >= 127)
-             ? 127
-             : (std::thread::hardware_concurrency() / 4))
-      : 2;  // thread count between 2 - 127
+                                 ? (((std::thread::hardware_concurrency() / 4) >= 127)
+                                        ? 127
+                                        : (std::thread::hardware_concurrency() / 4))
+                                 : 2;  // thread count between 2 - 127
 
   const size_t num_streams = (type == SameStream) ? 1 : num_threads;
   std::vector<hipStream_t> streams(num_streams, nullptr);
