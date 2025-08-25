@@ -66,12 +66,13 @@ jobs:
   # Build a cached CI base image per OS using Buildx + GHA cache (Item #6)
   # -----------------------------------------------------------------------------
   build-ci-base:
-    name: Build CI Base Image (${{ matrix.os }})
+    name: Build CI Base Image • ${{ matrix.gpu }} • ${{ matrix.os }}
     runs-on: azure-linux-scale-rocm
     strategy:
       fail-fast: false
       matrix:
         os: [ 'ubuntu-22.04', 'rhel-8.8', 'rhel-9.5', 'sles-15.6' ]
+        gpu: [ 'gfx94X', 'gfx110X', 'gfx120X' ]
     steps:
       - name: Checkout (shallow)
         uses: actions/checkout@v4
@@ -79,6 +80,7 @@ jobs:
           sparse-checkout: projects/rocprofiler-sdk/requirements.txt
 
       - name: Get the latest therock build
+        if: github.event_name == 'schedule'
         id: therock
         run: |
           sudo apt-get install -y python3-pip
@@ -121,11 +123,14 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Create CI Dockerfile
+        if: github.event_name == 'schedule'
         run: |
           cat > ci.Dockerfile <<'EOF'
           # Build a thin "base with deps" image atop the private runner image
           ARG BASE_TAG=ubuntu-22.04
           FROM rocm/rocprofiler-private:${BASE_TAG}
+          ARG GPU_TYPE=gfx94X
+          ENV GPU_TYPE=${GPU_TYPE}
           SHELL ["/bin/bash","-lc"]
           COPY projects/rocprofiler-sdk/requirements.txt /root/requirements.txt
           ENV DEBIAN_FRONTEND=noninteractive
@@ -196,20 +201,32 @@ jobs:
                 python3 -m pip install --upgrade -r /root/requirements.txt || true; \
               fi
           RUN set -euo pipefail; \
-              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
-                source rocprofiler-sdk/bin/activate; \
-                python3 -m pipx ensurepath; \
-                source ~/.bashrc; \
-              fi; \
-              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
-              mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz
+              if [ "${GPU_TYPE}" = "gfx94X" ]; then \
+                if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                  source rocprofiler-sdk/bin/activate; \
+                  python3 -m pipx ensurepath; \
+                  source ~/.bashrc; \
+                fi; \
+                aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
+                mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz; \
+              fi
           RUN set -euo pipefail; \
-              if [ -f /etc/debian_version ]; then \
+              if [ "${GPU_TYPE}" = "gfx110X" ]; then \
+                if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                  source rocprofiler-sdk/bin/activate; \
+                  python3 -m pipx ensurepath; \
+                  source ~/.bashrc; \
+                fi; \
                 aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
                 mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz; \
               fi
           RUN set -euo pipefail; \
-              if [ -f /etc/debian_version ]; then \
+              if [ "${GPU_TYPE}" = "gfx120X" ]; then \
+                if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
+                  source rocprofiler-sdk/bin/activate; \
+                  python3 -m pipx ensurepath; \
+                  source ~/.bashrc; \
+                fi; \
                 aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
                 mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz; \
               fi
@@ -225,10 +242,11 @@ jobs:
           push: true
           build-args: |
             BASE_TAG=${{ matrix.os }}
+            GPU_TYPE=${{ matrix.gpu }}
           tags: |
-            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-latest
-          cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.os }}
-          cache-to: type=gha,mode=max,scope=rocprofiler-ci-${{ matrix.os }}
+            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-latest
+          cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}
+          cache-to: type=gha,mode=max,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}
 
   # -----------------------------------------------------------------------------
   # Ubuntu / DEB job(s)
@@ -245,7 +263,7 @@ jobs:
           - { gpu: 'mi325', runner: 'linux-mi325-1gpu-ossci-rocm', os: 'ubuntu-22.04', build-type: 'RelWithDebInfo', therock-s3: "gfx94X",  ci-flags: '--linter clang-tidy', gpu-target: "gfx942" }
     runs-on: ${{ matrix.system.runner }}
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.system.os }}-${{ matrix.system.therock-s3 }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -554,7 +572,7 @@ jobs:
         ci-flags: [ '' ]
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -753,7 +771,7 @@ jobs:
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: linux-mi325-1gpu-ossci-rocm
     container:
-      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-latest
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-gfx94X-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
