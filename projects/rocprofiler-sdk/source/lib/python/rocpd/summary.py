@@ -208,7 +208,7 @@ def generate_summary_query(
 def generate_domain_query(
     connection: RocpdImportData, summary_queries, by_rank=False
 ) -> Tuple[str, str]:
-    """Generate the SQL statement for domain summary by doing union over all summary views."""
+    """Generate the SQL statement for domain summary by doing union over all summary queries."""
 
     if by_rank:
         view_suffix = "_summary_by_rank"
@@ -227,22 +227,22 @@ def generate_domain_query(
         join_condition = "CROSS JOIN total_duration TD"
         order_by = 'ORDER BY GD."DURATION (nsec)" DESC'
 
-    summary_views = {
+    summary_dictionary = {
         query_name: query
         for query_name, query in summary_queries.items()
         if query_name.endswith(view_suffix)
     }
 
-    if len(summary_views) < 1:
+    if len(summary_dictionary) < 1:
         return ()
 
     summary_selects = [
-        f"{query_name} AS ({query})," for query_name, query in summary_views.items()
+        f"{query_name} AS ({query}) ," for query_name, query in summary_dictionary.items()
     ]
 
     union_selects = [
         f" SELECT '{query_name.replace(view_suffix, '').upper()}' as domain, * FROM {query_name} "
-        for query_name, query in summary_views.items()
+        for query_name, query in summary_dictionary.items()
     ]
 
     domain_select = f"""
@@ -379,7 +379,7 @@ def create_summary_region_queries(
         return queries
 
     markers_query_name = "markers"
-    markers_query = f"""
+    markers_query = """
         SELECT JSON_EXTRACT(extdata, '$.message') AS marker_name, *
         FROM regions_and_samples
         WHERE category LIKE 'MARKER_%'
@@ -402,7 +402,7 @@ def create_summary_region_queries(
 
 
 def create_domain_query(connection: RocpdImportData, summary_queries, by_rank=False):
-    """Create a domain summary query by aggregating all summary views."""
+    """Create a domain summary query by aggregating all summary queries."""
 
     result = generate_domain_query(connection, summary_queries, by_rank=by_rank)
     if not result:
@@ -414,7 +414,7 @@ def create_domain_query(connection: RocpdImportData, summary_queries, by_rank=Fa
 
 
 def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
-    """Generate all summary views and write them to CSV files."""
+    """Generate all summaries and export them to selected format."""
 
     domain_summary = kwargs.get("domain_summary", False)
     by_rank = kwargs.get("summary_by_rank", False)
@@ -444,7 +444,7 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
 
     if domain_summary:
         summary_queries |= create_domain_query(connection, summary_queries)
-        # Create and domain summary per rank only if both domain_summary and summary_by_rank are enabled
+        # Create domain summary per rank only if both domain_summary and summary_by_rank are enabled
         if by_rank:
             summary_queries |= create_domain_query(
                 connection, summary_queries, by_rank=True
