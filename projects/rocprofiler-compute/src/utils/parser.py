@@ -932,6 +932,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             locals()[var_name] = peak_data_row[metric_name]
     else:
         default_peaks = [
+            "FP16Flops",
+            "FP32Flops",
+            "FP64Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
             "MFMAF16Flops",
