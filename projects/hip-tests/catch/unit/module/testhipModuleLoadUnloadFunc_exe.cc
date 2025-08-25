@@ -110,10 +110,9 @@ bool testhipModuleLoadUnloadFunc(const std::vector<char>& buffer, char* globTest
 
   // Check the results
   for (size_t idx = 0; idx < N; idx++) {
-    if (B_h[idx] !=
-        (deviceGlobalInt1H * A_h[idx] + deviceGlobalInt2H + static_cast<int>(deviceGlobalShortH) +
-         +static_cast<int>(deviceGlobalCharH) +
-         static_cast<int>(deviceGlobalFloatH * deviceGlobalFloatH))) {
+    if (B_h[idx] != (deviceGlobalInt1H * A_h[idx] + deviceGlobalInt2H +
+                     static_cast<int>(deviceGlobalShortH) + +static_cast<int>(deviceGlobalCharH) +
+                     static_cast<int>(deviceGlobalFloatH * deviceGlobalFloatH))) {
       // exit the current process with failure
       return false;
     }

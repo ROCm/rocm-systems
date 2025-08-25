@@ -85,9 +85,9 @@ LONG_CONVERSION_FUNCTION_TEST_DEF(llround, std::llround, long long)
 TEST_CASE("Unit_Device_llround_llroundf_Negative_RTC") { NegativeTestRTCWrapper<4>(kLlround); }
 
 
-template <typename T>
-__global__ void remquo_kernel(std::pair<T, int>* const ys, const size_t num_xs, T* const x1s,
-                              T* const x2s) {
+template <typename T> __global__ void remquo_kernel(std::pair<T, int>* const ys,
+                                                    const size_t num_xs, T* const x1s,
+                                                    T* const x2s) {
   const auto tid = cg::this_grid().thread_rank();
   const auto stride = cg::this_grid().size();
 

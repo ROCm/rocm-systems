@@ -300,7 +300,8 @@ class OmniSoC_Base:
             sets_info = parse_sets_yaml(self.__arch)
             if set_selected not in set(sets_info.keys()):
                 console_error(
-                    f"argument --set: invalid choice: '{set_selected}' (choose from {sets_info.keys()})"
+                    f"argument --set: invalid choice: '{set_selected}' "
+                    f"(choose from {sets_info.keys()})"
                 )
             self.__args.filter_blocks = [
                 next(iter(metric.keys()))

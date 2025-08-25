@@ -879,11 +879,11 @@ bool VirtualGPU::processMemObjects(const amd::Kernel& kernel, const_address para
         } else {
           ClPrint(amd::LOG_INFO, amd::LOG_KERN, "Arg%d: %s %s = val:0x%lx (size:0x%x)", i,
                   desc.typeName_.c_str(), desc.name_.c_str(),
-                  (desc.size_ == 1)       ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
-                      : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
-                      : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
-                      : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
-                                          : 0LL,
+                  (desc.size_ == 1)   ? *reinterpret_cast<const uint8_t*>(srcArgPtr)
+                  : (desc.size_ == 2) ? *reinterpret_cast<const uint16_t*>(srcArgPtr)
+                  : (desc.size_ == 4) ? *reinterpret_cast<const uint32_t*>(srcArgPtr)
+                  : (desc.size_ == 8) ? *reinterpret_cast<const uint64_t*>(srcArgPtr)
+                                      : 0LL,
                   desc.size_);
         }
       }
@@ -1362,10 +1362,10 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
                          HSA_PACKET_HEADER_WIDTH_SCACQUIRE_FENCE_SCOPE),
           cache_state, barrier_value_packet_.signal, barrier_value_packet_.value,
           barrier_value_packet_.mask,
-          barrier_value_packet_.cond == 0       ? "EQ"
-              : barrier_value_packet_.cond == 1 ? "NE"
-              : barrier_value_packet_.cond == 2 ? "LT"
-                                                : "GTE",
+          barrier_value_packet_.cond == 0   ? "EQ"
+          : barrier_value_packet_.cond == 1 ? "NE"
+          : barrier_value_packet_.cond == 2 ? "LT"
+                                            : "GTE",
           barrier_value_packet_.completion_signal, read, index);
   // Clear dependent signals for the next packet
   barrier_value_packet_.signal = hsa_signal_t{};
@@ -1432,21 +1432,23 @@ VirtualGPU::VirtualGPU(Device& device, bool profiling, bool cooperative,
   cooperative_ = cooperative;
 
   if (device.settings().fenceScopeAgent_) {
-    dispatchPacketHeaderNoSync_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+    dispatchPacketHeaderNoSync_ =
+        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
         (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
         (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+                            (1 << HSA_PACKET_HEADER_BARRIER) |
+                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_AGENT << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   } else {
-    dispatchPacketHeaderNoSync_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
+    dispatchPacketHeaderNoSync_ =
+        (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
     dispatchPacketHeader_ = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
+                            (1 << HSA_PACKET_HEADER_BARRIER) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE) |
+                            (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE);
   }
 
   aqlHeader_ = dispatchPacketHeader_;
@@ -2091,8 +2093,8 @@ void VirtualGPU::submitSvmPrefetchAsync(amd::SvmPrefetchAsyncCommand& cmd) {
     // Find the requested agent for the transfer
     hsa_agent_t agent =
         (cmd.cpu_access() || (dev().settings().hmmFlags_ & Settings::Hmm::EnableSystemMemory))
-        ? dev().getCpuAgent(cmd.numa_id())
-        : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
+            ? dev().getCpuAgent(cmd.numa_id())
+            : (static_cast<const roc::Device*>(cmd.device()))->getBackendDevice();
 
     // Initiate a prefetch command
     hsa_status_t status =
@@ -3000,7 +3002,7 @@ void VirtualGPU::submitSvmFillMemory(amd::SvmFillMemoryCommand& cmd) {
     size_t fillSize = patternSize * cmd.times();
 
     size_t offset = reinterpret_cast<uintptr_t>(cmd.dst()) -
-        reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
+                    reinterpret_cast<uintptr_t>(dstMemory->getSvmPtr());
 
     Memory* memory = dev().getRocMemory(dstMemory);
 
@@ -3567,9 +3569,9 @@ bool VirtualGPU::submitKernelInternal(const amd::NDRangeContainer& sizes, const 
   if (aql_packet != nullptr) {
     *aql_packet = dispatchPacket;
     aql_packet->header = (HSA_PACKET_TYPE_KERNEL_DISPATCH << HSA_PACKET_HEADER_TYPE) |
-        (1 << HSA_PACKET_HEADER_BARRIER) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
-        (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
+                         (1 << HSA_PACKET_HEADER_BARRIER) |
+                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_ACQUIRE_FENCE_SCOPE) |
+                         (HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_RELEASE_FENCE_SCOPE);
     aql_packet->setup = sizes.dimensions() << HSA_KERNEL_DISPATCH_PACKET_SETUP_DIMENSIONS;
   }
 

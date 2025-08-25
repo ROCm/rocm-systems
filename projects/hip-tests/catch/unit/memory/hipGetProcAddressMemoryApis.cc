@@ -6041,7 +6041,7 @@ TEST_CASE("Unit_hipGetProcAddress_MemoryApisPeerToPeer") {
   HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, deviceId, peerDeviceId));
   if (!canAccessPeer) {
     std::string msg = "Skipped as peer access cannot be enabled between devices " +
-        std::to_string(deviceId) + " " + std::to_string(peerDeviceId);
+                      std::to_string(deviceId) + " " + std::to_string(peerDeviceId);
     HipTest::HIP_SKIP_TEST(msg.c_str());
     return;
   }
