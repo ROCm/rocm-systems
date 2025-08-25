@@ -171,7 +171,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Roofline support for RHEL 10 OS.
 
-* FP4 and FP6 data types have been added for roofline profiling on AMD Instinct MI350 series.
+* `FP4` and `FP6` data types have been added for roofline profiling on AMD Instinct MI350 series.
 
 #### rocprofv3 support
 
@@ -203,9 +203,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Updated Roofline binaries:
   * Rebuild using latest ROCm stack
   * Minimum OS distribution support minimum for roofline feature is now Ubuntu 22.04, RHEL 8, and SLES15 SP6.
-* Fixed not detecting memory clock issue when using amd-smi
-* Fixed standalone GUI crashing
-* Fixed L2 read/write/atomic bandwidths on MI350
+
+### Removed
+
+* Roofline support for Ubuntu 20.04 and SLES below 15.6
+* Removed support for AMD Instinct MI50 and MI60.
 
 ### Optimized
 
@@ -215,7 +217,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Fixed kernel name and kernel dispatch filtering when using ``rocprofv3``.
 * Fixed an issue of TCC channel counters collection in ``rocprofv3``.
-* Fixed peak FLOPS of F8, I8, F16, and BF16 on AMD Instinct MI 300.
+* Fixed peak FLOPS of `F8`, `I8`, `F16`, and `BF16` on AMD Instinct MI300.
+* Fixed not detecting memory clock issue when using amd-smi
+* Fixed standalone GUI crashing
+* Fixed L2 read/write/atomic bandwidths on AMD Instinct MI350 series.
 
 ### Known issues
 
@@ -234,10 +239,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Memory chart on ROCm Compute Profiler CLI might look corrupted if the CLI width is too narrow.
 
-### Removed
-
-* Roofline support for Ubuntu 20.04 and SLES below 15.6
-* Removed support for AMD Instinct MI50 and MI60.
+* Roofline feature is currently not functional on Azure Linux 3.0 and Debian 12.
 
 ### Upcoming changes
 
@@ -246,7 +248,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Hardware IP block based filtering using ``-b`` option in profile mode will be removed in favor of analysis report block based filtering using ``-b`` option in profile mode.
 * MongoDB database support will be removed, and a deprecation warning has been added to the application interface.
 * Usage of ``rocm-smi`` is deprecated in favor of ``amd-smi``, and a deprecation warning has been added to the application interface.
-
 
 ## ROCm Compute Profiler 3.1.1 for ROCm 6.4.2
 
