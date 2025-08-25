@@ -593,7 +593,9 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_path_rocpd(binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute):
+def test_path_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
     workload_dir = test_utils.get_output_dir()
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
