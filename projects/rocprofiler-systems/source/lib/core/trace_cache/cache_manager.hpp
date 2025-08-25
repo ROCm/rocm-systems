@@ -40,15 +40,14 @@ public:
     metadata_registry&    get_metadata_regsitry() { return m_metadata; }
     void                  shutdown();
     void                  post_process();
+    void                  post_process_bulk();
 
 private:
     void post_process_metadata();
-    cache_manager();
+    cache_manager() = default;
 
-    buffer_storage        m_storage{ getpid() };
-    metadata_registry     m_metadata;
-    storage_parser        m_parser{ getpid() };
-    rocpd_post_processing m_postprocessing;
+    buffer_storage    m_storage{ getpid() };
+    metadata_registry m_metadata;
 };
 
 inline metadata_registry&

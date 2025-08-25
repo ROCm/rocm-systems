@@ -30,12 +30,15 @@
 #include "core/node_info.hpp"
 #include "core/perfetto.hpp"
 #include "core/rocpd/data_processor.hpp"
+#include "core/trace_cache/cache_manager.hpp"
 #include "library/components/ensure_storage.hpp"
 #include "library/ptl.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 
+#include <cstddef>
+#include <sys/types.h>
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/data_tracker/components.hpp>
@@ -142,12 +145,6 @@ backtrace_metrics::get_hw_counter_labels(int64_t _tid)
     return (_v) ? *_v : std::vector<std::string>{};
 }
 
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
-}
-
 void
 backtrace_metrics::start()
 {}
@@ -175,13 +172,16 @@ rocpd_init_categories()
     static bool _is_initialized = false;
     if(_is_initialized) return;
 
-    auto& data_processor = get_data_processor();
-
-    data_processor.insert_string(trait::name<category::thread_cpu_time>::value);
-    data_processor.insert_string(trait::name<category::thread_peak_memory>::value);
-    data_processor.insert_string(trait::name<category::thread_context_switch>::value);
-    data_processor.insert_string(trait::name<category::thread_page_fault>::value);
-    data_processor.insert_string(trait::name<category::thread_hardware_counter>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::thread_cpu_time>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::thread_peak_memory>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::thread_context_switch>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::thread_page_fault>::value);
+    trace_cache::get_metadata_registry().add_string(
+        trait::name<category::thread_hardware_counter>::value);
 
     _is_initialized = true;
 }
@@ -190,14 +190,13 @@ template <typename Category>
 void
 rocpd_init_tracks(int64_t _tid)
 {
-    auto&       data_processor = get_data_processor();
-    auto&       n_info         = node_info::get_instance();
-    const auto& t_info         = thread_info::get(_tid, SequentTID);
-    auto        _tid_name      = JOIN("", '[', _tid, ']');
+    const auto& t_info    = thread_info::get(_tid, SequentTID);
+    auto        _tid_name = JOIN("", '[', _tid, ']');
 
-    auto thread_idx = data_processor.insert_thread_info(
-        n_info.id, getppid(), getpid(), t_info->index_data->system_value,
-        JOIN(" ", "Thread", _tid).c_str(), t_info->get_start(), t_info->get_stop(), "{}");
+    trace_cache::get_metadata_registry().add_thread_info(
+        { getppid(), getpid(), static_cast<size_t>(t_info->index_data->system_value),
+          static_cast<uint32_t>(t_info->get_start()),
+          static_cast<uint32_t>(t_info->get_stop()), "{}" });
 
     if constexpr(std::is_same_v<Category, category::thread_hardware_counter>)
     {
@@ -210,16 +209,17 @@ rocpd_init_tracks(int64_t _tid)
             ROCPROFSYS_CI_THROW(_desc.empty(), "Empty description for %s\n", itr.c_str());
 
             std::string track_name = JOIN(' ', "Thread", _desc, _tid_name, "(S)");
-            data_processor.insert_track(track_name.c_str(), n_info.id, getpid(),
-                                        thread_idx, "{}");
+            trace_cache::get_metadata_registry().add_track(
+                { track_name.c_str(),
+                  static_cast<size_t>(t_info->index_data->system_value), "{}" });
         }
     }
     else
-        data_processor.insert_track(
-            JOIN('_', trait::name<Category>::value, _tid_name).c_str(), n_info.id,
-            getpid(), thread_idx, "{}");
+        trace_cache::get_metadata_registry().add_track(
+            { JOIN('_', trait::name<Category>::value, _tid_name).c_str(),
+              static_cast<size_t>(t_info->index_data->system_value), "{}" });
 }
-
+/*
 template <typename Category>
 void
 rocpd_initialize_backtrace_metrics_pmc(size_t dev_id, const char* units, int64_t _tid)
@@ -301,6 +301,7 @@ rocpd_process_backtrace_metrics_events(const uint32_t device_id, uint64_t timest
         insert_event_and_sample(
             JOIN("_", trait::name<Category>::value, _tid_name).c_str(), value);
 }
+*/
 }  // namespace
 
 void
@@ -475,6 +476,7 @@ backtrace_metrics::fini_perfetto(int64_t _tid, valid_array_t _valid)
 void
 backtrace_metrics::init_rocpd(int64_t _tid, valid_array_t _valid)
 {
+    /*
     rocpd_init_categories();
     if(get_valid(category::thread_cpu_time{}, _valid))
     {
@@ -505,11 +507,13 @@ backtrace_metrics::init_rocpd(int64_t _tid, valid_array_t _valid)
         rocpd_initialize_backtrace_metrics_pmc<category::thread_hardware_counter>(0, "",
                                                                                   _tid);
     }
+*/
 }
 
 void
 backtrace_metrics::fini_rocpd(int64_t _tid, valid_array_t _valid)
 {
+    /*
     const auto& _thread_info = thread_info::get(_tid, SequentTID);
 
     ROCPROFSYS_CI_THROW(!_thread_info, "Error! missing thread info for tid=%li\n", _tid);
@@ -552,6 +556,7 @@ backtrace_metrics::fini_rocpd(int64_t _tid, valid_array_t _valid)
                                                hw_counter_data_t>(0, _ts, zero_counters,
                                                                   _tid);
     }
+*/
 }
 
 backtrace_metrics&
@@ -636,9 +641,10 @@ backtrace_metrics::post_process_perfetto(int64_t _tid, uint64_t _ts) const
 }
 
 void
-backtrace_metrics::post_process_rocpd([[maybe_unused]] int64_t  _tid,
-                                      [[maybe_unused]] uint64_t _ts) const
+backtrace_metrics::process_rocpd([[maybe_unused]] int64_t  _tid,
+                                 [[maybe_unused]] uint64_t _ts) const
 {
+    /*
 #if ROCPROFSYS_USE_ROCM > 0
     auto is_category_enabled = [&](const auto& _category) { return (*this)(_category); };
 
@@ -673,6 +679,7 @@ backtrace_metrics::post_process_rocpd([[maybe_unused]] int64_t  _tid,
                                                                   _tid);
     }
 #endif
+*/
 }
 }  // namespace component
 }  // namespace rocprofsys

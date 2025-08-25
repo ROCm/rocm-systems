@@ -32,6 +32,7 @@
 #include "core/rocpd/json.hpp"
 #include "core/state.hpp"
 #include "core/trace_cache/cache_manager.hpp"
+#include "core/trace_cache/sample_type.hpp"
 #include "core/utility.hpp"
 #include "library/components/backtrace.hpp"
 #include "library/components/backtrace_metrics.hpp"
@@ -43,6 +44,7 @@
 #include "library/thread_info.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
+#include "rocprofiler-systems/categories.h"
 
 #include <timemory/backends/papi.hpp>
 #include <timemory/backends/threading.hpp>
@@ -160,6 +162,23 @@ namespace
 {
 using sampler_allocator_t = typename sampler_t::allocator_t;
 
+struct timer_sampling_data
+{
+    int64_t                                   m_tid     = -1;
+    uint64_t                                  m_beg     = 0;
+    uint64_t                                  m_end     = 0;
+    std::vector<tim::unwind::processed_entry> m_stack   = {};
+    backtrace_metrics                         m_metrics = {};
+};
+
+struct overflow_sampling_data
+{
+    int64_t                                   m_tid   = -1;
+    uint64_t                                  m_beg   = 0;
+    uint64_t                                  m_end   = 0;
+    std::vector<tim::unwind::processed_entry> m_stack = {};
+};
+
 template <typename Category>
 inline std::string
 get_category_track_name(uint64_t tid)
@@ -225,12 +244,6 @@ generate_hw_counter_json(int64_t _tid, const backtrace_metrics& metrics)
     return extdata.dump();
 }
 
-rocpd::data_processor&
-get_data_processor()
-{
-    return rocpd::data_processor::get_instance();
-}
-
 template <typename Category>
 std::string
 get_track_name(const thread_info& _thread_info)
@@ -292,22 +305,109 @@ rocpd_init_track(int64_t tid)
         { _overflow_track_name, thread_id, "{}" });
 }
 
-template <typename Category>
+std::vector<timer_sampling_data>
+post_process_timer_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+
+std::vector<overflow_sampling_data>
+post_process_overflow_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
+
 void
-rocpd_insert_region(size_t thread_id, size_t start_time, size_t end_time, size_t name_id,
-                    const char* track, const char* call_stack = "{}",
-                    const char* line_info = "{}", const char* extdata = "{}")
+process_backtrace_metrics(
+    [[maybe_unused]] int64_t                                 _tid,
+    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
 {
-    auto& data_processor     = get_data_processor();
-    auto& n_info             = node_info::get_instance();
-    auto  string_primary_key = data_processor.insert_string(trait::name<Category>::value);
+#if ROCPROFSYS_USE_ROCM > 0
+    auto _valid_metrics = backtrace_metrics::valid_array_t{};
 
-    auto event_id = data_processor.insert_event(string_primary_key, 0, 0, 0, call_stack,
-                                                line_info, extdata);
+    for(const auto& itr : _timer_data)
+    {
+        _valid_metrics |= itr.m_metrics.get_valid();
+    }
 
-    data_processor.insert_region(n_info.id, getpid(), thread_id, start_time, end_time,
-                                 name_id, event_id);
-    data_processor.insert_sample(track, start_time, event_id);
+    if(trait::runtime_enabled<backtrace_metrics>::get() && get_use_rocpd())
+    {
+        ROCPROFSYS_VERBOSE(3 || get_debug_sampling(),
+                           "[%li] Post-processing metrics for rocpd...\n", _tid);
+        backtrace_metrics::init_rocpd(_tid, _valid_metrics);  // move to setup
+        for(const auto& itr : _timer_data)
+            itr.m_metrics.process_rocpd(_tid, 0.5 * (itr.m_beg + itr.m_end));
+        backtrace_metrics::fini_rocpd(_tid, _valid_metrics);
+    }
+#endif
+}
+
+void
+cache_sampling_data(int64_t _tid, const bundle_t* _init,
+                    const std::vector<bundle_t*>& _data)
+{
+    if(_data.empty()) return;
+
+    ROCPROFSYS_VERBOSE(3 || get_debug_sampling(),
+                       "[%li] Storing sampling data to trace cache...\n", _tid);
+
+    auto _timer_data    = post_process_timer_data(_tid, _init, _data);
+    auto _overflow_data = post_process_overflow_data(_tid, _init, _data);
+
+    const auto& _thread_info = thread_info::get(_tid, SequentTID);
+    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
+    if(!_thread_info) return;
+
+    // Store timer sampling data
+    for(const auto& itr : _timer_data)
+    {
+        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end })) continue;
+
+        for(const auto& iitr : itr.m_stack)
+        {
+            auto _name       = std::string(demangle(iitr.name));
+            auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
+            auto _call_stack = generate_call_stack_json(iitr);
+            auto _line_info  = generate_line_info_json(iitr);
+            auto _extdata    = generate_hw_counter_json(_tid, itr.m_metrics);
+
+            trace_cache::get_buffer_storage().store(
+                trace_cache::entry_type::backtrace_region_sample,
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_TIMER_SAMPLING),
+                static_cast<uint64_t>(_thread_info->index_data->system_value),
+                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
+                trait::name<category::timer_sampling>::value, _call_stack.c_str(),
+                _line_info.c_str(), _extdata.c_str());
+        }
+    }
+
+    // Store overflow sampling data
+    auto _overflow_event =
+        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
+
+    if(!_overflow_event.empty())
+    {
+        const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
+        const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
+        if(_overflow_pos != std::string::npos)
+            _overflow_event =
+                _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
+    }
+
+    for(const auto& itr : _overflow_data)
+    {
+        if(!_thread_info->is_valid_lifetime({ itr.m_beg, itr.m_end })) continue;
+
+        for(const auto& iitr : itr.m_stack)
+        {
+            auto _name       = std::string(demangle(iitr.name));
+            auto _track_name = get_track_name<category::overflow_sampling>(*_thread_info);
+            auto _call_stack = generate_call_stack_json(iitr);
+            auto _line_info  = generate_line_info_json(iitr);
+
+            trace_cache::get_buffer_storage().store(
+                trace_cache::entry_type::backtrace_region_sample,
+                static_cast<uint32_t>(ROCPROFSYS_CATEGORY_OVERFLOW_SAMPLING),
+                static_cast<uint64_t>(_thread_info->index_data->system_value),
+                _track_name.c_str(), _name.c_str(), itr.m_beg, itr.m_end,
+                trait::name<category::overflow_sampling>::value, _call_stack.c_str(),
+                _line_info.c_str(), "{}");
+        }
+    }
 }
 
 auto&
@@ -902,6 +1002,47 @@ configure(bool _setup, int64_t _tid)
         }
 
         _sampler->stop();
+
+        // Store sampling data to trace cache before resetting the sampler
+        auto start = std::chrono::steady_clock::now();
+        if(get_use_rocpd())
+        {
+            auto _raw_data = _sampler->get_data();
+
+            if(!_raw_data.empty())
+            {
+                auto* _init = get_sampler_init(_tid).get();
+                if(_init)
+                {
+                    // Filter valid data
+                    const auto& _thread_info = thread_info::get(_tid, SequentTID);
+                    std::vector<sampling::bundle_t*> _valid_data{};
+                    for(auto& itr : _raw_data)
+                    {
+                        auto* _bt = itr.get<backtrace>();
+                        auto* _cc = itr.get<callchain>();
+                        auto* _ts = itr.get<backtrace_timestamp>();
+                        if(_thread_info &&
+                           ((_bt && !_bt->empty()) || (_cc && !_cc->empty())) && _ts &&
+                           _thread_info->is_valid_time(_ts->get_timestamp()))
+                        {
+                            _valid_data.emplace_back(&itr);
+                        }
+                    }
+
+                    if(!_valid_data.empty())
+                    {
+                        cache_sampling_data(_tid, _init, _valid_data);
+                    }
+                }
+            }
+        }
+        auto duration = (std::chrono::steady_clock::now() - start);
+        std::cout
+            << "Elapsed time for caching " << _sampler->get_sample_count() << " samples: "
+            << std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count()
+            << std::endl;
+
         _sampler->reset();
         *_running = false;
         if(_perf_sampler) _perf_sampler->stop();
@@ -938,29 +1079,6 @@ configure(bool _setup, int64_t _tid)
 
     return (_signal_types) ? *_signal_types : std::set<int>{};
 }
-
-struct timer_sampling_data
-{
-    int64_t                                   m_tid     = -1;
-    uint64_t                                  m_beg     = 0;
-    uint64_t                                  m_end     = 0;
-    std::vector<tim::unwind::processed_entry> m_stack   = {};
-    backtrace_metrics                         m_metrics = {};
-};
-
-struct overflow_sampling_data
-{
-    int64_t                                   m_tid   = -1;
-    uint64_t                                  m_beg   = 0;
-    uint64_t                                  m_end   = 0;
-    std::vector<tim::unwind::processed_entry> m_stack = {};
-};
-
-std::vector<timer_sampling_data>
-post_process_timer_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
-
-std::vector<overflow_sampling_data>
-post_process_overflow_data(int64_t, const bundle_t*, const std::vector<bundle_t*>&);
 
 void
 post_process_perfetto(int64_t, const std::vector<timer_sampling_data>&,
@@ -1152,7 +1270,7 @@ post_process()
 
             if(get_use_perfetto()) post_process_perfetto(i, _timer_data, _overflow_data);
             if(get_use_timemory()) post_process_timemory(i, _timer_data, _overflow_data);
-            if(get_use_rocpd()) post_process_rocpd(i, _timer_data, _overflow_data);
+            // if(get_use_rocpd()) post_process_rocpd(i, _timer_data, _overflow_data);
         }
         else
         {
@@ -1212,8 +1330,8 @@ post_process_timer_data(int64_t _tid, const bundle_t* _init,
         auto _ret    = timer_sampling_data{};
         _ret.m_tid   = _bt_time->get_tid();
         _ret.m_beg   = _last->get<backtrace_timestamp>()->get_timestamp();
-        _ret.m_end   = _bt_time->get_timestamp();
         _ret.m_stack = backtrace::filter_and_patch(_bt_data->get());
+        _ret.m_end   = _bt_time->get_timestamp();
         if constexpr(tim::trait::is_available<hw_counters>::value)
         {
             auto _hw_counters_enabled = [](const auto* _bt_v) {
@@ -1703,199 +1821,6 @@ post_process_timemory(int64_t _tid, const std::vector<timer_sampling_data>& _tim
             iitr.pop();
         }
     }
-}
-
-void
-rocpd_post_process_overflow_data(
-    int64_t _tid, const std::vector<overflow_sampling_data>& _overflow_data)
-{
-    auto& data_processor = get_data_processor();
-
-    const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
-    if(!_thread_info) return;
-
-    auto _overflow_event =
-        get_setting_value<std::string>("ROCPROFSYS_SAMPLING_OVERFLOW_EVENT").value_or("");
-
-    if(!_overflow_event.empty() && !_overflow_data.empty())
-    {
-        auto _beg_ns = std::max(_overflow_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_overflow_data.back().m_end, _thread_info->get_stop());
-
-        const auto _overflow_prefix = std::string_view{ "PERF_COUNT_" };
-        const auto _overflow_pos    = _overflow_event.find(_overflow_prefix);
-        if(_overflow_pos != std::string::npos)
-            _overflow_event =
-                _overflow_event.substr(_overflow_pos + _overflow_prefix.length());
-
-        const auto* _main_name =
-            static_strings.emplace(join(" ", _overflow_event, "samples [rocprof-sys]"))
-                .first->c_str();
-        auto main_name_id = data_processor.insert_string(_main_name);
-
-        size_t thread_id = _thread_info->index_data->system_value;
-
-        auto thread_primary_key = data_processor.map_thread_id_to_primary_key(thread_id);
-        const auto _track_name =
-            get_track_name<category::overflow_sampling>(*_thread_info);
-
-        rocpd_insert_region<category::overflow_sampling>(
-            thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
-
-        for(const auto& itr : _overflow_data)
-        {
-            auto _beg = itr.m_beg;
-            auto _end = itr.m_end;
-
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
-
-            for(const auto& iitr : itr.m_stack)
-            {
-                const auto* _name =
-                    static_strings.emplace(demangle(iitr.name)).first->c_str();
-                auto name_id = data_processor.insert_string(_name);
-                rocpd_insert_region<category::overflow_sampling>(
-                    thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
-                    generate_call_stack_json(iitr).c_str(),
-                    generate_line_info_json(iitr).c_str());
-            }
-        }
-    }
-}
-
-void
-rocpd_post_process_backtrace_metrics(
-    [[maybe_unused]] int64_t                                 _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
-{
-#if ROCPROFSYS_USE_ROCM > 0
-    auto _valid_metrics = backtrace_metrics::valid_array_t{};
-
-    for(const auto& itr : _timer_data)
-    {
-        _valid_metrics |= itr.m_metrics.get_valid();
-    }
-
-    if(trait::runtime_enabled<backtrace_metrics>::get() && get_use_rocpd())
-    {
-        ROCPROFSYS_VERBOSE(3 || get_debug_sampling(),
-                           "[%li] Post-processing metrics for rocpd...\n", _tid);
-        backtrace_metrics::init_rocpd(_tid, _valid_metrics);  // move to setup
-        for(const auto& itr : _timer_data)
-            itr.m_metrics.post_process_rocpd(_tid, 0.5 * (itr.m_beg + itr.m_end));
-        backtrace_metrics::fini_rocpd(_tid, _valid_metrics);
-    }
-#endif
-}
-
-void
-rocpd_post_process_timer_data(
-    [[maybe_unused]] int64_t                                 _tid,
-    [[maybe_unused]] const std::vector<timer_sampling_data>& _timer_data)
-{
-#if ROCPROFSYS_USE_ROCM > 0
-    auto& data_processor = get_data_processor();
-
-    const auto& _thread_info = thread_info::get(_tid, SequentTID);
-    ROCPROFSYS_CI_THROW(!_thread_info, "No valid thread info for tid=%li\n", _tid);
-    if(!_thread_info) return;
-
-    if(!_timer_data.empty())
-    {
-        rocpd_post_process_backtrace_metrics(_tid, _timer_data);
-
-        auto _beg_ns = std::max(_timer_data.front().m_beg, _thread_info->get_start());
-        auto _end_ns = std::min(_timer_data.back().m_end, _thread_info->get_stop());
-
-        const auto _track_name = get_track_name<category::timer_sampling>(*_thread_info);
-
-        auto thread_primary_key = data_processor.map_thread_id_to_primary_key(
-            _thread_info->index_data->system_value);
-
-        const auto main_name_id = data_processor.insert_string("samples [rocprof-sys]");
-        rocpd_insert_region<category::timer_sampling>(
-            thread_primary_key, _beg_ns, _end_ns, main_name_id, _track_name.c_str());
-
-        auto _labels = backtrace_metrics::get_hw_counter_labels(_tid);
-        for(const auto& itr : _timer_data)
-        {
-            size_t   _ncount = 0;
-            uint64_t _beg    = itr.m_beg;
-            uint64_t _end    = itr.m_end;
-            if(!_thread_info->is_valid_lifetime({ _beg, _end })) continue;
-
-            for(const auto& iitr : itr.m_stack)
-            {
-                auto _ncur = _ncount++;
-                // the begin/end + HW counters will be same for entire call-stack so only
-                // annotate the top and the bottom functions to keep the data consumption
-                // low
-                bool _include_common = (_ncur == 0 || _ncur + 1 == itr.m_stack.size());
-
-                // Only annotate HW counters when first or last and HW counters are not
-                // empty
-                bool _include_hw =
-                    _include_common && !itr.m_metrics.get_hw_counters().empty();
-
-                std::string hw_counter_json = "{}";
-                if(_include_hw)
-                {
-                    // current values when read
-                    hw_counter_json = generate_hw_counter_json(_tid, itr.m_metrics);
-                }
-
-                if(get_sampling_include_inlines() && iitr.lineinfo)
-                {
-                    auto _lines = iitr.lineinfo.lines;
-                    std::reverse(_lines.begin(), _lines.end());
-                    size_t _n = 0;
-                    for(const auto& line : _lines)
-                    {
-                        const auto* _name =
-                            static_strings.emplace(demangle(line.name)).first->c_str();
-                        auto inlined_name_id = data_processor.insert_string(_name);
-
-                        auto inlined_call_stack        = nlohmann::json();
-                        inlined_call_stack["name"]     = std::string(demangle(line.name));
-                        inlined_call_stack["location"] = std::string(line.location);
-                        inlined_call_stack["line"]     = std::to_string(line.line);
-                        inlined_call_stack["inlined"]  = "true";
-
-                        rocpd_insert_region<category::timer_sampling>(
-                            thread_primary_key, _beg, _end, inlined_name_id,
-                            _track_name.c_str(), inlined_call_stack.dump().c_str(), "{}",
-                            // Only include HW counters for first inlined function
-                            (_n == 0) ? hw_counter_json.c_str() : "{}");
-                    }
-                }
-                else
-                {
-                    const auto* _name = static_strings.emplace(iitr.name).first->c_str();
-                    const auto  name_id = data_processor.insert_string(_name);
-                    rocpd_insert_region<category::timer_sampling>(
-                        thread_primary_key, _beg, _end, name_id, _track_name.c_str(),
-                        generate_call_stack_json(iitr).c_str(),
-                        generate_line_info_json(iitr).c_str(), hw_counter_json.c_str());
-                }
-            }
-        }
-    }
-#endif
-}
-
-void
-post_process_rocpd(int64_t _tid, const std::vector<timer_sampling_data>& _timer_data,
-                   const std::vector<overflow_sampling_data>& _overflow_data)
-{
-#if ROCPROFSYS_USE_ROCM > 0
-    rocpd_post_process_overflow_data(_tid, _overflow_data);
-    rocpd_post_process_timer_data(_tid, _timer_data);
-#else
-    (void) _tid;
-    (void) _timer_data;
-    (void) _overflow_data;
-#endif
 }
 
 struct sampling_initialization

@@ -115,7 +115,7 @@ struct backtrace_metrics : comp::empty_base
     const auto& get_hw_counters() const { return m_hw_counter; }
 
     void post_process_perfetto(int64_t _tid, uint64_t _ts) const;
-    void post_process_rocpd(int64_t _tid, uint64_t _ts) const;
+    void process_rocpd(int64_t _tid, uint64_t _ts) const;
 
     backtrace_metrics& operator-=(const backtrace_metrics&);
 

@@ -38,18 +38,18 @@ static std::mutex _mutex;
 class database
 {
 public:
-    static database& get_instance();
-
-    database(database&)            = delete;
-    database& operator=(database&) = delete;
+    explicit database(int pid);
+    database()                      = default;
+    database(database&)             = delete;
+    database& operator=(database&)  = delete;
+    database(database&&)            = default;
+    database& operator=(database&&) = default;
 
     void flush();
 
     ~database();
 
 private:
-    database();
-
     template <typename... Args>
     inline void validate_sqlite3_result(int sqlite3_error_code, const char* query,
                                         Args&&... args)
