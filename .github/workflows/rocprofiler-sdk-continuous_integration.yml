@@ -204,21 +204,15 @@ jobs:
               aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx94X }}" rocm-gfx94X.tar.gz --no-sign-request && \
               mv rocm-gfx94X.tar.gz /opt/rocm-gfx94X.tar.gz
           RUN set -euo pipefail; \
-              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
-                source rocprofiler-sdk/bin/activate; \
-                python3 -m pipx ensurepath; \
-                source ~/.bashrc; \
-              fi; \
-              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
-              mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz
+              if [ -f /etc/debian_version ]; then \
+                aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
+                mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz \
+              fi
           RUN set -euo pipefail; \
-              if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
-                source rocprofiler-sdk/bin/activate; \
-                python3 -m pipx ensurepath; \
-                source ~/.bashrc; \
-              fi; \
-              aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
-              mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz
+              if [ -f /etc/debian_version ]; then \
+                aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
+                mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz \
+              fi
           EOF
 
       - name: Build & Push (to Docker Hub; cache to GHA)
@@ -549,7 +543,7 @@ jobs:
   # RHEL/SLES (RPM) job(s)
   # -----------------------------------------------------------------------------
   core-rpm:
-    name: Core • ${{ matrix.os }} • ${{ matrix.runner }}
+    name: Core • ${{ matrix.runner }} • ${{ matrix.os }}
     needs: build-ci-base
     strategy:
       fail-fast: false
@@ -665,9 +659,11 @@ jobs:
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
+          python3 -m venv rocprofiler-sdk
+          source rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          python3 -m pipx install cmake
-          python3 -m pipx ensurepath; source ~/.bashrc || true
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade cmake
           echo "Install ROCR-Runtime..."
           cmake -B build \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -685,9 +681,11 @@ jobs:
         working-directory: projects/aqlprofile
         run: |
           echo "Install Aqlprofile."
+          python3 -m venv rocprofiler-sdk
+          source rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
-          python3 -m pipx install cmake
-          python3 -m pipx ensurepath; source ~/.bashrc || true
+          python3 -m pip install --upgrade pip
+          python3 -m pip install --upgrade cmake
           cmake -B build-aqlprofile \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
@@ -744,7 +742,7 @@ jobs:
             -E "${${{ matrix.runner }}_EXCLUDE_TESTS_REGEX}"
 
   sanitizers:
-    name: Sanitizers • ${{ matrix.sanitizer }} • ${{ matrix.runner }} • ${{ matrix.os }}
+    name: ${{ matrix.sanitizer }} • ${{ matrix.runner }} • ${{ matrix.os }}
     needs: build-ci-base
     strategy:
       fail-fast: false

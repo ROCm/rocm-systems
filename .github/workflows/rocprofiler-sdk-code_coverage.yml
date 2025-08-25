@@ -57,6 +57,7 @@ env:
 
 jobs:
   code-coverage:
+    name: Code Coverage • ${{ matrix.runner }} • ${{ matrix.os }}
     strategy:
       # fail-fast: false
       matrix:
@@ -66,7 +67,7 @@ jobs:
 
     runs-on: rocprofiler-mi300a-dind
     container:
-      image: rocm/rocprofiler-private:${{ matrix.os }}
+      image: docker.io/rocm/rocprofiler-private:${{ matrix.os }}-latest
       credentials:
         username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
         password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
@@ -85,31 +86,7 @@ jobs:
       shell: bash
       working-directory: /tmp
       run: |
-        apt-get update
-        apt-get install -y curl wget gpg python3 python3-pip build-essential coreutils software-properties-common
-        mkdir --parents --mode=0755 /etc/apt/keyrings
-        wget -N -P /tmp/ https://repo.radeon.com/amdgpu-install/.7.0/ubuntu/jammy/amdgpu-install_7.0.70000-1_all.deb
-        apt-get install -y /tmp/amdgpu-install_7.0.70000-1_all.deb
-        sed -i "s/\/30.10/\/.30.10/" /etc/apt/sources.list.d/amdgpu*.list
-        sed -i "s|rocm/apt/7.0|rocm/apt/.apt_7.0|; s|graphics/7.0|graphics/.7.0|" /etc/apt/sources.list.d/rocm.list
-        apt-get update
-        apt-get install -y rocm-openmp-sdk libva-amdgpu-dev rocm-llvm-dev
-        add-apt-repository ppa:git-core/ppa
-        apt-get update
-        apt-get install -y git
-        python3 -m pip install awscli
-        export PATH=/usr/local/bin:~/.local/bin:$PATH
-        KEY=$(aws s3api list-objects-v2 \
-          --bucket therock-nightly-tarball \
-          --no-sign-request \
-          --output json \
-          --query "sort_by(Contents[?contains(Key, 'linux-gfx94X')], &LastModified)[-1].Key")
-        KEY=${KEY//\"/}
-        test -n "$KEY" || { echo "No gfx94X tarball found"; exit 1; }
-        aws s3 cp "s3://therock-nightly-tarball/${KEY}" rocm.tar.gz --no-sign-request
-        ls -lh rocm.tar.gz
-        echo "Downloaded: ${KEY}"
-        tar -xf *.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
+        tar -xf /opt/rocm-gfx94X.tar.gz -C ${{ env.ROCM_PATH }}-7.0.0
         ln -s ${{ env.ROCM_PATH }}-7.0.0 ${{ env.ROCM_PATH }}
         echo "ROCm installed to: ${{ env.ROCM_PATH }}"
 
@@ -121,8 +98,33 @@ jobs:
           projects/aqlprofile
           projects/rocprofiler-register
           projects/rocr-runtime
-        submodules: true
+        submodules: false
         set-safe-directory: true
+
+    - name: Compute submodule cache key
+      id: submods
+      shell: bash
+      run: |
+        git config --global --add safe.directory '*'
+        git submodule status --recursive | awk '{print $1,$2}' > .git-submodules-status
+        echo "hash=$(sha256sum .git-submodules-status | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+        # collect submodule paths for cache 'path'
+        git config --file .gitmodules --get-regexp path | awk '{print $2}' > .git-submodule-paths
+        { echo "paths<<EOF"; cat .git-submodule-paths; echo "EOF"; } >> "$GITHUB_OUTPUT"
+
+    - name: Restore submodule cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          .git/modules
+          ${{ steps.submods.outputs.paths }}
+        key: submods-${{ runner.os }}-${{ steps.submods.outputs.hash }}
+        restore-keys: |
+          submods-${{ runner.os }}-
+          submods-
+
+    - name: Init/Update submodules
+      run: git submodule update --init --recursive --jobs 16
 
     - name: Clone ROCDecode
       uses: actions/checkout@v5
@@ -163,13 +165,26 @@ jobs:
     - name: Install requirements
       timeout-minutes: 10
       shell: bash
+      working-directory: projects/rocprofiler-sdk
       run: |
-        cd projects/rocprofiler-sdk
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev libsqlite3-dev libdrm-dev file autoconf pkg-config rpm libzstd-dev
         python3 -m pip install -U --user -r requirements.txt
-        rm -rf /opt/rocm/lib/*rocprofiler-sdk* /opt/rocm/lib/cmake/*rocprofiler-sdk* /opt/rocm/share/*rocprofiler-sdk* /opt/rocm/libexec/*rocprofiler-sdk*
+          rm -rf \
+            ${{ env.ROCM_PATH }}/lib/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/lib/cmake/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/share/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}/libexec/*rocprofiler-sdk* \
+            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/roctx \
+            ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
+
+    - name: Setup ccache
+      uses: hendrikmuhs/ccache-action@v1.2
+      with:
+        key: ccache-${{ matrix.os }}-rocprofiler-mi300a-dind-${{ matrix.runner }}
+        max-size: 2G
+        save: true
 
     - name: Sync gcov with compilers
       timeout-minutes: 10
@@ -199,27 +214,28 @@ jobs:
       run: |
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
-    - name: Special Requirements
-      shell: bash
-      working-directory: projects/rocprofiler-sdk
-      run: |
-          echo 'CMAKE_HIP_PLATFORM=amd' >> $GITHUB_ENV
-          echo 'HIP_PLATFORM=amd' >> $GITHUB_ENV
-          echo 'HIP_RUNTIME=rocclr' >> $GITHUB_ENV
-          echo 'HIP_COMPILER=amdclang++' >> $GITHUB_ENV
-          echo 'LLVM_PATH=/opt/rocm/llvm' >> $GITHUB_ENV
-          echo 'CMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}' >> $GITHUB_ENV
-
     - name: Install Missing ROCm Dependencies
       shell: bash
       run: |
         echo -e "Building & Installing ROCDecode..."
-        cmake -B build-rocdecode -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocDecode
+        cmake -B build-rocdecode \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+          ${GITHUB_WORKSPACE}/rocDecode
         cmake --build build-rocdecode --target all --parallel 16
         cmake --build build-rocdecode --target install
         echo -e "ROCDecode Installed Successfully!"
         echo -e "Building & Installing ROCJPEG..."
-        cmake -B build-rocjpeg -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ ${GITHUB_WORKSPACE}/rocJPEG
+        cmake -B build-rocjpeg \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }} \
+          -DCMAKE_CXX_COMPILER=${{ env.ROCM_PATH }}/bin/amdclang++ \
+          -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+          ${GITHUB_WORKSPACE}/rocJPEG
         cmake --build build-rocjpeg --target all --parallel 16
         cmake --build build-rocjpeg --target install
         echo -e "ROCJPEG Installed Successfully!"
@@ -231,7 +247,13 @@ jobs:
         export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         echo "Install ROCProfiler-Register"
-        cmake -B build-rocprofiler-register -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake -B build-rocprofiler-register \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+          .
         cmake --build build-rocprofiler-register --target all --parallel 16
         cmake --build build-rocprofiler-register --target install
         echo "✅ ROCProfiler-Register Installation complete!"
@@ -243,7 +265,11 @@ jobs:
         export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         echo "Install ROCR-Runtime..."
-        cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake -B build \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH='${{ env.ROCM_PATH }}-7.0.0;${{ env.ROCM_PATH }}-7.0.0/llvm' \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          .
         cmake --build build --target all --parallel 16
         cmake --build build --target install
         echo "✅ ROCR-Runtime Installation complete!"
@@ -255,7 +281,13 @@ jobs:
         export LD_LIBRARY_PATH=${{ env.ROCM_PATH }}/lib:${{ env.ROCM_PATH }}/llvm/lib:$LD_LIBRARY_PATH
         export PATH=${{ env.ROCM_PATH }}/bin:${{ env.ROCM_PATH }}/llvm/bin:$PATH
         echo "Install Aqlprofile..."
-        cmake -B build-aqlprofile -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 .
+        cmake -B build-aqlprofile \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DCMAKE_PREFIX_PATH=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_INSTALL_PREFIX=${{ env.ROCM_PATH }}-7.0.0 \
+          -DCMAKE_C_COMPILER_LAUNCHER=/usr/bin/ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=/usr/bin/ccache \
+          .
         cmake --build build-aqlprofile --target all --parallel 16
         cmake --build build-aqlprofile --target install
         echo "✅ AQLProfile Installation complete!"
