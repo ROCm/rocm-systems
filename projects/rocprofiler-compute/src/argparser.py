@@ -189,8 +189,7 @@ Examples:
 
     def validate_block(value):
         # Metric id is of the form I or I.I or I.I.I where I is two digit number.
-        metric_id_pattern = re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$")
-        if metric_id_pattern.match(value):
+        if re.compile(r"^\d{1,2}(?:\.\d{1,2}){0,2}$").match(value):
             return value
         raise argparse.ArgumentTypeError(f"Invalid metric id: {value}")
 
@@ -218,7 +217,6 @@ Examples:
         choices=[""] + list(supported_archs.keys()),  # ["gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
-
     profile_group.add_argument(
         "--list-sets",
         action="store_true",
@@ -231,7 +229,6 @@ Examples:
         help="\t\t\tProfile a set of metrics of topic of interest by collecting "
         "counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
     )
-
     profile_group.add_argument(
         "--config-dir",
         dest="config_dir",
@@ -284,7 +281,6 @@ Examples:
         default="csv",
         help="\t\t\tSet the format of output file of rocprof.",
     )
-
     profile_group.add_argument(
         "--pc-sampling-method",
         required=False,
@@ -296,7 +292,6 @@ Examples:
             "Support stochastic only >= MI300"
         ),
     )
-
     profile_group.add_argument(
         "--pc-sampling-interval",
         required=False,
@@ -310,7 +305,6 @@ Examples:
             "(DEFAULT: 1048576)."
         ),
     )
-
     profile_group.add_argument(
         "--rocprofiler-sdk-library-path",
         type=str,
@@ -383,7 +377,6 @@ Examples:
         action="store_true",
         help="\t\t\tInclude kernel names in roofline plot.",
     )
-
     roofline_group.add_argument(
         "-R",
         "--roofline-data-type",
@@ -689,7 +682,6 @@ Examples:
             "\t\t\t   I64\n\t\t\t "
         ),
     )
-
     analyze_group.add_argument(
         "--pc-sampling-sorting-type",
         required=False,
