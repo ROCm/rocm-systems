@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/experimental/spm/capture.h>
+#include <rocprofiler-sdk/experimental/spm/core.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -70,11 +71,10 @@
 namespace common
 {
 void
-spm_data_callback(rocprofiler_agent_id_t        agent,
-                  rocprofiler_spm_record_type_t type,
-                  void*                         payload,
-                  rocprofiler_user_data_t       userdata);
-
+spm_data_callback(rocprofiler_spm_counter_record_t* records,
+                  size_t                            record_count,
+                  rocprofiler_spm_record_flags_t    flags,
+                  rocprofiler_user_data_t*          userdata);
 void
 finalize();
 

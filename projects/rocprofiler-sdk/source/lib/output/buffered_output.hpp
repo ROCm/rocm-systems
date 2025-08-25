@@ -25,7 +25,6 @@
 #include "counter_info.hpp"
 #include "generator.hpp"
 #include "pc_sample_transform.hpp"
-#include "spm_info.hpp"
 #include "statistics.hpp"
 #include "stream_info.hpp"
 #include "tmp_file_buffer.hpp"
@@ -174,7 +173,10 @@ using rccl_buffered_output_t =
 using counter_collection_buffered_output_t =
     buffered_output<tool_counter_record_t, domain_type::COUNTER_COLLECTION>;
 using spm_counter_collection_buffered_output_t =
-    buffered_output<rocprofiler_spm_counter_record_t, domain_type::SAMPLING_PERFORMANCE_MONITOR>;
+    buffered_output<tool_spm_counter_record_t, domain_type::STREAMING_PERFORMANCE_MONITOR>;
+using spm_counter_records_buffered_output_t =
+    ::rocprofiler::tool::buffered_output<rocprofiler::tool::tool_spm_counter_value_t,
+                                         domain_type::SPM_COUNTER_VALUES>;
 using scratch_memory_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_scratch_memory_record_t,
                     domain_type::SCRATCH_MEMORY>;

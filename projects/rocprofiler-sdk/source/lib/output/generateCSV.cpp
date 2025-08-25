@@ -1008,12 +1008,58 @@ generate_csv(const output_config& cfg,
 }
 
 void
-generate_csv(const output_config& /*cfg*/,
-             const metadata& /*tool_metadata*/,
-             const generator<rocprofiler_spm_counter_record_t>& /*data*/,
-             const stats_entry_t& /*stats*/)
+generate_csv(const output_config&                        cfg,
+             const metadata&                             tool_metadata,
+             const generator<tool_spm_counter_record_t>& data,
+             const stats_entry_t&                        stats)
 {
-    return;
+    if(data.empty()) return;
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::STREAMING_PERFORMANCE_MONITOR),
+                    stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::STREAMING_PERFORMANCE_MONITOR,
+                                     tool::csv::spm_csv_encoder{},
+                                     {"Dispatch_Id", "Counter_Name", "Counter_Value"}};
+
+    auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
+    for(const auto& itr : tool_metadata.get_counter_info())
+        counter_id_to_name.emplace(itr.id, itr.name);
+    auto dispatch_counter =
+        std::unordered_map<rocprofiler_dispatch_id_t,
+                           std::unordered_map<rocprofiler_counter_id_t, uint64_t>>{};
+
+    for(auto ditr : data)
+    {
+        for(auto record : data.get(ditr))
+        {
+            auto dispatch_id   = record.dispatch_id;
+            auto record_vector = record.read();
+
+            for(auto& count : record_vector)
+            {
+                if(dispatch_counter.find(dispatch_id) == dispatch_counter.end())
+                {
+                    dispatch_counter[dispatch_id] = {{count.id, 0}};
+                }
+                auto& counter = dispatch_counter.at(dispatch_id);
+                if(counter.find(count.id) == counter.end()) counter[count.id] = 0;
+                counter.at(count.id) += count.value;
+            }
+        }
+    }
+
+    auto row_ss = std::stringstream{};
+    for(auto& [dispatch_id, counter_values] : dispatch_counter)
+    {
+        for(auto& [counter_id, counter_value] : counter_values)
+        {
+            tool::csv::spm_csv_encoder::write_row(
+                row_ss, dispatch_id, counter_id_to_name.at(counter_id), counter_value);
+        }
+    }
+    ofs << row_ss.str();
 }
 }  // namespace tool
 }  // namespace rocprofiler

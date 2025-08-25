@@ -124,7 +124,7 @@ SPMAgentManager::resource_init()
 
         auto queue = std::make_unique<SPMQueue>(
             pack, *CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(rocp_agent)));
-       
+
         queues[id] = std::move(queue);
     }
 }
@@ -158,17 +158,10 @@ SPMAgentManager::stop_context()
         for(auto& [_, queue] : queues)
             wait_list.emplace_back(queue->stop());
     }
-
     for(auto& [id, queue] : queues)
     {
         auto pack = queue->params;
-        auto record =
-        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_AGENT_END,
-                                         .agent_id  = id,
-                                         .instance  = 0,
-                                         .timestamp = 0,
-                                         .value     = 0};
-        pack.data_fn(&record, 1, &(pack.user_data));
+        pack.data_fn(nullptr, 0, ROCPROFILER_SPM_RECORD_FLAG_END, &(pack.user_data));
     }
 }
 
@@ -192,7 +185,6 @@ SPMDispatchManager::resource_init()
         aql::SPMPacketFactory factory(*rocp_agent, pack, pool);
         auto                  packet = factory.construct();
 
-       
         packets.push_back({id, std::move(packet)});
     }
 }

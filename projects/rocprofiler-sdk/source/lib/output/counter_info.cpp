@@ -38,7 +38,8 @@ namespace rocprofiler
 {
 namespace tool
 {
-constexpr auto type = domain_type::COUNTER_VALUES;
+constexpr auto type     = domain_type::COUNTER_VALUES;
+constexpr auto spm_type = domain_type::SPM_COUNTER_VALUES;
 
 tool_counter_record_t::container_type
 tool_counter_record_t::read() const
@@ -63,8 +64,8 @@ tool_spm_counter_record_t::read() const
 {
     if(!record.fpos) return container_type{};
 
-    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
-    return _tmp_file.read<tool_counter_value_t>(*record.fpos);
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_spm_counter_value_t>(spm_type))->file;
+    return _tmp_file.read<tool_spm_counter_value_t>(*record.fpos);
 }
 
 void
@@ -72,8 +73,8 @@ tool_spm_counter_record_t::write(const tool_spm_counter_record_t::container_type
 {
     if(_data.empty()) return;
 
-    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
-    record.fpos     = _tmp_file.write<tool_counter_value_t>(_data.data(), _data.size());
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_spm_counter_value_t>(spm_type))->file;
+    record.fpos     = _tmp_file.write<tool_spm_counter_value_t>(_data.data(), _data.size());
 }
 }  // namespace tool
 }  // namespace rocprofiler

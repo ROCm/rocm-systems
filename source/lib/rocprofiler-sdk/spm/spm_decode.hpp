@@ -54,7 +54,7 @@ typedef std::vector<instances_t> counter_vec;
 void
 decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine, void* userdata);
 void
-aql_data_callback(size_t, void*, size_t, int /* flags */, void*);
+aql_data_callback(size_t, void*, size_t, int, void*);
 struct spm_counter_instance_t
 {
     rocprofiler_counter_id_t id;

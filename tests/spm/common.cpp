@@ -26,7 +26,6 @@
 #endif
 
 #include "common.hpp"
-#include <rocprofiler-sdk/experimental/spm/decode.h>
 
 #include <unistd.h>
 #include <cassert>
@@ -38,216 +37,128 @@
 
 namespace common
 {
-using map_type_t = std::map<uint64_t, std::string>;
-
-auto&
-id_names()
-{
-    static auto* ids = new std::map<uint64_t, map_type_t>();
-    return *ids;
-}
-
-class XccBuff
-{
-    struct CustomPtr
-    {
-        CustomPtr(char* _ptr)
-        : ptr(_ptr)
-        {}
-        char* const         ptr;
-        std::atomic<size_t> offset{0};
-    };
-
-public:
-    XccBuff(size_t _size, size_t _xcc_num)
-    : size(_size)
-    , xcc_num(_xcc_num)
-    {
-        vec.resize(xcc_num * size);
-        for(size_t i = 0; i < xcc_num; i++)
-            data.push_back(std::make_unique<CustomPtr>(vec.data() + i * size));
-    }
-
-    const size_t size;
-    const size_t xcc_num;
-
-    std::vector<std::unique_ptr<CustomPtr>> data{};
-
-    std::vector<char> desc{};
-
-private:
-    std::vector<char> vec{};
-};
-auto&
-get_buffer()
-{
-    static auto* buffer = new std::unordered_map<uint64_t, std::unique_ptr<XccBuff>>{};
-    return *buffer;
-}
+using map_value_t      = std::unordered_map<std::string, uint64_t>;
+using agent_counters_t = std::unordered_map<uint64_t, std::vector<uint64_t>>;
 
 static std::shared_mutex mut{};
 
-void
-spm_data_callback(rocprofiler_agent_id_t        agent,
-                  rocprofiler_spm_record_type_t type,
-                  void*                         payload,
-                  rocprofiler_user_data_t /* userdata */)
+auto&
+agent_counters()
 {
-    C_API_BEGIN
+    static auto* ids = new agent_counters_t();
+    return *ids;
+}
 
-    if(type == ROCPROFILER_SPM_RECORD_TYPE_SPM_DESC)
-    {
-        auto& desc = *reinterpret_cast<rocprofiler_spm_descriptor_t*>(payload);
-        auto  buf  = std::make_unique<XccBuff>(32 << 20, desc.buffer_num);  // 32MB per XCC
-
-        buf->desc = std::vector<char>((char*) desc.data, (char*) desc.data + desc.size);
-
-        std::unique_lock<std::shared_mutex> lk(mut);
-        get_buffer()[agent.handle] = std::move(buf);
-    }
-
-    if(type != ROCPROFILER_SPM_RECORD_TYPE_DATA) return;
-
-    auto& xcc_data = *reinterpret_cast<rocprofiler_spm_data_record_t*>(payload);
-
-    std::shared_lock<std::shared_mutex> lk(mut);
-    auto*                               buf = get_buffer().at(agent.handle).get();
-
-    char*  ptr    = buf->data.at(xcc_data.buffer_id)->ptr;
-    size_t offset = buf->data.at(xcc_data.buffer_id)->offset.fetch_add(xcc_data.data_size);
-
-    size_t xcc_data_size = xcc_data.data_size;
-
-    if(offset + xcc_data_size >= buf->size) throw std::runtime_error("SPM Buffer overflow!");
-
-    memcpy(ptr + offset, xcc_data.data, xcc_data_size);
-
-    C_API_END
+auto&
+id_values()
+{
+    static auto* ids = new std::unordered_map<uint64_t, map_value_t>();
+    return *ids;
 }
 
 void
-spm_decode_callback(rocprofiler_counter_id_t id,
-                    rocprofiler_spm_coord_t* /* dimensions */,
-                    uint64_t /* num_dimensions*/,
-                    const uint64_t* /* timestamps */,
-                    const uint64_t* values,
-                    uint64_t        count,
-                    void*           userdata)
+spm_data_callback(rocprofiler_spm_counter_record_t* records,
+                  size_t                            record_count,
+                  rocprofiler_spm_record_flags_t /* flags*/,
+                  rocprofiler_user_data_t* /*userdata*/)
 {
-    size_t total = 0;
-    for(size_t i = 0; i < count; i++)
-        total += values[i];
+    std::unique_lock<std::shared_mutex> lk(mut);
+    // if(!flags&ROCPROFILER_SPM_RECORD_FLAG_DATA) return;
 
-    auto& map = *reinterpret_cast<std::unordered_map<uint64_t, uint64_t>*>(userdata);
-    if(map.find(id.handle) == map.end()) map[id.handle] = 0;
-    map.at(id.handle) += total;
-};
+    for(size_t count = 0; count < record_count; count++)
+    {
+        auto     _counter_id = rocprofiler_counter_id_t{};
+        auto     _info       = rocprofiler_counter_info_v0_t{};
+        auto     agent_id    = records[count].agent_id;
+        uint64_t value       = records[count].value;
+        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
+                         "query record counter id");
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(
+                _counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&_info)),
+            "Could not query counter_id");
+        if(id_values().find(agent_id.handle) == id_values().end())
+            id_values()[agent_id.handle] = {{_info.name, value}};
+        auto& val = id_values()[agent_id.handle];
+        if(val.find(_info.name) == val.end()) val[_info.name] = 0;
+        val[_info.name] += value;
+    }
+
+    for(auto& [agent, value_by_name] : id_values())
+    {
+        float tcp_access = value_by_name["TCP_TOTAL_READ"] + value_by_name["TCP_TOTAL_WRITE"];
+        float tcp_miss   = value_by_name["TCP_TCC_READ_REQ"] + value_by_name["TCP_TCC_WRITE_REQ"];
+
+        // mi200 values
+        constexpr float se_to_cu   = 100.0f / 13;
+        constexpr float se_per_xcd = 800.0f;
+
+        std::cout << "\n\n";
+        std::cout << "SALU Insts:    "
+                  << 1.0f * value_by_name["SQ_INSTS_SALU"] / value_by_name["SQ_WAVES"] << std::endl;
+        std::cout << "VALU Insts:    "
+                  << 1.0f * value_by_name["SQ_INSTS_VALU"] / value_by_name["SQ_WAVES"] << std::endl;
+        std::cout << "Block Dim:     "
+                  << 1.0f * value_by_name["SQ_WAVES"] / value_by_name["SPI_CSN_NUM_THREADGROUPS"]
+                  << std::endl;
+        std::cout << "L2 HIT+MISS:   "
+                  << 100.0f * (value_by_name["TCC_HIT"] + value_by_name["TCC_MISS"]) /
+                         value_by_name["TCC_REQ"]
+                  << " %" << std::endl;
+        std::cout << "SQC HIT+MISS:  "
+                  << 100.0f *
+                         (value_by_name["SQC_ICACHE_HITS"] + value_by_name["SQC_ICACHE_MISSES"]) /
+                         value_by_name["SQC_ICACHE_REQ"]
+                  << " %" << std::endl;
+        std::cout << "CPC BUSY+IDLE: "
+                  << se_per_xcd *
+                         (value_by_name["CPC_CPC_STAT_BUSY"] + value_by_name["CPC_CPC_STAT_IDLE"]) /
+                         value_by_name["SQ_CYCLES"]
+                  << " %" << std::endl;
+        std::cout << "\n";
+        std::cout << "Active SPI:    "
+                  << 100.0f * value_by_name["SPI_CSN_WINDOW_VALID"] / value_by_name["SQ_CYCLES"]
+                  << " %" << std::endl;
+        std::cout << "SPI Busy:      "
+                  << 100.0f * value_by_name["SPI_CSN_BUSY"] / value_by_name["SQ_CYCLES"] << " %"
+                  << std::endl;
+        std::cout << "SQ CU Busy:    "
+                  << se_to_cu * value_by_name["SQ_BUSY_CU_CYCLES"] / value_by_name["SQ_CYCLES"]
+                  << " %" << std::endl;
+        std::cout << "CPC Busy:      "
+                  << se_per_xcd * value_by_name["CPC_CPC_STAT_BUSY"] / value_by_name["SQ_CYCLES"]
+                  << " %" << std::endl;
+        std::cout << "CPC Idle:      "
+                  << se_per_xcd * value_by_name["CPC_CPC_STAT_IDLE"] / value_by_name["SQ_CYCLES"]
+                  << " %" << std::endl;
+        std::cout << "SQC HIT:       "
+                  << 100.0f * value_by_name["SQC_ICACHE_HITS"] / value_by_name["SQC_ICACHE_REQ"]
+                  << " %" << std::endl;
+        std::cout << "SQC MISS:      "
+                  << 100.0f * value_by_name["SQC_ICACHE_MISSES"] / value_by_name["SQC_ICACHE_REQ"]
+                  << " %" << std::endl;
+        std::cout << "L2 Hit:        "
+                  << 100.0f * value_by_name["TCC_HIT"] / value_by_name["TCC_REQ"] << " %"
+                  << std::endl;
+        std::cout << "L2 Miss:       "
+                  << 100.0f * value_by_name["TCC_MISS"] / value_by_name["TCC_REQ"] << " %"
+                  << std::endl;
+        std::cout << "L1 Read/wave:  "
+                  << 1.0f * value_by_name["TCP_TOTAL_READ"] / value_by_name["SQ_WAVES"]
+                  << std::endl;
+        std::cout << "L1 Write/wave: "
+                  << 1.0f * value_by_name["TCP_TOTAL_WRITE"] / value_by_name["SQ_WAVES"]
+                  << std::endl;
+        std::cout << "L1->L2 Forward:" << 100.0f * tcp_miss / tcp_access << " %" << std::endl;
+        std::cout << "TA BUSY/WAVE:  "
+                  << 1.0f * value_by_name["TA_TA_BUSY"] / value_by_name["TA_TOTAL_WAVEFRONTS"]
+                  << std::endl;
+    }
+}
 
 void
 finalize()
-{
-    std::unique_lock<std::shared_mutex> lk(mut);
-
-    std::unordered_map<std::string, uint64_t> value_by_name{};
-
-    for(auto& [agent, buf] : get_buffer())
-    {
-        std::unordered_map<uint64_t, uint64_t> counter_total{};
-
-        for(size_t i = 0; i < buf->data.size(); i++)
-            if(buf->data[i]->offset.load())
-            {
-                char*  ptr  = buf->data[i]->ptr;
-                size_t size = buf->data[i]->offset.load();
-
-                rocprofiler_spm_descriptor_t desc{};
-                desc.data = buf->desc.data();
-                desc.size = buf->desc.size();
-
-                std::cout << "Decoding " << i << " with size " << size / 1012000.0f << " MB"
-                          << std::endl;
-
-                ROCPROFILER_CALL(
-                    rocprofiler_spm_decode(desc, i, spm_decode_callback, ptr, size, &counter_total),
-                    "spm decode");
-            }
-
-        for(auto& [id, cnt] : counter_total)
-        {
-            auto& name = id_names().at(agent).at(id);
-            if(value_by_name.find(name) == value_by_name.end()) value_by_name[name] = 1E-5f;
-            value_by_name.at(name) += cnt;
-        }
-    }
-
-    delete &get_buffer();
-
-    for(auto& [name, cnt] : value_by_name)
-        std::cout << name << ": " << cnt << std::endl;
-
-    float tcp_access = value_by_name["TCP_TOTAL_READ"] + value_by_name["TCP_TOTAL_WRITE"];
-    float tcp_miss   = value_by_name["TCP_TCC_READ_REQ"] + value_by_name["TCP_TCC_WRITE_REQ"];
-
-    // mi200 values
-    constexpr float se_to_cu   = 100.0f / 13;
-    constexpr float se_per_xcd = 800.0f;
-
-    std::cout << "\n\n";
-    std::cout << "SALU Insts:    "
-              << 1.0f * value_by_name["SQ_INSTS_SALU"] / value_by_name["SQ_WAVES"] << std::endl;
-    std::cout << "VALU Insts:    "
-              << 1.0f * value_by_name["SQ_INSTS_VALU"] / value_by_name["SQ_WAVES"] << std::endl;
-    std::cout << "Block Dim:     "
-              << 1.0f * value_by_name["SQ_WAVES"] / value_by_name["SPI_CSN_NUM_THREADGROUPS"]
-              << std::endl;
-    std::cout << "L2 HIT+MISS:   "
-              << 100.0f * (value_by_name["TCC_HIT"] + value_by_name["TCC_MISS"]) /
-                     value_by_name["TCC_REQ"]
-              << " %" << std::endl;
-    std::cout << "SQC HIT+MISS:  "
-              << 100.0f * (value_by_name["SQC_ICACHE_HITS"] + value_by_name["SQC_ICACHE_MISSES"]) /
-                     value_by_name["SQC_ICACHE_REQ"]
-              << " %" << std::endl;
-    std::cout << "CPC BUSY+IDLE: "
-              << se_per_xcd *
-                     (value_by_name["CPC_CPC_STAT_BUSY"] + value_by_name["CPC_CPC_STAT_IDLE"]) /
-                     value_by_name["SQ_CYCLES"]
-              << " %" << std::endl;
-    std::cout << "\n";
-    std::cout << "Active SPI:    "
-              << 100.0f * value_by_name["SPI_CSN_WINDOW_VALID"] / value_by_name["SQ_CYCLES"] << " %"
-              << std::endl;
-    std::cout << "SPI Busy:      "
-              << 100.0f * value_by_name["SPI_CSN_BUSY"] / value_by_name["SQ_CYCLES"] << " %"
-              << std::endl;
-    std::cout << "SQ CU Busy:    "
-              << se_to_cu * value_by_name["SQ_BUSY_CU_CYCLES"] / value_by_name["SQ_CYCLES"] << " %"
-              << std::endl;
-    std::cout << "CPC Busy:      "
-              << se_per_xcd * value_by_name["CPC_CPC_STAT_BUSY"] / value_by_name["SQ_CYCLES"]
-              << " %" << std::endl;
-    std::cout << "CPC Idle:      "
-              << se_per_xcd * value_by_name["CPC_CPC_STAT_IDLE"] / value_by_name["SQ_CYCLES"]
-              << " %" << std::endl;
-    std::cout << "SQC HIT:       "
-              << 100.0f * value_by_name["SQC_ICACHE_HITS"] / value_by_name["SQC_ICACHE_REQ"] << " %"
-              << std::endl;
-    std::cout << "SQC MISS:      "
-              << 100.0f * value_by_name["SQC_ICACHE_MISSES"] / value_by_name["SQC_ICACHE_REQ"]
-              << " %" << std::endl;
-    std::cout << "L2 Hit:        " << 100.0f * value_by_name["TCC_HIT"] / value_by_name["TCC_REQ"]
-              << " %" << std::endl;
-    std::cout << "L2 Miss:       " << 100.0f * value_by_name["TCC_MISS"] / value_by_name["TCC_REQ"]
-              << " %" << std::endl;
-    std::cout << "L1 Read/wave:  "
-              << 1.0f * value_by_name["TCP_TOTAL_READ"] / value_by_name["SQ_WAVES"] << std::endl;
-    std::cout << "L1 Write/wave: "
-              << 1.0f * value_by_name["TCP_TOTAL_WRITE"] / value_by_name["SQ_WAVES"] << std::endl;
-    std::cout << "L1->L2 Forward:" << 100.0f * tcp_miss / tcp_access << " %" << std::endl;
-    std::cout << "TA BUSY/WAVE:  "
-              << 1.0f * value_by_name["TA_TA_BUSY"] / value_by_name["TA_TOTAL_WAVEFRONTS"]
-              << std::endl;
-}
+{}
 
 rocprofiler_status_t
 iterate_agent_counters(rocprofiler_agent_id_t    agent_id,
@@ -267,7 +178,7 @@ iterate_agent_counters(rocprofiler_agent_id_t    agent_id,
                                      "CPC_CPC_STAT_IDLE", "SPI_CSN_WINDOW_VALID",
                                      "SPI_CSN_BUSY",      "SPI_CSN_NUM_THREADGROUPS"};
 
-    map_type_t counter_list{};
+    auto counter_list = std::vector<uint64_t>{};
     for(size_t i = 0; i < num_counters; i++)
     {
         rocprofiler_counter_info_v0_t _info{};
@@ -277,10 +188,10 @@ iterate_agent_counters(rocprofiler_agent_id_t    agent_id,
             "Could not query counter_id");
 
         if(desired.find(std::string(_info.name)) != desired.end())
-            counter_list.emplace(counters[i].handle, _info.name);
+            counter_list.emplace_back(counters[i].handle);
     }
 
-    id_names()[agent_id.handle] = std::move(counter_list);
+    agent_counters()[agent_id.handle] = std::move(counter_list);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -291,8 +202,8 @@ init_counters(rocprofiler_agent_id_t id)
         rocprofiler_iterate_spm_supported_counters(id, common::iterate_agent_counters, nullptr),
         "Iterate counters");
 
-    std::vector<rocprofiler_counter_id_t> counters{};
-    for(auto& [id_, _] : id_names().at(id.handle))
+    auto counters = std::vector<rocprofiler_counter_id_t>{};
+    for(auto& id_ : agent_counters().at(id.handle))
         counters.push_back(rocprofiler_counter_id_t{.handle = id_});
 
     return counters;

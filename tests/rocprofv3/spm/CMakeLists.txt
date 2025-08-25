@@ -30,14 +30,18 @@ set(IS_DISABLED False)
 # SPM
 add_test(
     NAME rocprofv3-test-spm-execute
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm ${COUNTER_LIST} -d
-            ${CMAKE_CURRENT_BINARY_DIR}/out_spm -o spm -- $<TARGET_FILE:simple-transpose>)
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm ${COUNTER_LIST} --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV JSON -o spm --
+        $<TARGET_FILE:simple-transpose>)
 
 # PMC
 add_test(
     NAME rocprofv3-test-pmc-compare-to-spm
-    COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc ${COUNTER_LIST} -d
-            ${CMAKE_CURRENT_BINARY_DIR}/out_spm -o pmc -- $<TARGET_FILE:simple-transpose>)
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc ${COUNTER_LIST} -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV JSON -o pmc --
+        $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -73,7 +77,7 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --pmc
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_spm_accumulated_values.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv)
 
 set_tests_properties(
     rocprofv3-test-spm-validate
@@ -94,7 +98,8 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --spm ${COUNTER_LIST}
         --spm-frequency-sclk 800000 --spm-timeout-ms 10 --spm-buffer-size 4096 -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_multi -o multi -- $<TARGET_FILE:vector-ops>)
+        ${CMAKE_CURRENT_BINARY_DIR}/out_multi --output-format CSV -o multi --
+        $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
     rocprofv3-test-spm-multigpu

@@ -191,13 +191,7 @@ generate_stats(const output_config& /*cfg*/,
 {
     return stats_entry_t{};
 }
-stats_entry_t
-generate_stats(const output_config& /*cfg*/,
-               const metadata& /*tool_metadata*/,
-               const generator<tool_spm_counter_record_t>& /*data*/)
-{
-    return stats_entry_t{};
-}
+
 stats_entry_t
 generate_stats(const output_config& /*cfg*/,
                const metadata&                                                      tool_metadata,

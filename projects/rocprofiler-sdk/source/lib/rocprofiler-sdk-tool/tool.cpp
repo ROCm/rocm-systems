@@ -54,7 +54,6 @@
 #include "lib/output/generateStats.hpp"
 #include "lib/output/metadata.hpp"
 #include "lib/output/output_stream.hpp"
-#include "lib/output/spm_info.hpp"
 #include "lib/output/statistics.hpp"
 #include "lib/output/stream_info.hpp"
 #include "lib/output/timestamps.hpp"
@@ -188,19 +187,19 @@ is_handled_signal(int signum)
 
 struct buffer_ids
 {
-    rocprofiler_buffer_id_t hsa_api_trace                = {};
-    rocprofiler_buffer_id_t hip_api_trace                = {};
-    rocprofiler_buffer_id_t kernel_trace                 = {};
-    rocprofiler_buffer_id_t memory_copy_trace            = {};
-    rocprofiler_buffer_id_t memory_allocation_trace      = {};
-    rocprofiler_buffer_id_t counter_collection           = {};
-    rocprofiler_buffer_id_t scratch_memory               = {};
-    rocprofiler_buffer_id_t rccl_api_trace               = {};
-    rocprofiler_buffer_id_t pc_sampling_host_trap        = {};
-    rocprofiler_buffer_id_t rocdecode_api_trace          = {};
-    rocprofiler_buffer_id_t rocjpeg_api_trace            = {};
-    rocprofiler_buffer_id_t pc_sampling_stochastic       = {};
-    rocprofiler_buffer_id_t sampling_performance_monitor = {};
+    rocprofiler_buffer_id_t hsa_api_trace                 = {};
+    rocprofiler_buffer_id_t hip_api_trace                 = {};
+    rocprofiler_buffer_id_t kernel_trace                  = {};
+    rocprofiler_buffer_id_t memory_copy_trace             = {};
+    rocprofiler_buffer_id_t memory_allocation_trace       = {};
+    rocprofiler_buffer_id_t counter_collection            = {};
+    rocprofiler_buffer_id_t scratch_memory                = {};
+    rocprofiler_buffer_id_t rccl_api_trace                = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap         = {};
+    rocprofiler_buffer_id_t rocdecode_api_trace           = {};
+    rocprofiler_buffer_id_t rocjpeg_api_trace             = {};
+    rocprofiler_buffer_id_t pc_sampling_stochastic        = {};
+    rocprofiler_buffer_id_t streaming_performance_monitor = {};
 
     auto as_array() const
     {
@@ -216,7 +215,7 @@ struct buffer_ids
                                                        rocdecode_api_trace,
                                                        rocjpeg_api_trace,
                                                        pc_sampling_stochastic,
-                                                       sampling_performance_monitor};
+                                                       streaming_performance_monitor};
     }
     auto pc_sampling_buffers_as_array() const
     {
@@ -1508,11 +1507,38 @@ spm_dispatch_callback(rocprofiler_agent_id_t /**/,
 void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
-                  rocprofiler_user_data_t* /**/)
+                  rocprofiler_spm_record_flags_t    flags,
+                  rocprofiler_user_data_t*          userdata)
 {
-    for(size_t i = 0; i < record_count; i++)
+    auto lk = std::shared_lock{tool_metadata->spm_mut};
+    if(record_count == 0) return;
+
+    if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA)
     {
-        rocprofiler::tool::write_ring_buffer(records[i], domain_type::SAMPLING_PERFORMANCE_MONITOR);
+        auto counter_record        = tool::tool_spm_counter_record_t{};
+        counter_record.dispatch_id = userdata->value;
+        if(record_count > 0) counter_record.agent_id = records[0].agent_id;
+        auto serialized_records = std::vector<tool::tool_spm_counter_value_t>{};
+        for(size_t count = 0; count < record_count; count++)
+        {
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
+                             "query record counter id");
+            serialized_records.emplace_back(tool::tool_spm_counter_value_t{
+                _counter_id, records[count].value, records[count].timestamp});
+        }
+
+        if(!serialized_records.empty())
+        {
+            counter_record.write(serialized_records);
+            tool::write_ring_buffer(counter_record, domain_type::STREAMING_PERFORMANCE_MONITOR);
+        }
+    }
+
+    if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
+    {
+        ROCP_CI_LOG(WARNING) << "Data Lost. Agent:" << records[0].agent_id.handle
+                             << " dispatch_id:" << userdata->value;
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;

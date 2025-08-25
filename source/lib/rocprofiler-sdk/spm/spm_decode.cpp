@@ -71,7 +71,7 @@ decode_cb(uint64_t timestamp, uint64_t value, uint64_t index, int shader_engine,
 }
 
 void
-aql_data_callback(size_t /**/, void* data, size_t size, int /* flags */, void* userdata)
+aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* userdata)
 {
     SPM::counter_vec counters{};
     auto             spm_packet = static_cast<hsa::SPMPacket*>(userdata);
@@ -119,9 +119,8 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /* flags */, void* u
                 for(size_t it = 0; it < size_1; it++)
                 {
                     records.emplace_back(
-                        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_DATA,
-                                                         .agent_id  = spm_packet->agent_id,
-                                                         .instance  = instance_id,
+                        rocprofiler_spm_counter_record_t{.agent_id  = spm_packet->agent_id,
+                                                         .id        = instance_id,
                                                          .timestamp = times[it],
                                                          .value     = values[it]});
                 }
@@ -141,16 +140,17 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /* flags */, void* u
                 for(size_t it = 0; it < size_1; it++)
                 {
                     records.emplace_back(
-                        rocprofiler_spm_counter_record_t{.flags     = ROCPROFILER_SPM_RECORD_FLAG_DATA,
-                                                         .agent_id  = spm_packet->agent_id,
-                                                         .instance  = instance_id,
+                        rocprofiler_spm_counter_record_t{.agent_id  = spm_packet->agent_id,
+                                                         .id        = instance_id,
                                                          .timestamp = times[it],
                                                          .value     = values[it]});
                 }
             }
         }
     }
-    spm_packet->decode_data_fn(&records[0], records.size(), &(spm_packet->user_data));
+
+    spm_packet->decode_data_fn(
+        &records[0], records.size(), ROCPROFILER_SPM_RECORD_FLAG_DATA, &(spm_packet->user_data));
 }
 }  // namespace SPM
 }  // namespace rocprofiler
