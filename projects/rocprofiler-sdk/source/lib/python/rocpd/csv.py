@@ -24,6 +24,8 @@
 ###############################################################################
 
 import os
+import re
+from typing import Tuple
 
 from .importer import RocpdImportData
 from .query import export_sqlite_query
@@ -60,66 +62,78 @@ def write_sql_query_to_csv(
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 
+def get_header_with_alias(column_name, titled_columns) -> Tuple[str, str]:
+    match = re.match(r"(.+?)\s+AS\s+(.+)", column_name, re.IGNORECASE)
+    if match:
+        return match.group(1), match.group(2)
+
+    if titled_columns:
+        return column_name, column_name.title()
+
+    return column_name, ""
+
+
 def write_agent_info_csv(importData, config) -> None:
 
     # Define mapping of output column name to JSON key
-    json_keys = {
-        "Node_Id": "node_id",
-        "Logical_Node_Id": "logical_node_id",
-        "Cpu_Cores_Count": "cpu_cores_count",
-        "Simd_Count": "simd_count",
-        "Cpu_Core_Id_Base": "cpu_core_id_base",
-        "Simd_Id_Base": "simd_id_base",
-        "Max_Waves_Per_Simd": "max_waves_per_simd",
-        "Lds_Size_In_Kb": "lds_size_in_kb",
-        "Gds_Size_In_Kb": "gds_size_in_kb",
-        "Num_Gws": "num_gws",
-        "Wave_Front_Size": "wave_front_size",
-        "Num_Xcc": "num_xcc",
-        "Cu_Count": "cu_count",
-        "Array_Count": "array_count",
-        "Num_Shader_Banks": "num_shader_banks",
-        "Simd_Arrays_Per_Engine": "simd_arrays_per_engine",
-        "Cu_Per_Simd_Array": "cu_per_simd_array",
-        "Simd_Per_Cu": "simd_per_cu",
-        "Max_Slots_Scratch_Cu": "max_slots_scratch_cu",
-        "Gfx_Target_Version": "gfx_target_version",
-        "Vendor_Id": "vendor_id",
-        "Device_Id": "device_id",
-        "Location_Id": "location_id",
-        "Domain": "domain",
-        "Drm_Render_Minor": "drm_render_minor",
-        "Num_Sdma_Engines": "num_sdma_engines",
-        "Num_Sdma_Xgmi_Engines": "num_sdma_xgmi_engines",
-        "Num_Sdma_Queues_Per_Engine": "num_sdma_queues_per_engine",
-        "Num_Cp_Queues": "num_cp_queues",
-        "Max_Engine_Clk_Ccompute": "max_engine_clk_ccompute",
-        "Max_Engine_Clk_Fcompute": "max_engine_clk_fcompute",
-        "Sdma_Fw_Version": "sdma_fw_version.uCodeSDMA",
-        "Fw_Version": "fw_version.uCode",
-        "Cu_per_engine": "cu_per_engine",
-        "Max_Waves_Per_Cu": "max_waves_per_cu",
-        "Workgroup_Max_Size": "workgroup_max_size",
-        "Family_Id": "family_id",
-        "Grid_Max_Size": "grid_max_size",
-        "Local_Mem_Size": "local_mem_size",
-        "Hive_Id": "hive_id",
-        "Gpu_Id": "gpu_id",
-        "Workgroup_Max_Dim_X": "workgroup_max_dim.x",
-        "Workgroup_Max_Dim_Y": "workgroup_max_dim.y",
-        "Workgroup_Max_Dim_Z": "workgroup_max_dim.z",
-        "Grid_Max_Dim_X": "grid_max_dim.x",
-        "Grid_Max_Dim_Y": "grid_max_dim.y",
-        "Grid_Max_Dim_Z": "grid_max_dim.z",
-        "Vendor_Name": "vendor_name",
-        "Product_Name": "product_name",
-    }
+    json_keys = [
+        "node_id",
+        "logical_node_id",
+        "cpu_cores_count",
+        "simd_count",
+        "cpu_core_id_base",
+        "simd_id_base",
+        "max_waves_per_simd",
+        "lds_size_in_kb",
+        "gds_size_in_kb",
+        "num_gws",
+        "wave_front_size",
+        "num_xcc",
+        "cu_count",
+        "array_count",
+        "num_shader_banks",
+        "simd_arrays_per_engine",
+        "cu_per_simd_array",
+        "simd_per_cu",
+        "max_slots_scratch_cu",
+        "gfx_target_version",
+        "vendor_id",
+        "device_id",
+        "location_id",
+        "domain",
+        "drm_render_minor",
+        "num_sdma_engines",
+        "num_sdma_xgmi_engines",
+        "num_sdma_queues_per_engine",
+        "num_cp_queues",
+        "max_engine_clk_ccompute",
+        "max_engine_clk_fcompute",
+        "sdma_fw_version.uCodeSDMA AS Sdma_Fw_Version",
+        "fw_version.uCode AS Fw_Version",
+        "cu_per_engine",
+        "max_waves_per_cu",
+        "workgroup_max_size",
+        "family_id",
+        "grid_max_size",
+        "local_mem_size",
+        "hive_id",
+        "gpu_id",
+        "workgroup_max_dim.x AS Workgroup_Max_Dim_X",
+        "workgroup_max_dim.y AS Workgroup_Max_Dim_Y",
+        "workgroup_max_dim.z AS Workgroup_Max_Dim_Z",
+        "grid_max_dim.x AS Grid_Max_Dim_X",
+        "grid_max_dim.y AS Grid_Max_Dim_Y",
+        "grid_max_dim.z AS Grid_Max_Dim_Z",
+        "vendor_name",
+        "product_name",
+    ]
 
     # Build SELECT clause for json_extract columns
-    select_json = [
-        f"json_extract(extdata, '$.{json_key}') AS {col_name}"
-        for col_name, json_key in json_keys.items()
-    ]
+    select_json = []
+    for column in json_keys:
+        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
+        alias_postfix = " AS " + (column_alias if column_alias else column_name)
+        select_json.append(f"json_extract(extdata, '$.{column_name}'){alias_postfix}")
 
     # Build Capability value for SELECT clause
     def cap_expr(key, shift, mask=None):
@@ -161,24 +175,30 @@ def write_agent_info_csv(importData, config) -> None:
     select_capability = [" | ".join(capability_exprs) + " AS Capability"]
 
     # Add non-JSON columns
-    select_fixed = [
-        "guid AS Guid",
+    fixed_keys = [
+        "guid",
         "type AS Agent_Type",
-        "name AS Name",
-        "model_name AS Model_Name",
+        "name",
+        "model_name",
     ]
+
+    fixed_select = []
+    for column in fixed_keys:
+        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
+        alias_postfix = " AS " + column_alias if column_alias else ""
+        fixed_select.append(f"{column_name}{alias_postfix}")
 
     # to mimic the previous order
     select_clause = (
-        select_fixed[:1]
+        fixed_select[:1]
         + select_json[:2]
-        + select_fixed[1:2]
+        + fixed_select[1:2]
         + select_json[2:33]
         + select_capability
         + select_json[33:47]
-        + select_fixed[2:3]
+        + fixed_select[2:3]
         + select_json[47:]
-        + select_fixed[3:4]
+        + fixed_select[3:4]
     )
 
     select_clause = ",\n    ".join(select_clause)
@@ -219,31 +239,43 @@ def write_kernel_csv(importData, config) -> None:
     else:
         kernel_name = "name"
 
+    select_columns = [
+        "guid",
+        "'KERNEL_DISPATCH' AS Kind",
+        f"{agent_id} AS Agent_Id",
+        "queue_id",
+        "stream_id",
+        "tid AS Thread_Id",
+        "dispatch_id",
+        "kernel_Id",
+        f"{kernel_name} AS Kernel_Name",
+        "stack_id AS Correlation_Id",
+        "start AS Start_Timestamp",
+        "end AS End_Timestamp",
+        "lds_size AS LDS_Block_Size",
+        "scratch_size",
+        "vgpr_count AS VGPR_Count",
+        "accum_vgpr_count AS Accum_VGPR_Count",
+        "sgpr_count AS SGPR_Count",
+        "workgroup_x AS Workgroup_Size_X",
+        "workgroup_y AS Workgroup_Size_Y",
+        "workgroup_z AS Workgroup_Size_Z",
+        "grid_x AS Grid_Size_X",
+        "grid_y AS Grid_Size_Y",
+        "grid_z AS Grid_Size_Z",
+    ]
+
+    aliased_headers = []
+    for column in select_columns:
+        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
+        alias_postfix = " AS " + column_alias if column_alias else ""
+        aliased_headers.append(f"{column_name}{alias_postfix}")
+
+    select_clause = ",\n".join(aliased_headers)
+
     query = f"""
         SELECT
-            guid AS Guid,
-            'KERNEL_DISPATCH' AS Kind,
-            {agent_id} AS Agent_Id,
-            queue_id AS Queue_Id,
-            stream_id AS Stream_Id,
-            tid AS Thread_Id,
-            dispatch_id AS Dispatch_Id,
-            kernel_Id AS Kernel_Id,
-            {kernel_name} AS Kernel_Name,
-            stack_id AS Correlation_Id,
-            start AS Start_Timestamp,
-            end AS End_Timestamp,
-            lds_size AS LDS_Block_Size,
-            scratch_size AS Scratch_Size,
-            vgpr_count AS VGPR_Count,
-            accum_vgpr_count AS Accum_VGPR_Count,
-            sgpr_count AS SGPR_Count,
-            workgroup_x AS Workgroup_Size_X,
-            workgroup_y AS Workgroup_Size_Y,
-            workgroup_z AS Workgroup_Size_Z,
-            grid_x AS Grid_Size_X,
-            grid_y AS Grid_Size_Y,
-            grid_z AS Grid_Size_Z
+            {select_clause}
         FROM "kernels"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -308,28 +340,40 @@ def write_counters_csv(importData, config) -> None:
 
     agent_id = build_agent_id_string(config.agent_index_value)
 
+    select_columns = [
+        "guid",
+        "stack_id AS Correlation_Id",
+        "dispatch_id",
+        f"{agent_id} AS Agent_Id",
+        "queue_id",
+        "pid AS Process_Id",
+        "tid AS Thread_Id",
+        "grid_size",
+        "kernel_id",
+        "kernel_name",
+        "workgroup_size",
+        "lds_block_size AS LDS_Block_Size",
+        "scratch_size",
+        "vgpr_count AS VGPR_Count",
+        "accum_vgpr_count AS Accum_VGPR_Count",
+        "sgpr_count AS SGPR_Count",
+        "counter_name",
+        "value AS Counter_Value",
+        "start AS Start_Timestamp",
+        "end AS End_Timestamp",
+    ]
+
+    aliased_headers = []
+    for column in select_columns:
+        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
+        alias_postfix = " AS " + column_alias if column_alias else ""
+        aliased_headers.append(f"{column_name}{alias_postfix}")
+
+    select_clause = ",\n".join(aliased_headers)
+
     query = f"""
         SELECT
-            guid AS Guid,
-            stack_id AS Correlation_Id,
-            dispatch_id AS Dispatch_Id,
-            {agent_id} AS Agent_Id,
-            queue_id AS Queue_Id,
-            pid AS Process_Id,
-            tid AS Thread_Id,
-            grid_size AS Grid_Size,
-            kernel_id AS Kernel_Id,
-            kernel_name AS Kernel_Name,
-            workgroup_size AS Workgroup_Size,
-            lds_block_size AS LDS_Block_Size,
-            scratch_size AS Scratch_Size,
-            vgpr_count AS VGPR_Count,
-            accum_vgpr_count AS Accum_VGPR_Count,
-            sgpr_count AS SGPR_Count,
-            counter_name AS Counter_Name,
-            value AS Counter_Value,
-            start AS Start_Timestamp,
-            end AS End_Timestamp
+            {select_clause}
         FROM "counters_collection"
         ORDER BY
             guid ASC, start ASC, end DESC
@@ -411,11 +455,24 @@ def execute(input, config=None, window_args=None, **kwargs):
 def add_args(parser):
     """Add csv arguments."""
 
-    return []
+    csv_options = parser.add_argument_group("CSV options")
+    csv_options.add_argument(
+        "--titled-columns",
+        action="store_true",
+        default=False,
+        help="Format column names as titles in the output",
+    )
+
+    return ["titled_columns"]
 
 
 def process_args(args, valid_args):
     ret = {}
+    for itr in valid_args:
+        if hasattr(args, itr):
+            val = getattr(args, itr)
+            if val is not None:
+                ret[itr] = val
     return ret
 
 
