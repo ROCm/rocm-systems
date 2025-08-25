@@ -40,7 +40,7 @@ const static char* strKernel = KERNEL_CODE(
   /* The purpose of this is to introduce an additional zero at stage - pass
    * bit*/
   const uint leftID = (thread & (pairDistance - 1)) |
-      ((thread & ~(pairDistance - 1)) << 1); /* Is the same as below */
+                      ((thread & ~(pairDistance - 1)) << 1); /* Is the same as below */
 
   const uint direction = ((thread >> stage) & 1) == 1 ? 0 : 1;
 

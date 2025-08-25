@@ -169,14 +169,17 @@ class OmniAnalyze_Base:
         if self.__args.list_metrics:
             self.list_metrics()
 
-        # load required configs
-        for d in self.__args.path:
-            sysinfo_path = (
-                Path(d[0])
+        def get_sysinfo_path(data_path):
+            return (
+                Path(data_path)
                 if self.__args.nodes is None
                 and self.__args.spatial_multiplexing is not True
-                else file_io.find_1st_sub_dir(d[0])
+                else file_io.find_1st_sub_dir(data_path)
             )
+
+        # load required configs
+        for d in self.__args.path:
+            sysinfo_path = get_sysinfo_path(d[0])
             sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_arch"]
             args = self.__args
@@ -196,20 +199,14 @@ class OmniAnalyze_Base:
             #    For regular single node case, load sysinfo.csv directly
             #    For multi-node, either the default "all", or specified some,
             #    pick up the one in the 1st sub_dir. We could fix it properly later.
-            sysinfo_path = (
-                Path(d[0])
-                if self.__args.nodes is None
-                and self.__args.spatial_multiplexing is not True
-                else file_io.find_1st_sub_dir(d[0])
-            )
+            w = schema.Workload()
+            sysinfo_path = get_sysinfo_path(d[0])
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
 
             if not getattr(self.get_args(), "no_roof", False):
                 try:
-                    roofline_path = sysinfo_path.joinpath("roofline.csv")
-                    roofline_df = pd.read_csv(roofline_path)
-
-                    # use original column names from roofline.csv directly
+                    roofline_csv_path = sysinfo_path / "roofline.csv"
+                    roofline_df = pd.read_csv(roofline_csv_path)
                     w.roofline_peaks = roofline_df
 
                 except FileNotFoundError:

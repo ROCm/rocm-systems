@@ -188,7 +188,7 @@ bool setAliasOptionVariable(int OptDescTableIx, Options& Opts, int64_t IValue, c
       if (OptDescTableIx == OID_SaveTemps) {
         // Dump .cl, .i(.ii), .amdil, .isa, .s, dll, calimage
         flags = DUMP_CL | DUMP_I | DUMP_S | DUMP_O | DUMP_DLL | DUMP_CGIL | DUMP_DEBUGIL | DUMP_IL |
-            DUMP_ISA;
+                DUMP_ISA;
       } else if (OptDescTableIx == OID_SaveTempsAll) {
         flags = DUMP_ALL;
       } else {  // OID_Output
@@ -531,7 +531,8 @@ int getOptionDesc(std::string& options, size_t StartPos, bool IsShortForm, Optio
   }
 
   char next_c = options.at(pos);
-  bool optionalHasValue = (OPTION_value(od) == OVA_OPTIONAL) &&
+  bool optionalHasValue =
+      (OPTION_value(od) == OVA_OPTIONAL) &&
       (((OPTION_info(od) & OA_SEPARATOR_EQUAL) && (next_c == '=')) ||
        ((OPTION_info(od) & OA_SEPARATOR_NONE) && !OPTION_valueSeparator(next_c)));
   bool hasValue = (OPTION_value(od) == OVA_REQUIRED) || optionalHasValue;

@@ -1833,7 +1833,7 @@ RUNTIME_ENTRY(cl_int, clGetKernelWorkGroupInfo,
       // Return the amount of used local memory
       const size_t align = amdDevice.info().minDataTypeAlignSize_;
       cl_ulong memSize = as_amd(kernel)->parameters().localMemSize(align) +
-          amd::alignUp(devKernel->workGroupInfo()->localMemSize_, align);
+                         amd::alignUp(devKernel->workGroupInfo()->localMemSize_, align);
       return amd::clGetInfo(memSize, param_value_size, param_value, param_value_size_ret);
     }
     case CL_KERNEL_PREFERRED_WORK_GROUP_SIZE_MULTIPLE: {

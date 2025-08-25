@@ -60,7 +60,7 @@ TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, sho
   CHECK_IMAGE_SUPPORT
 #if HT_NVIDIA
       (void)
-      hipGetLastError();  // Prevent negative tests affecting this
+  hipGetLastError();  // Prevent negative tests affecting this
 #endif
 #if __HIP_NO_IMAGE_SUPPORT
   HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");

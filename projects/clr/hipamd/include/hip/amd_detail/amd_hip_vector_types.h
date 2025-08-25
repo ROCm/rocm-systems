@@ -59,9 +59,9 @@ template <typename T, unsigned int n> struct HIP_vector_base;
 template <typename T, unsigned int rank> struct HIP_vector_type;
 
 namespace hip_impl {
-template <typename T, unsigned int n>
-__attribute__((always_inline)) __HOST_DEVICE__ typename HIP_vector_base<T, n>::Native_vec_*
-get_native_pointer(HIP_vector_base<T, n>& base_vec) {
+template <typename T, unsigned int n> __attribute__((always_inline)) __HOST_DEVICE__
+    typename HIP_vector_base<T, n>::Native_vec_*
+    get_native_pointer(HIP_vector_base<T, n>& base_vec) {
   static_assert(sizeof(base_vec) == sizeof(typename HIP_vector_base<T, n>::Native_vec_));
   static_assert(__hip_internal::alignment_of<HIP_vector_base<T, n>>::value ==
                 __hip_internal::alignment_of<typename HIP_vector_base<T, n>::Native_vec_>::value);
@@ -78,9 +78,9 @@ get_native_pointer(const HIP_vector_base<T, n>& base_vec) {
 };
 }  // Namespace hip_impl.
 
-template <typename T, unsigned int n>
-__attribute__((always_inline)) __HOST_DEVICE__ typename HIP_vector_base<T, n>::Native_vec_&
-get_native_vector(HIP_vector_base<T, n>& base_vec) {
+template <typename T, unsigned int n> __attribute__((always_inline)) __HOST_DEVICE__
+    typename HIP_vector_base<T, n>::Native_vec_&
+    get_native_vector(HIP_vector_base<T, n>& base_vec) {
   return *hip_impl::get_native_pointer(base_vec);
 };
 
@@ -308,9 +308,8 @@ template <typename T, unsigned int rank> struct HIP_vector_type : public HIP_vec
 
   __HOST_DEVICE__
   HIP_vector_type() = default;
-  template <typename U,
-            typename __hip_internal::enable_if<__hip_internal::is_convertible<U, T>::value>::type* =
-                nullptr>
+  template <typename U, typename __hip_internal::enable_if<
+                            __hip_internal::is_convertible<U, T>::value>::type* = nullptr>
   __HOST_DEVICE__ explicit constexpr HIP_vector_type(U x_) noexcept
       : HIP_vector_base<T, rank>{static_cast<T>(x_)} {}
   template <  // TODO: constrain based on type as well.
@@ -368,9 +367,8 @@ template <typename T, unsigned int rank> struct HIP_vector_type : public HIP_vec
 #endif
     return *this;
   }
-  template <
-      typename U,
-      typename __hip_internal::enable_if<__hip_internal::is_convertible<U, T>{}>::type* = nullptr>
+  template <typename U, typename __hip_internal::enable_if<
+                            __hip_internal::is_convertible<U, T>{}>::type* = nullptr>
   __HOST_DEVICE__ HIP_vector_type& operator+=(U x) noexcept {
     return *this += make_vector_type<T, rank>(x);
   }
@@ -383,9 +381,8 @@ template <typename T, unsigned int rank> struct HIP_vector_type : public HIP_vec
 #endif
     return *this;
   }
-  template <
-      typename U,
-      typename __hip_internal::enable_if<__hip_internal::is_convertible<U, T>{}>::type* = nullptr>
+  template <typename U, typename __hip_internal::enable_if<
+                            __hip_internal::is_convertible<U, T>{}>::type* = nullptr>
   __HOST_DEVICE__ HIP_vector_type& operator-=(U x) noexcept {
     return *this -= make_vector_type<T, rank>(x);
   }
@@ -404,9 +401,8 @@ template <typename T, unsigned int rank> struct HIP_vector_type : public HIP_vec
     return HIP_vector_type{x} *= y;
   }
 
-  template <
-      typename U,
-      typename __hip_internal::enable_if<__hip_internal::is_convertible<U, T>{}>::type* = nullptr>
+  template <typename U, typename __hip_internal::enable_if<
+                            __hip_internal::is_convertible<U, T>{}>::type* = nullptr>
   __HOST_DEVICE__ HIP_vector_type& operator*=(U x) noexcept {
     return *this *= make_vector_type<T, rank>(x);
   }
@@ -424,9 +420,8 @@ template <typename T, unsigned int rank> struct HIP_vector_type : public HIP_vec
 #endif
     return *this;
   }
-  template <
-      typename U,
-      typename __hip_internal::enable_if<__hip_internal::is_convertible<U, T>{}>::type* = nullptr>
+  template <typename U, typename __hip_internal::enable_if<
+                            __hip_internal::is_convertible<U, T>{}>::type* = nullptr>
   __HOST_DEVICE__ HIP_vector_type& operator/=(U x) noexcept {
     return *this /= make_vector_type<T, rank>(x);
   }
@@ -576,8 +571,7 @@ __HOST_DEVICE__ inline constexpr HIP_vector_type<T, n> operator/(
   return make_vector_type<T, n>(x) /= y;
 }
 
-template <typename T, unsigned int n>
-__HOST_DEVICE__ inline
+template <typename T, unsigned int n> __HOST_DEVICE__ inline
 #if __cplusplus >= 201402L && !defined(__HIPCC_RTC__)
     constexpr
 #endif
