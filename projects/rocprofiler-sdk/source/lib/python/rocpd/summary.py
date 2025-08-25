@@ -559,9 +559,7 @@ def main(argv=None) -> int:
     from .time_window import add_args as add_args_time_window
     from .time_window import process_args as process_args_time_window
 
-    parser = argparse.ArgumentParser(
-        description="Create ROCpd database summary region views"
-    )
+    parser = argparse.ArgumentParser(description="Generate summary views from rocPD data")
     required_params = parser.add_argument_group("Required options")
 
     required_params.add_argument(

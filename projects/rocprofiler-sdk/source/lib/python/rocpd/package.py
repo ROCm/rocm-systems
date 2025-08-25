@@ -319,13 +319,13 @@ def execute(input_files, **kwargs):
 
 def main(argv=None):
     """
-    Main function to demonstrate the creation of a metadata file and .rpdb package
+    Main function to create a metadata file and .rpdb package
 
     Consolidates to a .rpdb package if --consolidate is specified.
     """
 
     parser = argparse.ArgumentParser(
-        description="Convert rocPD to Perfetto file", allow_abbrev=False
+        description="Package database files into .rpdb output"
     )
 
     required_params = parser.add_argument_group("Required options")

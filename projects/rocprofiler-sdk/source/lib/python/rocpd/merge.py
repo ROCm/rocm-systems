@@ -187,9 +187,9 @@ class RocpdMerger:
 def add_args(parser):
     """Add arguments for merger."""
 
-    o_options = parser.add_argument_group("Output options")
+    io_options = parser.add_argument_group("I/O options")
 
-    o_options.add_argument(
+    io_options.add_argument(
         "-o",
         "--output-file",
         help="Sets the base output file name",
@@ -197,7 +197,7 @@ def add_args(parser):
         type=str,
         required=False,
     )
-    o_options.add_argument(
+    io_options.add_argument(
         "-d",
         "--output-path",
         help="Sets the output path where the output files will be saved (default path: `./rocpd-output-data`)",
@@ -244,8 +244,13 @@ def main(argv=None) -> int:
 
     from . import output_config
 
-    parser = argparse.ArgumentParser(description="Merge ROCpd databases")
-    parser.add_argument(
+    parser = argparse.ArgumentParser(
+        description="Generate merged database from rocPD databases"
+    )
+
+    required_params = parser.add_argument_group("Required options")
+
+    required_params.add_argument(
         "-i",
         "--input",
         required=True,
