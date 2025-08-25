@@ -19,7 +19,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
 
 * Added interactive metric descriptions in TUI analyze mode
-  * users can now left click on any metric cell to view detailed descriptions in the dedicated `Metric Description` tab
+  * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
 
 ### Changed
 
