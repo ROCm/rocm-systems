@@ -401,8 +401,8 @@ void OCLPerfKernelThroughput::open(unsigned int test, char* units, double& conve
       input2BufferSize_ = static_cast<size_t>(matrixDim2_ * matrixDim1_ * sizeof(float));
       output1BufferSize_ = static_cast<size_t>(matrixDim1_ * matrixDim1_ * sizeof(float));
       _reqDataSize = (1.0 * matrixDim1_ * matrixDim2_ * sizeof(float)) +
-          (1.0 * matrixDim2_ * matrixDim1_ * sizeof(float)) +
-          (1.0 * matrixDim1_ * matrixDim1_ * sizeof(float));
+                     (1.0 * matrixDim2_ * matrixDim1_ * sizeof(float)) +
+                     (1.0 * matrixDim1_ * matrixDim1_ * sizeof(float));
       break;
     case 1:                                         // Flops/Byte
       flopsPerByte_ = (int)workSize[workSizeIdx_];  // for kernelType == 0
@@ -695,13 +695,13 @@ void OCLPerfKernelThroughput::run(void) {
       // printf("FlopCount = 2*%i*%i*%i=%f\n",
       // matrixDim1_,matrixDim1_,matrixDim2_,flopCount);
       bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) * 1000000.f /
-          avgKernelTime_;  // GB/s
+                   avgKernelTime_;  // GB/s
       gflops_ = (float)(1000000.f * flopCount / avgKernelTime_ / 1000000000.0);
       break;
     case 1:  // Madds
       flopCount = _reqDataSize * flopsPerByte_;
       bandwidth_ = (float)(1.f * _reqDataSize / 1024.f / 1024.f / 1024.f) * 1000000.f /
-          avgKernelTime_;  // GB/s
+                   avgKernelTime_;  // GB/s
       gflops_ = bandwidth_ * flopsPerByte_;
       break;
   }

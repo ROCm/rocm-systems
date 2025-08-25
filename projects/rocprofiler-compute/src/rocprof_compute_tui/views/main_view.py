@@ -55,7 +55,10 @@ class MainView(Horizontal):
 
     def __init__(self):
         super().__init__(id="main-container")
-        self.start_path = Path(DEFAULT_START_PATH) if DEFAULT_START_PATH else Path.cwd()
+        self.start_path = (
+            # NOTE: is cwd the best choice?
+            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
+        )
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
 
@@ -167,7 +170,9 @@ class MainView(Horizontal):
     def refresh_results(self) -> None:
         kernel_view = self.query_one("#kernel-view")
         if kernel_view:
-            kernel_view.update_results(self.kernel_to_df_dict, self.top_kernel_to_df_list)
+            kernel_view.update_results(
+                self.kernel_to_df_dict, self.top_kernel_to_df_list
+            )
             self.logger.success("Results displayed successfully.")
         else:
             self.logger.error("Kernel view not found or no data available")

@@ -265,7 +265,7 @@ void OCLPerfGenericBandwidth::run(void) {
   // We have one extra write per LDS location to initialize LDS
   double perf = ((double)global * (numReads_ * sizeof(cl_float) + dataSizeBytes_ / 64) * NUM_ITER *
                  (double)(1e-09)) /
-      sec;
+                sec;
 
   _perfInfo = (float)perf;
   SNPRINTF(buf, sizeof(buf), " %6s %9s %8d threads, %3d reads (GB/s) ", buf2, buf3, global,

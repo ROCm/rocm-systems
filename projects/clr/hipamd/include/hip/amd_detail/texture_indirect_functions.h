@@ -37,41 +37,36 @@ THE SOFTWARE.
   unsigned int ADDRESS_SPACE_CONSTANT* s = i + HIP_SAMPLER_OBJECT_OFFSET_DWORD;                    \
   (void)s;
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1Dfetch(hipTextureObject_t textureObject, int x) {
   TEXTURE_OBJECT_PARAMETERS_INIT
   auto tmp = __ockl_image_load_1Db(i, x);
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1Dfetch(T* ptr, hipTextureObject_t textureObject, int x) {
   *ptr = tex1Dfetch<T>(textureObject, x);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1D(hipTextureObject_t textureObject, float x) {
   TEXTURE_OBJECT_PARAMETERS_INIT
   auto tmp = __ockl_image_sample_1D(i, s, x);
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1D(T* ptr, hipTextureObject_t textureObject, float x) {
   *ptr = tex1D<T>(textureObject, x);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2D(hipTextureObject_t textureObject, float x, float y) {
   TEXTURE_OBJECT_PARAMETERS_INIT
   float2 coords{x, y};
@@ -79,17 +74,15 @@ static __device__ __hip_img_chk__ T tex2D(hipTextureObject_t textureObject, floa
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2D(T* ptr, hipTextureObject_t textureObject, float x,
                                              float y) {
   *ptr = tex2D<T>(textureObject, x, y);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex3D(hipTextureObject_t textureObject, float x, float y,
                                           float z) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -98,17 +91,15 @@ static __device__ __hip_img_chk__ T tex3D(hipTextureObject_t textureObject, floa
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex3D(T* ptr, hipTextureObject_t textureObject, float x,
                                              float y, float z) {
   *ptr = tex3D<T>(textureObject, x, y, z);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1DLayered(hipTextureObject_t textureObject, float x,
                                                  int layer) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -117,17 +108,15 @@ static __device__ __hip_img_chk__ T tex1DLayered(hipTextureObject_t textureObjec
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1DLayered(T* ptr, hipTextureObject_t textureObject,
                                                     float x, int layer) {
   *ptr = tex1DLayered<T>(textureObject, x, layer);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2DLayered(hipTextureObject_t textureObject, float x, float y,
                                                  int layer) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -136,17 +125,15 @@ static __device__ __hip_img_chk__ T tex2DLayered(hipTextureObject_t textureObjec
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DLayered(T* ptr, hipTextureObject_t textureObject,
                                                     float x, float y, int layer) {
   *ptr = tex1DLayered<T>(textureObject, x, y, layer);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemap(hipTextureObject_t textureObject, float x, float y,
                                                float z) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -155,17 +142,15 @@ static __device__ __hip_img_chk__ T texCubemap(hipTextureObject_t textureObject,
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemap(T* ptr, hipTextureObject_t textureObject, float x,
                                                   float y, float z) {
   *ptr = texCubemap<T>(textureObject, x, y, z);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemapLayered(hipTextureObject_t textureObject, float x,
                                                       float y, float z, int layer) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -174,17 +159,15 @@ static __device__ __hip_img_chk__ T texCubemapLayered(hipTextureObject_t texture
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemapLayered(T* ptr, hipTextureObject_t textureObject,
                                                          float x, float y, float z, int layer) {
   *ptr = texCubemapLayered<T>(textureObject, x, y, z, layer);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2Dgather(hipTextureObject_t textureObject, float x, float y,
                                                 int comp = 0) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -214,17 +197,15 @@ static __device__ __hip_img_chk__ T tex2Dgather(hipTextureObject_t textureObject
   return {};
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2Dgather(T* ptr, hipTextureObject_t textureObject,
                                                    float x, float y, int comp = 0) {
   *ptr = texCubemapLayered<T>(textureObject, x, y, comp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1DLod(hipTextureObject_t textureObject, float x,
                                              float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -232,17 +213,15 @@ static __device__ __hip_img_chk__ T tex1DLod(hipTextureObject_t textureObject, f
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1DLod(T* ptr, hipTextureObject_t textureObject, float x,
                                                 float level) {
   *ptr = tex1DLod<T>(textureObject, x, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2DLod(hipTextureObject_t textureObject, float x, float y,
                                              float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -251,17 +230,15 @@ static __device__ __hip_img_chk__ T tex2DLod(hipTextureObject_t textureObject, f
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DLod(T* ptr, hipTextureObject_t textureObject, float x,
                                                 float y, float level) {
   *ptr = tex2DLod<T>(textureObject, x, y, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex3DLod(hipTextureObject_t textureObject, float x, float y,
                                              float z, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -270,17 +247,15 @@ static __device__ __hip_img_chk__ T tex3DLod(hipTextureObject_t textureObject, f
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex3DLod(T* ptr, hipTextureObject_t textureObject, float x,
                                                 float y, float z, float level) {
   *ptr = tex3DLod<T>(textureObject, x, y, z, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1DLayeredLod(hipTextureObject_t textureObject, float x,
                                                     int layer, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
@@ -290,17 +265,15 @@ static __device__ __hip_img_chk__ T tex1DLayeredLod(hipTextureObject_t textureOb
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1DLayeredLod(T* ptr, hipTextureObject_t textureObject,
                                                        float x, int layer, float level) {
   *ptr = tex1DLayeredLod<T>(textureObject, x, layer, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2DLayeredLod(hipTextureObject_t textureObject, float x,
                                                     float y, int layer, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
@@ -310,17 +283,15 @@ static __device__ __hip_img_chk__ T tex2DLayeredLod(hipTextureObject_t textureOb
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DLayeredLod(T* ptr, hipTextureObject_t textureObject,
                                                        float x, float y, int layer, float level) {
   *ptr = tex2DLayeredLod<T>(textureObject, x, y, layer, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemapLod(hipTextureObject_t textureObject, float x,
                                                   float y, float z, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -329,17 +300,15 @@ static __device__ __hip_img_chk__ T texCubemapLod(hipTextureObject_t textureObje
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemapLod(T* ptr, hipTextureObject_t textureObject,
                                                      float x, float y, float z, float level) {
   *ptr = texCubemapLod<T>(textureObject, x, y, z, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemapGrad(hipTextureObject_t textureObject, float x,
                                                    float y, float z, float4 dPdx, float4 dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
@@ -355,18 +324,16 @@ static __device__ __hip_img_chk__ T texCubemapGrad(hipTextureObject_t textureObj
   return {};
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemapGrad(T* ptr, hipTextureObject_t textureObject,
                                                       float x, float y, float z, float4 dPdx,
                                                       float4 dPdy) {
   *ptr = texCubemapGrad<T>(textureObject, x, y, z, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemapLayeredLod(hipTextureObject_t textureObject, float x,
                                                          float y, float z, int layer, float level) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -375,9 +342,8 @@ static __device__ __hip_img_chk__ T texCubemapLayeredLod(hipTextureObject_t text
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemapLayeredLod(T* ptr,
                                                             hipTextureObject_t textureObject,
                                                             float x, float y, float z, int layer,
@@ -385,9 +351,8 @@ static __device__ __hip_img_chk__ void texCubemapLayeredLod(T* ptr,
   *ptr = texCubemapLayeredLod<T>(textureObject, x, y, z, layer, level);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1DGrad(hipTextureObject_t textureObject, float x, float dPdx,
                                               float dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -395,17 +360,15 @@ static __device__ __hip_img_chk__ T tex1DGrad(hipTextureObject_t textureObject, 
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1DGrad(T* ptr, hipTextureObject_t textureObject, float x,
                                                  float dPdx, float dPdy) {
   *ptr = tex1DGrad<T>(textureObject, x, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2DGrad(hipTextureObject_t textureObject, float x, float y,
                                               float2 dPdx, float2 dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -415,17 +378,15 @@ static __device__ __hip_img_chk__ T tex2DGrad(hipTextureObject_t textureObject, 
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DGrad(T* ptr, hipTextureObject_t textureObject, float x,
                                                  float y, float2 dPdx, float2 dPdy) {
   *ptr = tex2DGrad<T>(textureObject, x, y, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex3DGrad(hipTextureObject_t textureObject, float x, float y,
                                               float z, float4 dPdx, float4 dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT;
@@ -438,17 +399,15 @@ static __device__ __hip_img_chk__ T tex3DGrad(hipTextureObject_t textureObject, 
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex3DGrad(T* ptr, hipTextureObject_t textureObject, float x,
                                                  float y, float z, float4 dPdx, float4 dPdy) {
   *ptr = tex3DGrad<T>(textureObject, x, y, z, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex1DLayeredGrad(hipTextureObject_t textureObject, float x,
                                                      int layer, float dPdx, float dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -457,18 +416,16 @@ static __device__ __hip_img_chk__ T tex1DLayeredGrad(hipTextureObject_t textureO
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex1DLayeredGrad(T* ptr, hipTextureObject_t textureObject,
                                                         float x, int layer, float dPdx,
                                                         float dPdy) {
   *ptr = tex1DLayeredGrad<T>(textureObject, x, layer, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T tex2DLayeredGrad(hipTextureObject_t textureObject, float x,
                                                      float y, int layer, float2 dPdx, float2 dPdy) {
   TEXTURE_OBJECT_PARAMETERS_INIT
@@ -478,18 +435,16 @@ static __device__ __hip_img_chk__ T tex2DLayeredGrad(hipTextureObject_t textureO
   return __hipMapFrom<T>(tmp);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void tex2DLayeredGrad(T* ptr, hipTextureObject_t textureObject,
                                                         float x, float y, int layer, float2 dPdx,
                                                         float2 dPdy) {
   *ptr = tex2DLayeredGrad<T>(textureObject, x, y, layer, dPdx, dPdy);
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ T texCubemapLayeredGrad(hipTextureObject_t textureObject, float x,
                                                           float y, float z, int layer, float4 dPdx,
                                                           float4 dPdy) {
@@ -507,9 +462,8 @@ static __device__ __hip_img_chk__ T texCubemapLayeredGrad(hipTextureObject_t tex
   return {};
 }
 
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void texCubemapLayeredGrad(T* ptr,
                                                              hipTextureObject_t textureObject,
                                                              float x, float y, float z, int layer,

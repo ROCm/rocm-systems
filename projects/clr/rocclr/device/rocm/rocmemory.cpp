@@ -835,9 +835,8 @@ bool Buffer::create(bool alloc_local) {
         } else if (memFlags & ROCCLR_MEM_HSA_SIGNAL_MEMORY) {
           // TODO: ROCr will introduce a new attribute enum that implies a non-blocking signal,
           // replace "HSA_AMD_SIGNAL_AMD_GPU_ONLY" with this new enum when it is ready.
-          if (HSA_STATUS_SUCCESS !=
-              hsa_amd_signal_create(kInitSignalValueOne, 0, nullptr, HSA_AMD_SIGNAL_AMD_GPU_ONLY,
-                                    &signal_)) {
+          if (HSA_STATUS_SUCCESS != hsa_amd_signal_create(kInitSignalValueOne, 0, nullptr,
+                                                          HSA_AMD_SIGNAL_AMD_GPU_ONLY, &signal_)) {
             ClPrint(amd::LOG_ERROR, amd::LOG_MEM,
                     "[ROCclr] ROCCLR_MEM_HSA_SIGNAL_MEMORY signal creation failed");
             return false;
@@ -1316,8 +1315,8 @@ bool Image::create(bool alloc_local) {
   // support alignment larger than HSA memory region allocation granularity.
   // In this case, the user manages the alignment.
   const size_t alloc_size = (deviceImageInfo_.alignment <= dev().alloc_granularity())
-      ? deviceImageInfo_.size
-      : deviceImageInfo_.size + deviceImageInfo_.alignment;
+                                ? deviceImageInfo_.size
+                                : deviceImageInfo_.size + deviceImageInfo_.alignment;
 
   if (!(owner()->getMemFlags() & CL_MEM_ALLOC_HOST_PTR)) {
     originalDeviceMemory_ = dev().deviceLocalAlloc(alloc_size);
@@ -1357,8 +1356,8 @@ bool Image::createView(const Memory& parent) {
   deviceMemory_ = parent.getDeviceMemory();
 
   originalDeviceMemory_ = (parent.owner()->asBuffer() != nullptr)
-      ? deviceMemory_
-      : static_cast<const Image&>(parent).originalDeviceMemory_;
+                              ? deviceMemory_
+                              : static_cast<const Image&>(parent).originalDeviceMemory_;
 
   // Detect image view from buffer to distinguish linear paths from tiled.
   amd::Memory* ancestor = parent.owner();
@@ -1411,10 +1410,10 @@ bool Image::createView(const Memory& parent) {
             break;
           }
           hsa_ext_image_t hsaImage;
-          if (HSA_STATUS_SUCCESS ==
-              hsa_ext_image_create_with_layout(
-                  dev().getBackendDevice(), &imageDescriptor_, deviceMemory_, permission_,
-                  HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR, tryPitch, 0, &hsaImage)) {
+          if (HSA_STATUS_SUCCESS == hsa_ext_image_create_with_layout(
+                                        dev().getBackendDevice(), &imageDescriptor_, deviceMemory_,
+                                        permission_, HSA_EXT_IMAGE_DATA_LAYOUT_LINEAR, tryPitch, 0,
+                                        &hsaImage)) {
             // The image pitch from app is not expectation of the GPU
             LogWarning("[OCL] will use copy image");
             workaround = true;

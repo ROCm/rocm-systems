@@ -511,8 +511,8 @@ bool Program::compileAndLinkExecutable(const amd_comgr_data_set_t inputs,
   if (status == AMD_COMGR_STATUS_SUCCESS) {
     hasRelocatableData = true;
     amd_comgr_action_kind_t kind = (continueCompileFrom == FILE_TYPE_ASM_TEXT)
-        ? AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE
-        : AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE;
+                                       ? AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE
+                                       : AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE;
     status = amd::Comgr::do_action(kind, action, inputs, relocatableData);
     extractBuildLog(relocatableData);
   }
@@ -1259,9 +1259,9 @@ bool Program::linkImplHSAIL(amd::option::Options* options) {
   bool finalize = true;
   internal_ = (compileOptions_.find("-cl-internal-kernel") != std::string::npos) ? true : false;
   // If !binaryElf_ then program must have been created using clCreateProgramWithBinary
-  aclType continueCompileFrom = (!binaryElf_)
-      ? static_cast<aclType>(getNextCompilationStageFromBinary(options))
-      : ACL_TYPE_LLVMIR_BINARY;
+  aclType continueCompileFrom =
+      (!binaryElf_) ? static_cast<aclType>(getNextCompilationStageFromBinary(options))
+                    : ACL_TYPE_LLVMIR_BINARY;
 
   switch (continueCompileFrom) {
     case ACL_TYPE_SPIRV_BINARY:
@@ -2857,9 +2857,8 @@ bool Program::getDemangledName(const std::string& mangledName, std::string& dema
 
   demangledName.resize(demangled_size);
 
-  if (AMD_COMGR_STATUS_SUCCESS !=
-      amd::Comgr::get_data(demangled_data, &demangled_size,
-                           const_cast<char*>(demangledName.data()))) {
+  if (AMD_COMGR_STATUS_SUCCESS != amd::Comgr::get_data(demangled_data, &demangled_size,
+                                                       const_cast<char*>(demangledName.data()))) {
     amd::Comgr::release_data(mangled_data);
     amd::Comgr::release_data(demangled_data);
     return false;
