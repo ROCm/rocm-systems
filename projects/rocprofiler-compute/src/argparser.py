@@ -29,14 +29,14 @@ import re
 from pathlib import Path
 
 
-def print_avail_arch(avail_arch: list):
+def print_avail_arch(avail_arch: list) -> str:
     ret_str = "\t\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t\t   {}".format(arch)
     return ret_str
 
 
-def add_general_group(parser, rocprof_compute_version):
+def add_general_group(parser, rocprof_compute_version) -> None:
     general_group = parser.add_argument_group("General Options")
 
     general_group.add_argument(
@@ -64,7 +64,7 @@ def add_general_group(parser, rocprof_compute_version):
 
 def omniarg_parser(
     parser, rocprof_compute_home, supported_archs, rocprof_compute_version
-):
+) -> None:
     # -----------------------------------------
     # Parse arguments (dependent on mode)
     # -----------------------------------------

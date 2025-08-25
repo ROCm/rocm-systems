@@ -29,6 +29,7 @@ import time
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -57,7 +58,7 @@ from utils.utils import mibench
 SYMBOLS = [0, 1, 2, 3, 4, 5, 13, 17, 18, 20]
 
 
-def wrap_text(text, width=92):
+def wrap_text(text, width=92) -> str:
     """
     Wraps text using textwrap and joins lines with <br> for Plotly.
     """
@@ -104,13 +105,13 @@ class Roofline:
         self.__run_parameters["roofline_data_type"] = self.__args.roofline_data_type
         self.validate_parameters()
 
-    def validate_parameters(self):
+    def validate_parameters(self) -> None:
         if self.__run_parameters["include_kernel_names"] and (
             not self.__run_parameters["is_standalone"]
         ):
             console_error("--kernel-names cannot be used with --no-roof option")
 
-    def roof_setup(self):
+    def roof_setup(self) -> None:
         # Setup the workload directory for roofline profiling.
         workload_dir_val = self.__run_parameters.get("workload_dir")
 
@@ -169,7 +170,7 @@ class Roofline:
     def empirical_roofline(
         self,
         ret_df,
-    ):
+    ) -> Optional[html.Section]:
         """
         Generate a set of empirical roofline plots given a directory containing
         required profiling and benchmarking data.
@@ -620,7 +621,9 @@ class Roofline:
 
         return fig
 
-    def cli_generate_plot(self, dtype, workload=None, config=None, arch_config=None):
+    def cli_generate_plot(
+        self, dtype, workload=None, config=None, arch_config=None
+    ) -> Optional[str]:
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
@@ -879,7 +882,7 @@ class Roofline:
         return plt.build()
 
     @demarcate
-    def standalone_roofline(self):
+    def standalone_roofline(self) -> None:
         if (
             not isinstance(self.__run_parameters["workload_dir"], list)
             and self.__run_parameters["workload_dir"] != None
@@ -905,7 +908,7 @@ class Roofline:
         self.empirical_roofline(ret_df=t_df)
 
     @abstractmethod
-    def profile(self):
+    def profile(self) -> None:
         if self.__args.roof_only:
             # check for roofline benchmark
             console_log(
@@ -940,16 +943,16 @@ class Roofline:
     # rocprofiler-compute, we include pre_processing() and profile() methods for
     # those who wish to borrow the roofline module
     @abstractmethod
-    def post_processing(self):
+    def post_processing(self) -> None:
         if self.__run_parameters["is_standalone"]:
             self.standalone_roofline()
 
-    def get_dtype(self):
+    def get_dtype(self) -> list[str]:
         return self.__run_parameters["roofline_data_type"]
 
 
-def to_int(a):
-    if str(type(a)) == "<class 'NoneType'>":
+def to_int(a) -> Union[float, int]:
+    if a is None:
         return np.nan
     else:
         return int(a)

@@ -59,7 +59,7 @@ from utils.utils import (
 
 
 class RocProfCompute:
-    def __init__(self):
+    def __init__(self) -> None:
         self.__args = None
         self.__profiler_mode = None
         self.__analyze_mode = None
@@ -92,7 +92,7 @@ class RocProfCompute:
 
         console_debug("Execution mode = %s" % self.__mode)
 
-    def print_graphic(self):
+    def print_graphic(self) -> None:
         """Log program name as ascii art to terminal."""
         ascii_art = r"""
                                  __                                       _
@@ -107,7 +107,7 @@ class RocProfCompute:
     def get_mode(self):
         return self.__mode
 
-    def set_version(self):
+    def set_version(self) -> None:
         vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
         self.__version["ver_pretty"] = get_version_display(
@@ -115,7 +115,7 @@ class RocProfCompute:
         )
         return
 
-    def detect_profiler(self):
+    def detect_profiler(self) -> None:
         profiler_mode = detect_rocprof(self.__args)
         if str(profiler_mode).endswith("rocprof"):
             self.__profiler_mode = "rocprofv1"
@@ -132,7 +132,7 @@ class RocProfCompute:
             )
         return
 
-    def detect_analyze(self):
+    def detect_analyze(self) -> None:
         if self.__args.gui:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
@@ -142,7 +142,7 @@ class RocProfCompute:
         return
 
     @demarcate
-    def load_soc_specs(self, sysinfo: dict = None):
+    def load_soc_specs(self, sysinfo: dict = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
         self.__mspec = generate_machine_specs(self.__args, sysinfo)
         if self.__args.specs:
@@ -156,7 +156,7 @@ class RocProfCompute:
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
         return
 
-    def parse_args(self):
+    def parse_args(self) -> None:
         parser = argparse.ArgumentParser(
             description=(
                 "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
@@ -222,16 +222,16 @@ class RocProfCompute:
         return
 
     @demarcate
-    def list_metrics(self):
+    def list_metrics(self) -> None:
         if not self.__args.list_metrics:
             arch = self.__mspec.gpu_arch
         else:
             arch = self.__args.list_metrics
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs([
-                self.__args.config_dir.joinpath(arch)
-            ])
+            ac.panel_configs = file_io.load_panel_configs(
+                [self.__args.config_dir.joinpath(arch)]
+            )
             sys_info = self.__mspec.get_class_members().iloc[0]
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
@@ -248,7 +248,7 @@ class RocProfCompute:
             console_error("Unsupported arch")
 
     @demarcate
-    def list_sets(self):
+    def list_sets(self) -> None:
         sets_info = parse_sets_yaml(self.__mspec.gpu_arch)
 
         if not sets_info:
@@ -297,7 +297,7 @@ class RocProfCompute:
         sys.exit(0)
 
     @demarcate
-    def run_profiler(self):
+    def run_profiler(self) -> None:
         self.print_graphic()
         self.load_soc_specs()
 
@@ -404,7 +404,7 @@ class RocProfCompute:
         return
 
     @demarcate
-    def update_db(self):
+    def update_db(self) -> None:
         self.print_graphic()
 
         console_warning(
@@ -429,7 +429,7 @@ class RocProfCompute:
         return
 
     @demarcate
-    def run_analysis(self):
+    def run_analysis(self) -> None:
         self.print_graphic()
 
         console_log("Analysis mode = %s" % self.__analyze_mode)

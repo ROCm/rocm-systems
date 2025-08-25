@@ -437,25 +437,27 @@ def v3_json_to_csv(json_file_path, csv_file_path):
     counter_info = v3_json_get_counters(data)
 
     # CSV headers. If there are no dispatches we still end up with a valid CSV file.
-    csv_data = dict.fromkeys([
-        "Dispatch_ID",
-        "GPU_ID",
-        "Queue_ID",
-        "PID",
-        "TID",
-        "Grid_Size",
-        "Workgroup_Size",
-        "LDS_Per_Workgroup",
-        "Scratch_Per_Workitem",
-        "Arch_VGPR",
-        "Accum_VGPR",
-        "SGPR",
-        "Wave_Size",
-        "Kernel_Name",
-        "Start_Timestamp",
-        "End_Timestamp",
-        "Correlation_ID",
-    ])
+    csv_data = dict.fromkeys(
+        [
+            "Dispatch_ID",
+            "GPU_ID",
+            "Queue_ID",
+            "PID",
+            "TID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
+            "Scratch_Per_Workitem",
+            "Arch_VGPR",
+            "Accum_VGPR",
+            "SGPR",
+            "Wave_Size",
+            "Kernel_Name",
+            "Start_Timestamp",
+            "End_Timestamp",
+            "Correlation_ID",
+        ]
+    )
 
     for key in csv_data:
         csv_data[key] = []
