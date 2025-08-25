@@ -25,7 +25,6 @@ concurrency:
 
 env:
   ROCM_PATH: "/opt/rocm"
-  PATH: "/usr/bin:$PATH"
   navi3_EXCLUDE_TESTS_REGEX: ""
   vega20_EXCLUDE_TESTS_REGEX: ""
   mi200_EXCLUDE_TESTS_REGEX: ""
