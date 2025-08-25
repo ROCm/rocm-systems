@@ -206,12 +206,12 @@ jobs:
           RUN set -euo pipefail; \
               if [ -f /etc/debian_version ]; then \
                 aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx110X }}" rocm-gfx110X.tar.gz --no-sign-request && \
-                mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz \
+                mv rocm-gfx110X.tar.gz /opt/rocm-gfx110X.tar.gz; \
               fi
           RUN set -euo pipefail; \
               if [ -f /etc/debian_version ]; then \
                 aws s3 cp "s3://therock-nightly-tarball/${{ steps.therock.outputs.gfx120X }}" rocm-gfx120X.tar.gz --no-sign-request && \
-                mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz \
+                mv rocm-gfx120X.tar.gz /opt/rocm-gfx120X.tar.gz; \
               fi
           EOF
 
