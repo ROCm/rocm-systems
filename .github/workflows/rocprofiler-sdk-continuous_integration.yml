@@ -199,6 +199,9 @@ jobs:
                 source ~/.bashrc; \
                 python3 -m pip install --upgrade pip || true; \
                 python3 -m pip install --upgrade -r /root/requirements.txt || true; \
+                cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.51.0.tar.xz; \
+                tar -xf git-2.51.0.tar.xz; cd git-2.51.0; make prefix=/usr all -j 32; make prefix=/usr install; \
+                cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.51.0*; \
               fi
           RUN set -euo pipefail; \
               if [ "${GPU_TYPE}" = "gfx94X" ]; then \
