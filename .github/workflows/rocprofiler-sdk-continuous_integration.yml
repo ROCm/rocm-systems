@@ -633,7 +633,9 @@ jobs:
 
       - name: Install Curl for RHEL 8.8
         if: ${{ matrix.os == 'rhel-8.8' }}
-        run: dnf install -y curl
+        run: |
+          dnf install -y curl
+          ln -s /usr/local/bin/curl /usr/bin/curl
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
@@ -663,7 +665,6 @@ jobs:
         shell: bash
         working-directory: projects/rocr-runtime
         run: |
-          source ../rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
@@ -684,7 +685,6 @@ jobs:
         working-directory: projects/aqlprofile
         run: |
           echo "Install Aqlprofile."
-          source ../rocprofiler-sdk/bin/activate
           export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:$PATH
           python3 -m pipx install cmake
           python3 -m pipx ensurepath; source ~/.bashrc || true
