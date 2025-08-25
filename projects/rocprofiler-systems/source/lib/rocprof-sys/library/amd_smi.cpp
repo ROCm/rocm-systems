@@ -254,7 +254,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     {
         add_vcn_pmc(std::nullopt);
     }
-    else if(gpu::is_vcn_busy_supported(gpu_id))
+    else
     {
         for(int xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
@@ -266,7 +266,7 @@ metadata_initialize_smi_pmc(size_t gpu_id)
     {
         add_jpeg_pmc(std::nullopt);
     }
-    else if(gpu::is_jpeg_busy_supported(gpu_id))
+    else
     {
         for(auto xcp = 0; xcp < AMDSMI_MAX_NUM_XCP; ++xcp)
         {
