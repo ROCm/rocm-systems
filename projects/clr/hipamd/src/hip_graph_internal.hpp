@@ -366,9 +366,8 @@ class GraphNode : public hipGraphNodeDOTAttribute {
   virtual void EnqueueCommands(hip::Stream* stream) {
     // If the node is disabled it becomes empty node. To maintain ordering just enqueue marker.
     // Node can be enabled/disabled only for kernel, memcpy and memset nodes.
-    if (!isEnabled_ &&
-        (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
-         type_ == hipGraphNodeTypeMemset)) {
+    if (!isEnabled_ && (type_ == hipGraphNodeTypeKernel || type_ == hipGraphNodeTypeMemcpy ||
+                        type_ == hipGraphNodeTypeMemset)) {
       amd::Command::EventWaitList waitList;
       if (!commands_.empty()) {
         waitList = commands_[0]->eventWaitList();
@@ -1677,7 +1676,7 @@ class GraphMemcpyNode1D : public GraphMemcpyNode {
       label = buffer;
     } else {
       label = std::to_string(GetID()) + "\n" + label_ + "\n(" + memcpyDirection + "," +
-          std::to_string(count_) + ")";
+              std::to_string(count_) + ")";
     }
     return label;
   }
@@ -1948,7 +1947,7 @@ class GraphMemsetNode : public GraphNode {
         sizeBytes = memsetParams_.width * memsetParams_.height * depth_ * memsetParams_.elementSize;
       }
       label = std::to_string(GetID()) + "\n" + label_ + "\n(" +
-          std::to_string(memsetParams_.value) + "," + std::to_string(sizeBytes) + ")";
+              std::to_string(memsetParams_.value) + "," + std::to_string(sizeBytes) + ")";
     }
     return label;
   }

@@ -170,8 +170,8 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness", "", float, double) {
 
       __hip_fp8_e4m3 tmp;
       tmp.__x = std::is_same<TestType, float>::value
-          ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3)
-          : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3);
+                    ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3)
+                    : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3);
       ;
       float cvt2 = tmp;
 
@@ -440,8 +440,8 @@ TEMPLATE_TEST_CASE("Unit_fp8_ocp_correctness", "", float, double) {
 
       __hip_fp8_e5m2 tmp;
       tmp.__x = std::is_same<TestType, float>::value
-          ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2)
-          : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2);
+                    ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2)
+                    : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2);
       ;
       float cvt2 = tmp;
 
@@ -780,8 +780,8 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness", "", float, double) {
 
       __hip_fp8_e4m3_fnuz tmp;
       tmp.__x = std::is_same<TestType, float>::value
-          ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
-          : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
+                    ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3_FNUZ)
+                    : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E4M3_FNUZ);
       ;
       float cvt2 = tmp;
 
@@ -1058,8 +1058,8 @@ TEMPLATE_TEST_CASE("Unit_fp8_fnuz_correctness", "", float, double) {
 
       __hip_fp8_e5m2_fnuz tmp;
       tmp.__x = std::is_same<TestType, float>::value
-          ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
-          : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
+                    ? __hip_cvt_float_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2_FNUZ)
+                    : __hip_cvt_double_to_fp8(orig, __HIP_SATFINITE, __HIP_E5M2_FNUZ);
       ;
       float cvt2 = tmp;
 

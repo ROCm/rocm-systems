@@ -1915,13 +1915,12 @@ __BF16_DEVICE_STATIC__ __hip_bfloat16 unsafeAtomicAdd(__hip_bfloat16* address,
   static_assert(sizeof(unsigned short int) == sizeof(__hip_bfloat16_raw));
   unsigned short int* address_as_short = reinterpret_cast<unsigned short int*>(address);
   // Align to 4 bytes
-  unsigned int* aligned_addr =
-      __builtin_bit_cast(unsigned int*,
-                         __builtin_bit_cast(unsigned long long int, address_as_short) &
-                             (unsigned long long int)(~0x3));
+  unsigned int* aligned_addr = __builtin_bit_cast(
+      unsigned int*, __builtin_bit_cast(unsigned long long int, address_as_short) &
+                         (unsigned long long int)(~0x3));
 
   bool is_lower = __builtin_bit_cast(unsigned long long int, aligned_addr) ==
-      __builtin_bit_cast(unsigned long long int, address);
+                  __builtin_bit_cast(unsigned long long int, address);
 
   __hip_bfloat162 fval;
   if (is_lower)

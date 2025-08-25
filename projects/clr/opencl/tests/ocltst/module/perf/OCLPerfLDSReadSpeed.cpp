@@ -341,7 +341,7 @@ void OCLPerfLDSReadSpeed::run(void) {
   // We have one extra write per LDS location to initialize LDS
   double perf = ((double)global * (numReads_ * sizeof(cl_float) + ldsSizeBytes_ / 64) * NUM_ITER *
                  (double)(1e-09)) /
-      sec;
+                sec;
 
   _perfInfo = (float)perf;
   SNPRINTF(buf, sizeof(buf), " %s %8d threads, %3d reads (GB/s) ", buf2, global, numReads_);

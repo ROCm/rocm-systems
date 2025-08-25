@@ -69,9 +69,8 @@ template <typename T> class DrvMemcpy3DAsync {
 };
 
 /* Intializes class variables */
-template <typename T>
-DrvMemcpy3DAsync<T>::DrvMemcpy3DAsync(int l_width, int l_height, int l_depth,
-                                      hipArray_Format l_format) {
+template <typename T> DrvMemcpy3DAsync<T>::DrvMemcpy3DAsync(int l_width, int l_height, int l_depth,
+                                                            hipArray_Format l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;

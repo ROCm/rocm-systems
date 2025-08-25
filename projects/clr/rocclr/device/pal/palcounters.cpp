@@ -194,7 +194,7 @@ bool PalCounterReference::finalize() {
 
     assert(layout.sampleCount == numExpCounters_);
     size_t size = sizeof(Pal::GlobalCounterLayout) +
-        (sizeof(Pal::GlobalSampleLayout) * (layout.sampleCount - 1));
+                  (sizeof(Pal::GlobalSampleLayout) * (layout.sampleCount - 1));
     layout_ = reinterpret_cast<Pal::GlobalCounterLayout*>(new char[size]);
     if (layout_ != nullptr) {
       layout_->sampleCount = layout.sampleCount;
@@ -728,7 +728,7 @@ bool PerfCounter::create() {
       }
       counter_start = info_.counterIndex_;
       counter_step = dev().properties().gfxipProperties.shaderCore.numShaderArrays *
-          dev().properties().gfxipProperties.shaderCore.numShaderEngines;
+                     dev().properties().gfxipProperties.shaderCore.numShaderEngines;
       break;
 
     case PCIndexSelect::ComputeUnit:

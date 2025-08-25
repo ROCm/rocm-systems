@@ -74,7 +74,8 @@ def load_panel_configs(dirs):
                 if f.endswith(".yaml"):
                     with open(Path(root) / f) as file:
                         config_yml = yaml.safe_load(file)
-                        # metric key can be None due to some metric tables not having any metrics
+                        # metric key can be None due to some metric-
+                        # tables not having any metrics
                         # metric key should be empty dict instead of None
                         for data_source in config_yml["Panel Config"]["data source"]:
                             metric_table = data_source.get("metric_table")
@@ -160,9 +161,9 @@ def create_df_kernel_top_stats(
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
-        {"ExeTime": ["count", "sum", "mean", "median"]}
-    )
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
+        "ExeTime": ["count", "sum", "mean", "median"]
+    })
 
     time_unit_str = "(" + time_unit + ")"
     grouped.columns = [

@@ -61,9 +61,9 @@ template <typename C, typename D> RAII_guard<C, D> make_RAII_guard(const C& ctor
   return RAII_guard<C, D>{ctor, std::move(dtor)};
 }
 
-template <FunctionalProcedure F, typename... Ts>
-using is_new_grid_launch_t = typename std::conditional<is_callable<F(Ts...)>{}, New_grid_launch_tag,
-                                                       Old_grid_launch_tag>::type;
+template <FunctionalProcedure F, typename... Ts> using is_new_grid_launch_t =
+    typename std::conditional<is_callable<F(Ts...)>{}, New_grid_launch_tag,
+                              Old_grid_launch_tag>::type;
 }  // namespace
 
 // TODO: - dispatch rank should be derived from the domain dimensions passed

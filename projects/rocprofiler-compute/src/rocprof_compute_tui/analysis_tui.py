@@ -26,6 +26,8 @@
 import copy
 from pathlib import Path
 
+import pandas as pd
+
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from rocprof_compute_tui.utils.tui_utils import (
     get_top_kernels_and_dispatch_ids,
@@ -40,9 +42,8 @@ class tui_analysis(OmniAnalyze_Base):
     def __init__(self, args, supported_archs, path):
         super().__init__(args, supported_archs)
         self.path = str(path)
-        self.arch = None
+        self.args = self.get_args()
         self.raw_dfs = {}
-        self.kernel_dfs = {}
 
     # -----------------------
     # Required child methods
@@ -50,99 +51,108 @@ class tui_analysis(OmniAnalyze_Base):
     @demarcate
     def pre_processing(self):
         self._profiling_config = file_io.load_profiling_config(self.path)
-
         self._runs = self.initalize_runs()
 
-        if self.get_args().random_port:
+        if self.args.random_port:
             console_error("--gui flag is required to enable --random-port")
 
-        self._runs[self.path].raw_pmc = file_io.create_df_pmc(
+        # Process PMC data
+        workload = self._runs[self.path]
+
+        workload.raw_pmc = file_io.create_df_pmc(
             self.path,
-            self.get_args().nodes,
-            self.get_args().spatial_multiplexing,
-            self.get_args().kernel_verbose,
-            self.get_args().verbose,
+            self.args.nodes,
+            self.args.spatial_multiplexing,
+            self.args.kernel_verbose,
+            self.args.verbose,
             self._profiling_config,
         )
 
-        if self.get_args().spatial_multiplexing:
-            self._runs[self.path].raw_pmc = self.spatial_multiplex_merge_counters(
-                self._runs[self.path].raw_pmc
-            )
+        if self.args.spatial_multiplexing:
+            workload.raw_pmc = self.spatial_multiplex_merge_counters(workload.raw_pmc)
 
         file_io.create_df_kernel_top_stats(
-            df_in=self._runs[self.path].raw_pmc,
+            df_in=workload.raw_pmc,
             raw_data_dir=self.path,
-            filter_gpu_ids=self._runs[self.path].filter_gpu_ids,
-            filter_dispatch_ids=self._runs[self.path].filter_dispatch_ids,
-            filter_nodes=self._runs[self.path].filter_nodes,
-            time_unit=self.get_args().time_unit,
-            max_stat_num=self.get_args().max_stat_num,
-            kernel_verbose=self.get_args().kernel_verbose,
+            filter_gpu_ids=workload.filter_gpu_ids,
+            filter_dispatch_ids=workload.filter_dispatch_ids,
+            filter_nodes=workload.filter_nodes,
+            time_unit=self.args.time_unit,
+            max_stat_num=self.args.max_stat_num,
+            kernel_verbose=self.args.kernel_verbose,
         )
-
-        kernel_name_shortener(
-            self._runs[self.path].raw_pmc, self.get_args().kernel_verbose
-        )
+        kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
 
         # 1. load top kernel
         parser.load_kernel_top(
-            workload=self._runs[self.path], dir=self.path, args=self.get_args()
+            workload=self._runs[self.path], dir=self.path, args=self.args
         )
 
-        # 2. load table data for each kernel
-        self.raw_dfs.clear()
-        for idx in self._runs[self.path].raw_pmc.index:
-            kernel_df = self._runs[self.path].raw_pmc.loc[[idx]]
+        # 2. Generate kernel-specific dataframes
+        self.raw_dfs = {}
+        for idx in workload.raw_pmc.index:
+            kernel_df = workload.raw_pmc.loc[[idx]]
             kernel_name = kernel_df.pmc_perf["Kernel_Name"].loc[idx]
-            this_dfs = copy.deepcopy(self._runs[self.path].dfs)
+            kernel_dfs = copy.deepcopy(workload.dfs)
+
             parser.eval_metric(
-                this_dfs,
-                self._runs[self.path].dfs_type,
-                self._runs[self.path].sys_info.iloc[0],
+                kernel_dfs,
+                workload.dfs_type,
+                workload.sys_info.iloc[0],
+                workload.roofline_peaks,
                 kernel_df,
-                self.get_args().debug,
+                self.args.debug,
                 self._profiling_config,
             )
 
-            self.raw_dfs[kernel_name] = this_dfs
+            self.raw_dfs[kernel_name] = kernel_dfs
 
     def initalize_runs(self, normalization_filter=None):
-        sysinfo_path = Path(self.path)
-        sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        self.arch = sys_info.iloc[0]["gpu_arch"]
-        args = self.get_args()
+        # Load system info and configure
+        sys_info = file_io.load_sys_info(Path(self.path) / "sysinfo.csv")
+        arch = sys_info.iloc[0]["gpu_arch"]
+
         self.generate_configs(
-            self.arch,
-            args.config_dir,
-            args.list_stats,
-            args.filter_metrics,
+            arch,
+            self.args.config_dir,
+            self.args.list_stats,
+            self.args.filter_metrics,
             sys_info.iloc[0],
         )
-
         self.load_options(normalization_filter)
 
+        # Create workload with system and roofline data
         w = schema.Workload()
-        w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
-        mspec = self.get_socs()[self.arch]._mspec
-        if args.specs_correction:
-            w.sys_info = parser.correct_sys_info(mspec, args.specs_correction)
-        w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
-        w.dfs = copy.deepcopy(self._arch_configs[self.arch].dfs)
-        w.dfs_type = self._arch_configs[self.arch].dfs_type
-        self._runs[self.path] = w
+        w.sys_info = (
+            parser.correct_sys_info(
+                self.get_socs()[arch]._mspec, self.args.specs_correction
+            )
+            if self.args.specs_correction
+            else sys_info
+        )
 
+        roofline_path = Path(self.path) / "roofline.csv"
+        w.roofline_peaks = (
+            pd.read_csv(roofline_path)
+            if not getattr(self.args, "no_roof", False) and roofline_path.exists()
+            else pd.DataFrame()
+        )
+
+        w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
+        w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
+        w.dfs_type = self._arch_configs[arch].dfs_type
+
+        self._runs[self.path] = w
         return self._runs
 
-    @demarcate
     def run_kernel_analysis(self):
-        self.kernel_dfs.clear()
-        for kernel_name, df in self.raw_dfs.items():
-            self.kernel_dfs[kernel_name] = process_panels_to_dataframes(
-                self.get_args(), df, self._arch_configs[self.arch], roof_plot=None
+        arch = list(self._arch_configs.keys())[0]
+        return {
+            kernel_name: process_panels_to_dataframes(
+                self.args, df, self._arch_configs[arch], roof_plot=None
             )
-        return self.kernel_dfs
+            for kernel_name, df in self.raw_dfs.items()
+        }
 
-    @demarcate
     def run_top_kernel(self):
         return get_top_kernels_and_dispatch_ids(self._runs)

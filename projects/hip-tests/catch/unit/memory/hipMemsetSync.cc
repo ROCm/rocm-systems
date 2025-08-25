@@ -51,9 +51,9 @@ struct MultiDData {
 };
 
 // set of helper functions to tidy the nested switch statements
-template <typename T>
-static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW, size_t dataH,
-                                            size_t dataD, size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW,
+                                                                  size_t dataH, size_t dataD,
+                                                                  size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr{};
@@ -88,9 +88,8 @@ static std::pair<T*, T*> deviceMallocHelper(memSetType memType, size_t dataW, si
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH, size_t dataD,
-                                          size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH,
+                                                                size_t dataD, size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr;
@@ -101,9 +100,9 @@ static std::pair<T*, T*> hostMallocHelper(size_t dataW, size_t dataH, size_t dat
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH, size_t dataD,
-                                              size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH,
+                                                                    size_t dataD,
+                                                                    size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr = new T[dataW * dataH * dataD];
@@ -114,9 +113,9 @@ static std::pair<T*, T*> hostRegisteredHelper(size_t dataW, size_t dataH, size_t
   return std::make_pair(aPtr, nullptr);
 }
 
-template <typename T>
-static std::pair<T*, T*> devRegisteredHelper(size_t dataW, size_t dataH, size_t dataD,
-                                             size_t& dataPitch) {
+template <typename T> static std::pair<T*, T*> devRegisteredHelper(size_t dataW, size_t dataH,
+                                                                   size_t dataD,
+                                                                   size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   T* aPtr = new T[dataW * dataH * dataD];
@@ -164,9 +163,9 @@ static std::pair<T*, T*> initMemory(allocType type, memSetType memType, MultiDDa
 }
 
 // set of helper functions to tidy the nested switch statements
-template <typename T>
-static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                             size_t dataD, size_t& dataPitch) {
+template <typename T> static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem,
+                                                   size_t dataW, size_t dataH, size_t dataD,
+                                                   size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   switch (memType) {
@@ -200,9 +199,8 @@ static void deviceMallocCopy(memSetType memType, T* aPtr, T* hostMem, size_t dat
   }
 }
 
-template <typename T>
-static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                     size_t dataD, size_t& dataPitch) {
+template <typename T> static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW,
+                                           size_t dataH, size_t dataD, size_t& dataPitch) {
   size_t elementSize = sizeof(T);
   size_t sizeInBytes = elementSize * dataW * dataH * dataD;
   hipMemcpy3DParms params{};
@@ -236,9 +234,9 @@ static void hostCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size
   }
 }
 
-template <typename T>
-static void devRegisteredCopy(memSetType memType, T* aPtr, T* hostMem, size_t dataW, size_t dataH,
-                              size_t dataD, size_t& dataPitch) {
+template <typename T> static void devRegisteredCopy(memSetType memType, T* aPtr, T* hostMem,
+                                                    size_t dataW, size_t dataH, size_t dataD,
+                                                    size_t& dataPitch) {
   size_t elementSize = sizeof(T);
 
   switch (memType) {
@@ -309,9 +307,9 @@ void verifyData(T* aPtr, size_t value, MultiDData& data, allocType type, memSetT
 }
 
 // macro to allow reuse of functions for testing versions of hipMemset
-template <typename T>
-void memsetCheck(T* aPtr, size_t value, memSetType memsetType, MultiDData& data, bool async = false,
-                 hipStream_t stream = nullptr) {
+template <typename T> void memsetCheck(T* aPtr, size_t value, memSetType memsetType,
+                                       MultiDData& data, bool async = false,
+                                       hipStream_t stream = nullptr) {
   size_t dataW = data.width;
   size_t dataH = data.height == 0 ? 1 : data.height;
   size_t dataD = data.depth == 0 ? 1 : data.depth;

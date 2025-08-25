@@ -135,7 +135,7 @@ hipError_t Event::elapsedTime(Event& eStop, float& ms) {
     command->awaitCompletion();
     ms = static_cast<float>(static_cast<int64_t>(command->event().profilingInfo().end_) -
                             time(false)) /
-        1000000.f;
+         1000000.f;
     command->release();
   } else {
     // Note: with direct dispatch eStop.ready() relies on HW event, but CPU status can be delayed.
@@ -210,7 +210,8 @@ hipError_t Event::streamWait(hip::Stream* stream, uint flags) {
 hipError_t Event::recordCommand(amd::Command*& command, amd::HostQueue* stream, uint32_t ext_flags,
                                 bool batch_flush) {
   if (command == nullptr) {
-    int32_t releaseFlags = ((ext_flags == 0) ? flags_ : ext_flags) &
+    int32_t releaseFlags =
+        ((ext_flags == 0) ? flags_ : ext_flags) &
         (hipEventReleaseToDevice | hipEventReleaseToSystem | hipEventDisableSystemFence);
     if (releaseFlags & hipEventDisableSystemFence) {
       releaseFlags = amd::Device::kCacheStateIgnore;
@@ -269,8 +270,8 @@ bool isValid(hipEvent_t event) {
 // ================================================================================================
 hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
   unsigned supportedFlags = hipEventDefault | hipEventBlockingSync | hipEventDisableTiming |
-      hipEventReleaseToDevice | hipEventReleaseToSystem | hipEventInterprocess |
-      hipEventDisableSystemFence;
+                            hipEventReleaseToDevice | hipEventReleaseToSystem |
+                            hipEventInterprocess | hipEventDisableSystemFence;
 
   const unsigned releaseFlags =
       (hipEventReleaseToDevice | hipEventReleaseToSystem | hipEventDisableSystemFence);
@@ -284,7 +285,7 @@ hipError_t ihipEventCreateWithFlags(hipEvent_t* event, unsigned flags) {
                               }
                               return bitcount;
                             }(flags & releaseFlags) > 1) ||
-      ((flags & hipEventInterprocess) && !(flags & hipEventDisableTiming));
+                            ((flags & hipEventInterprocess) && !(flags & hipEventDisableTiming));
   if (!illegalFlags) {
     hip::Event* e = nullptr;
     if (flags & hipEventInterprocess) {
