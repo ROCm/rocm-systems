@@ -104,7 +104,7 @@ TEST_CASE("Unit_hipMemcpyBatchAsync_BasicFunctional") {
  */
 TEST_CASE("Unit_hipMemcpyBatchAsync_NegativeTsts") {
   const size_t count = 2;
-  size_t numAttrs = 1;
+  size_t numAttrs = 0;
   size_t sizes[2];
   size_t attrsIdxs[1];
   size_t size = 4096 * sizeof(char);
