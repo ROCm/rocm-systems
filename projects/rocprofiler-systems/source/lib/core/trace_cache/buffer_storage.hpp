@@ -82,8 +82,9 @@ public:
             }
             else if constexpr(std::is_same_v<std::decay_t<Type>, std::vector<uint8_t>>)
             {
-                len                              = val.size() + sizeof(size_t);
-                *reinterpret_cast<size_t*>(dest) = static_cast<size_t>(val.size());
+                size_t elem_count = val.size();
+                len               = elem_count + sizeof(size_t);
+                std::memcpy(dest, &elem_count, sizeof(size_t));
                 std::memcpy(dest + sizeof(size_t), val.data(), val.size());
             }
             else
