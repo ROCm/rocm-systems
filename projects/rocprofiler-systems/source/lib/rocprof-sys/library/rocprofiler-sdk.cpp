@@ -340,22 +340,18 @@ ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& rec
 
     // ompt_device_initialize's type is the gfx arg, so we ignore
     static std::set<rocprofiler_ompt_operation_t> ompt_typed_callbacks = {
-        ROCPROFILER_OMPT_ID_mutex_released,
-        ROCPROFILER_OMPT_ID_sync_region_wait,
-        ROCPROFILER_OMPT_ID_work,
-        ROCPROFILER_OMPT_ID_sync_region,
-        ROCPROFILER_OMPT_ID_lock_init,
-        ROCPROFILER_OMPT_ID_lock_destroy,
-        ROCPROFILER_OMPT_ID_mutex_acquire,
-        ROCPROFILER_OMPT_ID_mutex_acquired,
-        ROCPROFILER_OMPT_ID_reduction,
-        ROCPROFILER_OMPT_ID_dispatch,
-        ROCPROFILER_OMPT_ID_target_emi,
-        ROCPROFILER_OMPT_ID_target_data_op_emi,
-        ROCPROFILER_OMPT_ID_target_submit_emi,
-        ROCPROFILER_OMPT_ID_parallel_begin,
-        ROCPROFILER_OMPT_ID_parallel_end,
+        ROCPROFILER_OMPT_ID_sync_region_wait,   ROCPROFILER_OMPT_ID_work,
+        ROCPROFILER_OMPT_ID_sync_region,        ROCPROFILER_OMPT_ID_lock_init,
+        ROCPROFILER_OMPT_ID_lock_destroy,       ROCPROFILER_OMPT_ID_reduction,
+        ROCPROFILER_OMPT_ID_dispatch,           ROCPROFILER_OMPT_ID_target_emi,
+        ROCPROFILER_OMPT_ID_target_data_op_emi, ROCPROFILER_OMPT_ID_target_submit_emi,
+        ROCPROFILER_OMPT_ID_parallel_begin,     ROCPROFILER_OMPT_ID_parallel_end,
         // ROCPROFILER_OMPT_ID_thread_begin,
+        /* Although the ones below have a mutex "kind", it would make them have the same
+         name (usually being omp_mutex_lock), making it harder to understand */
+        // ROCPROFILER_OMPT_ID_mutex_acquire,
+        // ROCPROFILER_OMPT_ID_mutex_acquired,
+        // ROCPROFILER_OMPT_ID_mutex_released,
     };
 
     if(ompt_typed_callbacks.find(ompt_operation_type) == ompt_typed_callbacks.end())
@@ -366,6 +362,12 @@ ompt_get_detailed_callback_name(const rocprofiler_callback_tracing_record_t& rec
     if(ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin ||
        ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_end)
         return "omp_parallel";
+
+    // Forces the track to have omp_mutex_lock as opposed to omp_lock_init
+    // Name reflects ompt_mutex_t enum val of 1
+    if(ompt_operation_type == ROCPROFILER_OMPT_ID_lock_init ||
+       ompt_operation_type == ROCPROFILER_OMPT_ID_lock_destroy)
+        return "omp_mutex_lock";
 
     // Depending on the callback, below func contains kind/work_type/optype arg that
     // contains the string with detailed name
@@ -1016,6 +1018,9 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
     // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_begin) _name = "omp_parallel";
+    // Although not necessary to connect them, this forces a unified name instead of
+    // omp_lock_init
+    if(record.operation == ROCPROFILER_OMPT_ID_lock_init) _name = "omp_lock";
 #    endif
 
     if(get_use_timemory())
@@ -1081,6 +1086,9 @@ ompt_tracing_callback_stop(
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
     // connect. This will be changed in the future
     if(record.operation == ROCPROFILER_OMPT_ID_parallel_end) _name = "omp_parallel";
+    // Although not necessary to connect them, this forces a unified name instead of
+    // omp_lock_init
+    if(record.operation == ROCPROFILER_OMPT_ID_lock_destroy) _name = "omp_lock";
 #    endif
 
     if(get_use_timemory())
@@ -1412,16 +1420,23 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
                 // OMPT callbacks that when received, should call start followed
-                // immediately by stop This mimics the timemory implementation
+                // immediately by stop
                 static std::set<rocprofiler_ompt_operation_t> ompt_instant_events = {
                     ROCPROFILER_OMPT_ID_dispatch,
-                    ROCPROFILER_OMPT_ID_mutex_acquire,
                     ROCPROFILER_OMPT_ID_flush,
                     ROCPROFILER_OMPT_ID_cancel,
                     ROCPROFILER_OMPT_ID_device_initialize,
                     ROCPROFILER_OMPT_ID_device_finalize,
                     ROCPROFILER_OMPT_ID_device_load,
                     // ROCPROFILER_OMPT_ID_device_unload // Unsupported by runtime
+                    ROCPROFILER_OMPT_ID_task_create,
+                    ROCPROFILER_OMPT_ID_task_schedule,
+                    ROCPROFILER_OMPT_ID_mutex_released,
+                    ROCPROFILER_OMPT_ID_mutex_acquire,
+                    ROCPROFILER_OMPT_ID_mutex_acquired,
+                    ROCPROFILER_OMPT_ID_dependences,
+                    ROCPROFILER_OMPT_ID_task_dependence,
+                    ROCPROFILER_OMPT_ID_error,
                 };
 
                 // Callbacks that are received but that we do not process
@@ -1447,6 +1462,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     ompt_tracing_callback_start(record, user_data, ts);
                 }
                 else if(ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_end)
+                {
+                    ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
+                }
+                else if(ompt_operation_type == ROCPROFILER_OMPT_ID_lock_init)
+                {
+                    ompt_tracing_callback_start(record, user_data, ts);
+                }
+                else if(ompt_operation_type == ROCPROFILER_OMPT_ID_lock_destroy)
                 {
                     ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                 }
