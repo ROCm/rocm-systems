@@ -68,9 +68,9 @@ class MemcpyHtoDKernelDtoHv2AsyncBenchmark
     REQUIRE(sum == count * (count - 1) / 2);
   }
 };
-template <typename BenchmarkType>
-static void RunBenchmark(LinearAllocs host_allocation_type, LinearAllocs device_allocation_type,
-                         size_t size) {
+template <typename BenchmarkType> static void RunBenchmark(LinearAllocs host_allocation_type,
+                                                           LinearAllocs device_allocation_type,
+                                                           size_t size) {
   BenchmarkType benchmark;
   if (size < 1_KB) {
     benchmark.AddSectionName(std::to_string(size));

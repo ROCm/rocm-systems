@@ -719,8 +719,8 @@ struct __hipext_ocp_fp6x32_e2m3 {
   }
 #endif
 
-        __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp6x32_e2m3(const __amd_fp16x32_storage_t in,
-                                                        const __amd_scale_t scale)
+        __OCP_FP_HOST_DEVICE__
+        __hipext_ocp_fp6x32_e2m3(const __amd_fp16x32_storage_t in, const __amd_scale_t scale)
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
       : __x(__builtin_amdgcn_cvt_scalef32_pk32_fp6_f16(in, __amd_scale_to_float(scale))){}
 #else
@@ -742,8 +742,8 @@ struct __hipext_ocp_fp6x32_e2m3 {
   }
 #endif
 
-        __OCP_FP_HOST_DEVICE__
-        __hipext_ocp_fp6x32_e2m3(const __amd_bf16x32_storage_t in, const __amd_scale_t scale)
+        __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp6x32_e2m3(const __amd_bf16x32_storage_t in,
+                                                        const __amd_scale_t scale)
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
       : __x(__builtin_amdgcn_cvt_scalef32_pk32_fp6_bf16(in, __amd_scale_to_float(scale))){}
 #else
@@ -832,8 +832,8 @@ struct __hipext_ocp_fp6x32_e3m2 {
   }
 #endif
 
-        __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp6x32_e3m2(const __amd_fp16x32_storage_t in,
-                                                        const __amd_scale_t scale)
+        __OCP_FP_HOST_DEVICE__
+        __hipext_ocp_fp6x32_e3m2(const __amd_fp16x32_storage_t in, const __amd_scale_t scale)
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
       : __x(__builtin_amdgcn_cvt_scalef32_pk32_bf6_f16(in, __amd_scale_to_float(scale))){}
 #else
@@ -855,8 +855,8 @@ struct __hipext_ocp_fp6x32_e3m2 {
   }
 #endif
 
-        __OCP_FP_HOST_DEVICE__ __hipext_ocp_fp6x32_e3m2(const __amd_bf16x32_storage_t in,
-                                                        const __amd_scale_t scale)
+        __OCP_FP_HOST_DEVICE__
+        __hipext_ocp_fp6x32_e3m2(const __amd_bf16x32_storage_t in, const __amd_scale_t scale)
 #if HIP_ENABLE_GFX950_OCP_BUILTINS
       : __x(__builtin_amdgcn_cvt_scalef32_pk32_bf6_bf16(in, __amd_scale_to_float(scale))){}
 #else

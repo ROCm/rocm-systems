@@ -256,7 +256,7 @@ inline float half2float(const uint16_t Val) {
   uint32_t signBit = ((uint32_t)(Val & 0x8000)) << signBitShift;
   uint32_t exponent = (Val & halfExpoentMask) >> 10;
   uint32_t fraction = ((uint32_t)(Val & halfFractionMask))
-      << 13;  // Aligning half fraction to float
+                      << 13;  // Aligning half fraction to float
   union {
     uint32_t u32Arg;
     float fArg;
@@ -283,7 +283,7 @@ inline float half2float(const uint16_t Val) {
     }
   }
   uint32_t floatExponent = ((exponent + floatExponentBias - halfExponentBias) & 0xff)
-      << floatExponentShift;
+                           << floatExponentShift;
   u32Arg = signBit | floatExponent | fraction;
   return fArg;
 }

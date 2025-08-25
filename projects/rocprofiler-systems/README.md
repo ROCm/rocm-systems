@@ -1,11 +1,5 @@
 # ROCm Systems Profiler: Application profiling, tracing, and analysis
 
-[![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/ubuntu-jammy.yml)
-[![OpenSUSE 15.x with GCC](https://github.com/ROCm/rocprofiler-systems/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/opensuse.yml)
-[![RedHat Linux (GCC, Python, ROCm)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/redhat.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/redhat.yml)
-[![Installer Packaging (CPack)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/cpack.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/cpack.yml)
-[![Documentation](https://github.com/ROCm/rocprofiler-systems/actions/workflows/docs.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/docs.yml)
-
 > [!NOTE]
 > If you are using a version of ROCm prior to ROCm 6.3.1 and are experiencing problems viewing your trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
 

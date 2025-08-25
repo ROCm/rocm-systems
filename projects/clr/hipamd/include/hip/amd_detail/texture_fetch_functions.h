@@ -37,8 +37,8 @@ THE SOFTWARE.
   (void)s;
 
 template <typename T> struct __hip_is_tex_surf_scalar_channel_type {
-  static constexpr bool value = __hip_internal::is_same<T, char>::value ||
-      __hip_internal::is_same<T, unsigned char>::value ||
+  static constexpr bool value =
+      __hip_internal::is_same<T, char>::value || __hip_internal::is_same<T, unsigned char>::value ||
       __hip_internal::is_same<T, short>::value ||
       __hip_internal::is_same<T, unsigned short>::value || __hip_internal::is_same<T, int>::value ||
       __hip_internal::is_same<T, unsigned int>::value || __hip_internal::is_same<T, float>::value;
@@ -51,12 +51,12 @@ template <typename T> struct __hip_is_tex_surf_channel_type {
 template <typename T, unsigned int rank>
 struct __hip_is_tex_surf_channel_type<HIP_vector_type<T, rank>> {
   static constexpr bool value = __hip_is_tex_surf_scalar_channel_type<T>::value &&
-      ((rank == 1) || (rank == 2) || (rank == 4));
+                                ((rank == 1) || (rank == 2) || (rank == 4));
 };
 
 template <typename T> struct __hip_is_tex_normalized_channel_type {
-  static constexpr bool value = __hip_internal::is_same<T, char>::value ||
-      __hip_internal::is_same<T, unsigned char>::value ||
+  static constexpr bool value =
+      __hip_internal::is_same<T, char>::value || __hip_internal::is_same<T, unsigned char>::value ||
       __hip_internal::is_same<T, short>::value || __hip_internal::is_same<T, unsigned short>::value;
 };
 
@@ -73,8 +73,7 @@ template <typename T, hipTextureReadMode readMode, typename Enable = void> struc
 /*
  * Map from device function return U to scalar texture type T
  */
-template <typename T, typename U>
-__forceinline__ __device__
+template <typename T, typename U> __forceinline__ __device__
     typename __hip_internal::enable_if<__hip_is_tex_surf_scalar_channel_type<T>::value,
                                        const T>::type
     __hipMapFrom(const U& u) {
@@ -96,8 +95,7 @@ __forceinline__ __device__
 /*
  * Map from device function return U to vector texture type T
  */
-template <typename T, typename U>
-__forceinline__ __device__ typename __hip_internal::enable_if<
+template <typename T, typename U> __forceinline__ __device__ typename __hip_internal::enable_if<
     __hip_is_tex_surf_scalar_channel_type<typename T::value_type>::value, const T>::type
 __hipMapFrom(const U& u) {
   if constexpr (sizeof(typename T::value_type) < sizeof(float)) {
@@ -118,8 +116,7 @@ __hipMapFrom(const U& u) {
 /*
  * Map from scalar texture type T to device function input U
  */
-template <typename U, typename T>
-__forceinline__ __device__
+template <typename U, typename T> __forceinline__ __device__
     typename __hip_internal::enable_if<__hip_is_tex_surf_scalar_channel_type<T>::value,
                                        const U>::type
     __hipMapTo(const T& t) {
@@ -143,8 +140,7 @@ __forceinline__ __device__
 /*
  * Map from vector texture type T to device function input U
  */
-template <typename U, typename T>
-__forceinline__ __device__ typename __hip_internal::enable_if<
+template <typename U, typename T> __forceinline__ __device__ typename __hip_internal::enable_if<
     __hip_is_tex_surf_scalar_channel_type<typename T::value_type>::value, const U>::type
 __hipMapTo(const T& t) {
   if constexpr (sizeof(typename T::value_type) < sizeof(float)) {
@@ -164,18 +160,16 @@ __hipMapTo(const T& t) {
   }
 }
 
-template <typename T, hipTextureReadMode readMode>
-using __hip_tex_ret_t = typename __hip_tex_ret<T, readMode, bool>::type;
+template <typename T, hipTextureReadMode readMode> using __hip_tex_ret_t =
+    typename __hip_tex_ret<T, readMode, bool>::type;
 
-template <typename T>
-struct __hip_tex_ret<
+template <typename T> struct __hip_tex_ret<
     T, hipReadModeElementType,
     typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value, bool>::type> {
   using type = T;
 };
 
-template <typename T, unsigned int rank>
-struct __hip_tex_ret<
+template <typename T, unsigned int rank> struct __hip_tex_ret<
     HIP_vector_type<T, rank>, hipReadModeElementType,
     typename __hip_internal::enable_if<
         __hip_is_tex_surf_channel_type<HIP_vector_type<T, rank>>::value, bool>::type> {
@@ -189,8 +183,7 @@ struct __hip_tex_ret<T, hipReadModeNormalizedFloat,
   using type = float;
 };
 
-template <typename T, unsigned int rank>
-struct __hip_tex_ret<
+template <typename T, unsigned int rank> struct __hip_tex_ret<
     HIP_vector_type<T, rank>, hipReadModeNormalizedFloat,
     typename __hip_internal::enable_if<
         __hip_is_tex_normalized_channel_type<HIP_vector_type<T, rank>>::value, bool>::type> {
@@ -421,18 +414,16 @@ struct __hip_tex2dgather_ret {
   static_assert(__hip_internal::is_same<Enable, void>::value, "Invalid channel type!");
 };
 
-template <typename T, hipTextureReadMode readMode>
-using __hip_tex2dgather_ret_t = typename __hip_tex2dgather_ret<T, readMode, bool>::type;
+template <typename T, hipTextureReadMode readMode> using __hip_tex2dgather_ret_t =
+    typename __hip_tex2dgather_ret<T, readMode, bool>::type;
 
-template <typename T>
-struct __hip_tex2dgather_ret<
+template <typename T> struct __hip_tex2dgather_ret<
     T, hipReadModeElementType,
     typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value, bool>::type> {
   using type = HIP_vector_type<T, 4>;
 };
 
-template <typename T, unsigned int rank>
-struct __hip_tex2dgather_ret<
+template <typename T, unsigned int rank> struct __hip_tex2dgather_ret<
     HIP_vector_type<T, rank>, hipReadModeElementType,
     typename __hip_internal::enable_if<
         __hip_is_tex_surf_channel_type<HIP_vector_type<T, rank>>::value, bool>::type> {

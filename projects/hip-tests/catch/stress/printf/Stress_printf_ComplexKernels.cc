@@ -439,7 +439,7 @@ TEST_CASE("Stress_printf_ComplexKernelMultStreamMultGpu") {
   uint32_t num_blocks = (((MAX_GRID_SIZE * print_limit) / CONST_WEIGHTING_FACT1 -
                           (CONST_WEIGHTING_FACT2 * print_limit)) *
                          4) /
-      numOfGPUs;
+                        numOfGPUs;
   TestPassed =
       hipPrintfStressTest::testPrintfMultGPU(numOfGPUs, num_blocks, threads_per_block, iterCount);
   REQUIRE(TestPassed);

@@ -109,9 +109,8 @@ static __HOST_DEVICE__ __forceinline__ int __hipGetPixelAddr(int x, int format, 
  *  \param x [in] The coordinate where the value will be read out.
  *  \param boundaryMode [in] The boundary mode is currently ignored.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf1Dread(T* data, hipSurfaceObject_t surfObj, int x,
                                                   int boundaryMode = hipBoundaryModeZero) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT;
@@ -128,9 +127,8 @@ static __device__ __hip_img_chk__ void surf1Dread(T* data, hipSurfaceObject_t su
  *  \param surfObj [in] The surface descriptor.
  *  \param x [in] The coordinate where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf1Dwrite(T data, hipSurfaceObject_t surfObj, int x) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
   x = __hipGetPixelAddr(x, __ockl_image_channel_data_type_1D(i), __ockl_image_channel_order_1D(i));
@@ -147,9 +145,8 @@ static __device__ __hip_img_chk__ void surf1Dwrite(T data, hipSurfaceObject_t su
  *  \param x [in] The x coordinate where the value will be read out.
  *  \param y [in] The y coordinate where the value will be read out.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf2Dread(T* data, hipSurfaceObject_t surfObj, int x,
                                                   int y) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -168,9 +165,8 @@ static __device__ __hip_img_chk__ void surf2Dread(T* data, hipSurfaceObject_t su
  *  \param x [in] The x coordinate where the data will be written.
  *  \param y [in] The y coordinate where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf2Dwrite(T data, hipSurfaceObject_t surfObj, int x,
                                                    int y) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -190,9 +186,8 @@ static __device__ __hip_img_chk__ void surf2Dwrite(T data, hipSurfaceObject_t su
  *  \param y [in] The y coordinate where the value will be read out.
  *  \param z [in] The z coordinate where the value will be read out.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf3Dread(T* data, hipSurfaceObject_t surfObj, int x, int y,
                                                   int z) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -212,9 +207,8 @@ static __device__ __hip_img_chk__ void surf3Dread(T* data, hipSurfaceObject_t su
  *  \param y [in] The y coordinate where the data will be written.
  *  \param z [in] The z coordinate where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf3Dwrite(T data, hipSurfaceObject_t surfObj, int x, int y,
                                                    int z) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -233,9 +227,8 @@ static __device__ __hip_img_chk__ void surf3Dwrite(T data, hipSurfaceObject_t su
  *  \param x [in] The coordinate where the value will be read out.
  *  \param layer [in] The layer index where the value will be read out.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf1DLayeredread(T* data, hipSurfaceObject_t surfObj, int x,
                                                          int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -253,9 +246,8 @@ static __device__ __hip_img_chk__ void surf1DLayeredread(T* data, hipSurfaceObje
  *  \param x [in] The x coordinate where the data will be written.
  *  \param layer [in] The layer index where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf1DLayeredwrite(T data, hipSurfaceObject_t surfObj, int x,
                                                           int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -274,9 +266,8 @@ static __device__ __hip_img_chk__ void surf1DLayeredwrite(T data, hipSurfaceObje
  *  \param y [in] The y coordinate where the value will be read out.
  *  \param layer [in] The layer index where the value will be read out.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf2DLayeredread(T* data, hipSurfaceObject_t surfObj, int x,
                                                          int y, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -296,9 +287,8 @@ static __device__ __hip_img_chk__ void surf2DLayeredread(T* data, hipSurfaceObje
  *  \param y [in] The y coordinate where the data will be written.
  *  \param layer [in] The layer index where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surf2DLayeredwrite(T data, hipSurfaceObject_t surfObj, int x,
                                                           int y, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -318,9 +308,8 @@ static __device__ __hip_img_chk__ void surf2DLayeredwrite(T data, hipSurfaceObje
  *  \param y [in] The y coordinate where the value will be read out.
  *  \param face [in] The face index where the value will be read out.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surfCubemapread(T* data, hipSurfaceObject_t surfObj, int x,
                                                        int y, int face) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -340,9 +329,8 @@ static __device__ __hip_img_chk__ void surfCubemapread(T* data, hipSurfaceObject
  *  \param y [in] The y coordinate where the data will be written.
  *  \param face [in] The face index where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surfCubemapwrite(T data, hipSurfaceObject_t surfObj, int x,
                                                         int y, int face) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -363,9 +351,8 @@ static __device__ __hip_img_chk__ void surfCubemapwrite(T data, hipSurfaceObject
  *  \param face [in] The face index where the value will be read out.
  *  \param layer [in] The layer index where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surfCubemapLayeredread(T* data, hipSurfaceObject_t surfObj,
                                                               int x, int y, int face, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT
@@ -386,9 +373,8 @@ static __device__ __hip_img_chk__ void surfCubemapLayeredread(T* data, hipSurfac
  *  \param face [in] The face index where the data will be written.
  *  \param layer [in] The layer index where the data will be written.
  */
-template <
-    typename T,
-    typename __hip_internal::enable_if<__hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
+template <typename T, typename __hip_internal::enable_if<
+                          __hip_is_tex_surf_channel_type<T>::value>::type* = nullptr>
 static __device__ __hip_img_chk__ void surfCubemapLayeredwrite(T* data, hipSurfaceObject_t surfObj,
                                                                int x, int y, int face, int layer) {
   __HIP_SURFACE_OBJECT_PARAMETERS_INIT

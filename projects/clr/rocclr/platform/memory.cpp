@@ -57,9 +57,9 @@ bool HostMemoryReference::allocateMemory(size_t size, const Context& context) {
   size_t memoryAlignment = (CPU_MEMORY_ALIGNMENT_SIZE <= 0) ? 256 : CPU_MEMORY_ALIGNMENT_SIZE;
   size_ = amd::alignUp(size, memoryAlignment);
   //! \note memory size must be aligned for CAL pinning
-  hostMem_ = CPU_MEMORY_GUARD_PAGES
-      ? GuardedMemory::allocate(size_, MEMOBJ_BASE_ADDR_ALIGN, CPU_MEMORY_GUARD_PAGE_SIZE * Ki)
-      : context.hostAlloc(size_, MEMOBJ_BASE_ADDR_ALIGN);
+  hostMem_ = CPU_MEMORY_GUARD_PAGES ? GuardedMemory::allocate(size_, MEMOBJ_BASE_ADDR_ALIGN,
+                                                              CPU_MEMORY_GUARD_PAGE_SIZE * Ki)
+                                    : context.hostAlloc(size_, MEMOBJ_BASE_ADDR_ALIGN);
   alloced_ = (hostMem_ != NULL);
   return alloced_;
 }
@@ -146,7 +146,7 @@ Memory::Memory(Memory& parent, Flags flags, size_t origin, size_t size, Type typ
 
   if ((flags_ & (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS)) == 0) {
     flags_ |= parent_->getMemFlags() &
-        (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS);
+              (CL_MEM_HOST_READ_ONLY | CL_MEM_HOST_WRITE_ONLY | CL_MEM_HOST_NO_ACCESS);
   }
 }
 
@@ -590,8 +590,8 @@ bool Buffer::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) con
 
 bool Buffer::validateRegion(const Coord3D& origin, const Coord3D& region) const {
   return ((region[0] > 0) && (origin[0] < getSize()) && ((origin[0] + region[0]) <= getSize()))
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 void Pipe::initDeviceMemory() {
@@ -614,7 +614,7 @@ Image::Image(const Format& format, Image& parent, uint baseMipLevel, cl_mem_flag
       baseMipLevel_(baseMipLevel) {
   if (baseMipLevel > 0) {
     impl_.region_.c[0] = GETMIPDIM(parent.getWidth(), baseMipLevel) *
-        parent.getImageFormat().getElementSize() / format.getElementSize();
+                         parent.getImageFormat().getElementSize() / format.getElementSize();
     impl_.region_.c[1] = GETMIPDIM(parent.getHeight(), baseMipLevel);
     impl_.region_.c[2] = GETMIPDIM(parent.getDepth(), baseMipLevel);
 
@@ -1030,9 +1030,9 @@ const cl_image_format Image::supportedFormats[] = {
     {CL_DEPTH, CL_FLOAT},
 };
 
-const uint32_t NUM_CHANNEL_ORDER_OF_RGB = 1;  // The number of channel orders of RGB at the end of
-                                              // the table supportedFormats above and before sRGB
-                                              // and depth.
+const uint32_t NUM_CHANNEL_ORDER_OF_RGB = 1;   // The number of channel orders of RGB at the end of
+                                               // the table supportedFormats above and before sRGB
+                                               // and depth.
 const uint32_t NUM_CHANNEL_ORDER_OF_sRGB = 1;  // The number of channel orders of sRGB at the end of
                                                // the table supportedFormats above and before depth.
 const uint32_t NUM_CHANNEL_ORDER_OF_DEPTH =
@@ -1246,8 +1246,8 @@ Image* Image::createView(const Context& context, const Format& format, device::V
 bool Image::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) const {
   return (origin[0] == 0 && origin[1] == 0 && origin[2] == 0 && region[0] == getWidth() &&
           region[1] == getHeight() && region[2] == getDepth())
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 bool Image::validateRegion(const Coord3D& origin, const Coord3D& region) const {
@@ -1255,15 +1255,15 @@ bool Image::validateRegion(const Coord3D& origin, const Coord3D& region) const {
           (region[0] != 0) && (origin[1] < getHeight()) && (region[1] != 0) &&
           (origin[2] < getDepth()) && (region[2] != 0) && ((origin[0] + region[0]) <= getWidth()) &&
           ((origin[1] + region[1]) <= getHeight()) && ((origin[2] + region[2]) <= getDepth()))
-      ? true
-      : false;
+             ? true
+             : false;
 }
 
 bool Image::isRowSliceValid(size_t rowPitch, size_t slice, size_t width, size_t height) const {
   size_t tmpHeight = (getType() == CL_MEM_OBJECT_IMAGE1D_ARRAY) ? 1 : height;
 
   bool valid = (rowPitch == 0) ||
-      ((rowPitch != 0) && (rowPitch >= width * getImageFormat().getElementSize()));
+               ((rowPitch != 0) && (rowPitch >= width * getImageFormat().getElementSize()));
 
   return ((slice == 0) || ((slice != 0) && (slice >= rowPitch * tmpHeight))) ? valid : false;
 }

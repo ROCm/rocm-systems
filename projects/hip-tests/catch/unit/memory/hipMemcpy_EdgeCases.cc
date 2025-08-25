@@ -65,8 +65,8 @@ template <typename T> class DeviceMemory {
   int _offset;
 };
 
-template <typename T>
-DeviceMemory<T>::DeviceMemory(size_t numElements) : _maxNumElements(numElements), _offset(0) {
+template <typename T> DeviceMemory<T>::DeviceMemory(size_t numElements)
+    : _maxNumElements(numElements), _offset(0) {
   T** np = nullptr;
   HipTest::initArrays(&_A_d, &_B_d, &_C_d, np, np, np, numElements, 0);
   size_t sizeElements = numElements * sizeof(T);
@@ -110,8 +110,7 @@ template <typename T> class HostMemory {
   T* _C_h;
 };
 
-template <typename T>
-HostMemory<T>::HostMemory(size_t numElements, bool usePinnedHost)
+template <typename T> HostMemory<T>::HostMemory(size_t numElements, bool usePinnedHost)
     : _usePinnedHost(usePinnedHost), _maxNumElements(numElements), _offset(0) {
   T** np = nullptr;
   HipTest::initArrays(np, np, np, &_A_h, &_B_h, &_C_h, numElements, usePinnedHost);
@@ -199,9 +198,9 @@ void memcpytest2_get_host_memory(size_t* free, size_t* total) {
 // (runtime figures out direction).  if false, use
 // explicit memcpy direction.
 //
-template <typename T>
-void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem, size_t numElements, bool useHostToHost,
-                 bool useDeviceToDevice, bool useMemkindDefault) {
+template <typename T> void memcpytest2(DeviceMemory<T>* dmem, HostMemory<T>* hmem,
+                                       size_t numElements, bool useHostToHost,
+                                       bool useDeviceToDevice, bool useMemkindDefault) {
   size_t sizeElements = numElements * sizeof(T);
 
   hmem->reset(numElements);

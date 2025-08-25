@@ -51,11 +51,11 @@ namespace std {  // TODO: these should be removed as soon as possible.
 #if (__cplusplus < 201406L)
 #if (__cplusplus < 201402L)
 template <bool cond, typename T = void> using enable_if_t = typename enable_if<cond, T>::type;
-template <bool cond, typename T, typename U>
-using conditional_t = typename conditional<cond, T, U>::type;
+template <bool cond, typename T, typename U> using conditional_t =
+    typename conditional<cond, T, U>::type;
 template <typename T> using decay_t = typename decay<T>::type;
-template <FunctionalProcedure F, typename... Ts>
-using result_of_t = typename result_of<F(Ts...)>::type;
+template <FunctionalProcedure F, typename... Ts> using result_of_t =
+    typename result_of<F(Ts...)>::type;
 template <typename T> using remove_reference_t = typename remove_reference<T>::type;
 #endif
 #endif
@@ -67,8 +67,8 @@ template <typename...> using void_t_ = void;
 #if HIP_HAS_INVOCABLE
 template <typename, typename = void> struct is_callable_impl;
 
-template <FunctionalProcedure F, typename... Ts>
-struct is_callable_impl<F(Ts...)> : std::is_invocable<F, Ts...> {};
+template <FunctionalProcedure F, typename... Ts> struct is_callable_impl<F(Ts...)>
+    : std::is_invocable<F, Ts...> {};
 #elif HIP_HAS_RESULT_OF_SFINAE
 template <typename, typename = void> struct is_callable_impl : std::false_type {};
 
@@ -76,11 +76,10 @@ template <FunctionalProcedure F, typename... Ts>
 struct is_callable_impl<F(Ts...), void_t_<typename std::result_of<F(Ts...)>::type> >
     : std::true_type {};
 #else
-template <class Base, class T, class Derived>
-auto simple_invoke(T Base::* pmd, Derived&& ref) -> decltype(static_cast<Derived&&>(ref).*pmd);
+template <class Base, class T, class Derived> auto simple_invoke(T Base::* pmd, Derived&& ref)
+    -> decltype(static_cast<Derived&&>(ref).*pmd);
 
-template <class PMD, class Pointer>
-auto simple_invoke(PMD&& pmd, Pointer&& ptr)
+template <class PMD, class Pointer> auto simple_invoke(PMD&& pmd, Pointer&& ptr)
     -> decltype((*static_cast<Pointer&&>(ptr)).*static_cast<PMD&&>(pmd));
 
 template <class Base, class T, class Derived>
@@ -100,8 +99,8 @@ template <class Base, class T, class Derived, class... Args>
 auto simple_invoke(T Base::* pmf, const std::reference_wrapper<Derived>& ref, Args&&... args)
     -> decltype((ref.get().*pmf)(static_cast<Args&&>(args)...));
 
-template <class F, class... Ts>
-auto simple_invoke(F&& f, Ts&&... xs) -> decltype(f(static_cast<Ts&&>(xs)...));
+template <class F, class... Ts> auto simple_invoke(F&& f, Ts&&... xs)
+    -> decltype(f(static_cast<Ts&&>(xs)...));
 
 template <typename, typename = void> struct is_callable_impl : std::false_type {};
 
