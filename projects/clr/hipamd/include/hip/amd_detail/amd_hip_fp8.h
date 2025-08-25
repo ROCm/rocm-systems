@@ -327,8 +327,8 @@ where exponent==0 (actual exponent -14) and highest bit of mantissa is 1 are bf8
 this case, the fp16 mantissa should be shift left by 1  */
     act_exponent = exponent - bias + 1;
     exponent_diff = f8_denormal_act_exponent -
-        act_exponent;  // actual exponent is exponent-bias+1 as it is denormal
-  } else {             // fp32/fp16 is normal with implicit 1
+                    act_exponent;  // actual exponent is exponent-bias+1 as it is denormal
+  } else {                         // fp32/fp16 is normal with implicit 1
     act_exponent = exponent - bias;
     if (act_exponent <= f8_denormal_act_exponent) {
       /* This is the case where fp32/fp16 is normal but it is in f8 denormal range.
@@ -345,7 +345,7 @@ So for fp32/fp16, exponent -8 is the cut point to convert to fp8 nanoo */
   }
 
   bool midpoint = (mantissa & ((1ull << (mfmt - wm + exponent_diff)) - 1)) ==
-      (1ull << (mfmt - wm + exponent_diff - 1));
+                  (1ull << (mfmt - wm + exponent_diff - 1));
   /* This part is a bit tricky. The judgment of whether it is a tie needs to be done before we shift
 right as shift right could rip off some residual part and make something not midpoint look like
 midpoint. For example, the fp16 number 0x1002 (0 00100 0000000010), it is larger than midpoint, but
@@ -400,9 +400,9 @@ after shift right by 4 bits, it would look like midpoint.
 // The conversion function is from rocblas
 // https://github.com/ROCm/rocBLAS/blob/9b7f692abe3c54b88d1e77e045a7db7f1f188b69/library/include/internal/rocblas_hip_f8_impl.h#L220
 // This has been modified to handle double types as well
-template <typename T, bool is_fnuz>
-__FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x, int wm, int we,
-                                          bool clip = false) {
+template <typename T, bool is_fnuz> __FP8_HOST_DEVICE_STATIC__ T cast_from_f8(__hip_fp8_storage_t x,
+                                                                              int wm, int we,
+                                                                              bool clip = false) {
 #if defined(__clang__) and defined(__HIP__)
   constexpr bool is_half = __hip_internal::is_same<T, _Float16>::value;
   constexpr bool is_float = __hip_internal::is_same<T, float>::value;
@@ -576,14 +576,15 @@ static __device__ __hip_fp8_storage_t cast_to_f8_from_f32(float v, bool saturate
 
   if (stochastic_rounding) {
     ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-        ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
-        : __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0);  // 0 pos
+               ? __builtin_amdgcn_cvt_sr_fp8_f32(val.fval, rng, ival, 0)
+               : __builtin_amdgcn_cvt_sr_bf8_f32(val.fval, rng, ival, 0);  // 0 pos
     val.i32val = ival;
     i8data = val.i8val[0];  // little endian
   } else {                  // RNE CVT
-    ival = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-        ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
-        : __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false);  // false -> WORD0
+    ival =
+        (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
+            ? __builtin_amdgcn_cvt_pk_fp8_f32(val.fval, val.fval, ival, false)
+            : __builtin_amdgcn_cvt_pk_bf8_f32(val.fval, val.fval, ival, false);  // false -> WORD0
     val.i32val = ival;
     i8data = val.i8val[0];
   }
@@ -628,8 +629,8 @@ cast_to_f8x2_from_f32x2(float2 v, bool saturate, __hip_fp8_interpretation_t inte
   }
 
   f2val.i32val[0] = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
-      : __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false);
+                        ? __builtin_amdgcn_cvt_pk_fp8_f32(v.x, v.y, 0, false)
+                        : __builtin_amdgcn_cvt_pk_bf8_f32(v.x, v.y, 0, false);
 
   return static_cast<__hip_fp8x2_storage_t>(f2val.i16val[0]);
 }
@@ -643,8 +644,8 @@ static __device__ float cast_to_f32_from_f8(__hip_fp8_storage_t v,
   val.i8val[0] = v;
 
   float fval = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
-      : __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0);
+                   ? __builtin_amdgcn_cvt_f32_fp8(val.i32val, 0)
+                   : __builtin_amdgcn_cvt_f32_bf8(val.i32val, 0);
   return fval;
 }
 
@@ -657,8 +658,8 @@ static __device__ float2 cast_to_f32x2_from_f8x2(__hip_fp8x2_storage_t v,
   val.i16val[0] = v;
 
   auto f2 = (interpret == __HIP_E4M3_FNUZ) || (interpret == __HIP_E4M3)
-      ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
-      : __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false);
+                ? __builtin_amdgcn_cvt_pk_f32_fp8(val.i32val, false)
+                : __builtin_amdgcn_cvt_pk_f32_bf8(val.i32val, false);
   return float2{f2[0], f2[1]};
 }
 #endif  // HIP_FP8_CVT_FAST_PATH
@@ -672,9 +673,9 @@ __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_fnuz_is_nan(__hip_fp8_storage_t a) {
 
 __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_ocp_is_nan(__hip_fp8_storage_t a,
                                                    const __hip_fp8_interpretation_t type) {
-  return (type == __HIP_E4M3) ? ((a & 0x7f) == 0x7f)
-      : (type == __HIP_E5M2)  ? ((a & 0x7f) > 0x7c)
-                              : false;
+  return (type == __HIP_E4M3)   ? ((a & 0x7f) == 0x7f)
+         : (type == __HIP_E5M2) ? ((a & 0x7f) > 0x7c)
+                                : false;
 }
 
 __FP8_HOST_DEVICE_STATIC__ bool hip_fp8_ocp_is_inf(__hip_fp8_storage_t a,

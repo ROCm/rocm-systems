@@ -227,8 +227,8 @@ hipError_t hipStreamAttachMemAsync(hipStream_t stream, void* dev_ptr, size_t len
   // This type of memory may only be specified if the device associated with the
   // stream reports a non-zero value for the device attribute hipDevAttrPageableMemoryAccess.
   hip::Stream* hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-      ? hip::getCurrentDevice()->NullStream()
-      : hip::getStream(stream);
+                                ? hip::getCurrentDevice()->NullStream()
+                                : hip::getStream(stream);
   size_t offset = 0;
   amd::Memory* memObj = getMemoryObject(dev_ptr, offset);
   if (memObj == nullptr) {
@@ -328,13 +328,13 @@ hipError_t ihipMemPrefetchAsync(const void* dev_ptr, size_t count, hipMemLocatio
   // Pick the specified stream or Null one from the provided target device
   if (cpuAccess == true) {
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-        ? hip::getCurrentDevice()->NullStream()
-        : hip::getStream(stream);
+                     ? hip::getCurrentDevice()->NullStream()
+                     : hip::getStream(stream);
   } else {
     dev = g_devices[targetDevice]->devices()[0];
     hip_stream = (stream == nullptr || stream == hipStreamLegacy)
-        ? g_devices[targetDevice]->NullStream()
-        : hip::getStream(stream);
+                     ? g_devices[targetDevice]->NullStream()
+                     : hip::getStream(stream);
   }
 
   if (hip_stream == nullptr) {

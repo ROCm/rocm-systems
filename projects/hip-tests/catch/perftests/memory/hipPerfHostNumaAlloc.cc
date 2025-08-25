@@ -174,13 +174,11 @@ TEST_CASE("Perf_hipPerfHostNumaAlloc_test") {
     return;
   }
 
-  REQUIRE(true ==
-          runTest(cpuCount, gpuCount, hipHostMallocDefault | hipHostMallocNumaUser,
-                  "Testing hipHostMallocDefault | hipHostMallocNumaUser......"));
+  REQUIRE(true == runTest(cpuCount, gpuCount, hipHostMallocDefault | hipHostMallocNumaUser,
+                          "Testing hipHostMallocDefault | hipHostMallocNumaUser......"));
 
-  REQUIRE(true ==
-          runTest(cpuCount, gpuCount, hipHostMallocMapped | hipHostMallocNumaUser,
-                  "Testing hipHostMallocMapped | hipHostMallocNumaUser......."));
+  REQUIRE(true == runTest(cpuCount, gpuCount, hipHostMallocMapped | hipHostMallocNumaUser,
+                          "Testing hipHostMallocMapped | hipHostMallocNumaUser......."));
 }
 
 /**
