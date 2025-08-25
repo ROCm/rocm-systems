@@ -57,10 +57,18 @@ TUI analysis structure
 Unlike the :doc:`cli` plain style interfaces, the TUI restructures the analysis workflow into four
 hierarchical categories to provide a more organized, top-down analysis approach:
 
-1. Kernel Selection Header with Top Stats
-2. High Level Analysis
-3. Detailed Block Analysis
-4. Source Level analysis
+#. Kernel Selection Header with Top Stats
+
+   Supports interactive kernel selection to toggle between kernel(s) to view individual kernel
+   analysis results
+
+#. High Level Analysis
+
+   Experimental performance metrics layout, reorganized performance metrics grouping to display the new
+   GPU Speed-of-Light section, Compute Throughput section, and Memory Throughput section
+
+#. Detailed Block Analysis
+#. Source Level analysis
 
 You are recommended to follow this top-down hierarchical structure to conduct a thorough performance
 analysis, starting with the broad overview and progressively drilling down to specific details.
