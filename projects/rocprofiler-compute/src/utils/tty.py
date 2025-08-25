@@ -494,7 +494,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         if p.is_dir():
                             if "title" in table_config and table_config["title"]:
                                 table_id_str += "_" + table_config["title"]
-                            csv_filename = p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                            csv_filename = (
+                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                            )
                             df.to_csv(csv_filename, index=False)
                             print(f"Created file: {csv_filename}")
 

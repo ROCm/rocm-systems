@@ -640,18 +640,20 @@ Examples:
         default="stdout",
         help=(
             "\t\tSet the format of output file or folder containing analysis data.\n"
-            "\t\tBy default, file or folder created will have the name rocprof_compute_<uuid>.\n"
+            "\t\tBy default, file or folder created will "
+            "have the name rocprof_compute_<uuid>.\n"
             "\t\tFile or folder name can be overriden using --output-name.\n"
-            "\t\tDefault output format is stdout which will not generate any file/folder.\n"
+            "\t\tDefault output format is stdout which will not "
+            "generate any file/folder.\n"
         ),
     )
     analyze_group.add_argument(
         "--output-name",
         metavar="",
         dest="output_name",
-        help="\t\tOverride the default output file name rocprof_compue_<uuid> with the specified name.",
         help=(
-            "\t\tOverride the default output file name rocprof_compue_<uuid> with the specified name.\n"
+            "\t\tOverride the default output file name rocprof_compue_<uuid> "
+            "with the specified name.\n"
             "\t\tThis is only applicable when --output-format txt/csv/db is used.\n"
         ),
     )

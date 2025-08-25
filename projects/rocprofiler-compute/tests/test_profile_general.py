@@ -768,7 +768,9 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_analyze_rocpd(binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute):
+def test_analyze_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
     workload_dir = test_utils.get_output_dir()
     options = ["--device", "0", "--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
