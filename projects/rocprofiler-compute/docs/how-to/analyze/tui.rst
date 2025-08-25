@@ -42,6 +42,7 @@ workload from ``rocprof-compute profile`` generated output directories.
 and graphs visualizing the analysis data.
 
 4. After the analysis results are loaded, you can start interactive analysis with detailed metrics.
+You can left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab.
 The TUI supports basic keyboard shortcuts, including quit application commands for easy navigation.
 
 TUI analysis structure
