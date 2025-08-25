@@ -1,0 +1,65 @@
+{
+    "required_tables": [
+        {
+            "name_prefix": "rocpd_info_pmc_",
+            "min_rows": 4,
+            "required_columns": [
+                "agent_id",
+                "target_arch",
+                "name",
+                "symbol",
+                "description",
+                "units",
+                "value_type"
+            ],
+            "validation_queries": [
+                {
+                    "description": "Check for amd-smi monitoring categories",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} WHERE target_arch is 'GPU'",
+                    "expected_result": 4,
+                    "comparison": "equals",
+                    "error_message": "Found none of the amd-smi categories"
+                }
+            ]
+        },
+        {
+            "name_prefix": "rocpd_pmc_event_",
+            "min_rows": 2000,
+            "required_columns": [
+                "event_id",
+                "pmc_id",
+                "value"
+            ],
+            "validation_queries": [
+                {
+                    "description": "Check for amd-smi monitoring busy times",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_mm'",
+                    "expected_result": 150,
+                    "comparison": "greater_than",
+                    "error_message": "Less than expected number of capured amd-smi-busy samples!"
+                },
+                {
+                    "description": "Check for amd-smi monitoring GPU temperature",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_temp'",
+                    "expected_result": 150,
+                    "comparison": "greater_than",
+                    "error_message": "Less than expected number of capured amd-smi-temperature samples!"
+                },
+                {
+                    "description": "Check for amd-smi monitoring GPU power consumption",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_power'",
+                    "expected_result": 150,
+                    "comparison": "greater_than",
+                    "error_message": "Less than expected number of capured amd-smi-power samples!"
+                },
+                {
+                    "description": "Check for amd-smi monitoring GPU memory usage",
+                    "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_memory_usage'",
+                    "expected_result": 150,
+                    "comparison": "greater_than",
+                    "error_message": "Less than expected number of capured amd-smi-memory-usage samples!"
+                }
+            ]
+        }
+    ]
+}
