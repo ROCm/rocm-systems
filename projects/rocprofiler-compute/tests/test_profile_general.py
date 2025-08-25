@@ -593,7 +593,9 @@ def test_path(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_path_rocpd(binary_handler_profile_rocprof_compute):
+def test_path_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
     workload_dir = test_utils.get_output_dir()
     options = ["--format-rocprof-output", "rocpd"]
     binary_handler_profile_rocprof_compute(config, workload_dir, options)
@@ -603,6 +605,9 @@ def test_path_rocpd(binary_handler_profile_rocprof_compute):
         "format_rocprof_output: rocpd", f"{workload_dir}/profiling_config.yaml"
     )
     assert test_utils.check_file_pattern("Counter_Name", f"{workload_dir}/pmc_perf.csv")
+
+    code = binary_handler_analyze_rocprof_compute(["analyze", "--path", workload_dir])
+    assert code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
