@@ -285,9 +285,8 @@ TEST(metrics, check_public_api_query)
             std::string current_dimension_name(info.dimensions[i]->name);
 
             // Used to store index wise count (like number of instances with SE[0], SE[1], etc.) to
-            // validate
-            //  permutations included in dimensions_instances
-            std::map<int, int> index_to_count;
+            // validate permutations included in dimensions_instances
+            auto index_to_count = std::map<int, int>{};
 
             // Iterate over all instances with unique dimensions indexes.
             for(size_t j = 0; j < info.dimensions_instances_count; j++)
