@@ -23,12 +23,12 @@ THE SOFTWARE.
 #include <hip_test_common.hh>
 
 namespace hipHostUnregisterTests {
-constexpr unsigned int allFlags = hipHostRegisterDefault &  // 0
-    hipHostRegisterPortable &                               // 1
-    hipHostRegisterMapped &                                 // 2
-    hipHostRegisterIoMemory                                 // 4
+constexpr unsigned int allFlags = hipHostRegisterDefault &   // 0
+                                  hipHostRegisterPortable &  // 1
+                                  hipHostRegisterMapped &    // 2
+                                  hipHostRegisterIoMemory    // 4
 #if HT_NVIDIA
-    & cudaHostRegisterReadOnly;  // 8
+                                  & cudaHostRegisterReadOnly;  // 8
 #else
     ;
 #endif

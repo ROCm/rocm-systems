@@ -79,9 +79,8 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
 
   // pResViewDesc can only be specified if the type of resource is a HIP array or a HIP mipmapped
   // array.
-  if ((pResViewDesc != nullptr) &&
-      ((pResDesc->resType != hipResourceTypeArray) &&
-       (pResDesc->resType != hipResourceTypeMipmappedArray))) {
+  if ((pResViewDesc != nullptr) && ((pResDesc->resType != hipResourceTypeArray) &&
+                                    (pResDesc->resType != hipResourceTypeMipmappedArray))) {
     return hipErrorUnknown;
   }
 
@@ -176,9 +175,8 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
   // hipAddressModeWrap and hipAddressModeMirror won't be supported
   // and will be switched to hipAddressModeClamp.
   for (int i = 0; i < 3; i++) {
-    if ((pTexDesc->normalizedCoords == 0) &&
-        ((pTexDesc->addressMode[i] == hipAddressModeWrap) ||
-         (pTexDesc->addressMode[i] == hipAddressModeMirror))) {
+    if ((pTexDesc->normalizedCoords == 0) && ((pTexDesc->addressMode[i] == hipAddressModeWrap) ||
+                                              (pTexDesc->addressMode[i] == hipAddressModeMirror))) {
       addressMode[i] = hip::getCLAddressingMode(hipAddressModeClamp);
     }
     // hipTextureDesc::addressMode is ignored if hipResourceDesc::resType is hipResourceTypeLinear
@@ -237,12 +235,14 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
           (pTexDesc->sRGB == 1)) {
         // TODO ROCclr currently right now can only change the format of the image.
-        const cl_channel_order channelOrder = (pResViewDesc != nullptr)
-            ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
-            : hip::getCLChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
-        const cl_channel_type channelType = (pResViewDesc != nullptr)
-            ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
-            : hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
+        const cl_channel_order channelOrder =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getCLChannelOrder(pResDesc->res.array.array->NumChannels, pTexDesc->sRGB);
+        const cl_channel_type channelType =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getCLChannelType(pResDesc->res.array.array->Format, readMode);
         const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
@@ -277,12 +277,14 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
       if ((pResViewDesc != nullptr) || (readMode == hipReadModeNormalizedFloat) ||
           (pTexDesc->sRGB == 1)) {
         // TODO ROCclr currently right now can only change the format of the image.
-        const cl_channel_order channelOrder = (pResViewDesc != nullptr)
-            ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
-            : hip::getCLChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
-        const cl_channel_type channelType = (pResViewDesc != nullptr)
-            ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
-            : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
+        const cl_channel_order channelOrder =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelOrder(hip::getNumChannels(pResViewDesc->format), pTexDesc->sRGB)
+                : hip::getCLChannelOrder(pResDesc->res.mipmap.mipmap->num_channels, pTexDesc->sRGB);
+        const cl_channel_type channelType =
+            (pResViewDesc != nullptr)
+                ? hip::getCLChannelType(hip::getArrayFormat(pResViewDesc->format), readMode)
+                : hip::getCLChannelType(pResDesc->res.mipmap.mipmap->format, readMode);
         const amd::Image::Format imageFormat(cl_image_format{channelOrder, channelType});
         if (!imageFormat.isValid()) {
           return hipErrorInvalidValue;
@@ -335,7 +337,8 @@ hipError_t ihipCreateTextureObject(hipTextureObject_t* pTexObject, const hipReso
           hip::getArrayFormat(pResDesc->res.pitch2D.desc), pTexDesc->readMode);
       const amd::Image::Format imageFormat({channelOrder, channelType});
       const cl_mem_object_type imageType = hip::getCLMemObjectType(pResDesc->resType);
-      const size_t imageSizeInBytes = pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
+      const size_t imageSizeInBytes =
+          pResDesc->res.pitch2D.width * imageFormat.getElementSize() +
           pResDesc->res.pitch2D.pitchInBytes * (pResDesc->res.pitch2D.height - 1);
       amd::Memory* buffer =
           getMemoryObjectWithOffset(pResDesc->res.pitch2D.devPtr, imageSizeInBytes);

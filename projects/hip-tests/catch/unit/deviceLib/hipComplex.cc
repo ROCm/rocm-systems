@@ -398,27 +398,27 @@ static bool test_allcomplexMathFunc_host() {
 TEST_CASE("Unit_TestMathFuncComplex") {
   bool TestPassed = false;
   TestPassed = test_makehipComplex_dev<hipFloatComplex, float>() &&
-      test_makehipComplex_dev<float2, float>() &&
-      test_makehipComplex_dev<hipDoubleComplex, double>() &&
-      test_makehipComplex_dev<double2, double>() &&
-      test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_ADD) &&
-      test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_ADD) &&
-      test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_SUB) &&
-      test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_SUB) &&
-      test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_MUL) &&
-      test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_MUL) &&
-      test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_DIV) &&
-      test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_DIV) &&
-      test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_CONJ) &&
-      test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_CONJ) &&
-      test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_REAL) &&
-      test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_REAL) &&
-      test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_IMAG) &&
-      test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_IMAG) &&
-      test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_SQABS) &&
-      test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_SQABS) &&
-      test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_ABS) &&
-      test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_ABS) &&
-      test_allcomplexMathFunc_host();
+               test_makehipComplex_dev<float2, float>() &&
+               test_makehipComplex_dev<hipDoubleComplex, double>() &&
+               test_makehipComplex_dev<double2, double>() &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_ADD) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_ADD) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_SUB) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_SUB) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_MUL) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_MUL) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_DIV) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_DIV) &&
+               test_complexMathFunc1_dev<hipFloatComplex, float>(COMPLEX_CONJ) &&
+               test_complexMathFunc1_dev<hipDoubleComplex, double>(COMPLEX_CONJ) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_REAL) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_REAL) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_IMAG) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_IMAG) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_SQABS) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_SQABS) &&
+               test_complexMathFunc2_dev<hipFloatComplex, float>(COMPLEX_ABS) &&
+               test_complexMathFunc2_dev<hipDoubleComplex, double>(COMPLEX_ABS) &&
+               test_allcomplexMathFunc_host();
   REQUIRE(TestPassed == true);
 }

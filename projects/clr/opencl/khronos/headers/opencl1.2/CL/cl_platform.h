@@ -59,7 +59,7 @@ extern "C" {
 #define CL_EXT_SUFFIX__VERSION_1_1 CL_EXTENSION_WEAK_LINK AVAILABLE_MAC_OS_X_VERSION_10_7_AND_LATER
 #define CL_EXT_SUFFIX__VERSION_1_0_DEPRECATED                                                      \
   CL_EXTENSION_WEAK_LINK                                                                           \
-      AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_7
+  AVAILABLE_MAC_OS_X_VERSION_10_6_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_7
 
 #ifdef AVAILABLE_MAC_OS_X_VERSION_10_8_AND_LATER
 #define CL_API_SUFFIX__VERSION_1_2 AVAILABLE_MAC_OS_X_VERSION_10_8_AND_LATER
@@ -68,7 +68,7 @@ extern "C" {
 #define CL_EXT_PREFIX__VERSION_1_1_DEPRECATED
 #define CL_EXT_SUFFIX__VERSION_1_1_DEPRECATED                                                      \
   CL_EXTENSION_WEAK_LINK                                                                           \
-      AVAILABLE_MAC_OS_X_VERSION_10_7_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_8
+  AVAILABLE_MAC_OS_X_VERSION_10_7_AND_LATER_BUT_DEPRECATED_IN_MAC_OS_X_VERSION_10_8
 #else
 #warning This path should never happen outside of internal operating system development.  AvailabilityMacros do not function correctly here!
 #define CL_API_SUFFIX__VERSION_1_2 AVAILABLE_MAC_OS_X_VERSION_10_7_AND_LATER

@@ -240,9 +240,9 @@ static void verify_recorded_values(unsigned int* recorded_values, uint32_t loops
   }
 }
 
-template <typename F>
-static void test_cg_multi_grid_group_type(F kernel_func, int num_devices, int block_size,
-                                          bool specific_api_test) {
+template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, int num_devices,
+                                                                int block_size,
+                                                                bool specific_api_test) {
   // Create a stream each device
   hipStream_t stream[MaxGPUs];
   for (int i = 0; i < num_devices; i++) {

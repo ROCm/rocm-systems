@@ -581,8 +581,8 @@ bool Graph::RunOneNode(Node node, bool wait) {
     for (auto edge : node->GetEdges()) {
       // Don't wait in the nodes, executed on the same streams and if it has just one dependency
       bool wait = ((i < DEBUG_HIP_FORCE_GRAPH_QUEUES) || (edge->GetDependencies().size() > 1))
-          ? true
-          : false;
+                      ? true
+                      : false;
       // Execute the edge node
       if (!RunOneNode(edge, wait)) {
         return false;

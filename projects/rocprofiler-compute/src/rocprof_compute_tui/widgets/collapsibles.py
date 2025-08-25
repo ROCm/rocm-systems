@@ -51,7 +51,8 @@ def create_table(df: pd.DataFrame) -> DataTable:
 def create_widget_from_data(df: pd.DataFrame, tui_style: str = None, context: str = ""):
     if df is None or df.empty:
         return Label(
-            f"Data not available{f' for {context}' if context else ''}", classes="warning"
+            f"Data not available{f' for {context}' if context else ''}",
+            classes="warning",
         )
 
     match tui_style:
@@ -100,7 +101,9 @@ def build_section_from_config(
             if isinstance(dfs, dict):
                 exclude_keys = subsection_config.get("exclude_keys", [])
                 for section_name, subsections in dfs.items():
-                    if section_name not in exclude_keys and isinstance(subsections, dict):
+                    if section_name not in exclude_keys and isinstance(
+                        subsections, dict
+                    ):
                         kernel_children = []
                         for subsection_name, data in subsections.items():
                             if isinstance(data, dict) and "df" in data:
