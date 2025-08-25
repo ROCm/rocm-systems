@@ -68,8 +68,8 @@ enum class ops {
 };
 
 struct joinable_thread : std::thread {
-  template <class... Xs>
-  explicit joinable_thread(Xs&&... xs) : std::thread(std::forward<Xs>(xs)...) {}  // NOLINT
+  template <class... Xs> explicit joinable_thread(Xs&&... xs)
+      : std::thread(std::forward<Xs>(xs)...) {}  // NOLINT
 
   joinable_thread& operator=(joinable_thread&& other) = default;
   joinable_thread(joinable_thread&& other) = default;

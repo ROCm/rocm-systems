@@ -82,9 +82,8 @@ static bool testhipMemset(T* A_h, T* A_d, T memsetval, enum MemsetType type, siz
 }
 
 
-template <typename T>
-static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval, enum MemsetType type,
-                               size_t numElements) {
+template <typename T> static bool testhipMemsetAsync(T* A_h, T* A_d, T memsetval,
+                                                     enum MemsetType type, size_t numElements) {
   size_t Nbytes = numElements * sizeof(T);
   bool testResult = true;
   constexpr auto MAX_OFFSET = 3;  // To memset on unaligned ptr.

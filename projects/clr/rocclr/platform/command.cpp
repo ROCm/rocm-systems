@@ -301,10 +301,9 @@ const Event::EventWaitList Event::nullWaitList(0);
 // ================================================================================================
 Command::Command(HostQueue& queue, cl_command_type type, const EventWaitList& eventWaitList,
                  uint32_t commandWaitBits, const Event* waitingEvent)
-    : Event(queue,
-            amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
-                queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
-                Agent::shouldPostEventEvents()),
+    : Event(queue, amd::activity_prof::IsEnabled(amd::activity_prof::OperationId(type)) ||
+                       queue.properties().test(CL_QUEUE_PROFILING_ENABLE) ||
+                       Agent::shouldPostEventEvents()),
       queue_(&queue),
       next_(nullptr),
       type_(type),
@@ -604,24 +603,24 @@ bool CopyMemoryCommand::isEntireMemory() const {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         source().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), imageSize);
+               destination().isEntirelyCovered(dstOrigin(), imageSize);
     } break;
     case CL_COMMAND_COPY_BUFFER_TO_IMAGE: {
       Coord3D imageSize(size()[0] * size()[1] * size()[2] *
                         destination().asImage()->getImageFormat().getElementSize());
       result = source().isEntirelyCovered(srcOrigin(), imageSize) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
     } break;
     case CL_COMMAND_COPY_BUFFER_RECT: {
       Coord3D rectSize(size()[0] * size()[1] * size()[2]);
       Coord3D srcOffs(srcRect().start_);
       Coord3D dstOffs(dstRect().start_);
       result = source().isEntirelyCovered(srcOffs, rectSize) &&
-          destination().isEntirelyCovered(dstOffs, rectSize);
+               destination().isEntirelyCovered(dstOffs, rectSize);
     } break;
     default:
       result = source().isEntirelyCovered(srcOrigin(), size()) &&
-          destination().isEntirelyCovered(dstOrigin(), size());
+               destination().isEntirelyCovered(dstOrigin(), size());
       break;
   }
   return result;

@@ -163,7 +163,7 @@ void runAndCompileTest(const std::tuple<Types...> types) {
           // call the operator only if the lane is mentioned in the mask
           T& result = output[warpSize * i + tid];
           result = )" +
-      intrinsicName + R"((masks[i], input[tid]);
+              intrinsicName + R"((masks[i], input[tid]);
         }
       }
    })";

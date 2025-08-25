@@ -140,8 +140,8 @@ int main(int argc, char** argv) {
 
         bool isAMDPlatform = (strcmp(platform.getInfo<CL_PLATFORM_NAME>().c_str(),
                                      "AMD Accelerated Parallel Processing") == 0)
-            ? true
-            : false;
+                                 ? true
+                                 : false;
         if (isAMDPlatform) {
           std::string boardName;
           device.getInfo(CL_DEVICE_BOARD_NAME_AMD, &boardName);

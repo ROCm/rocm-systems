@@ -114,7 +114,7 @@ std::string TestContext::getMatchingConfigFile(std::string config_dir) {
     std::string cur_arch = getCurrentArch();
     LogPrintf("The arch present: %s", cur_arch.c_str());
     configFileToUse = config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + "_" +
-        cur_arch + ".json";
+                      cur_arch + ".json";
   } else {
     configFileToUse =
         config_dir + "/config_" + getConfig().platform + "_" + getConfig().os + ".json";

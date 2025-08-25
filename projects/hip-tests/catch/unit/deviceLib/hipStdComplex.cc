@@ -58,9 +58,9 @@ std::string getName(enum CalcKind CK) {
   case CK_##func:                                                                                  \
     return std::complex<FloatT>(func(A));
 
-template <typename FloatT>
-__device__ __host__ std::complex<FloatT> calc(std::complex<FloatT> A, std::complex<FloatT> B,
-                                              enum CalcKind CK) {
+template <typename FloatT> __device__ __host__ std::complex<FloatT> calc(std::complex<FloatT> A,
+                                                                         std::complex<FloatT> B,
+                                                                         enum CalcKind CK) {
   switch (CK) {
     case CK_add:
       return A + B;
@@ -79,9 +79,8 @@ __device__ __host__ std::complex<FloatT> calc(std::complex<FloatT> A, std::compl
   return A;  // To prevent compile warning
 }
 
-template <typename FloatT>
-__global__ void kernel(std::complex<FloatT>* A, std::complex<FloatT>* B, std::complex<FloatT>* C,
-                       enum CalcKind CK) {
+template <typename FloatT> __global__ void kernel(std::complex<FloatT>* A, std::complex<FloatT>* B,
+                                                  std::complex<FloatT>* C, enum CalcKind CK) {
   int tx = threadIdx.x + blockIdx.x * blockDim.x;
   C[tx] = calc<FloatT>(A[tx], B[tx], CK);
 }
