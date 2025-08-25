@@ -925,32 +925,70 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             "wave_size is not available in sysinfo.csv, please provide the correct "
             "value using --specs-correction"
         )
+
+    default_peaks = [
+        "FP16Flops",
+        "FP32Flops",
+        "FP64Flops",
+        "MFMAF64Flops",
+        "MFMAF32Flops",
+        "MFMAF16Flops",
+        "MFMABF16Flops",
+        "MFMAF8Flops",
+        "MFMAI8Ops",
+        "HBMBw",
+        "L2Bw",
+        "L1Bw",
+        "LDSBw",
+        "MFMA_FLOPs_F6F4",
+    ]
+
+    ammolite__FP16Flops_empirical_peak = 0
+    ammolite__FP32Flops_empirical_peak = 0
+    ammolite__FP64Flops_empirical_peak = 0
+    ammolite__MFMAF64Flops_empirical_peak = 0
+    ammolite__MFMAF32Flops_empirical_peak = 0
+    ammolite__MFMAF16Flops_empirical_peak = 0
+    ammolite__MFMABF16Flops_empirical_peak = 0
+    ammolite__MFMAF8Flops_empirical_peak = 0
+    ammolite__MFMAI8Ops_empirical_peak = 0
+    ammolite__HBMBw_empirical_peak = 0
+    ammolite__L2Bw_empirical_peak = 0
+    ammolite__L1Bw_empirical_peak = 0
+    ammolite__LDSBw_empirical_peak = 0
+    ammolite__MFMA_FLOPs_F6F4_empirical_peak = 0
+
     if not empirical_peaks_df.empty:
         peak_data_row = empirical_peaks_df.iloc[0]
-        for metric_name in empirical_peaks_df.columns:
-            var_name = f"ammolite__{metric_name}_empirical_peak"
-            locals()[var_name] = peak_data_row[metric_name]
-    else:
-        default_peaks = [
-            "FP16Flops",
-            "FP32Flops",
-            "FP64Flops",
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "HBMBw",
-            "L2Bw",
-            "L1Bw",
-            "LDSBw",
-            "MFMA_FLOPs_F6F4",
-        ]
-        # set values to 0 if no no empirical peaks from roofline.csv are provided
-        for peak_name in default_peaks:
-            var_name = f"ammolite__{peak_name}_empirical_peak"
-            exec(f"{var_name} = 0", globals(), locals())
+
+        if "FP16Flops" in empirical_peaks_df.columns:
+            ammolite__FP16Flops_empirical_peak = peak_data_row["FP16Flops"]
+        if "FP32Flops" in empirical_peaks_df.columns:
+            ammolite__FP32Flops_empirical_peak = peak_data_row["FP32Flops"]
+        if "FP64Flops" in empirical_peaks_df.columns:
+            ammolite__FP64Flops_empirical_peak = peak_data_row["FP64Flops"]
+        if "MFMAF64Flops" in empirical_peaks_df.columns:
+            ammolite__MFMAF64Flops_empirical_peak = peak_data_row["MFMAF64Flops"]
+        if "MFMAF32Flops" in empirical_peaks_df.columns:
+            ammolite__MFMAF32Flops_empirical_peak = peak_data_row["MFMAF32Flops"]
+        if "MFMAF16Flops" in empirical_peaks_df.columns:
+            ammolite__MFMAF16Flops_empirical_peak = peak_data_row["MFMAF16Flops"]
+        if "MFMABF16Flops" in empirical_peaks_df.columns:
+            ammolite__MFMABF16Flops_empirical_peak = peak_data_row["MFMABF16Flops"]
+        if "MFMAF8Flops" in empirical_peaks_df.columns:
+            ammolite__MFMAF8Flops_empirical_peak = peak_data_row["MFMAF8Flops"]
+        if "MFMAI8Ops" in empirical_peaks_df.columns:
+            ammolite__MFMAI8Ops_empirical_peak = peak_data_row["MFMAI8Ops"]
+        if "HBMBw" in empirical_peaks_df.columns:
+            ammolite__HBMBw_empirical_peak = peak_data_row["HBMBw"]
+        if "L2Bw" in empirical_peaks_df.columns:
+            ammolite__L2Bw_empirical_peak = peak_data_row["L2Bw"]
+        if "L1Bw" in empirical_peaks_df.columns:
+            ammolite__L1Bw_empirical_peak = peak_data_row["L1Bw"]
+        if "LDSBw" in empirical_peaks_df.columns:
+            ammolite__LDSBw_empirical_peak = peak_data_row["LDSBw"]
+        if "MFMA_FLOPs_F6F4" in empirical_peaks_df.columns:
+            ammolite__MFMA_FLOPs_F6F4_empirical_peak = peak_data_row["MFMA_FLOPs_F6F4"]
 
     # TODO: fix all $normUnit in Unit column or title
 
@@ -966,6 +1004,8 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
         try:
             ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
         except TypeError:
+            ammolite__build_in[key] = None
+        except NameError:
             ammolite__build_in[key] = None
         except KeyError:
             ammolite__build_in[key] = None
