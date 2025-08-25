@@ -29,7 +29,7 @@ RUN apt-get update && \
         bzip2 chrpath cmake curl environment-modules flex gettext git-core gnupg2 \
         gzip iproute2 libiberty-dev libpapi-dev libpfm4-dev libsqlite3-dev libtool \
         locales lsb-release m4 ninja-build python3-pip software-properties-common \
-        texinfo unzip wget vim zip zlib1g-dev && \
+        texinfo unzip wget vim zip zlib1g-dev nlohmann-json3-dev && \
     apt-get autoclean
 
 RUN if ! pip install 'cmake==3.21' perfetto 2>&1 | tee pip_output.log | grep -q "externally managed environment"; then \

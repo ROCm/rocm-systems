@@ -35,12 +35,15 @@ class json
 {
 public:
     static std::shared_ptr<json> create();
+    static std::shared_ptr<json> parse_string(const std::string& json_str);
+    static std::shared_ptr<json> load_file(const std::string& filepath);
 
     using json_value =
         std::variant<std::string, int, double, long long, bool, std::vector<json>,
                      std::nullptr_t, std::shared_ptr<json>>;
 
-    void set(const std::string& key, const json_value& value);
+    void                        set(const std::string& key, const json_value& value);
+    std::shared_ptr<json_value> get(const std::string& key) const;
 
     std::string to_string() const;
 
@@ -48,7 +51,11 @@ private:
     json() = default;
 
 private:
-    static std::string stringify(const std::shared_ptr<json_value>& value);
+    static std::string           stringify(const std::shared_ptr<json_value>& value);
+    static std::shared_ptr<json> parse_json_content(const std::string& content);
+    static json_value            parse_value(const std::string& content, size_t& pos);
+    static std::string parse_string_literal(const std::string& content, size_t& pos);
+    static void        skip_whitespace(const std::string& content, size_t& pos);
 
 private:
     std::unordered_map<std::string, std::shared_ptr<json_value>> data;

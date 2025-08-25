@@ -23,7 +23,8 @@ RUN apt-get update && \
     apt-get install -y apt-utils autoconf autotools-dev bash-completion bison \
         build-essential chrpath cmake curl flex gettext git-core gnupg2 iproute2 \
         libnuma1 libopenmpi-dev libpapi-dev libpfm4-dev librpm-dev libsqlite3-dev \
-        libtool libudev1 lsb-release m4 ninja-build python3-pip rpm texinfo wget && \
+        libtool libudev1 lsb-release m4 ninja-build python3-pip rpm texinfo wget \
+        nlohmann-json3-dev && \
     OS_VERSION=$(grep '^VERSION_ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     OS_ID=$(grep '^ID=' /etc/os-release | cut -d'=' -f2 | tr -d '"') && \
     if [ "${OS_ID}" == "ubuntu" ] && [ "${OS_VERSION}" == "22.04" ]; then \

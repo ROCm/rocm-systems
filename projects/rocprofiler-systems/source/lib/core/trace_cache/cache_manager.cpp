@@ -72,6 +72,8 @@ cache_manager::post_process_metadata()
 void
 cache_manager::shutdown()
 {
+    m_metadata.save_to_file("/tmp/metadata_" + std::to_string(getppid()) + "_" +
+                            std::to_string(getpid()) + ".json");
     m_storage.shutdown();
 }
 

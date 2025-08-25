@@ -73,6 +73,8 @@
 #include <timemory/utility/types.hpp>
 #include <timemory/variadic.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include <array>
 #include <chrono>
 #include <condition_variable>
@@ -168,21 +170,21 @@ get_category_track_name(uint64_t tid)
 std::string
 generate_call_stack_json(const tim::unwind::processed_entry& stack_entry)
 {
-    auto call_stack = ::rocpd::json::create();
+    auto call_stack = nlohmann::json();
 
-    call_stack->set("name", std::string(demangle(stack_entry.name)));
-    call_stack->set("pc", as_hex(stack_entry.address));
-    call_stack->set("file", std::string(stack_entry.location));
+    call_stack["name"] = std::string(demangle(stack_entry.name));
+    call_stack["pc"]   = as_hex(stack_entry.address);
+    call_stack["file"] = std::string(stack_entry.location);
 
-    return call_stack->to_string();
+    return call_stack.dump();
 }
 
 std::string
 generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
 {
-    auto line_info = ::rocpd::json::create();
-    line_info->set("line_address", as_hex(line_info_entry.line_address));
-    line_info->set("name", std::string(demangle(line_info_entry.name)));
+    auto line_info            = nlohmann::json();
+    line_info["line_address"] = as_hex(line_info_entry.line_address);
+    line_info["name"]         = std::string(demangle(line_info_entry.name));
 
     if(line_info_entry.lineinfo && !line_info_entry.lineinfo.lines.empty())
     {
@@ -190,37 +192,37 @@ generate_line_info_json(const tim::unwind::processed_entry& line_info_entry)
         std::reverse(_lines.begin(), _lines.end());
         for(const auto& line : _lines)
         {
-            auto inlined = ::rocpd::json::create();
-            inlined->set("name", std::string(demangle(line.name)));
-            inlined->set("location", std::string(line.location));
-            inlined->set("line", std::to_string(line.line));
-            line_info->set("inlined", inlined);
+            auto inlined        = nlohmann::json();
+            inlined["name"]     = std::string(demangle(line.name));
+            inlined["location"] = std::string(line.location);
+            inlined["line"]     = std::to_string(line.line);
+            line_info["inlined"].push_back(inlined);
         }
     }
 
-    return line_info->to_string();
+    return line_info.dump();
 }
 
 std::string
 generate_hw_counter_json(int64_t _tid, const backtrace_metrics& metrics)
 {
-    auto extdata = ::rocpd::json::create();
+    auto extdata = nlohmann::json();
 
     if(!metrics.get_hw_counters().empty())
     {
         auto _labels      = backtrace_metrics::get_hw_counter_labels(_tid);
         auto _hw_cnt_vals = metrics.get_hw_counters();
 
-        auto hw_counters = ::rocpd::json::create();
+        auto hw_counters = nlohmann::json();
         for(size_t i = 0; i < _labels.size(); ++i)
         {
-            hw_counters->set(_labels.at(i), _hw_cnt_vals.at(i));
+            hw_counters[_labels.at(i)] = _hw_cnt_vals.at(i);
         }
 
-        extdata->set("hw_counters", hw_counters);
+        extdata["hw_counters"] = hw_counters;
     }
 
-    return extdata->to_string();
+    return extdata.dump();
 }
 
 rocpd::data_processor&
@@ -1854,16 +1856,15 @@ rocpd_post_process_timer_data(
                             static_strings.emplace(demangle(line.name)).first->c_str();
                         auto inlined_name_id = data_processor.insert_string(_name);
 
-                        auto inlined_call_stack = ::rocpd::json::create();
-                        inlined_call_stack->set("name", std::string(demangle(line.name)));
-                        inlined_call_stack->set("location", std::string(line.location));
-                        inlined_call_stack->set("line", std::to_string(line.line));
-                        inlined_call_stack->set("inlined", "true");
+                        auto inlined_call_stack        = nlohmann::json();
+                        inlined_call_stack["name"]     = std::string(demangle(line.name));
+                        inlined_call_stack["location"] = std::string(line.location);
+                        inlined_call_stack["line"]     = std::to_string(line.line);
+                        inlined_call_stack["inlined"]  = "true";
 
                         rocpd_insert_region<category::timer_sampling>(
                             thread_primary_key, _beg, _end, inlined_name_id,
-                            _track_name.c_str(), inlined_call_stack->to_string().c_str(),
-                            "{}",
+                            _track_name.c_str(), inlined_call_stack.dump().c_str(), "{}",
                             // Only include HW counters for first inlined function
                             (_n == 0) ? hw_counter_json.c_str() : "{}");
                     }

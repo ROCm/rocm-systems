@@ -752,6 +752,9 @@ rocprofsys_finalize_hidden(void)
         }
 #endif
         auto& _manager = rocprofsys::trace_cache::cache_manager::get_instance();
+        _manager.get_metadata_regsitry().save_to_file("/tmp/metadata_" +
+                                                      std::to_string(getppid()) + "_" +
+                                                      std::to_string(getpid()) + ".json");
         _manager.shutdown();
         _manager.post_process();
 
