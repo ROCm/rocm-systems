@@ -24,9 +24,6 @@
 ##############################################################################
 
 
-from typing import Any, Dict, List
-
-import pandas as pd
 import yaml
 from textual.widgets import Collapsible, DataTable, Label
 
@@ -38,120 +35,113 @@ from rocprof_compute_tui.widgets.charts import (
 )
 
 
-def create_table(df: pd.DataFrame) -> DataTable:
+def create_table(df, hidden_columns=[]):
     table = DataTable(zebra_stripes=True)
-    df = df.reset_index()
-    df = df[~df.apply(lambda row: row.astype(str).str.strip().eq("").any(), axis=1)]
-    str_columns = [str(col) for col in df.columns]
-    table.add_columns(*str_columns)
-    table.add_rows([tuple(str(x) for x in row) for row in df.itertuples(index=False)])
+
+    df = df.reset_index().dropna()
+    df = df[~df.astype(str).apply(lambda row: row.str.strip().eq("").any(), axis=1)]
+
+    if df.empty:
+        return Label("No table data generated")
+
+    table._df = df
+    table._visible_cols = [col for col in df.columns if col not in hidden_columns]
+
+    table.add_columns(*table._visible_cols)
+    for _, row in df.iterrows():
+        table.add_row(*[str(row[col]) for col in table._visible_cols])
+
     return table
 
 
-def create_widget_from_data(df: pd.DataFrame, tui_style: str = None, context: str = ""):
+def create_widget_from_data(df, tui_style=None, context=""):
     if df is None or df.empty:
         return Label(
             f"Data not available{f' for {context}' if context else ''}",
             classes="warning",
         )
 
-    match tui_style:
-        # TODO: implement tui_style == "roofline"
-        # case "roofline":
-        #     return Roofline(df)
-        case None:
-            return create_table(df)
-        case "mem_chart":
-            return MemoryChart(df)
-        case "simple_bar":
-            return SimpleBar(df)
-        case "simple_box":
-            return SimpleBox(df)
-        case "simple_multiple_bar":
-            return SimpleMultiBar(df)
-        case _:
-            return Label(f"Unknown display type: {tui_style}")
+    if tui_style is None:
+        return create_table(df, hidden_columns=["Description"])
+    elif tui_style == "mem_chart":
+        return MemoryChart(df)
+    elif tui_style == "simple_bar":
+        return SimpleBar(df)
+    elif tui_style == "simple_box":
+        return SimpleBox(df)
+    elif tui_style == "simple_multiple_bar":
+        return SimpleMultiBar(df)
+    else:
+        return Label(f"Unknown display type: {tui_style}")
 
 
-def load_config(config_path) -> Dict[str, Any]:
-    try:
-        with open(config_path, "r") as file:
-            return yaml.safe_load(file)
-    except FileNotFoundError:
-        raise FileNotFoundError(
-            (
-                f"Configuration file {config_path} not found, \n"
-                "please populate the analysis_config.yaml file."
-            )
-        )
-    except yaml.YAMLError as e:
-        raise ValueError(f"Error parsing YAML configuration: {e}")
+def load_config(config_path):
+    with open(config_path, "r") as file:
+        return yaml.safe_load(file)
 
 
-def build_section_from_config(
-    dfs: Dict[str, Any], section_config: Dict[str, Any]
-) -> Collapsible:
+def build_section_from_config(dfs, section_config):
     title = section_config["title"]
     collapsed = section_config.get("collapsed", True)
-
     children = []
-    for subsection_config in section_config["subsections"]:
-        # Handle arch_config_data
-        if subsection_config.get("arch_config_data", False):
-            if isinstance(dfs, dict):
-                exclude_keys = subsection_config.get("exclude_keys", [])
-                for section_name, subsections in dfs.items():
-                    if section_name not in exclude_keys and isinstance(
-                        subsections, dict
-                    ):
-                        kernel_children = []
-                        for subsection_name, data in subsections.items():
-                            if isinstance(data, dict) and "df" in data:
-                                widget = create_widget_from_data(
-                                    data["df"], data.get("tui_style"), subsection_name
-                                )
-                                kernel_children.append(
-                                    Collapsible(
-                                        widget, title=subsection_name, collapsed=True
-                                    )
-                                )
 
-                        if kernel_children:
-                            children.append(
+    for subsection_config in section_config["subsections"]:
+        subsection_title = subsection_config.get("title", "Untitled")
+        subsection_collapsed = subsection_config.get("collapsed", True)
+
+        # Handle arch_config_data (dynamic sections from dfs)
+        if subsection_config.get("arch_config_data", False):
+            exclude_keys = subsection_config.get("exclude_keys", [])
+            for section_name, subsections in dfs.items():
+                if section_name not in exclude_keys and isinstance(subsections, dict):
+                    kernel_children = []
+                    for subsection_name, data in subsections.items():
+                        if isinstance(data, dict) and "df" in data:
+                            widget = create_widget_from_data(
+                                data["df"], data.get("tui_style"), subsection_name
+                            )
+                            kernel_children.append(
                                 Collapsible(
-                                    *kernel_children, title=section_name, collapsed=True
+                                    widget, title=subsection_name, collapsed=True
                                 )
                             )
-        else:
-            # Handle data_path
-            tui_style = subsection_config.get("tui_style")
+
+                    if kernel_children:
+                        children.append(
+                            Collapsible(
+                                *kernel_children, title=section_name, collapsed=True
+                            )
+                        )
+
+        # Handle data_path (specific data sections)
+        elif "data_path" in subsection_config:
             data_path = subsection_config["data_path"]
+            tui_style = subsection_config.get("tui_style")
 
-            df = dfs.get(data_path[0], {}).get(data_path[1], {})
-            df = df.get("df") if isinstance(df, dict) else None
-            if df is not None and isinstance(df, dict) and tui_style is None:
-                tui_style = df.get("tui_style")
+            # Navigate data path
+            current = dfs
+            for key in data_path:
+                current = current.get(key, {}) if isinstance(current, dict) else {}
 
-            widgets = [
-                create_widget_from_data(df, tui_style, f"path {' -> '.join(data_path)}")
-            ]
+            df = current.get("df") if isinstance(current, dict) else None
+            if df is not None and tui_style is None:
+                tui_style = current.get("tui_style")
 
+            widget = create_widget_from_data(
+                df, tui_style, f"path {' -> '.join(data_path)}"
+            )
             children.append(
                 Collapsible(
-                    *widgets,
-                    title=subsection_config.get("title", "Untitled"),
-                    collapsed=subsection_config.get("collapsed", True),
+                    widget, title=subsection_title, collapsed=subsection_collapsed
                 )
             )
+
     return Collapsible(*children, title=title, collapsed=collapsed)
 
 
-def build_all_sections(dfs: Dict[str, Any], config_path) -> List[Collapsible]:
+def build_all_sections(dfs, config_path):
     config = load_config(config_path)
-    sections = []
-
-    for section_config in config["sections"]:
-        section = build_section_from_config(dfs, section_config)
-        sections.append(section)
-
-    return sections
+    return [
+        build_section_from_config(dfs, section_config)
+        for section_config in config["sections"]
+    ]
