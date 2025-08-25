@@ -438,9 +438,9 @@ get_callback_domains()
     }
 
 #    if ROCPROFILER_VERSION >= 600
-    // Translate some configuration settings to rocprofiler domains
     if(config::get_use_ompt() && _version.formatted >= 600)
     {
+        // Translate some configuration settings to rocprofiler domains
         _data.emplace(ROCPROFILER_CALLBACK_TRACING_OMPT);
     }
 #    endif

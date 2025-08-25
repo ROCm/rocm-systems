@@ -87,32 +87,6 @@ namespace
 using tool_agent_vec_t = std::vector<tool_agent>;
 client_data* tool_data = new client_data{};
 
-#if(ROCPROFILER_VERSION >= 600)
-
-// OMPT callbacks that when received, should call start followed immediately by stop
-// This mimics the timemory implementation
-static std::set<rocprofiler_ompt_operation_t> ompt_instant_events = {
-    ROCPROFILER_OMPT_ID_dispatch,
-    ROCPROFILER_OMPT_ID_mutex_acquire,
-    ROCPROFILER_OMPT_ID_flush,
-    ROCPROFILER_OMPT_ID_cancel,
-    ROCPROFILER_OMPT_ID_device_initialize,
-    ROCPROFILER_OMPT_ID_device_finalize,
-    ROCPROFILER_OMPT_ID_device_load,
-    // ROCPROFILER_OMPT_ID_device_unload // Unsupported by runtime
-};
-
-// Callbacks that are received but that we do not process
-static std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
-    ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
-    // There is no point in handling ompt_thread_begin events as the corresponding
-    //      ompt_thread_end event will not occur unless runtime is finalized earlier
-    ROCPROFILER_OMPT_ID_thread_begin,
-    ROCPROFILER_OMPT_ID_thread_end,
-};
-
-#endif
-
 void
 thread_precreate(rocprofiler_runtime_library_t /*lib*/, void* /*tool_data*/)
 {
@@ -1033,8 +1007,10 @@ ompt_tracing_callback_start(rocprofiler_callback_tracing_record_t record,
         _name      = check_name;
     }
     if(_name.empty())
-#    endif
         _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+#    else
+    _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+#    endif
 
 #    if(!(ROCPROFSYS_OMPT_EXPERIMENTAL_TYPE_NAMES > 0))
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
@@ -1096,8 +1072,10 @@ ompt_tracing_callback_stop(
         _name      = check_name;
     }
     if(_name.empty())
-#    endif
         _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+#    else
+    _name = tool_data->callback_tracing_info.at(record.kind, record.operation);
+#    endif
 
 #    if(!(ROCPROFSYS_OMPT_EXPERIMENTAL_TYPE_NAMES > 0))
     // Forces omp_parallel begin and end to have same name, allowing perfetto track to
@@ -1167,6 +1145,38 @@ void
 tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       rocprofiler_user_data_t* user_data, void* /*callback_data*/)
 {
+    constexpr size_t kBacktraceStackDepth      = 16;
+    constexpr size_t kBacktraceIgnoreDepth     = 3;
+    constexpr bool   kBacktraceWithSignalFrame = true;
+
+    using backtrace_entry_vec_t = std::vector<tim::unwind::processed_entry>;
+    auto _bt_data               = std::optional<backtrace_entry_vec_t>{};
+    auto kPopulateBacktrace     = [&](bool use_rocpd) {
+        auto use_perfetto =
+            (config::get_use_perfetto() && config::get_perfetto_annotations());
+
+        if((use_perfetto || use_rocpd) &&
+           tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
+        {
+            auto _backtrace =
+                tim::get_unw_stack<kBacktraceStackDepth, kBacktraceIgnoreDepth,
+                                       kBacktraceWithSignalFrame>();
+            _bt_data = backtrace_entry_vec_t{};
+            _bt_data->reserve(_backtrace.size());
+            for(auto itr : _backtrace)
+            {
+                if(itr)
+                {
+                    if(auto _val = binary::lookup_ipaddr_entry<false>(itr->address());
+                       _val)
+                    {
+                        _bt_data->emplace_back(std::move(*_val));
+                    }
+                }
+            }
+        }
+    };
+
     auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts));
     const char* name = "";
@@ -1175,7 +1185,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     static bool is_first_implicit_call = true;
     // Ignore first ompt_implicit_call as this is created after runtime initialization but
     // before first region
-    //  Respective end is also not received due to finalization occuring too late
+    //  Respective end is also not received due to finalization occurring too late
     if(is_first_implicit_call && (record.kind == ROCPROFILER_CALLBACK_TRACING_OMPT &&
                                   record.operation == ROCPROFILER_OMPT_ID_implicit_task))
     {
@@ -1191,10 +1201,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         name       = check_name.c_str();
     }
     if(strlen(name) == 0)
-#    endif
-#endif
         rocprofiler_query_callback_tracing_kind_operation_name(
             record.kind, record.operation, &name, nullptr);
+#    else
+    rocprofiler_query_callback_tracing_kind_operation_name(record.kind, record.operation,
+                                                           &name, nullptr);
+#    endif
+#endif
 
     auto info = std::stringstream{};
     info << std::left << "tid=" << record.thread_id << ", cid=" << std::setw(3)
@@ -1294,36 +1307,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        using backtrace_entry_vec_t = std::vector<tim::unwind::processed_entry>;
-
-        constexpr size_t bt_stack_depth       = 16;
-        constexpr size_t bt_ignore_depth      = 3;
-        constexpr bool   bt_with_signal_frame = true;
-
-        auto _bt_data = std::optional<backtrace_entry_vec_t>{};
-        auto use_perfetto =
-            (config::get_use_perfetto() && config::get_perfetto_annotations());
-        auto use_rocpd = config::get_use_rocpd();
-
-        if((use_perfetto || use_rocpd) &&
-           tool_data->backtrace_operations.at(record.kind).count(record.operation) > 0)
-        {
-            auto _backtrace = tim::get_unw_stack<bt_stack_depth, bt_ignore_depth,
-                                                 bt_with_signal_frame>();
-            _bt_data        = backtrace_entry_vec_t{};
-            _bt_data->reserve(_backtrace.size());
-            for(auto itr : _backtrace)
-            {
-                if(itr)
-                {
-                    if(auto _val = binary::lookup_ipaddr_entry<false>(itr->address());
-                       _val)
-                    {
-                        _bt_data->emplace_back(std::move(*_val));
-                    }
-                }
-            }
-        }
+        kPopulateBacktrace(config::get_use_rocpd());
 
         switch(record.kind)
         {
@@ -1427,40 +1411,36 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 #if(ROCPROFILER_VERSION >= 600)
             case ROCPROFILER_CALLBACK_TRACING_OMPT:
             {
+                // OMPT callbacks that when received, should call start followed
+                // immediately by stop This mimics the timemory implementation
+                static std::set<rocprofiler_ompt_operation_t> ompt_instant_events = {
+                    ROCPROFILER_OMPT_ID_dispatch,
+                    ROCPROFILER_OMPT_ID_mutex_acquire,
+                    ROCPROFILER_OMPT_ID_flush,
+                    ROCPROFILER_OMPT_ID_cancel,
+                    ROCPROFILER_OMPT_ID_device_initialize,
+                    ROCPROFILER_OMPT_ID_device_finalize,
+                    ROCPROFILER_OMPT_ID_device_load,
+                    // ROCPROFILER_OMPT_ID_device_unload // Unsupported by runtime
+                };
+
+                // Callbacks that are received but that we do not process
+                static std::set<rocprofiler_ompt_operation_t> ompt_no_process = {
+                    ROCPROFILER_OMPT_ID_callback_functions,  // "Fake" callback
+                    // There is no point in handling ompt_thread_begin events as the
+                    // corresponding
+                    //      ompt_thread_end event will not occur unless runtime is
+                    //      finalized earlier
+                    ROCPROFILER_OMPT_ID_thread_begin,
+                    ROCPROFILER_OMPT_ID_thread_end,
+                };
+
                 auto ompt_operation_type =
                     static_cast<rocprofiler_ompt_operation_t>(record.operation);
                 if(ompt_no_process.find(ompt_operation_type) != ompt_no_process.end())
                     return;
 
-                using backtrace_entry_vec_t = std::vector<tim::unwind::processed_entry>;
-
-                constexpr size_t bt_stack_depth       = 16;
-                constexpr size_t bt_ignore_depth      = 3;
-                constexpr bool   bt_with_signal_frame = true;
-
-                auto _bt_data = std::optional<backtrace_entry_vec_t>{};
-
-                if(config::get_use_perfetto() && config::get_perfetto_annotations() &&
-                   tool_data->backtrace_operations.at(record.kind)
-                           .count(record.operation) > 0)
-                {
-                    auto _backtrace = tim::get_unw_stack<bt_stack_depth, bt_ignore_depth,
-                                                         bt_with_signal_frame>();
-                    _bt_data        = backtrace_entry_vec_t{};
-                    _bt_data->reserve(_backtrace.size());
-                    for(auto itr : _backtrace)
-                    {
-                        if(itr)
-                        {
-                            if(auto _val =
-                                   binary::lookup_ipaddr_entry<false>(itr->address());
-                               _val)
-                            {
-                                _bt_data->emplace_back(std::move(*_val));
-                            }
-                        }
-                    }
-                }
+                kPopulateBacktrace(false);  // No ROCPD support
 
                 if(ompt_operation_type == ROCPROFILER_OMPT_ID_parallel_begin)
                 {
