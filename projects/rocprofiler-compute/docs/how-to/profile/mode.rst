@@ -25,13 +25,13 @@ Profiling with ROCm Compute Profiler yields the following benefits.
   of your profiling via pre-configured input files.
 
 * :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profile can adjust the
-   output format of underlying rocprof tool which changes the output format of raw performance
-   counter data in the workload folder created during profiling. Supported output formats are
-   ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
+  output format of underlying rocprof tool which changes the output format of raw performance
+  counter data in the workload folder created during profiling. Supported output formats are
+  ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
 
 .. note::
 
-   The default output format will be changed to ``rocpd`` in the future releases of ROCm Compute Profiler.
+   The default output format will be changed to ``rocpd`` in a future release of ROCm Compute Profiler.
 
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.

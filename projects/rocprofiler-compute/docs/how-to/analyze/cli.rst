@@ -318,10 +318,12 @@ Per-kernel roofline analysis
   When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
 
   .. code-block:: shell-session
+
      $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
   This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
 
   .. code-block:: text
+
    ================================================================================
    4. Roofline
    ================================================================================
@@ -372,6 +374,7 @@ Per-kernel roofline analysis
   Analyze multiple kernels for comparison:
 
   .. code-block:: shell-session
+
      $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
 
 Baseline comparison
