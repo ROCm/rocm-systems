@@ -310,11 +310,10 @@ class OmniAnalyze_Base:
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
         if self.__args.output_format == "txt":
-            if self.__args.output_name:
-                self._output = open(f"{self.__args.output_name}.txt", "w+")
-                print(f"Created file: {self.__args.output_name}.txt")
-            else:
-                self._output = open(f"rocprof_compute_{get_uuid()}.txt", "w+")
+            output_filename = self.__args.output_name or f"rocprof_compute_{get_uuid()}"
+            output_filename += ".txt"
+            self._output = open(output_filename, "w+")
+            print(f"Created file: {output_filename}")
         elif self.__args.output_format == "stdout":
             self._output = sys.stdout
 
