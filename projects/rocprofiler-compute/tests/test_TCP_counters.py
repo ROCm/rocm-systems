@@ -167,7 +167,9 @@ def test_L1_cache_counters(
             workload_dir,
             "-b",
             "16.3",
-            "--save-dfs",
+            "--output-format",
+            "csv",
+            "--output-name",
             workload_dir,
         ])
         assert return_code == 0
