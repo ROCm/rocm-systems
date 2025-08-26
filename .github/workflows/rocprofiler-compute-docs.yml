@@ -38,7 +38,7 @@ jobs:
           pip3 install -r docs/archive/requirements-doc.txt
       - name: Setup Pages
         working-directory: projects/rocprofiler-compute
-        uses: actions/configure-pages@v5
+        uses: actions/configure-pages@v4
       - name: Build 1.x docs
         working-directory: projects/rocprofiler-compute
         run: |
@@ -69,4 +69,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@v4
