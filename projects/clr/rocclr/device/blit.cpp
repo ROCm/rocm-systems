@@ -1,4 +1,4 @@
-/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+/* Copyright (c) 2010 - 2025 Advanced Micro Devices, Inc.
 
  Permission is hereby granted, free of charge, to any person obtaining a copy
  of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,8 @@ bool HostBlitManager::readBuffer(device::Memory& srcMemory, void* dstHost,
     LogError("Couldn't map device memory for host read");
     return false;
   }
-
+  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy D2H, src=%p, dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + origin[0]), dstHost, size[0]);
   // Copy memory
   std::memcpy(dstHost, reinterpret_cast<const_address>(src) + origin[0], size[0]);
 
@@ -162,6 +163,8 @@ bool HostBlitManager::writeBuffer(const void* srcHost, device::Memory& dstMemory
     return false;
   }
 
+  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy H2D, src=%p, dst=%p, size=%zu",
+        srcHost, (reinterpret_cast<address>(dst) + origin[0]), size[0]);
   // Copy memory
   std::memcpy(reinterpret_cast<address>(dst) + origin[0], srcHost, size[0]);
 
@@ -291,7 +294,9 @@ bool HostBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstM
     LogError("Couldn't map destination memory");
     return false;
   }
-
+  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy for copyBuffer, src=%p, dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + srcOrigin[0]),
+          (reinterpret_cast<address>(dst) + dstOrigin[0]), size[0]);
   // Straight forward buffer copy
   std::memcpy((reinterpret_cast<address>(dst) + dstOrigin[0]),
               (reinterpret_cast<const_address>(src) + srcOrigin[0]), size[0]);
@@ -322,6 +327,11 @@ bool HostBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& 
     LogError("Couldn't map destination memory");
     return false;
   }
+
+  ClPrint(amd::LOG_INFO, amd::LOG_COPY, "Using host memcpy for copyBufferRect, src=%p, "
+          "dst=%p, size=%zu",
+          (reinterpret_cast<const_address>(src) + srcRect.offset(0, 0, 0)),
+          (reinterpret_cast<address>(dst) + dstRect.offset(0, 0, 0)), size[0]);
 
   for (size_t z = 0; z < size[2]; ++z) {
     for (size_t y = 0; y < size[1]; ++y) {

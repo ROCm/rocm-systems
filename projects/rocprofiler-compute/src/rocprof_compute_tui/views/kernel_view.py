@@ -133,25 +133,8 @@ class KernelView(Container):
                 df_path = self.kernel_to_df_dict[kernel["Kernel_Name"]]["7. Wavefront"][
                     "7.1 Wavefront Launch Stats"
                 ]["df"]
-                metric_avg = (
-                    df_path[df_path["Metric"] == new_metric]["Avg"].iloc[0].item()
-                )
+                metric_avg = df_path[df_path["Metric"] == new_metric]["Avg"].iloc[0]
                 self.top_kernel_to_df_list[i][new_metric] = metric_avg
-
-        """
-        header_order = [
-            "Dispatch_ID",
-            "Kernel_Name",
-            "Mean(ns)",
-            "Median(ns)",
-            "Sum(ns)",
-            "Compute Throughput",
-            "Memory Throughput",
-            "VGPRs",
-            "Grid Size",
-            "Workgroup Size",
-        ]
-        """
 
     @on(RadioSet.Changed)
     def on_radio_changed(self, event: RadioSet.Changed) -> None:
