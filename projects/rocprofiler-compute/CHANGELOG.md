@@ -21,6 +21,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Added interactive metric descriptions in TUI analyze mode
   * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
 
+* Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
@@ -99,6 +101,12 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Data-Return Busy
   * L1I-L2 Bandwidth
   * sL1D-L2 BW
+
+* Analysis output:
+  * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
+    * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
+    * Add ``--output-name`` analysis mode option to override the default file/folder name.
+  * Replace `--save-dfs` analyze mode option with `--output-format csv`
 
 ### Resolved issues
 

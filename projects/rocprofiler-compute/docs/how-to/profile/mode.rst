@@ -24,6 +24,15 @@ Profiling with ROCm Compute Profiler yields the following benefits.
 * :ref:`Automate counter collection <profiling-routine>`: ROCm Compute Profiler handles all
   of your profiling via pre-configured input files.
 
+* :ref:`Profiling output format <profiling-output-format>`: ROCm Compute Profile can adjust the
+  output format of underlying rocprof tool which changes the output format of raw performance
+  counter data in the workload folder created during profiling. Supported output formats are
+  ``json``, ``csv``, and ``rocpd``. The default output format is ``csv``.
+
+.. note::
+
+   The default output format will be changed to ``rocpd`` in a future release of ROCm Compute Profiler.
+
 * :ref:`Filtering <filtering>`: Apply runtime filters to speed up the profiling
   process.
 
@@ -216,6 +225,32 @@ an Instinct MI210 vs an Instinct MI250.
    -rw-r--r-- 1 auser agroup   599 Mar  1 15:15 SQ_LEVEL_WAVES.csv
    -rw-r--r-- 1 auser agroup   650 Mar  1 15:15 sysinfo.csv
    -rw-r--r-- 1 auser agroup   399 Mar  1 15:15 timestamps.csv
+
+.. _profiling-output-format:
+
+Profiling output format
+-----------------------
+
+Use the ``--format-rocprof-output <format>`` profile mode option to specify the output format
+of the underlying ``rocprof`` tool. The following formats are supported:
+
+* ``csv`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in csv format.
+   * The generated csv files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
+   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+
+* ``json`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in json format.
+   * The generated json files across multiple runs of rocprof are processed and dumped into the workload directory as csv files.
+   * Multiple csv files are merged into single pmc_perf.csv file in workload directory.
+
+* ``rocpd`` format:
+   * Ask underlying rocprof tool to dump raw performance counter data in rocpd format.
+   * Multiple ``rocpd`` database files containding counter collection data are merged into a single csv under the workload folder.
+     The database files are then removed.
+   * Use ``--retain-rocpd-output`` profile mode option to preserve the ``rocpd`` database(s) in the workload folder.
+     This is useful for custom analysis of profiling data.
+
 
 .. _filtering:
 

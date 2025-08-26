@@ -767,6 +767,32 @@ def test_roof_rocpd(binary_handler_profile_rocprof_compute):
 
 
 @pytest.mark.misc
+def test_analyze_rocpd(
+    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+):
+    workload_dir = test_utils.get_output_dir()
+    options = ["--device", "0", "--format-rocprof-output", "rocpd"]
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
+
+    db_name = "test"
+    code = binary_handler_analyze_rocprof_compute([
+        "analyze",
+        "--output-format",
+        "db",
+        "--output-name",
+        f"{db_name}",
+        "--path",
+        workload_dir,
+    ])
+    assert code == 0
+    assert os.path.isfile(f"{db_name}.db")
+
+    # Remove test.db
+    os.remove(f"{db_name}.db")
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
 def test_roofline_workload_dir_not_set_error():
     """
     Test roof_setup() error: "Workload directory is not set. Cannot perform setup."
