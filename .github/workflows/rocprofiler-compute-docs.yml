@@ -33,23 +33,28 @@ jobs:
         with:
             sparse-checkout: projects/rocprofiler-compute
       - name: Additional python packages
+        working-directory: projects/rocprofiler-compute
         run: |
-          cd projects/rocprofiler-compute
           pip3 install -r docs/archive/requirements-doc.txt
       - name: Setup Pages
+        working-directory: projects/rocprofiler-compute
         uses: actions/configure-pages@v5
       - name: Build 1.x docs
+        working-directory: projects/rocprofiler-compute
         run: |
           cd docs/archive/docs-1.x
           make html
       - name: Build 2.x docs
+        working-directory: projects/rocprofiler-compute
         run: |
           cd docs/archive/docs-2.x
           make html
       - name: Relocate 1.x docs
+        working-directory: projects/rocprofiler-compute
         run: |
           mv docs/archive/docs-1.x/_build/html docs/archive/_build/html/1.x
       - name: Upload artifact
+        working-directory: projects/rocprofiler-compute
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./docs/archive/_build/html
