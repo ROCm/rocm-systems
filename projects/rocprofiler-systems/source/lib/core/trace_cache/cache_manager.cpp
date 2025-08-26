@@ -141,19 +141,23 @@ cache_manager::post_process_bulk()
         _post_processing.post_process_metadata();
         _parser.consume_storage();
         _post_processing.get_data_processor()->flush();
-    }
 
-    for(const auto& [pid, files] : cache_map)
-    {
-        if(!files.buff_storage.empty() && !files.metadata.empty())
+        for(const auto& [pid, files] : cache_map)
         {
-            m_metadata.load_from_file(files.metadata);
-            rocpd_post_processing _post_processing(m_metadata, pid);
-            storage_parser        _parser(pid, files.buff_storage);
-            _post_processing.register_parser_callback(_parser);
-            _post_processing.post_process_metadata();
-            _parser.consume_storage();
-            _post_processing.get_data_processor()->flush();
+            if(!files.buff_storage.empty() && !files.metadata.empty())
+            {
+                std::cout << "Creating database for [" << pid
+                          << "]: " << files.buff_storage << " " << files.metadata
+                          << std::endl;
+                metadata_registry metadata;
+                metadata.load_from_file(files.metadata);
+                rocpd_post_processing _post_processing(metadata, pid);
+                storage_parser        _parser(getpid(), files.buff_storage);
+                _post_processing.register_parser_callback(_parser);
+                _post_processing.post_process_metadata();
+                _parser.consume_storage();
+                _post_processing.get_data_processor()->flush();
+            }
         }
     }
 }

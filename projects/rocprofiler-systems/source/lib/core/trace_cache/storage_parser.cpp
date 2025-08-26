@@ -50,13 +50,14 @@ storage_parser::register_type_callback(
 void
 storage_parser::consume_storage()
 {
-    ROCPROFSYS_DEBUG("Consuming buffered storage with filename: %s", m_filename.c_str());
-    if(m_pid != getpid())
-    {
-        ROCPROFSYS_DEBUG(
-            "Storage parser is not created in same process as shutting down..");
-        return;
-    }
+    ROCPROFSYS_VERBOSE(0, "Consuming buffered storage with filename: %s",
+                       m_filename.c_str());
+    // if(m_pid != getpid())
+    // {
+    //     ROCPROFSYS_DEBUG(
+    //         "Storage parser is not created in same process as shutting down..");
+    //     return;
+    // }
 
     std::ifstream ifs(m_filename, std::ios::binary);
     if(!ifs)

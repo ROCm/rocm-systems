@@ -35,7 +35,7 @@ public:
     static std::shared_ptr<data_processor> create_data_processor(int pid)
     {
         auto db = create_database(pid);
-        return std::make_shared<data_processor>(db);
+        return create_data_processor(db);
     }
 
 private:

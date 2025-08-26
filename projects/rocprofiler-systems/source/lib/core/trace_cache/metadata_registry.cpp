@@ -1,12 +1,15 @@
 
 
 #include "metadata_registry.hpp"
+#include "agent.hpp"
+#include "agent_manager.hpp"
 #include <algorithm>
 #include <cstdint>
 
 #include <fstream>
 
 #include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
 
 namespace rocprofsys
 {
@@ -653,6 +656,7 @@ metadata_registry::save_to_file(const std::string& filepath) const
 
         file << json_string;
         file.close();
+        std::cout << "saving to file" << filepath << std::endl;
         return true;
     } catch(const std::exception& e)
     {
