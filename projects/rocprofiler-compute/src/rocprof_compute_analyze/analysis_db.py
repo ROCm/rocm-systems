@@ -233,6 +233,8 @@ class db_analysis(OmniAnalyze_Base):
                         keys.append(f"{dtype}Ops")
                 elif dtype in MFMA_DATATYPES:
                     if dtype.startswith("F"):
+                        # FP16 -> F16
+                        dtype = dtype.replace("FP", "F")
                         keys.append(f"MFMA{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"MFMA{dtype}Ops")
