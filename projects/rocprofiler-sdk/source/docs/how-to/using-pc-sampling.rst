@@ -372,3 +372,51 @@ This information is useful for understanding how many instructions per cycle (IP
 .. note::
 
   The stochastic PC sampling is supported on AMD Instinct MI300, MI325, MI350, and MI355.
+
+## ROCPD database output
+
+For advanced analysis and querying capabilities, PC sampling data can be stored in a SQLite database using the ROCPD format:
+
+```bash
+rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap --pc-sampling-unit time --pc-sampling-interval 1 --output-format rocpd -- <application_path>
+```
+
+This generates a SQLite database file (`<process_id>_rocpd.db`) containing PC sampling data with the following benefits:
+
+- **SQL querying**: Use standard SQL to filter, aggregate, and analyze PC sampling data
+- **Structured storage**: All PC sampling metadata and samples stored in normalized tables
+- **Cross-referencing**: Easy correlation between samples, kernel dispatches, and API calls
+- **Performance**: Fast queries on large datasets using database indexing
+
+### Database schema
+
+The ROCPD database contains several key tables for PC sampling:
+
+- `rocpd_sample`: Core PC sampling records with timestamps and hardware IDs
+- `rocpd_event`: Extended data including instruction information and correlation IDs
+- `pc_sampling`: Unified view that contains both host-trap and stochastic sampling data
+
+The `pc_sampling` view contains all fields for both sampling methods:
+- Common fields like timestamps, instruction information, and hardware IDs
+- Stochastic-specific fields (wave_issued, inst_type, stall_reason, etc.) which will be NULL for host-trap records
+
+### Browsing PC sampling data
+
+When you open the `pc_sampling` view, you can see all PC sampling data in a tabular format. You can filter by the `sampling_method` column to focus on either "host_trap" or "stochastic" samples:
+
+```sql
+-- Query only stochastic samples
+SELECT * FROM pc_sampling WHERE sampling_method = 'stochastic';
+
+-- Query only host-trap samples
+SELECT * FROM pc_sampling WHERE sampling_method = 'host_trap';
+
+Browsing PC sampling data
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+When you open the ``pc_sampling`` view, you can see the actual PC sampling data in a tabular format:
+
+.. figure:: /data/pc_sampling_data_view.png
+   :alt: PC sampling data in database browser
+   :align: center
+   :width: 100%

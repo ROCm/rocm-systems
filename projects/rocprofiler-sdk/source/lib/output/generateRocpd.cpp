@@ -75,6 +75,231 @@
 
 ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN
 
+// PC sampling structures for serialization
+struct pc_line_info_data
+{
+    uint64_t code_object_id     = 0;
+    uint64_t code_object_offset = 0;
+};
+
+struct line_info_data
+{
+    pc_line_info_data pc;
+};
+
+struct workgroup_id_data
+{
+    uint32_t x = 0;
+    uint32_t y = 0;
+    uint32_t z = 0;
+};
+
+struct hw_id_data
+{
+    uint64_t chiplet          = 0;
+    uint64_t wave_id          = 0;
+    uint64_t simd_id          = 0;
+    uint64_t pipe_id          = 0;
+    uint64_t cu_or_wgp_id     = 0;
+    uint64_t shader_array_id  = 0;
+    uint64_t shader_engine_id = 0;
+    uint64_t workgroup_id     = 0;
+    uint64_t vm_id            = 0;
+    uint64_t queue_id         = 0;
+    uint64_t microengine_id   = 0;
+};
+
+// Stochastic PC sampling structures (for completeness)
+struct stochastic_snapshot_data
+{
+    std::string stall_reason               = {};
+    bool        dual_issue_valu            = false;
+    bool        arb_state_issue_valu       = false;
+    bool        arb_state_issue_matrix     = false;
+    bool        arb_state_issue_lds        = false;
+    bool        arb_state_issue_lds_direct = false;
+    bool        arb_state_issue_scalar     = false;
+    bool        arb_state_issue_vmem_tex   = false;
+    bool        arb_state_issue_flat       = false;
+    bool        arb_state_issue_exp        = false;
+    bool        arb_state_issue_misc       = false;
+    bool        arb_state_issue_brmsg      = false;
+    bool        arb_state_stall_valu       = false;
+    bool        arb_state_stall_matrix     = false;
+    bool        arb_state_stall_lds        = false;
+    bool        arb_state_stall_lds_direct = false;
+    bool        arb_state_stall_scalar     = false;
+    bool        arb_state_stall_vmem_tex   = false;
+    bool        arb_state_stall_flat       = false;
+    bool        arb_state_stall_exp        = false;
+    bool        arb_state_stall_misc       = false;
+    bool        arb_state_stall_brmsg      = false;
+};
+
+struct stochastic_memory_counters
+{
+    uint32_t load_cnt   = 0;
+    uint32_t store_cnt  = 0;
+    uint32_t bvh_cnt    = 0;
+    uint32_t sample_cnt = 0;
+    uint32_t ds_cnt     = 0;
+    uint32_t km_cnt     = 0;
+};
+
+struct stochastic_flags
+{
+    bool has_mem_cnt = false;
+};
+
+// Event data for PC sampling (common for both host trap and stochastic)
+struct pc_sampling_event_data
+{
+    workgroup_id_data workgroup_id;
+    uint64_t          dispatch_id = 0;
+
+    // Stochastic-specific fields (optional, only populated for stochastic)
+    std::optional<bool>                       wave_issued;
+    std::optional<std::string>                inst_type;
+    std::optional<uint32_t>                   wave_count;
+    std::optional<stochastic_flags>           flags;
+    std::optional<stochastic_snapshot_data>   snapshot;
+    std::optional<stochastic_memory_counters> memory_counters;
+};
+
+// Sample data for PC sampling
+struct pc_sampling_sample_data
+{
+    std::string sampling_method;
+    std::string instruction;
+    std::string instruction_comment;
+    std::string exec_mask;
+    uint32_t    wave_in_group = 0;
+    hw_id_data  hw_id;
+};
+
+// Serialization functions for all PC sampling structures
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const pc_line_info_data& data)
+{
+    ar(cereal::make_nvp("code_object_id", data.code_object_id));
+    ar(cereal::make_nvp("code_object_offset", data.code_object_offset));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const line_info_data& data)
+{
+    ar(cereal::make_nvp("pc", data.pc));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const workgroup_id_data& data)
+{
+    ar(cereal::make_nvp("x", data.x));
+    ar(cereal::make_nvp("y", data.y));
+    ar(cereal::make_nvp("z", data.z));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const hw_id_data& data)
+{
+    ar(cereal::make_nvp("chiplet", data.chiplet));
+    ar(cereal::make_nvp("wave_id", data.wave_id));
+    ar(cereal::make_nvp("simd_id", data.simd_id));
+    ar(cereal::make_nvp("pipe_id", data.pipe_id));
+    ar(cereal::make_nvp("cu_or_wgp_id", data.cu_or_wgp_id));
+    ar(cereal::make_nvp("shader_array_id", data.shader_array_id));
+    ar(cereal::make_nvp("shader_engine_id", data.shader_engine_id));
+    ar(cereal::make_nvp("workgroup_id", data.workgroup_id));
+    ar(cereal::make_nvp("vm_id", data.vm_id));
+    ar(cereal::make_nvp("queue_id", data.queue_id));
+    ar(cereal::make_nvp("microengine_id", data.microengine_id));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const stochastic_snapshot_data& data)
+{
+    ar(cereal::make_nvp("stall_reason", data.stall_reason));
+    ar(cereal::make_nvp("dual_issue_valu", data.dual_issue_valu));
+    ar(cereal::make_nvp("arb_state_issue_valu", data.arb_state_issue_valu));
+    ar(cereal::make_nvp("arb_state_issue_matrix", data.arb_state_issue_matrix));
+    ar(cereal::make_nvp("arb_state_issue_lds", data.arb_state_issue_lds));
+    ar(cereal::make_nvp("arb_state_issue_lds_direct", data.arb_state_issue_lds_direct));
+    ar(cereal::make_nvp("arb_state_issue_scalar", data.arb_state_issue_scalar));
+    ar(cereal::make_nvp("arb_state_issue_vmem_tex", data.arb_state_issue_vmem_tex));
+    ar(cereal::make_nvp("arb_state_issue_flat", data.arb_state_issue_flat));
+    ar(cereal::make_nvp("arb_state_issue_exp", data.arb_state_issue_exp));
+    ar(cereal::make_nvp("arb_state_issue_misc", data.arb_state_issue_misc));
+    ar(cereal::make_nvp("arb_state_issue_brmsg", data.arb_state_issue_brmsg));
+    ar(cereal::make_nvp("arb_state_stall_valu", data.arb_state_stall_valu));
+    ar(cereal::make_nvp("arb_state_stall_matrix", data.arb_state_stall_matrix));
+    ar(cereal::make_nvp("arb_state_stall_lds", data.arb_state_stall_lds));
+    ar(cereal::make_nvp("arb_state_stall_lds_direct", data.arb_state_stall_lds_direct));
+    ar(cereal::make_nvp("arb_state_stall_scalar", data.arb_state_stall_scalar));
+    ar(cereal::make_nvp("arb_state_stall_vmem_tex", data.arb_state_stall_vmem_tex));
+    ar(cereal::make_nvp("arb_state_stall_flat", data.arb_state_stall_flat));
+    ar(cereal::make_nvp("arb_state_stall_exp", data.arb_state_stall_exp));
+    ar(cereal::make_nvp("arb_state_stall_misc", data.arb_state_stall_misc));
+    ar(cereal::make_nvp("arb_state_stall_brmsg", data.arb_state_stall_brmsg));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const stochastic_memory_counters& data)
+{
+    ar(cereal::make_nvp("load_cnt", data.load_cnt));
+    ar(cereal::make_nvp("store_cnt", data.store_cnt));
+    ar(cereal::make_nvp("bvh_cnt", data.bvh_cnt));
+    ar(cereal::make_nvp("sample_cnt", data.sample_cnt));
+    ar(cereal::make_nvp("ds_cnt", data.ds_cnt));
+    ar(cereal::make_nvp("km_cnt", data.km_cnt));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const stochastic_flags& data)
+{
+    ar(cereal::make_nvp("has_mem_cnt", data.has_mem_cnt));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const pc_sampling_event_data& data)
+{
+    ar(cereal::make_nvp("workgroup_id", data.workgroup_id));
+    ar(cereal::make_nvp("dispatch_id", data.dispatch_id));
+
+    // Save optional stochastic fields if they exist
+    if(data.wave_issued.has_value()) ar(cereal::make_nvp("wave_issued", data.wave_issued.value()));
+
+    if(data.inst_type.has_value()) ar(cereal::make_nvp("inst_type", data.inst_type.value()));
+
+    if(data.wave_count.has_value()) ar(cereal::make_nvp("wave_count", data.wave_count.value()));
+
+    if(data.flags.has_value()) ar(cereal::make_nvp("flags", data.flags.value()));
+
+    if(data.snapshot.has_value()) ar(cereal::make_nvp("snapshot", data.snapshot.value()));
+
+    if(data.memory_counters.has_value())
+        ar(cereal::make_nvp("memory_counters", data.memory_counters.value()));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const pc_sampling_sample_data& data)
+{
+    ar(cereal::make_nvp("sampling_method", data.sampling_method));
+    ar(cereal::make_nvp("instruction", data.instruction));
+    ar(cereal::make_nvp("instruction_comment", data.instruction_comment));
+    ar(cereal::make_nvp("exec_mask", data.exec_mask));
+    ar(cereal::make_nvp("wave_in_group", data.wave_in_group));
+    ar(cereal::make_nvp("hw_id", data.hw_id));
+}
+
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, const ::rocprofiler::tool::argument_info& data)
@@ -562,7 +787,9 @@ write_rocpd(
     const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
     const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
     const generator<rocprofiler_buffer_tracing_rocdecode_api_ext_record_t>& rocdecode_api_gen,
-    const generator<tool_counter_record_t>&                                 counter_collection_gen)
+    const generator<tool_counter_record_t>&                                 counter_collection_gen,
+    const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>&  pc_sampling_host_trap_gen,
+    const generator<rocprofiler_tool_pc_sampling_stochastic_record_t>& pc_sampling_stochastic_gen)
 {
     static auto get_simple_timer = [](std::string_view label) {
         return common::simple_timer{fmt::format("SQLite3 generation :: {:24}", label)};
@@ -665,6 +892,8 @@ write_rocpd(
 
     for(const auto& itr : tool_metadata.get_counter_dimension_info())
         add_string_entry(_metadata, itr.name);
+
+    add_string_entry(_metadata, "pc_sample");
 
     auto thread_ids = std::set<rocprofiler_thread_id_t>{};
     auto stream_set = std::unordered_set<rocprofiler_stream_id_t>{};
@@ -1441,6 +1670,219 @@ write_rocpd(
         }
     };
 
+    // Helper function to get instruction info
+    auto get_instruction_info =
+        [&tool_metadata](const auto& itr) -> std::pair<std::string, std::string> {
+        if(itr.inst_index == -1)
+        {
+            return {"",
+                    "Unrecognized code object id, physical virtual address of PC:" +
+                        std::to_string(itr.pc_sample_record.pc.code_object_offset)};
+        }
+        else
+        {
+            return {std::string(tool_metadata.get_instruction(itr.inst_index)),
+                    std::string(tool_metadata.get_comment(itr.inst_index))};
+        }
+    };
+
+    auto insert_pc_sampling_data = [&](const auto&        pc_sampling_gen,
+                                       const std::string& sampling_method) {
+        for(auto pitr : pc_sampling_gen)
+        {
+            auto _deferred = sql::deferred_transaction{conn};
+            for(auto itr : pc_sampling_gen.get(pitr))
+            {
+                const auto& record = itr.pc_sample_record;
+
+                // Register thread ID
+                get_thread_id(record.correlation_id.internal);
+
+                // Get instruction info
+                auto [instruction, instruction_comment] = get_instruction_info(itr);
+
+                // Create line_info data structure
+                cereal::line_info_data line_info{
+                    .pc = {.code_object_id     = record.pc.code_object_id,
+                           .code_object_offset = record.pc.code_object_offset}};
+
+                // Serialize line_info to JSON
+                std::string line_info_json =
+                    get_json_string([&line_info](auto& ar) { cereal::save(ar, line_info); });
+
+                // Create event data structure with all fields properly initialized
+                cereal::pc_sampling_event_data event_data{
+                    .workgroup_id    = {.x = record.workgroup_id.x,
+                                     .y = record.workgroup_id.y,
+                                     .z = record.workgroup_id.z},
+                    .dispatch_id     = record.dispatch_id,
+                    .wave_issued     = std::nullopt,
+                    .inst_type       = std::nullopt,
+                    .wave_count      = std::nullopt,
+                    .flags           = std::nullopt,
+                    .snapshot        = std::nullopt,
+                    .memory_counters = std::nullopt};
+
+                // Add stochastic-specific data only for stochastic records
+                if(sampling_method == "stochastic")
+                {
+                    if constexpr(std::is_same_v<
+                                     std::decay_t<decltype(pc_sampling_gen)>,
+                                     generator<rocprofiler_tool_pc_sampling_stochastic_record_t>>)
+                    {
+                        const auto& stochastic_record = record;
+
+                        const char* inst_type_name =
+                            rocprofiler_get_pc_sampling_instruction_type_name(
+                                static_cast<rocprofiler_pc_sampling_instruction_type_t>(
+                                    stochastic_record.inst_type));
+
+                        const char* reason_not_issued_name =
+                            rocprofiler_get_pc_sampling_instruction_not_issued_reason_name(
+                                static_cast<
+                                    rocprofiler_pc_sampling_instruction_not_issued_reason_t>(
+                                    stochastic_record.snapshot.reason_not_issued));
+
+                        std::string inst_type_str =
+                            inst_type_name ? std::string(inst_type_name)
+                                           : std::to_string(stochastic_record.inst_type);
+
+                        std::string reason_str =
+                            reason_not_issued_name
+                                ? std::string(reason_not_issued_name)
+                                : std::to_string(stochastic_record.snapshot.reason_not_issued);
+
+                        // Add stochastic-specific fields to event data
+                        event_data.wave_issued = static_cast<bool>(stochastic_record.wave_issued);
+                        event_data.inst_type   = sanitize_sql_string(inst_type_str);
+                        event_data.wave_count  = stochastic_record.wave_count;
+
+                        event_data.flags = cereal::stochastic_flags{
+                            .has_mem_cnt =
+                                static_cast<bool>(stochastic_record.flags.has_memory_counter)};
+
+                        event_data.snapshot = cereal::stochastic_snapshot_data{
+                            .stall_reason = sanitize_sql_string(reason_str),
+                            .dual_issue_valu =
+                                static_cast<bool>(stochastic_record.snapshot.dual_issue_valu),
+                            .arb_state_issue_valu =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_valu),
+                            .arb_state_issue_matrix = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_issue_matrix),
+                            .arb_state_issue_lds =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_lds),
+                            .arb_state_issue_lds_direct = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_issue_lds_direct),
+                            .arb_state_issue_scalar = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_issue_scalar),
+                            .arb_state_issue_vmem_tex = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_issue_vmem_tex),
+                            .arb_state_issue_flat =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_flat),
+                            .arb_state_issue_exp =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_exp),
+                            .arb_state_issue_misc =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_misc),
+                            .arb_state_issue_brmsg =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_issue_brmsg),
+                            .arb_state_stall_valu =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_valu),
+                            .arb_state_stall_matrix = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_stall_matrix),
+                            .arb_state_stall_lds =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_lds),
+                            .arb_state_stall_lds_direct = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_stall_lds_direct),
+                            .arb_state_stall_scalar = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_stall_scalar),
+                            .arb_state_stall_vmem_tex = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_stall_vmem_tex),
+                            .arb_state_stall_flat =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_flat),
+                            .arb_state_stall_exp =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_exp),
+                            .arb_state_stall_misc =
+                                static_cast<bool>(stochastic_record.snapshot.arb_state_stall_misc),
+                            .arb_state_stall_brmsg = static_cast<bool>(
+                                stochastic_record.snapshot.arb_state_stall_brmsg)};
+
+                        // Add memory counters if present
+                        if(stochastic_record.flags.has_memory_counter)
+                        {
+                            event_data.memory_counters = cereal::stochastic_memory_counters{
+                                .load_cnt = static_cast<uint32_t>(
+                                    stochastic_record.memory_counters.load_cnt),
+                                .store_cnt = static_cast<uint32_t>(
+                                    stochastic_record.memory_counters.store_cnt),
+                                .bvh_cnt = static_cast<uint32_t>(
+                                    stochastic_record.memory_counters.bvh_cnt),
+                                .sample_cnt = static_cast<uint32_t>(
+                                    stochastic_record.memory_counters.sample_cnt),
+                                .ds_cnt =
+                                    static_cast<uint32_t>(stochastic_record.memory_counters.ds_cnt),
+                                .km_cnt = static_cast<uint32_t>(
+                                    stochastic_record.memory_counters.km_cnt)};
+                        }
+                    }
+                }
+
+                // Serialize event data to JSON
+                std::string event_extdata =
+                    get_json_string([&event_data](auto& ar) { cereal::save(ar, event_data); });
+
+                // Create event with PC sampling metadata
+                auto evt_id = create_event(
+                    conn,
+                    {insert_value("stack_id", record.correlation_id.internal),
+                     insert_value("parent_stack_id", record.correlation_id.internal),
+                     insert_value("correlation_id", record.correlation_id.external.value),
+                     insert_value("line_info", line_info_json),
+                     insert_value("extdata", event_extdata)});
+
+                // Create track_id
+                auto pc_track_id = get_track_id(conn,
+                                                node_id,
+                                                this_pid,
+                                                record.correlation_id.internal,
+                                                string_entries.at("pc_sample"),
+                                                R"({})");
+
+                // Create sample data structure
+                cereal::pc_sampling_sample_data sample_data{
+                    .sampling_method     = sampling_method,
+                    .instruction         = sanitize_sql_string(instruction),
+                    .instruction_comment = sanitize_sql_string(instruction_comment),
+                    .exec_mask           = std::to_string(static_cast<uint64_t>(record.exec_mask)),
+                    .wave_in_group       = static_cast<uint32_t>(record.wave_in_group),
+                    .hw_id               = {
+                        .chiplet          = static_cast<uint64_t>(record.hw_id.chiplet),
+                        .wave_id          = static_cast<uint64_t>(record.hw_id.wave_id),
+                        .simd_id          = static_cast<uint64_t>(record.hw_id.simd_id),
+                        .pipe_id          = static_cast<uint64_t>(record.hw_id.pipe_id),
+                        .cu_or_wgp_id     = static_cast<uint64_t>(record.hw_id.cu_or_wgp_id),
+                        .shader_array_id  = static_cast<uint64_t>(record.hw_id.shader_array_id),
+                        .shader_engine_id = static_cast<uint64_t>(record.hw_id.shader_engine_id),
+                        .workgroup_id     = static_cast<uint64_t>(record.hw_id.workgroup_id),
+                        .vm_id            = static_cast<uint64_t>(record.hw_id.vm_id),
+                        .queue_id         = static_cast<uint64_t>(record.hw_id.queue_id),
+                        .microengine_id   = static_cast<uint64_t>(record.hw_id.microengine_id)}};
+
+                // Serialize sample data to JSON
+                std::string sample_extdata =
+                    get_json_string([&sample_data](auto& ar) { cereal::save(ar, sample_data); });
+
+                // Insert sample with serialized data
+                auto stmt = get_insert_statement("rocpd_sample{{uuid}}",
+                                                 {insert_value("track_id", pc_track_id),
+                                                  insert_value("timestamp", record.timestamp),
+                                                  insert_value("event_id", evt_id),
+                                                  insert_value("extdata", sample_extdata)});
+
+                execute_raw_sql_statements(conn, stmt);
+            }
+        }
+    };
+
     auto dispatch_to_evt_id = common::container::stable_vector<uint64_t, 512>{};
 
     insert_node_data();
@@ -1455,7 +1897,7 @@ write_rocpd(
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_region");
-        insert_api_data(hip_api_gen);  // arg string entries can be added to _metadata
+        insert_api_data(hip_api_gen);
         insert_api_data(hsa_api_gen);
         insert_api_data(marker_api_gen);
         insert_api_data(rccl_api_gen);
@@ -1465,6 +1907,8 @@ write_rocpd(
     insert_kernel_dispatch_data(dispatch_to_evt_id);
     insert_pmc_event_data(dispatch_to_evt_id);
     insert_memory_copy_data(memory_copy_gen);
+    insert_pc_sampling_data(pc_sampling_host_trap_gen, "host_trap");
+    insert_pc_sampling_data(pc_sampling_stochastic_gen, "stochastic");
 
     {
         auto _sqlgenperf_rocpd = get_simple_timer("rocpd_memory_allocate");
