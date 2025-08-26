@@ -2434,7 +2434,7 @@ bool Device::ImportShareableHSAHandle(void* osHandle, uint64_t* hsa_handle_ptr) 
     return false;
   }
 
-  int dmabuf_fd = *(reinterpret_cast<int*>(osHandle));
+  int dmabuf_fd = static_cast<int>(reinterpret_cast<uintptr_t>(osHandle));
   if ((hsa_status = hsa_amd_vmem_import_shareable_handle(dmabuf_fd, &hsa_vmem_handle)) !=
       HSA_STATUS_SUCCESS) {
     LogPrintfError("Failed hsa_amd_vmem_import_shareable_handle with status: %d \n", hsa_status);
