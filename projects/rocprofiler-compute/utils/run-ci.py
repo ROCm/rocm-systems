@@ -39,54 +39,28 @@ def detect_repo_structure():
     """Detect if in monorepo or standalone structure"""
     cwd = Path.cwd()
 
-    if 'projects/rocprofiler-compute' in str(cwd):
+    if "projects/rocprofiler-compute" in str(cwd):
         parts = cwd.parts
-        idx = parts.index('rocprofiler-compute')
-        if idx > 0 and parts[idx-1] == 'projects':
-            monorepo_root = Path(*parts[:idx-1])
-            project_root = monorepo_root / 'projects' / 'rocprofiler-compute'
+        idx = parts.index("rocprofiler-compute")
+        if idx > 0 and parts[idx - 1] == "projects":
+            monorepo_root = Path(*parts[: idx - 1])
+            project_root = monorepo_root / "projects" / "rocprofiler-compute"
             return True, monorepo_root, project_root
 
-    if (cwd / 'CMakeLists.txt').exists():
-        with open(cwd / 'CMakeLists.txt', 'r') as f:
+    if (cwd / "CMakeLists.txt").exists():
+        with open(cwd / "CMakeLists.txt", "r") as f:
             content = f.read()
-            if 'project(rocprofiler-compute' in content or 'project(\n    rocprofiler-compute' in content:
+            if (
+                "project(rocprofiler-compute" in content
+                or "project(\n    rocprofiler-compute" in content
+            ):
                 return False, None, cwd
 
     return False, None, cwd
 
+
 def create_ctest_script(args):
     """Generate a CTest script for uploading coverage data"""
-
-    import tempfile
-    import xml.etree.ElementTree as ET
-    from datetime import datetime
-
-    try:
-        tree = ET.parse(args.coverage_file)
-        root = tree.getroot()
-        line_rate = float(root.get('line-rate', 0))
-        branch_rate = float(root.get('branch-rate', 0))
-
-        #create CTest Coverage.xml format
-        ctest_coverage = f"""<?xml version="1.0" encoding="UTF-8"?>
-<CoverageLog>
-  <StartDateTime>{datetime.now().isoformat()}</StartDateTime>
-  <StartTime>{int(datetime.now().timestamp())}</StartTime>
-  <Coverage>
-    <LOCTested>{int(line_rate * 1000)}</LOCTested>
-    <LOCUntested>{int((1 - line_rate) * 1000)}</LOCUntested>
-    <LOC>{1000}</LOC>
-    <PercentCoverage>{line_rate * 100:.2f}</PercentCoverage>
-  </Coverage>
-</CoverageLog>"""
-
-        with tempfile.NamedTemporaryFile(mode='w', suffix='_Coverage.xml', delete=False) as f:
-            f.write(ctest_coverage)
-            ctest_coverage_file = f.name
-    except Exception as e:
-        print(f"Warning: Could not convert coverage format: {e}")
-        ctest_coverage_file = args.coverage_file
 
     script_content = f"""
 cmake_minimum_required(VERSION 3.19)
@@ -119,44 +93,63 @@ ctest_submit(PARTS Coverage RETRY_COUNT 3 RETRY_DELAY 5)
 """
     return script_content
 
-def main():
 
-    if not os.getenv('CI'):
+def main():
+    if not os.getenv("CI"):
         print("WARNING: CDash upload should normally only be done from CI/CD")
     response = input("Continue anyway? (y/N): ")
-    if response.lower() != 'y':
+    if response.lower() != "y":
         print("Aborted.")
         return 1
 
+    parser = argparse.ArgumentParser(
+        description="Upload coverage XML to CDash for rocprofiler-compute"
+    )
 
-    parser = argparse.ArgumentParser(description="Upload coverage XML to CDash for rocprofiler-compute")
+    # required
+    parser.add_argument(
+        "--coverage-file", required=True, help="Path to coverage XML file"
+    )
+    parser.add_argument("--build-name", required=True, help="Build name for CDash")
 
-    #required
-    parser.add_argument("--coverage-file", required=True,
-                       help="Path to coverage XML file")
-    parser.add_argument("--build-name", required=True,
-                       help="Build name for CDash")
-
-    #optional
-    parser.add_argument("--project-name", default="rocprofiler-compute",
-                       help="CDash project name")
-    parser.add_argument("--submit-url",
-                       default="https://my.cdash.org/submit.php?project=rocprofiler-compute",
-                       help="CDash submission URL")
-    parser.add_argument("--cdash-host", default="my.cdash.org",
-                       help="CDash host (for older CMake)")
-    parser.add_argument("--submit-path",
-                       default="/submit.php?project=rocprofiler-compute",
-                       help="CDash submission path (for older CMake)")
-    parser.add_argument("--site", default=None,
-                       help="Site name for CDash (auto-detected if not provided)")
-    parser.add_argument("--source-dir", default=None,
-                       help="Source directory path (auto-detected if not provided)")
-    parser.add_argument("--binary-dir", default=None,
-                       help="Binary directory path (defaults to source-dir/build)")
-    parser.add_argument("--mode", default="Experimental",
-                       choices=["Experimental", "Nightly", "Continuous"],
-                       help="CTest dashboard mode")
+    # optional
+    parser.add_argument(
+        "--project-name", default="rocprofiler-compute", help="CDash project name"
+    )
+    parser.add_argument(
+        "--submit-url",
+        default="https://my.cdash.org/submit.php?project=rocprofiler-compute",
+        help="CDash submission URL",
+    )
+    parser.add_argument(
+        "--cdash-host", default="my.cdash.org", help="CDash host (for older CMake)"
+    )
+    parser.add_argument(
+        "--submit-path",
+        default="/submit.php?project=rocprofiler-compute",
+        help="CDash submission path (for older CMake)",
+    )
+    parser.add_argument(
+        "--site",
+        default=None,
+        help="Site name for CDash (auto-detected if not provided)",
+    )
+    parser.add_argument(
+        "--source-dir",
+        default=None,
+        help="Source directory path (auto-detected if not provided)",
+    )
+    parser.add_argument(
+        "--binary-dir",
+        default=None,
+        help="Binary directory path (defaults to source-dir/build)",
+    )
+    parser.add_argument(
+        "--mode",
+        default="Experimental",
+        choices=["Experimental", "Nightly", "Continuous"],
+        help="CTest dashboard mode",
+    )
     args = parser.parse_args()
 
     is_monorepo, monorepo_root, project_root = detect_repo_structure()
@@ -198,9 +191,10 @@ def main():
 
     try:
         import xml.etree.ElementTree as ET
+
         tree = ET.parse(args.coverage_file)
         root = tree.getroot()
-        line_rate = float(root.get('line-rate', 0)) * 100
+        line_rate = float(root.get("line-rate", 0)) * 100
         print(f"Line Coverage: {line_rate:.1f}%")
     except Exception as e:
         print(f"Warning: Could not parse coverage percentage: {e}")
@@ -208,7 +202,7 @@ def main():
     script_content = create_ctest_script(args)
 
     try:
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.cmake', delete=False) as f:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".cmake", delete=False) as f:
             f.write(script_content)
             script_path = f.name
 
@@ -217,7 +211,7 @@ def main():
         original_dir = os.getcwd()
         os.chdir(args.source_dir)
 
-        cmd = ['ctest', '-S', script_path, '-V']
+        cmd = ["ctest", "-S", script_path, "-V"]
         print(f"Executing: {' '.join(cmd)}")
         print(f"Working directory: {os.getcwd()}")
 
@@ -238,20 +232,26 @@ def main():
             return result.returncode
 
         print("\n✅ Coverage successfully uploaded to CDash!")
-        print(f"View results at: {args.submit_url.replace('/submit.php?project=', '/index.php?project=')}")
+        print(
+            f"View results at: {
+                args.submit_url.replace('/submit.php?project=', '/index.php?project=')
+            }"
+        )
         return 0
 
     except Exception as e:
         print(f"Error executing CTest script: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
     finally:
-        if 'script_path' in locals():
+        if "script_path" in locals():
             try:
                 os.unlink(script_path)
-            except:
+            except Exception:
                 pass
+
 
 if __name__ == "__main__":
     sys.exit(main())
