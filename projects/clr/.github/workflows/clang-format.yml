@@ -13,10 +13,16 @@ jobs:
 
       - name: Install clang-format
         run: |
-          sudo apt update && sudo apt install -y clang-format
+          wget https://github.com/cpp-linter/clang-tools-static-binaries/releases/download/master-b35c5633/clang-format-19_linux-amd64
+          wget https://raw.githubusercontent.com/llvm/llvm-project/refs/heads/main/clang/tools/clang-format/clang-format-diff.py
+          mv clang-format-19_linux-amd64 clang-format
+          chmod +x clang-format
+          chmod +x clang-format-diff.py
 
       - name: Run clang-format-check
         id: clang-format
         run: |
+          export CLANG_FORMAT=$(pwd)/clang-format
+          export CLANG_FORMAT_DIFF=$(pwd)/clang-format-diff.py
           chmod +x .github/hooks/clang-format-check.sh
           ./.github/hooks/clang-format-check.sh --range "${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}"

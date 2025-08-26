@@ -52,5 +52,5 @@ for file in $files; do
     diff_output=$(git diff -U0 --cached -- "$file")
   fi
 
-  echo "$diff_output" | "$clang_format_diff" -style=file -fallback-style=none -p1
+  echo "$diff_output" | "$clang_format_diff" -binary=$clang_bin -style=file -fallback-style=none -p1
 done
