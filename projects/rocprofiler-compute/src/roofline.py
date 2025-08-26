@@ -220,22 +220,14 @@ class Roofline:
                 flops_dt_list += f"_{dt}"
 
         if self.__run_parameters.get("include_kernel_names", False):
-            if self.__ai_data is None:
-                console_error(
-                    "Roofline Error: self.__ai_data is not populated. "
-                    "Cannot generate kernel names info.",
-                    exit=False,
-                )
-                original_kernel_names = []
-            else:
-                original_kernel_names = self.__ai_data.get("kernelNames", [])
-
-            num_kernels = len(original_kernel_names)
+            kernel_names = (
+                self.__ai_data.get("kernelNames", []) if self.__ai_data else []
+            )
 
             self.__figure.data = []
             self.__figure.layout = {}
 
-            if num_kernels == 0:
+            if not kernel_names:
                 console_log(
                     "roofline",
                     "No kernel names found to generate "
@@ -260,12 +252,8 @@ class Roofline:
                     width=400,
                 )
             else:
-                symbols_list = []
-                kernel_names_list = []
-
-                for i in range(num_kernels):
-                    symbols_list.append(SYMBOLS[i % len(SYMBOLS)])
-                    kernel_names_list.append(original_kernel_names[i])
+                num_kernels = len(kernel_names)
+                symbols_list = [SYMBOLS[i % len(SYMBOLS)] for i in range(num_kernels)]
 
                 self.__figure = go.Figure()
 
@@ -285,7 +273,8 @@ class Roofline:
                     )
                 )
 
-                for i, kernel_name in enumerate(kernel_names_list):
+                # Add kernel name annotations
+                for i, kernel_name in enumerate(kernel_names):
                     self.__figure.add_annotation(
                         x=0.25,
                         y=num_kernels - i,
@@ -297,6 +286,7 @@ class Roofline:
                         font=dict(size=11, color="black"),
                     )
 
+                # Add headers
                 self.__figure.add_annotation(
                     x=0.1,
                     y=num_kernels + 1,
@@ -316,6 +306,7 @@ class Roofline:
                     font=dict(size=12, color="black"),
                 )
 
+                # Add grid lines
                 for i in range(num_kernels + 1):
                     self.__figure.add_shape(
                         type="line",
@@ -354,59 +345,48 @@ class Roofline:
         # otherwise return HTML to be used in GUI output
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
+            workload_dir = self.__run_parameters["workload_dir"]
 
             # Re-save to remove loading MathJax pop up
-            for i in range(2):
+            for _ in range(2):
                 if ops_figure:
                     ops_figure.write_image(
-                        self.__run_parameters["workload_dir"]
-                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, ops_dt_list)
+                        f"{workload_dir}/empirRoof_gpu-{dev_id}{ops_dt_list}.pdf"
                     )
                 if flops_figure:
                     flops_figure.write_image(
-                        self.__run_parameters["workload_dir"]
-                        + "/empirRoof_gpu-{}{}.pdf".format(dev_id, flops_dt_list)
+                        f"{workload_dir}/empirRoof_gpu-{dev_id}{flops_dt_list}.pdf"
                     )
-
-                # only save a legend if kernel_names option is toggled
                 if self.__run_parameters["include_kernel_names"]:
-                    self.__figure.write_image(
-                        self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
-                    )
+                    self.__figure.write_image(f"{workload_dir}/kernelName_legend.pdf")
                 time.sleep(1)
             console_log("roofline", "Empirical Roofline PDFs saved!")
         else:
+            children = []
+
             if ops_figure:
-                ops_graph = html.Div(
-                    className="float-child",
-                    children=[
-                        html.H3(children="Empirical Roofline Analysis (Ops)"),
-                        dcc.Graph(figure=ops_figure),
-                    ],
-                )
-            else:
-                ops_graph = None
-            if flops_figure:
-                flops_graph = html.Div(
-                    className="float-child",
-                    children=[
-                        html.H3(children="Empirical Roofline Analysis (Flops)"),
-                        dcc.Graph(figure=flops_figure),
-                    ],
-                )
-            else:
-                flops_graph = None
-            return html.Section(
-                id="roofline",
-                children=[
+                children.append(
                     html.Div(
-                        className="float-container",
+                        className="float-child",
                         children=[
-                            ops_graph,
-                            flops_graph,
+                            html.H3(children="Empirical Roofline Analysis (Ops)"),
+                            dcc.Graph(figure=ops_figure),
                         ],
                     )
-                ],
+                )
+            if flops_figure:
+                children.append(
+                    html.Div(
+                        className="float-child",
+                        children=[
+                            html.H3(children="Empirical Roofline Analysis (Flops)"),
+                            dcc.Graph(figure=flops_figure),
+                        ],
+                    )
+                )
+            return html.Section(
+                id="roofline",
+                children=[html.Div(className="float-container", children=children)],
             )
 
     @demarcate
@@ -417,71 +397,46 @@ class Roofline:
         """
         if fig is None:
             fig = go.Figure()
-            skipAI = False
+            skip_ai = False
         else:
-            skipAI = True  # Don't repeat AI plotting
+            skip_ai = True
 
         plot_mode = "lines+text" if self.__run_parameters["is_standalone"] else "lines"
         self.__ceiling_data = constuct_roof(
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
         )
-        console_debug("roofline", "Ceiling data:\n%s" % self.__ceiling_data)
+        console_debug("roofline", f"Ceiling data:\n{self.__ceiling_data}")
         ops_flops = "OP" if (dtype[:1] == "I") else "FLOP"  # For printing purposes
 
         #######################
-        # Plot Application AI
+        # Plot Application AI #
         #######################
         # Plot the arithmetic intensity points for each cache level
-        if ops_flops == "FLOP":
-            if not skipAI:
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l1"][0],
-                        y=self.__ai_data["ai_l1"][1],
-                        name="ai_l1",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
+        if ops_flops == "FLOP" and not skip_ai:
+            ai_traces = ["ai_l1", "ai_l2", "ai_hbm"]
+            for trace_name in ai_traces:
+                if trace_name in self.__ai_data:
+                    fig.add_trace(
+                        go.Scatter(
+                            x=self.__ai_data[trace_name][0],
+                            y=self.__ai_data[trace_name][1],
+                            name=trace_name,
+                            mode="markers",
+                            marker_symbol=(
+                                SYMBOLS
+                                if self.__run_parameters["include_kernel_names"]
+                                else None
+                            ),
+                        )
                     )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_l2"][0],
-                        y=self.__ai_data["ai_l2"][1],
-                        name="ai_l2",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
-                    )
-                )
-                fig.add_trace(
-                    go.Scatter(
-                        x=self.__ai_data["ai_hbm"][0],
-                        y=self.__ai_data["ai_hbm"][1],
-                        name="ai_hbm",
-                        mode="markers",
-                        marker_symbol=(
-                            SYMBOLS
-                            if self.__run_parameters["include_kernel_names"]
-                            else None
-                        ),
-                    )
-                )
 
-                # Set layout
-                fig.update_layout(
-                    xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
-                    yaxis_title="Performance (GFLOP/sec)",
-                    hovermode="x unified",
-                    margin=dict(l=50, r=50, b=50, t=50, pad=4),
-                )
+            fig.update_layout(
+                xaxis_title="Arithmetic Intensity (FLOPs/Byte)",
+                yaxis_title="Performance (GFLOP/sec)",
+                hovermode="x unified",
+                margin=dict(l=50, r=50, b=50, t=50, pad=4),
+            )
         else:
             # Set layout
             fig.update_layout(
@@ -496,104 +451,100 @@ class Roofline:
                 "floating point calculations at this time",
             )
 
-        #######################
-        # Plot ceilings
-        #######################
+        #################
+        # PLOT CEILINGS #
+        #################
         mem_level_config = self.__run_parameters.get("mem_level", "ALL")
-        if mem_level_config == "ALL":
-            cache_hierarchy = ["HBM", "L2", "L1", "LDS"]
-        else:
-            cache_hierarchy = (
+        cache_hierarchy = (
+            ["HBM", "L2", "L1", "LDS"]
+            if mem_level_config == "ALL"
+            else (
                 mem_level_config
                 if isinstance(mem_level_config, list)
                 else [mem_level_config]
             )
+        )
 
-        # Plot peak BW ceiling(s)
+        ###########################
+        # Plot peak BW ceiling(s) #
+        ###########################
         for cache_level in cache_hierarchy:
+            cache_key = cache_level.lower()
             if (
                 not self.__ceiling_data
-                or cache_level.lower() not in self.__ceiling_data
-                or not isinstance(
-                    self.__ceiling_data[cache_level.lower()], (list, tuple)
-                )
-                or len(self.__ceiling_data[cache_level.lower()]) < 3
+                or cache_key not in self.__ceiling_data
+                or not isinstance(self.__ceiling_data[cache_key], (list, tuple))
+                or len(self.__ceiling_data[cache_key]) < 3
             ):
                 console_error(
-                    f"Ceiling data for {cache_level} is missing "
-                    f"or malformed for dtype {dtype}.",
+                    f"Ceiling data for {cache_level} is missing or malformed for dtype {dtype}.",
                     exit=False,
                 )
                 continue
 
+            ceiling_data = self.__ceiling_data[cache_key]
             fig.add_trace(
                 go.Scatter(
-                    x=self.__ceiling_data[cache_level.lower()][0],
-                    y=self.__ceiling_data[cache_level.lower()][1],
-                    name="{}-{}".format(cache_level, dtype),
+                    x=ceiling_data[0],
+                    y=ceiling_data[1],
+                    name=f"{cache_level}-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
-                        "{} GB/s".format(
-                            to_int(self.__ceiling_data[cache_level.lower()][2])
-                        ),
+                        f"{to_int(ceiling_data[2])} GB/s",
                         (
                             None
                             if self.__run_parameters.get("is_standalone")
-                            else "{} GB/s".format(
-                                to_int(self.__ceiling_data[cache_level.lower()][2])
-                            )
+                            else f"{to_int(ceiling_data[2])} GB/s"
                         ),
                     ],
                     textposition="top right",
                 )
             )
 
-        # Plot peak VALU ceiling
+        ##########################
+        # Plot peak VALU ceiling #
+        ##########################
         if dtype in PEAK_OPS_DATATYPES:
+            valu_data = self.__ceiling_data["valu"]
             fig.add_trace(
                 go.Scatter(
-                    x=self.__ceiling_data["valu"][0],
-                    y=self.__ceiling_data["valu"][1],
-                    name="Peak VALU-{}".format(dtype),
+                    x=valu_data[0],
+                    y=valu_data[1],
+                    name=f"Peak VALU-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else "{} G{}/s".format(
-                                to_int(self.__ceiling_data["valu"][2]), ops_flops
-                            )
+                            else f"{to_int(valu_data[2])} G{ops_flops}/s"
                         ),
-                        "{} G{}/s".format(
-                            to_int(self.__ceiling_data["valu"][2]), ops_flops
-                        ),
+                        f"{to_int(valu_data[2])} G{ops_flops}/s",
                     ],
                     textposition="top left",
                 )
             )
 
-        # Plot peak MFMA ceiling
+        ##########################
+        # Plot peak MFMA ceiling #
+        ##########################
         if dtype in MFMA_DATATYPES:
+            mfma_data = self.__ceiling_data["mfma"]
             fig.add_trace(
                 go.Scatter(
-                    x=self.__ceiling_data["mfma"][0],
-                    y=self.__ceiling_data["mfma"][1],
-                    name="Peak MFMA-{}".format(dtype),
+                    x=mfma_data[0],
+                    y=mfma_data[1],
+                    name=f"Peak MFMA-{dtype}",
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
                         (
                             None
                             if self.__run_parameters["is_standalone"]
-                            else "{} G{}/s".format(
-                                to_int(self.__ceiling_data["mfma"][2]), ops_flops
-                            )
+                            else f"{to_int(mfma_data[2])} G{ops_flops}/s"
                         ),
-                        "{} G{}/s".format(
-                            to_int(self.__ceiling_data["mfma"][2]), ops_flops
-                        ),
+                        f"{to_int(mfma_data[2])} G{ops_flops}/s",
                     ],
                     textposition="top left",
                 )
