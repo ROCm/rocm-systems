@@ -24,6 +24,7 @@
 ##############################################################################
 
 import copy
+import re
 import sys
 import textwrap
 from abc import abstractmethod
@@ -286,10 +287,11 @@ class OmniAnalyze_Base:
 
         # Ensure analysis output does not overwrite existing files
         if self.__args.output_name:
-            if not self.__args.output_name.isalnum():
+            if not re.match(r"^[A-Za-z0-9_-]+$", self.__args.output_name):
                 console_error(
                     "Analysis output file/folder name must "
-                    "contain only alphanumeric characters."
+                    "contain only alphanumeric characters "
+                    "or underscores (_), hyphens (-)."
                 )
             path_to_check = self.__args.output_name
             if self.__args.output_format in ("txt", "db"):
