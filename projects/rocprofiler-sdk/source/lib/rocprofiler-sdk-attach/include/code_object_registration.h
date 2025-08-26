@@ -22,27 +22,18 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include <rocprofiler-sdk/defines.h>
 
 #include <hsa/hsa.h>
 
-#include <cstdint>
+#include <stdint.h>
 
 ROCPROFILER_EXTERN_C_INIT
 
+typedef void (*rocprof_attach_code_object_iterator_t)(hsa_executable_t, void*);
+
 int
-rocprofiler_prestore_export_all_code_objects(hsa_executable_t* executables,
-                                             uint64_t*         num_executables) ROCPROFILER_PUBLIC_API;
+rocprofiler_attach_iterate_all_code_objects(rocprof_attach_code_object_iterator_t func,
+                                            void* data) ROCPROFILER_API;
 
 ROCPROFILER_EXTERN_C_FINI
-
-namespace rocprofiler
-{
-namespace prestore
-{
-
-void
-code_object_registration_init(HsaApiTable* table);
-
-}
-}  // namespace rocprofiler

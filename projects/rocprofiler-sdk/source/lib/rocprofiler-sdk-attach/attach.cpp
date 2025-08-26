@@ -20,22 +20,57 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#pragma once
+#include "include/attach.h"
+#include "code_object_registration.hpp"
+#include "queue_registration.hpp"
 
-#include <rocprofiler-sdk/defines.h>
+#include "lib/common/logging.hpp"
 
-#include <cstdint>
+void
+init_logging()
+{
+    rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
+}
+
+// ensure that logging is always initialized when library is loaded
+bool init_logging_at_load = (init_logging(), true);
 
 ROCPROFILER_EXTERN_C_INIT
 
 int
-rocprofiler_prestore_set_api_table(const char* name,
+rocprofiler_attach_set_api_table(const char* name,
                                    uint64_t    lib_version,
                                    uint64_t    lib_instance,
                                    void**      tables,
-                                   uint64_t    num_tables) ROCPROFILER_PUBLIC_API;
+                                   uint64_t    num_tables)
+{
+    ROCP_TRACE << "rocprofiler_attach_set_api_table called for api " << name;
+    (void) lib_version;   // unused
+    (void) lib_instance;  // unused
+
+    if(std::string_view{name} != "hsa")
+    {
+        ROCP_ERROR << "rocprofiler_attach_set_api_table was called with a table other than HSA";
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
+    ROCP_ERROR_IF(num_tables > 1) << "rocprofiler expected HSA library to pass 1 API table, not "
+                                  << num_tables;
+
+    auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
+
+    // Initialize all registration services in attach
+    rocprofiler::attach::queue_registration_init(hsa_api_table);
+    rocprofiler::attach::code_object_registration_init(hsa_api_table);
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 
 int
-rocprofiler_prestore_get_version() ROCPROFILER_PUBLIC_API;
+rocprofiler_attach_get_version()
+{
+    constexpr int ROCPROFILER_attach_VERSION = 1;
+    return ROCPROFILER_attach_VERSION;
+}
 
 ROCPROFILER_EXTERN_C_FINI

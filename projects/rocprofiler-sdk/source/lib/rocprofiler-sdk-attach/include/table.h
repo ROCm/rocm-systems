@@ -22,44 +22,24 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "attach.h"
+#include "queue_registration.h"
+#include "code_object_registration.h"
 
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
+constexpr uint32_t ROCPROFILER_ATTACH_TABLE_CURRENT_VERSION = 1;
 
-#include <cstdint>
+typedef int (*rocprofiler_attach_get_version_t)();
+typedef int (*rocprofiler_attach_set_api_table_t)(const char*, uint64_t, uint64_t, void**, uint64_t);
+typedef int (*rocprofiler_attach_iterate_all_queues_t)(rocprof_attach_queue_iterator_t, void*);
+typedef int (*rocprofiler_attach_set_write_interceptor_t)(hsa_queue_t*, write_interceptor_t, void*);
+typedef int (*rocprofiler_attach_iterate_all_code_objects_t)(rocprof_attach_code_object_iterator_t, void*);
 
-using hsa_amd_queue_intercept_packet_writer_t = void (*)(const void*, uint64_t);
-using write_interceptor_t =
-    void (*)(const void*, uint64_t, uint64_t, void*, hsa_amd_queue_intercept_packet_writer_t);
-
-namespace rocprofiler
+struct rocprofiler_attach_dispatch_table_t
 {
-namespace prestore
-{
-
-struct queue_prestore_export_t
-{
-    hsa_agent_t  agent;
-    hsa_queue_t* queue;
+    uint32_t                                      version;
+    rocprofiler_attach_get_version_t              rocprofiler_attach_get_version;
+    rocprofiler_attach_set_api_table_t            rocprofiler_attach_set_api_table;
+    rocprofiler_attach_iterate_all_queues_t       rocprofiler_attach_iterate_all_queues;
+    rocprofiler_attach_set_write_interceptor_t    rocprofiler_attach_set_write_interceptor;
+    rocprofiler_attach_iterate_all_code_objects_t rocprofiler_attach_iterate_all_code_objects;
 };
-
-void
-queue_registration_init(HsaApiTable* table);
-
-}  // namespace prestore
-}  // namespace rocprofiler
-
-ROCPROFILER_EXTERN_C_INIT
-
-int
-rocprofiler_prestore_export_all_queues(rocprofiler::prestore::queue_prestore_export_t* queues,
-                                       uint64_t* num_queues) ROCPROFILER_PUBLIC_API;
-
-int
-rocprofiler_prestore_set_write_interceptor(hsa_queue_t*        queue,
-                                           write_interceptor_t func,
-                                           void*               data) ROCPROFILER_PUBLIC_API;
-
-ROCPROFILER_EXTERN_C_FINI
