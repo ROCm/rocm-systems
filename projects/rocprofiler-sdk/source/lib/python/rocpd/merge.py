@@ -69,7 +69,7 @@ class RocpdMerger:
             self._filenames = input[:]
             self._output = output
             prepare_output_file(self._output)
-            self._connection = sqlite3.connect(self._output)
+            self._connection = sqlite3.connect(str(self._output))
 
         else:
             raise ValueError(
@@ -148,17 +148,18 @@ class RocpdMerger:
 
                 cur_orig.execute(f"SELECT * FROM {table_name}")
                 rows = cur_orig.fetchall()
-                for row in rows:
-                    placeholders = ", ".join("?" * len(row))
-                    cur_dest.execute(
-                        f"INSERT INTO {table_name} VALUES ({placeholders})", row
+                if rows:
+                    placeholders = ", ".join("?" * len(rows[0]))
+                    cur_dest.executemany(
+                        f"INSERT INTO {table_name} VALUES ({placeholders})", rows
                     )
 
             con_orig.close()
 
-        assert (
-            len(list(set(versions))) == 1
-        ), f"Multiple versions found : {list(set(versions))}"
+        # Check the schema versions.  Merge only occurs if all the DBs are the same schema version.
+        unique_versions = list(set(versions))
+        if len(unique_versions) != 1:
+            raise RuntimeError(f"Multiple versions found : {unique_versions}")
 
         # Create rocpd_<> views
         self._connection.executescript(self._create_union_views(views_by_base_name))

@@ -501,7 +501,7 @@ set_tests_properties(
                ENVIRONMENT
                "${rocprofv3-rocpd-env}"
                DEPENDS
-               "rocprofv3-test-rocpd-package-generation"
+               "rocprofv3-test-rocpd-merge-generation-using-package"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_REQUIRED
@@ -524,7 +524,7 @@ set_tests_properties(
                ENVIRONMENT
                "${rocprofv3-rocpd-env}"
                DEPENDS
-               "rocprofv3-test-rocpd-package-generation-multiproc"
+               "rocprofv3-test-rocpd-merge-generation-using-package-multiproc"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED

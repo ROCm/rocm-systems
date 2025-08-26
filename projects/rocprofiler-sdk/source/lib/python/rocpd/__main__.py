@@ -284,13 +284,13 @@ Example usage:
         parser.print_help()
         return
 
-    # convert to real number of DB input files
-    if args.command == "package" or args.command == "merge":
-        input_files = package.flatten_rocpd_yaml_input_file(
-            args.input, skip_auto_merge=True
-        )
-    else:
-        input_files = package.flatten_rocpd_yaml_input_file(args.input)
+    # intentionaly skip auto_merge for merge & package modules, because if user is directly using these 2 modules, they probably don't want auto-merge
+    skip_auto_merge_list = ["merge", "package"]
+
+    # convert to real number of DB input files using flatten function
+    input_files = package.flatten_rocpd_yaml_input_file(
+        args.input, skip_auto_merge=(args.command in skip_auto_merge_list)
+    )
 
     # error check for databases before trying to use the data
     if not input_files:

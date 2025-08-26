@@ -127,6 +127,14 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
 
     num_dbs = len(input_files)
     print(f"Found {num_dbs} database files.")
+
+    # Sanity check if all input files exist, now that we have the list
+    for db in input_files:
+        if not os.path.exists(db):
+            print(f"Warning: Input database file not found: {db}. Exiting.")
+            return []
+
+    # If all exist, then we can return the list of DBs
     return_list = input_files
 
     if skip_auto_merge:
