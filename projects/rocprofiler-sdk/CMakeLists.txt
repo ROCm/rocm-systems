@@ -23,6 +23,8 @@ foreach(_LANG C CXX)
         CACHE STRING "${_LANG} flags for code coverage builds")
 endforeach()
 
+set(CMAKE_DIRECTORY_LABELS "rocprofiler-sdk")
+
 project(
     rocprofiler-sdk
     LANGUAGES C CXX
