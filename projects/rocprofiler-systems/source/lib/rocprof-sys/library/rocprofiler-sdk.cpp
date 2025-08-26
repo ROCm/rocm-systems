@@ -1325,6 +1325,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                     case ROCPROFILER_OMPT_ID_lock_destroy:
                         ompt_tracing_callback_stop(record, user_data, ts, _bt_data);
                         break;
+                    // Although this has endpoint arg, treat it as instant event
+                    case ROCPROFILER_OMPT_ID_nest_lock:
                     case ROCPROFILER_OMPT_ID_dispatch:
                     case ROCPROFILER_OMPT_ID_flush:
                     case ROCPROFILER_OMPT_ID_cancel:
