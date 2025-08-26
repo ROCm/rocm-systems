@@ -54,7 +54,8 @@ bool rdc_is_partition_string(const char* s) {
     return false;
   }
 
-  if (s[0] != 'g') {
+  // Support both GPU ('g') and CPU ('c') partition strings
+  if (s[0] != 'g' && s[0] != 'c') {
     return false;
   }
 
@@ -64,17 +65,17 @@ bool rdc_is_partition_string(const char* s) {
 
   if (dotPos <= 1 || dotPos >= str.size() - 1) return false;
 
-  std::string gpuPart = str.substr(1, dotPos - 1);
+  std::string devPart = str.substr(1, dotPos - 1);
   std::string partitionPart = str.substr(dotPos + 1);
 
-  if (!std::all_of(gpuPart.begin(), gpuPart.end(), ::isdigit) ||
+  if (!std::all_of(devPart.begin(), devPart.end(), ::isdigit) ||
       !std::all_of(partitionPart.begin(), partitionPart.end(), ::isdigit))
     return false;
 
-  int gpuIndex = std::stoi(gpuPart);
+  int devIndex = std::stoi(devPart);
   int partitionIndex = std::stoi(partitionPart);
 
-  if (gpuIndex < 0 || gpuIndex >= RDC_MAX_NUM_DEVICES) return false;
+  if (devIndex < 0 || devIndex >= RDC_MAX_NUM_DEVICES) return false;
   if (partitionIndex < 0 || partitionIndex >= RDC_MAX_NUM_PARTITIONS) return false;
 
   return true;
@@ -96,16 +97,16 @@ bool rdc_parse_partition_string(const char* s, uint32_t* physicalGpu, uint32_t* 
 
   if (pos == std::string::npos) return false;
 
-  std::string gpuStr = rest.substr(0, pos);
+  std::string devStr = rest.substr(0, pos);
   std::string partStr = rest.substr(pos + 1);
 
   // Ensure both parts are a number
-  if (!(!gpuStr.empty() && std::all_of(gpuStr.begin(), gpuStr.end(), ::isdigit)) ||
+  if (!(!devStr.empty() && std::all_of(devStr.begin(), devStr.end(), ::isdigit)) ||
       !(!partStr.empty() && std::all_of(partStr.begin(), partStr.end(), ::isdigit))) {
     return false;
   }
 
-  *physicalGpu = std::stoi(gpuStr);
+  *physicalGpu = std::stoi(devStr);
   *partition = std::stoi(partStr);
   return true;
 }

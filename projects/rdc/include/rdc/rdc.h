@@ -424,6 +424,33 @@ typedef enum {
   RDC_HEALTH_EEPROM_CONFIG_VALID,    //!< Reads the EEPROM and verifies the checksums
   RDC_HEALTH_POWER_THROTTLE_TIME,    //!< Power throttle status counter
   RDC_HEALTH_THERMAL_THROTTLE_TIME,  //!< Total time in thermal throttle status (microseconds)
+
+  /**
+   * @brief RDC CPU related fields
+   */
+  RDC_FI_CPU_COUNT = 10000,             //!< CPU count
+  RDC_FI_CPU_MODEL,                     //!< Name of the model
+  RDC_FI_CPU_CORE_ENERGY,               //!< CPU core energy consumption (microjoules)
+  RDC_FI_CPU_SOCKET_ENERGY,             //!< CPU socket energy consumption (microjoules)
+  RDC_FI_CPU_THREADS_PER_CORE,          //!< Number of threads per CPU core
+  RDC_FI_CPU_HSMP_DRIVER_VERSION,       //!< HSMP driver version
+  RDC_FI_CPU_SMU_FW_VERSION,            //!< SMU firmware version
+  RDC_FI_CPU_HSMP_PROTO_VERSION,        //!< HSMP protocol version
+  RDC_FI_CPU_FCLK_FREQUENCY,            //!< CPU fabric clock frequency (MHz)
+  RDC_FI_CPU_MCLK_FREQUENCY,            //!< CPU memory clock frequency (MHz)
+  RDC_FI_CPU_CCLK_LIMIT,                //!< CPU core clock limit (MHz)
+  RDC_FI_CPU_SOCKET_ACTIVE_FREQ_LIMIT,  //!< CPU socket active frequency limit (MHz)
+  RDC_FI_CPU_SOCKET_FREQ_LIMIT_SRC,     //!< CPU socket frequency limit source type
+  RDC_FI_CPU_SOCKET_FREQ_RANGE_MAX,     //!< CPU socket maximum frequency range (MHz)
+  RDC_FI_CPU_SOCKET_FREQ_RANGE_MIN,     //!< CPU socket minimum frequency range (MHz)
+  RDC_FI_CPU_CORE_FREQ_LIMIT,           //!< CPU core current frequency limit (MHz)
+  RDC_FI_CPU_CORE_BOOST_LIMIT,          //!< CPU core boost limit (MHz)
+  RDC_FI_CPU_SOCKET_C0_RESIDENCY,       //!< CPU socket C0 residency percentage
+  RDC_FI_CPU_SOCKET_LCLK_DPM_LEVEL,     //!< CPU socket LCLK DPM level
+  RDC_FI_CPU_FAMILY,                    //!< CPU family identifier
+  RDC_FI_CPU_MODEL_ID,                  //!< CPU model identifier
+  RDC_FI_CPU_CORES_PER_SOCKET,          //!< Number of CPU cores per socket
+  RDC_FI_CPU_SOCKET_COUNT,              //!< Number of CPU sockets
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors

@@ -1,3 +1,13 @@
+#include <vector>
+
+// Improved CPU device detection logic
+bool is_cpu_device(int index) {
+  // Basic implementation: assume devices above a certain index are CPUs
+  // In a real implementation, you would query the device type through AMDSMi
+  // For now, assume device indices 8 and above are CPU sockets
+  const int CPU_DEVICE_START_INDEX = 8;
+  return index >= CPU_DEVICE_START_INDEX;
+}
 /*
 Copyright (c) 2020 - present Advanced Micro Devices, Inc. All rights reserved.
 
@@ -19,8 +29,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
-#include "RdciDiscoverySubSystem.h"
-
 #include <getopt.h>
 #include <unistd.h>
 
@@ -28,6 +36,7 @@ THE SOFTWARE.
 #include <iomanip>
 #include <set>
 
+#include "RdciDiscoverySubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc/rdc_private.h"
 #include "rdc_lib/RdcException.h"
@@ -111,6 +120,7 @@ void RdciDiscoverySubSystem::show_help() const {
 void RdciDiscoverySubSystem::show_attributes() {
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
+
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
   if (result != RDC_ST_OK) {
     throw RdcException(result, "Fail to get device information");
@@ -195,7 +205,8 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
     phys_info.device_index = i;
     phys_info.instance_index = 0;
     phys_info.entity_role = RDC_DEVICE_ROLE_PHYSICAL;
-    phys_info.device_type = RDC_DEVICE_TYPE_GPU;
+    // TODO: Detect CPU device type here if needed
+    phys_info.device_type = is_cpu_device(i) ? RDC_DEVICE_TYPE_CPU : RDC_DEVICE_TYPE_GPU;
     uint32_t phys_entity_index = rdc_get_entity_index_from_info(phys_info);
 
     rdc_resource_profile_t phys_xcc = {};
@@ -234,14 +245,18 @@ void RdciDiscoverySubSystem::show_attributes_with_partitions() {
         std::cout << ", \"partitions\": [";
       }
       for (uint32_t pid = 0; pid < num_partition; pid++) {
-        std::string instance_str = "g" + std::to_string(i) + "." + std::to_string(pid);
-
+        std::string instance_str;
         rdc_entity_info_t part_info;
         part_info.device_index = i;
         part_info.instance_index = pid;
         part_info.entity_role = RDC_DEVICE_ROLE_PARTITION_INSTANCE;
-        part_info.device_type = RDC_DEVICE_TYPE_GPU;
+        part_info.device_type = is_cpu_device(i) ? RDC_DEVICE_TYPE_CPU : RDC_DEVICE_TYPE_GPU;
         uint32_t part_entity_index = rdc_get_entity_index_from_info(part_info);
+        if (part_info.device_type == RDC_DEVICE_TYPE_CPU) {
+          instance_str = "c" + std::to_string(i) + "." + std::to_string(pid);
+        } else {
+          instance_str = "g" + std::to_string(i) + "." + std::to_string(pid);
+        }
 
         rdc_resource_profile_t part_xcc = {};
         rdc_resource_profile_t part_decoder = {};
