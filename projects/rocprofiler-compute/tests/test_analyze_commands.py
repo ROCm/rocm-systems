@@ -615,7 +615,9 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
             "analyze",
             "--path",
             workload_dir,
-            "--save-dfs",
+            "--output-format",
+            "csv",
+            "--output-name",
             output_path,
         ])
         assert code == 0
