@@ -62,15 +62,12 @@ def write_sql_query_to_csv(
     export_sqlite_query(connection, query, export_format="csv", export_path=export_path)
 
 
-def get_header_with_alias(column_name, titled_columns) -> Tuple[str, str]:
+def get_header_with_alias(column_name) -> Tuple[str, str]:
     match = re.match(r"(.+?)\s+AS\s+(.+)", column_name, re.IGNORECASE)
     if match:
         return match.group(1), match.group(2)
 
-    if titled_columns:
-        return column_name, column_name.title()
-
-    return column_name, ""
+    return column_name, column_name.title()
 
 
 def write_agent_info_csv(importData, config) -> None:
@@ -131,9 +128,8 @@ def write_agent_info_csv(importData, config) -> None:
     # Build SELECT clause for json_extract columns
     select_json = []
     for column in json_keys:
-        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
-        alias_postfix = " AS " + (column_alias if column_alias else column_name)
-        select_json.append(f"json_extract(extdata, '$.{column_name}'){alias_postfix}")
+        column_name, column_alias = get_header_with_alias(column)
+        select_json.append(f"json_extract(extdata, '$.{column_name}') AS {column_alias}")
 
     # Build Capability value for SELECT clause
     def cap_expr(key, shift, mask=None):
@@ -184,9 +180,8 @@ def write_agent_info_csv(importData, config) -> None:
 
     fixed_select = []
     for column in fixed_keys:
-        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
-        alias_postfix = " AS " + column_alias if column_alias else ""
-        fixed_select.append(f"{column_name}{alias_postfix}")
+        column_name, column_alias = get_header_with_alias(column)
+        fixed_select.append(f"{column_name} AS {column_alias}")
 
     # to mimic the previous order
     select_clause = (
@@ -267,9 +262,8 @@ def write_kernel_csv(importData, config) -> None:
 
     aliased_headers = []
     for column in select_columns:
-        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
-        alias_postfix = " AS " + column_alias if column_alias else ""
-        aliased_headers.append(f"{column_name}{alias_postfix}")
+        column_name, column_alias = get_header_with_alias(column)
+        aliased_headers.append(f"{column_name} AS {column_alias}")
 
     select_clause = ",\n".join(aliased_headers)
 
@@ -365,9 +359,8 @@ def write_counters_csv(importData, config) -> None:
 
     aliased_headers = []
     for column in select_columns:
-        column_name, column_alias = get_header_with_alias(column, config.titled_columns)
-        alias_postfix = " AS " + column_alias if column_alias else ""
-        aliased_headers.append(f"{column_name}{alias_postfix}")
+        column_name, column_alias = get_header_with_alias(column)
+        aliased_headers.append(f"{column_name} AS {column_alias}")
 
     select_clause = ",\n".join(aliased_headers)
 
@@ -455,24 +448,11 @@ def execute(input, config=None, window_args=None, **kwargs):
 def add_args(parser):
     """Add csv arguments."""
 
-    csv_options = parser.add_argument_group("CSV options")
-    csv_options.add_argument(
-        "--titled-columns",
-        action="store_true",
-        default=False,
-        help="Format column names as titles in the output",
-    )
-
-    return ["titled_columns"]
+    return []
 
 
 def process_args(args, valid_args):
     ret = {}
-    for itr in valid_args:
-        if hasattr(args, itr):
-            val = getattr(args, itr)
-            if val is not None:
-                ret[itr] = val
     return ret
 
 
