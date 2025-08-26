@@ -100,7 +100,8 @@ def flatten_rocpd_yaml_input_file(input, skip_auto_merge=False) -> list:
 
     return_list = []
     input_files = []
-    for item in input:
+    sanitized_input = output_config.sanitize_input_list(input)
+    for item in sanitized_input:
         # Handle .rpdb folder: look for index.yaml inside and flatten it
         if item.endswith(".rpdb") and os.path.isdir(item):
             index_yaml = os.path.join(item, "index.yaml")

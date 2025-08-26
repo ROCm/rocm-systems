@@ -97,10 +97,29 @@ def format_path(path, tag=os.path.basename(sys.executable)):
     return libpyrocpd.format_path(path, tag)
 
 
+def sanitize_input_list(input: list):
+    sanitized_list = []
+    for items in input:
+        if isinstance(items, list):
+            sanitized_list.extend(sanitize_input_list(items))
+        else:
+            sanitized_list.append(items)
+    return sanitized_list
+
+
 def check_file_exists(filename):
-    if not os.path.exists(filename):
-        raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
-    return filename
+    import glob
+
+    # Check for wildcards passed in
+    if any(char in filename for char in ["*", "?", "["]):
+        expanded_files = glob.glob(filename)
+        if not expanded_files:
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+        return sanitize_input_list(expanded_files)
+    else:
+        if not os.path.exists(filename):
+            raise argparse.ArgumentTypeError(f"File '{filename}' does not exist.")
+        return filename
 
 
 def add_args(parser):
