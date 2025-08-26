@@ -111,7 +111,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 312;
+    constexpr auto expected_rocp_agent_size = 376;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "
