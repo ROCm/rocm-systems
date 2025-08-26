@@ -153,4 +153,9 @@ agent_manager::get_cpu_agents_count() const
     return _cpu_agents_cnt;
 }
 
+void
+agent_manager::set_agents(std::vector<std::shared_ptr<agent>> agents)
+{
+    _agents = std::move(agents);
+}
 }  // namespace rocprofsys

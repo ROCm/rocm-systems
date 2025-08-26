@@ -249,6 +249,45 @@ from_json_kernel_symbol(const nlohmann::json& _json)
 #endif
 
 nlohmann::json
+to_json(const agent& _agent)
+{
+    nlohmann::json result;
+
+    result["type"]                 = _agent.type;
+    result["handle"]               = _agent.handle;
+    result["device_id"]            = _agent.device_id;
+    result["node_id"]              = _agent.node_id;
+    result["logical_node_id"]      = _agent.logical_node_id;
+    result["logical_node_type_id"] = _agent.logical_node_type_id;
+    result["name"]                 = _agent.name;
+    result["model_name"]           = _agent.model_name;
+    result["vendor_name"]          = _agent.vendor_name;
+    result["product_name"]         = _agent.product_name;
+    result["device_type_index"]    = _agent.device_type_index;
+
+    return result;
+}
+
+std::shared_ptr<agent>
+from_json_agent(const nlohmann::json& _json)
+{
+    auto a                  = std::make_shared<agent>();
+    a->type                 = _json["type"].get<agent_type>();
+    a->handle               = _json["handle"].get<uint64_t>();
+    a->device_id            = _json["device_id"].get<int32_t>();
+    a->node_id              = _json["node_id"].get<int32_t>();
+    a->logical_node_id      = _json["logical_node_id"].get<int32_t>();
+    a->logical_node_type_id = _json["logical_node_type_id"].get<int32_t>();
+    a->name                 = _json["name"].get<std::string>();
+    a->model_name           = _json["model_name"].get<std::string>();
+    a->vendor_name          = _json["vendor_name"].get<std::string>();
+    a->product_name         = _json["product_name"].get<std::string>();
+    a->device_type_index    = _json["device_type_index"].get<int32_t>();
+
+    return a;
+}
+
+nlohmann::json
 to_json(const metadata_registry& registry)
 {
     nlohmann::json result;
@@ -320,6 +359,16 @@ to_json(const metadata_registry& registry)
     }
     result["kernel_symbols"] = kernel_symbol_array;
 #endif
+
+    auto agents = agent_manager::get_instance().get_agents();
+
+    for(const auto& agent : agents)
+    {
+        if(agent != nullptr)
+        {
+            result["agents"].push_back(to_json(*agent));
+        }
+    }
 
     return result;
 }
@@ -395,6 +444,19 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         }
     }
 #endif
+
+    // This is not a right way to do this.
+    // With this, we want to proof that this approach is working
+    if(_json.contains("agents"))
+    {
+        const auto&                         agents_array = _json["agents"];
+        std::vector<std::shared_ptr<agent>> agents;
+        for(const auto& agent_json : agents_array)
+        {
+            agents.push_back(from_json_agent(agent_json));
+        }
+        agent_manager::get_instance().set_agents(agents);
+    }
 }
 
 }  // namespace

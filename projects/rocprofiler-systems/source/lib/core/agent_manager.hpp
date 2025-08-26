@@ -53,6 +53,8 @@ struct agent_manager
     size_t get_gpu_agents_count() const;
     size_t get_cpu_agents_count() const;
 
+    void set_agents(std::vector<std::shared_ptr<agent>> agents);
+
 private:
     std::vector<std::shared_ptr<agent>> _agents;
     size_t                              _gpu_agents_cnt{ 0 };
