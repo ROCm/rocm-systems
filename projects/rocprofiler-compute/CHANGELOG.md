@@ -18,6 +18,9 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
   * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
 
+* Added interactive metric descriptions in TUI analyze mode
+  * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
@@ -112,6 +115,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
 
 * Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
+
+* Improve post-analysis runtime performance by caching and multi-processing
 
 ### Removed
 

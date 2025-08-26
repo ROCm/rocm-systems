@@ -25,6 +25,7 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
       asynchronously
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
     - `hipMemAdvise_v2`         advise about the usage of a given memory range
+    - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
 * Changed HIP APIs
     - `hipMemCreate`  now can take hipDeviceMallocUncached as a flag to allocate uncached memory
 
@@ -43,7 +44,6 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipDrvLaunchKernelEx`  dispatches the device kernel represented by a HIP function object.
     - `hipMemGetHandleForAddressRange`  gets a handle for the address range requested.
     - `num_threads`  Total number of threads in the group. The legacy API size is alias.
-    - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
 * New support for Open Compute Project (OCP) floating-point `FP4`/`FP6`/`FP8` as the following. For details, see [Low precision floating point document](https://rocm.docs.amd.com/projects/HIP/en/latest/reference/low_fp_types.html).
     - Data types for `FP4`/`FP6`/`FP8`.
     - HIP APIs for `FP4`/`FP6`/`FP8`, which are compatible with corresponding CUDA APIs.
@@ -186,7 +186,6 @@ HIP runtime has the following functional improvements which greatly improve runt
  Developers can now use the environment variable `HSA_SCRATCH_SINGLE_LIMIT_ASYNC` to change the default allocation size with expected scratch limit in ROCR runtime. On top of it, this value can also be overwritten programmatically in the application using the HIP API `hipDeviceSetLimit(hipExtLimitScratchCurrent, value)` to reset the scratch limit value.
 * HIP runtime now enables peer-to-peer (P2P) memory copies to utilize all available SDMA engines, rather than being limited to a single engine. It also selects the best engine first to give optimal bandwidth.
 * Improved launch latency for `D2D` copies and `memset` on MI300 series.
-* Memory manager was implemented to improve the efficiency of memory usage and speed-up memory allocation/free in memory pools.
 * Introduced a threshold to handle the command submission patch to the GPU device(s), considering the synchronization with CPU, for performance improvement.
 
 ### Resolved issues
