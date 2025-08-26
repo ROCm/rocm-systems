@@ -1,4 +1,4 @@
-// MIT License
+g/ MIT License
 //
 // Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 //
@@ -109,3 +109,4 @@ private:
 
 }  // namespace common
 }  // namespace rocprofiler
+
