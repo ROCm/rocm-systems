@@ -141,6 +141,6 @@ TEST_CASE("Unit_hipMemRetainAllocationHandle_NegTst") {
 }
 
 /**
-* End doxygen group VirtualMemoryManagementTest.
-* @}
-*/
+ * End doxygen group VirtualMemoryManagementTest.
+ * @}
+ */

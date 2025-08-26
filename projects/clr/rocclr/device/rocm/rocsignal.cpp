@@ -24,9 +24,7 @@
 #include "rocsignal.hpp"
 namespace amd::roc {
 
-Signal::~Signal() {
-  hsa_signal_destroy(signal_);
-}
+Signal::~Signal() { hsa_signal_destroy(signal_); }
 
 bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitState ws) {
   hsa_status_t status = hsa_signal_create(init, 0, nullptr, &signal_);
@@ -40,16 +38,10 @@ bool Signal::Init(const amd::Device& dev, uint64_t init, device::Signal::WaitSta
 }
 
 uint64_t Signal::Wait(uint64_t value, device::Signal::Condition c, uint64_t timeout) {
-  return hsa_signal_wait_scacquire(
-    signal_,
-    static_cast<hsa_signal_condition_t>(c),
-    value,
-    timeout,
-    static_cast<hsa_wait_state_t>(ws_));
+  return hsa_signal_wait_scacquire(signal_, static_cast<hsa_signal_condition_t>(c), value, timeout,
+                                   static_cast<hsa_wait_state_t>(ws_));
 }
 
-void Signal::Reset(uint64_t value) {
-  hsa_signal_store_screlease(signal_, value);
-}
+void Signal::Reset(uint64_t value) { hsa_signal_store_screlease(signal_, value); }
 
-};
+};  // namespace amd::roc

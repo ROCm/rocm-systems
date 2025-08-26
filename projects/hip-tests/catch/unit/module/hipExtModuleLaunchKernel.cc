@@ -156,15 +156,13 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup") {
   args.buffersize = arraylength;
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   // Memcpy from A to Ad
   HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
-  REQUIRE(hipErrorInvalidValue ==
-          hipExtModuleLaunchKernel(Function, arraylength, 1, 1, localWorkSize,
-                                   1, 1, 0, 0, NULL,
-                                   reinterpret_cast<void**>(&config), 0));
+  REQUIRE(hipErrorInvalidValue == hipExtModuleLaunchKernel(Function, arraylength, 1, 1,
+                                                           localWorkSize, 1, 1, 0, 0, NULL,
+                                                           reinterpret_cast<void**>(&config), 0));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));
@@ -193,12 +191,8 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
   // Get module and function from module
   hipModule_t Module;
   hipFunction_t Function;
-  SECTION("regular fatbin") {
-     HIP_CHECK(hipModuleLoad(&Module, fileName));
-  }
-  SECTION("compressed fatbin") {
-     HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed));
-  }
+  SECTION("regular fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileName)); }
+  SECTION("compressed fatbin") { HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed)); }
   SECTION("generic target in regular fatbin") {
     if (!isGenericTargetSupported()) {
       fprintf(stderr, "Generic target test is skipped\n");
@@ -237,13 +231,11 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
   args.buffersize = arraylength;
   size_t size = sizeof(args);
 
-  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args,
-                    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
+  void* config[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size,
                     HIP_LAUNCH_PARAM_END};
   // Memcpy from A to Ad
   HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
-  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylength, 1, 1, localWorkSize,
-                                     1, 1, 0, 0, NULL,
+  HIP_CHECK(hipExtModuleLaunchKernel(Function, arraylength, 1, 1, localWorkSize, 1, 1, 0, 0, NULL,
                                      reinterpret_cast<void**>(&config), 0));
   // Memcpy results back to host
   HIP_CHECK(hipMemcpy(B, Bd, sizeBytes, hipMemcpyDefault));
@@ -266,8 +258,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
     hipEvent_t start_event = nullptr;
     HIP_CHECK(hipEventCreate(&start_event));
     const auto kernel = GetKernel(mg.module(), "NOPKernel");
-    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr,
-                                       nullptr, nullptr,
+    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr,
                                        start_event, nullptr));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipEventQuery(start_event));
@@ -278,8 +269,7 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Positive_Parameters") {
     hipEvent_t stop_event = nullptr;
     HIP_CHECK(hipEventCreate(&stop_event));
     const auto kernel = GetKernel(mg.module(), "NOPKernel");
-    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr,
-                                       nullptr, nullptr,
+    HIP_CHECK(hipExtModuleLaunchKernel(kernel, 1, 1, 1, 1, 1, 1, 0, nullptr, nullptr, nullptr,
                                        nullptr, stop_event));
     HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipEventQuery(stop_event));
@@ -294,9 +284,11 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Negative_Parameters") {
  * Test Description
  * ------------------------
  * - Test case to verify Negative tests of hipExtModuleLaunchKernel API.
- * - Test case to verify kernel execution time of the particular kernel by using hipExtModuleLaunchKernel.
+ * - Test case to verify kernel execution time of the particular kernel by using
+ hipExtModuleLaunchKernel.
  * - Test case to verify hipExtModuleLaunchKernel API by disabling time flag in event creation.
- * - Test case to verify hipExtModuleLaunchKernel API's Corner Scenarios for Grid and Block dimensions.
+ * - Test case to verify hipExtModuleLaunchKernel API's Corner Scenarios for Grid and Block
+ dimensions.
  * - Test case to verify different work groups of hipExtModuleLaunchKernel API.
 
  * Test source
@@ -317,16 +309,16 @@ struct gridblockDim {
 };
 class ModuleLaunchKernel {
   int N = 64;
-  int SIZE = N*N;
+  int SIZE = N * N;
   int *A, *B, *C;
   hipDeviceptr_t *Ad, *Bd;
   hipStream_t stream1, stream2;
-  hipEvent_t  start_event1, end_event1, start_event2, end_event2,
-              start_timingDisabled, end_timingDisabled;
+  hipEvent_t start_event1, end_event1, start_event2, end_event2, start_timingDisabled,
+      end_timingDisabled;
   hipModule_t Module;
   hipDeviceptr_t deviceGlobal;
-  hipFunction_t MultKernel, SixteenSecKernel, FourSecKernel,
-  TwoSecKernel, KernelandExtraParamKernel, DummyKernel;
+  hipFunction_t MultKernel, SixteenSecKernel, FourSecKernel, TwoSecKernel,
+      KernelandExtraParamKernel, DummyKernel;
   struct {
     int clockRate;
     void* _Ad;
@@ -340,7 +332,8 @@ class ModuleLaunchKernel {
   size_t size2;
   size_t size3;
   size_t deviceGlobalSize;
- public :
+
+ public:
   void AllocateMemory();
   void DeAllocateMemory();
   void ModuleLoad();
@@ -355,37 +348,37 @@ class ModuleLaunchKernel {
 };
 
 void ModuleLaunchKernel::AllocateMemory() {
-  A = new int[N*N*sizeof(int)];
-  B = new int[N*N*sizeof(int)];
-  for (int i=0; i < N; i++) {
-    for (int j=0; j < N; j++) {
-      A[i*N +j] = 1;
-      B[i*N +j] = 1;
+  A = new int[N * N * sizeof(int)];
+  B = new int[N * N * sizeof(int)];
+  for (int i = 0; i < N; i++) {
+    for (int j = 0; j < N; j++) {
+      A[i * N + j] = 1;
+      B[i * N + j] = 1;
     }
   }
   HIP_CHECK(hipStreamCreate(&stream1));
   HIP_CHECK(hipStreamCreate(&stream2));
-  HIP_CHECK(hipMalloc(&Ad, SIZE*sizeof(int)));
-  HIP_CHECK(hipMalloc(&Bd, SIZE*sizeof(int)));
-  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE*sizeof(int)));
-  HIP_CHECK(hipMemcpy(Ad, A, SIZE*sizeof(int), hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpy(Bd, B, SIZE*sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMalloc(&Ad, SIZE * sizeof(int)));
+  HIP_CHECK(hipMalloc(&Bd, SIZE * sizeof(int)));
+  HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&C), SIZE * sizeof(int)));
+  HIP_CHECK(hipMemcpy(Ad, A, SIZE * sizeof(int), hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemcpy(Bd, B, SIZE * sizeof(int), hipMemcpyHostToDevice));
   int clkRate = 0;
-  #if HT_AMD
+#if HT_AMD
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeWallClockRate, 0));
-  #endif
-  #if HT_NVIDIA
+#endif
+#if HT_NVIDIA
   HIP_CHECK(hipDeviceGetAttribute(&clkRate, hipDeviceAttributeClockRate, 0));
-  #endif
+#endif
   args1._Ad = Ad;
   args1._Bd = Bd;
   args1._Cd = C;
-  args1._n  = N;
+  args1._n = N;
   args1.clockRate = clkRate;
   args2._Ad = NULL;
   args2._Bd = NULL;
   args2._Cd = NULL;
-  args2._n  = 0;
+  args2._n = 0;
   args2.clockRate = clkRate;
   size1 = sizeof(args1);
   size2 = sizeof(args2);
@@ -394,16 +387,14 @@ void ModuleLaunchKernel::AllocateMemory() {
   HIP_CHECK(hipEventCreate(&end_event1));
   HIP_CHECK(hipEventCreate(&start_event2));
   HIP_CHECK(hipEventCreate(&end_event2));
-  HIP_CHECK(hipEventCreateWithFlags(&start_timingDisabled,
-                                   hipEventDisableTiming));
-  HIP_CHECK(hipEventCreateWithFlags(&end_timingDisabled,
-                                   hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&start_timingDisabled, hipEventDisableTiming));
+  HIP_CHECK(hipEventCreateWithFlags(&end_timingDisabled, hipEventDisableTiming));
 }
 
 void ModuleLaunchKernel::ModuleLoad() {
   constexpr auto matmulName = "matmul.code";
-  constexpr auto  matmulK = "matmulK";
-  constexpr auto  SixteenSec = "SixteenSecKernel";
+  constexpr auto matmulK = "matmulK";
+  constexpr auto SixteenSec = "SixteenSecKernel";
   constexpr auto KernelandExtra = "KernelandExtraParams";
   constexpr auto FourSec = "FourSecKernel";
   constexpr auto TwoSec = "TwoSecKernel";
@@ -413,13 +404,11 @@ void ModuleLaunchKernel::ModuleLoad() {
   HIP_CHECK(hipModuleLoad(&Module, matmulName));
   HIP_CHECK(hipModuleGetFunction(&MultKernel, Module, matmulK));
   HIP_CHECK(hipModuleGetFunction(&SixteenSecKernel, Module, SixteenSec));
-  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel,
-                                Module, KernelandExtra));
+  HIP_CHECK(hipModuleGetFunction(&KernelandExtraParamKernel, Module, KernelandExtra));
   HIP_CHECK(hipModuleGetFunction(&FourSecKernel, Module, FourSec));
   HIP_CHECK(hipModuleGetFunction(&TwoSecKernel, Module, TwoSec));
   HIP_CHECK(hipModuleGetFunction(&DummyKernel, Module, dummyKernel));
-  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize,
-                              Module, globalDevVar));
+  HIP_CHECK(hipModuleGetGlobal(&deviceGlobal, &deviceGlobalSize, Module, globalDevVar));
 }
 
 void ModuleLaunchKernel::DeAllocateMemory() {
@@ -452,15 +441,14 @@ bool ModuleLaunchKernel::ExtModule_KernelExecutionTime() {
   ModuleLoad();
   float time_4sec, time_2sec;
 
-  void *config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
+  void* config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
                      HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipExtModuleLaunchKernel(FourSecKernel, 1, 1, 1, 1, 1, 1, 0,
-                       stream1, NULL, reinterpret_cast<void**>(&config2),
-                       start_event1, end_event1, 0));
-  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
-                                    NULL, reinterpret_cast<void**>(&config2),
-                                    start_event2, end_event2, 0));
+  HIP_CHECK(hipExtModuleLaunchKernel(FourSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), start_event1, end_event1,
+                                     0));
+  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), start_event2, end_event2,
+                                     0));
   HIP_CHECK(hipStreamSynchronize(stream1));
   HIP_CHECK(hipEventElapsedTime(&time_4sec, start_event1, end_event1));
   HIP_CHECK(hipEventElapsedTime(&time_2sec, start_event2, end_event2));
@@ -484,12 +472,11 @@ bool ModuleLaunchKernel::ExtModule_Disabled_Timingflag() {
   ModuleLoad();
   hipError_t e;
   float time_2sec;
-  void *config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2,
-    HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
-    HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
-                                  NULL, reinterpret_cast<void**>(&config2),
-                                  start_timingDisabled, end_timingDisabled, 0));
+  void* config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
+                     HIP_LAUNCH_PARAM_END};
+  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), start_timingDisabled,
+                                     end_timingDisabled, 0));
   HIP_CHECK(hipStreamSynchronize(stream1));
   e = hipEventElapsedTime(&time_2sec, start_timingDisabled, end_timingDisabled);
   if (e == hipErrorInvalidHandle) {
@@ -516,18 +503,16 @@ bool ModuleLaunchKernel::ExtModule_ConcurencyCheck_GlobalVar(int conc_flag) {
   int deviceGlobal_h = 0;
   AllocateMemory();
   ModuleLoad();
-  void *config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
+  void* config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
                      HIP_LAUNCH_PARAM_END};
-  HIP_CHECK(hipExtModuleLaunchKernel(FourSecKernel, 1, 1, 1, 1, 1, 1, 0,
-                      stream1, NULL, reinterpret_cast<void**>(&config2),
-                                 start_event1, end_event1, conc_flag));
-  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
-                                    NULL, reinterpret_cast<void**>(&config2),
-                                    start_event2, end_event2, conc_flag));
+  HIP_CHECK(hipExtModuleLaunchKernel(FourSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), start_event1, end_event1,
+                                     conc_flag));
+  HIP_CHECK(hipExtModuleLaunchKernel(TwoSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), start_event2, end_event2,
+                                     conc_flag));
   HIP_CHECK(hipStreamSynchronize(stream1));
-  HIP_CHECK(hipMemcpyDtoH(&deviceGlobal_h, hipDeviceptr_t(deviceGlobal),
-                         deviceGlobalSize));
+  HIP_CHECK(hipMemcpyDtoH(&deviceGlobal_h, hipDeviceptr_t(deviceGlobal), deviceGlobalSize));
   if (conc_flag && deviceGlobal_h != 0x5555) {
     testStatus = true;
   } else if (!conc_flag && deviceGlobal_h == 0x5555) {
@@ -550,45 +535,32 @@ bool ModuleLaunchKernel::ExtModule_ConcurrencyCheck_TimeVer() {
   AllocateMemory();
   ModuleLoad();
   int mismatch = 0;
-  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
-  void* config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
+  void* config2[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args2, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size2,
                      HIP_LAUNCH_PARAM_END};
   auto start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipExtModuleLaunchKernel(SixteenSecKernel, 1, 1, 1, 1, 1, 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config2),
-                                    NULL, NULL, 0));
-  HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32 , 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config1),
-                                    NULL, NULL, 0));
+  HIP_CHECK(hipExtModuleLaunchKernel(SixteenSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), NULL, NULL, 0));
+  HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config1), NULL, NULL, 0));
   HIP_CHECK(hipStreamSynchronize(stream1));
   auto stop = std::chrono::high_resolution_clock::now();
-  auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>
-                   (stop-start);
+  auto duration1 = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   start = std::chrono::high_resolution_clock::now();
-  HIP_CHECK(hipExtModuleLaunchKernel(SixteenSecKernel, 1, 1, 1, 1, 1, 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config2),
-                                    NULL, NULL, 1));
-  HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32, 1, 0,
-                                    stream1, NULL,
-                                    reinterpret_cast<void**>(&config1),
-                                    NULL, NULL, 1));
+  HIP_CHECK(hipExtModuleLaunchKernel(SixteenSecKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config2), NULL, NULL, 1));
+  HIP_CHECK(hipExtModuleLaunchKernel(MultKernel, N, N, 1, 32, 32, 1, 0, stream1, NULL,
+                                     reinterpret_cast<void**>(&config1), NULL, NULL, 1));
   HIP_CHECK(hipStreamSynchronize(stream1));
   stop = std::chrono::high_resolution_clock::now();
-  auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>
-                   (stop-start);
+  auto duration2 = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (!(duration2.count() < duration1.count())) {
     testStatus = false;
   }
   for (int i = 0; i < N; i++) {
     for (int j = 0; j < N; j++) {
-      if (C[i*N + j] != N)
-        mismatch++;
+      if (C[i * N + j] != N) mismatch++;
     }
   }
   if (mismatch) {
@@ -603,84 +575,57 @@ bool ModuleLaunchKernel::ExtModule_Negative_tests() {
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
-  void *config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args1, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
-  void *params[] = {Ad};
+  void* params[] = {Ad};
   // Passing nullptr to kernel function in hipExtModuleLaunchKernel API
-  err = hipExtModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(nullptr, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed nullptr to kernel function");
     testStatus = false;
   }
   // Passing Max int value to block dimensions
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1,
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, std::numeric_limits<uint32_t>::max(),
                                  std::numeric_limits<uint32_t>::max(),
-                                 std::numeric_limits<uint32_t>::max(),
-                                 std::numeric_limits<uint32_t>::max(), 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+                                 std::numeric_limits<uint32_t>::max(), 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for max values to block dimension");
     testStatus = false;
   }
   // Passing 0 as value for all dimensions
-  err = hipExtModuleLaunchKernel(MultKernel, 0, 0, 0,
-                                 0,
-                                 0,
-                                 0, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 0, 0, 0, 0, 0, 0, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for 0 as value for all dimensions");
     testStatus = false;
   }
   // Passing 0 as value for x dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 0, 1, 1,
-                                 0,
-                                 1,
-                                 1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 0, 1, 1, 0, 1, 1, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for 0 as value for x dimension");
     testStatus = false;
   }
   // Passing 0 as value for y dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 0, 1,
-                                 1,
-                                 0,
-                                 1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 0, 1, 1, 0, 1, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for 0 as value for y dimension");
     testStatus = false;
   }
   // Passing 0 as value for z dimension
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 0,
-                                 1,
-                                 1,
-                                 0, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 0, 1, 1, 0, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for 0 as value for z dimension");
     testStatus = false;
   }
   // Passing both kernel and extra params
-  err = hipExtModuleLaunchKernel(KernelandExtraParamKernel, 1, 1, 1, 1, 1, 1, 0,
-                                 stream1, reinterpret_cast<void**>(&params),
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(KernelandExtraParamKernel, 1, 1, 1, 1, 1, 1, 0, stream1,
+                                 reinterpret_cast<void**>(&params),
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel fail when we pass both kernel,extra args");
     testStatus = false;
@@ -688,58 +633,44 @@ bool ModuleLaunchKernel::ExtModule_Negative_tests() {
   // Passing more than maxthreadsperblock to block dimensions
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1,
-                                 deviceProp.maxThreadsPerBlock+1,
-                                 deviceProp.maxThreadsPerBlock+1,
-                                 deviceProp.maxThreadsPerBlock+1, 0,
-                                 stream1, NULL,
-                                 reinterpret_cast<void**>(&config1),
-                                 nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsPerBlock + 1,
+                                 deviceProp.maxThreadsPerBlock + 1,
+                                 deviceProp.maxThreadsPerBlock + 1, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for max group size");
     testStatus = false;
   }
   // Block dimension X = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            deviceProp.maxThreadsDim[0]+1,
-                            1,
-                            1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1),
-                            nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, deviceProp.maxThreadsDim[0] + 1, 1, 1, 0,
+                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
+                                 nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimX + 1)");
     testStatus = false;
   }
   // Block dimension Y = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            1,
-                            deviceProp.maxThreadsDim[1]+1,
-                            1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1),
-                            nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, deviceProp.maxThreadsDim[1] + 1, 1, 0,
+                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
+                                 nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimY + 1)");
     testStatus = false;
   }
   // Block dimension Z = Max Allowed + 1
-  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1,
-                            1,
-                            1,
-                            deviceProp.maxThreadsDim[2]+1, 0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1),
-                            nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, deviceProp.maxThreadsDim[2] + 1, 0,
+                                 stream1, NULL, reinterpret_cast<void**>(&config1), nullptr,
+                                 nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for (MaxBlockDimZ + 1)");
     testStatus = false;
   }
 
   // Passing invalid config data in extra params
-  void *config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
+  void* config3[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size1,
                      HIP_LAUNCH_PARAM_END};
   err = hipExtModuleLaunchKernel(MultKernel, 1, 1, 1, 1, 1, 1, 0, stream1, NULL,
-                                 reinterpret_cast<void**>(&config3),
-                                 nullptr, nullptr, 0);
+                                 reinterpret_cast<void**>(&config3), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     INFO("hipExtModuleLaunchKernel failed for invalid conf");
     testStatus = false;
@@ -754,8 +685,7 @@ bool ModuleLaunchKernel::ExtModule_Corner_tests() {
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
-  void *config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
                      HIP_LAUNCH_PARAM_END};
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
@@ -765,25 +695,14 @@ bool ModuleLaunchKernel::ExtModule_Corner_tests() {
   unsigned int maxgridX = deviceProp.maxGridSize[0];
   unsigned int maxgridY = deviceProp.maxGridSize[1];
   unsigned int maxgridZ = deviceProp.maxGridSize[2];
-  struct gridblockDim test[6] = {{1, 1, 1, maxblockX, 1, 1},
-                                 {1, 1, 1, 1, maxblockY, 1},
-                                 {1, 1, 1, 1, 1, maxblockZ},
-                                 {maxgridX, 1, 1, 1, 1, 1},
-                                 {1, maxgridY, 1, 1, 1, 1},
-                                 {1, 1, maxgridZ, 1, 1, 1}};
+  struct gridblockDim test[6] = {{1, 1, 1, maxblockX, 1, 1}, {1, 1, 1, 1, maxblockY, 1},
+                                 {1, 1, 1, 1, 1, maxblockZ}, {maxgridX, 1, 1, 1, 1, 1},
+                                 {1, maxgridY, 1, 1, 1, 1},  {1, 1, maxgridZ, 1, 1, 1}};
 
   for (int i = 0; i < 6; i++) {
-    err = hipExtModuleLaunchKernel(DummyKernel,
-                                test[i].gridX,
-                                test[i].gridY,
-                                test[i].gridZ,
-                                test[i].blockX,
-                                test[i].blockY,
-                                test[i].blockZ,
-                                0,
-                                stream1, NULL,
-                                reinterpret_cast<void**>(&config1),
-                                nullptr, nullptr, 0);
+    err = hipExtModuleLaunchKernel(DummyKernel, test[i].gridX, test[i].gridY, test[i].gridZ,
+                                   test[i].blockX, test[i].blockY, test[i].blockZ, 0, stream1, NULL,
+                                   reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
     if (err != hipSuccess) {
       testStatus = false;
     }
@@ -798,34 +717,26 @@ bool ModuleLaunchKernel::Module_WorkGroup_Test() {
   hipError_t err;
   AllocateMemory();
   ModuleLoad();
-  void *config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3,
-                     HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
+  void* config1[] = {HIP_LAUNCH_PARAM_BUFFER_POINTER, &args3, HIP_LAUNCH_PARAM_BUFFER_SIZE, &size3,
                      HIP_LAUNCH_PARAM_END};
   hipDeviceProp_t deviceProp;
   HIP_CHECK(hipGetDeviceProperties(&deviceProp, 0));
-  double cuberootVal =
-                cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
+  double cuberootVal = cbrt(static_cast<double>(deviceProp.maxThreadsPerBlock));
   uint32_t cuberoot_floor = floor(cuberootVal);
   uint32_t cuberoot_ceil = ceil(cuberootVal);
   // Scenario: (block.x * block.y * block.z) <= Work Group Size where
   // block.x < MaxBlockDimX , block.y < MaxBlockDimY and block.z < MaxBlockDimZ
-  err = hipExtModuleLaunchKernel(DummyKernel,
-                            1, 1, 1,
-                            cuberoot_floor, cuberoot_floor, cuberoot_floor,
-                            0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1),
-                            nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(DummyKernel, 1, 1, 1, cuberoot_floor, cuberoot_floor,
+                                 cuberoot_floor, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err != hipSuccess) {
     testStatus = false;
   }
   // Scenario: (block.x * block.y * block.z) > Work Group Size where
   // block.x < MaxBlockDimX , block.y < MaxBlockDimY and block.z < MaxBlockDimZ
-  err = hipExtModuleLaunchKernel(DummyKernel,
-                            1, 1, 1,
-                            cuberoot_ceil, cuberoot_ceil, cuberoot_ceil + 1,
-                            0, stream1, NULL,
-                            reinterpret_cast<void**>(&config1),
-                            nullptr, nullptr, 0);
+  err = hipExtModuleLaunchKernel(DummyKernel, 1, 1, 1, cuberoot_ceil, cuberoot_ceil,
+                                 cuberoot_ceil + 1, 0, stream1, NULL,
+                                 reinterpret_cast<void**>(&config1), nullptr, nullptr, 0);
   if (err == hipSuccess) {
     testStatus = false;
   }
@@ -862,6 +773,6 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_Functional") {
   }
 }
 /**
-* End doxygen group KernelTest.
-* @}
-*/
+ * End doxygen group KernelTest.
+ * @}
+ */

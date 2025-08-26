@@ -228,7 +228,8 @@ Examples:
         "--set",
         default=None,
         dest="set_selected",
-        help="\t\t\tProfile a set of metrics of topic of interest by collecting counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
+        help="\t\t\tProfile a set of metrics of topic of interest by collecting "
+        "counters in a single pass.\n\t\t\tFor available sets, see --list-sets",
     )
 
     profile_group.add_argument(
@@ -307,7 +308,7 @@ Examples:
             "\t\t\t  For stochastic sampling, the interval is in cycles.\n"
             "\t\t\t  For host_trap sampling, the interval is in microsecond "
             "(DEFAULT: 1048576)."
-        )
+        ),
     )
 
     profile_group.add_argument(

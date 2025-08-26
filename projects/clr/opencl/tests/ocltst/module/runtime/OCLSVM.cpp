@@ -32,11 +32,10 @@
 
 #define NUM_SIZES 6
 
-#define OCL_CHECK(error)                                                 \
-  if (error != CL_SUCCESS) {                                             \
-    fprintf(stderr, "OpenCL API invocation failed at %s:%d\n", __FILE__, \
-            __LINE__);                                                   \
-    exit(-1);                                                            \
+#define OCL_CHECK(error)                                                                           \
+  if (error != CL_SUCCESS) {                                                                       \
+    fprintf(stderr, "OpenCL API invocation failed at %s:%d\n", __FILE__, __LINE__);                \
+    exit(-1);                                                                                      \
   }
 
 #define STR(__macro__) #__macro__
@@ -50,26 +49,19 @@ size_t getTotalSystemMemory() {
 }
 #endif
 
-template <typename T, unsigned N>
-static unsigned countOf(const T (&)[N]) {
-  return N;
-}
+template <typename T, unsigned N> static unsigned countOf(const T (&)[N]) { return N; }
 
 const static char* sources[] = {
-    STR(__kernel void test(__global int* ptr) {
-      ptr[get_global_id(0)] = 0xDEADBEEF;
-    }),
+    STR(__kernel void test(__global int* ptr) { ptr[get_global_id(0)] = 0xDEADBEEF; }),
     STR(__kernel void test(__global int* ptr, __global int* ptr2) {
       ptr[get_global_id(0)] = 0xDEADBEEF;
       ptr2[get_global_id(0)] = 0xDEADF00D;
     }),
-    STR(__kernel void test(__global long* ptr) {
-      ptr[get_global_id(0) * 1024] = 0xBAADF00D;
-    }),
+    STR(__kernel void test(__global long* ptr) { ptr[get_global_id(0) * 1024] = 0xBAADF00D; }),
     STR(__kernel void test(__global ulong* ptr) {
       while (ptr) {
         *ptr = 0xDEADBEEF;
-        ptr = *((__global ulong* __global*)(ptr + 1));
+        ptr = *((__global ulong * __global*)(ptr + 1));
       }
     }),
     STR(__kernel void test(__global volatile int* ptr, int numIterations) {
@@ -85,8 +77,8 @@ const static char* sources[] = {
     STR(__kernel void test(){
         // dummy
     }),
-    STR(__kernel void test(int8 arg0, __global int* arg1, int arg2,
-                           __global int* arg3, __global float* arg4){
+    STR(__kernel void test(int8 arg0, __global int* arg1, int arg2, __global int* arg3,
+                           __global float* arg4){
         // dummy
     }),
     STR(__kernel void test(__global int* ptr, int to) {
@@ -108,8 +100,7 @@ OCLSVM::OCLSVM() { _numSubTests = countOf(sources); }
 
 OCLSVM::~OCLSVM() {}
 
-void OCLSVM::open(unsigned int test, char* units, double& conversion,
-                  unsigned int deviceId) {
+void OCLSVM::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   OCLTestImp::open(test, units, conversion, deviceId);
   CHECK_ERROR(error_, "Error opening test");
   _openTest = test;
@@ -119,12 +110,10 @@ void OCLSVM::open(unsigned int test, char* units, double& conversion,
     return;
   }
 
-  program_ = _wrapper->clCreateProgramWithSource(
-      context_, 1, sources + _openTest, NULL, &error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, sources + _openTest, NULL, &error_);
   CHECK_ERROR(error_, "clCreateProgramWithSource()  failed");
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId],
-                                    "-cl-std=CL2.0", NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], "-cl-std=CL2.0", NULL, NULL);
   CHECK_ERROR(error_, "clBuildProgram() failed");
 
   kernel_ = _wrapper->clCreateKernel(program_, "test", &error_);
@@ -152,8 +141,7 @@ void OCLSVM::runFineGrainedBuffer() {
     return;
   }
   const size_t numElements = 256;
-  int* ptr = (int*)clSVMAlloc(context_,
-                              CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER,
+  int* ptr = (int*)clSVMAlloc(context_, CL_MEM_READ_WRITE | CL_MEM_SVM_FINE_GRAIN_BUFFER,
                               numElements * sizeof(int), 0);
   CHECK_RESULT(!ptr, "clSVMAlloc() failed");
 
@@ -161,16 +149,16 @@ void OCLSVM::runFineGrainedBuffer() {
   CHECK_ERROR(error_, "clSetKernelArgSVMPointer() failed");
 
   size_t gws[1] = {numElements};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
 
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(error_, "Queue::finish() failed");
 
   size_t matchingElements = std::count(ptr, ptr + numElements, (int)0xDEADBEEF);
-  CHECK_RESULT(matchingElements != numElements, "Expected: %zd, found:%zd",
-               numElements, matchingElements);
+  CHECK_RESULT(matchingElements != numElements, "Expected: %zd, found:%zd", numElements,
+               matchingElements);
   clSVMFree(context_, ptr);
 }
 
@@ -192,19 +180,17 @@ void OCLSVM::runFineGrainedSystem() {
   CHECK_ERROR(error_, "clSetKernelArgSVMPointer() failed");
 
   size_t gws[1] = {numElements};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
 
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(error_, "Queue::finish() failed");
 
   size_t matchingElements = std::count(ptr, ptr + numElements, (int)0xDEADBEEF);
-  size_t matchingElements2 =
-      std::count(ptr2, ptr2 + numElements, (int)0xDEADF00D);
-  CHECK_RESULT(matchingElements + matchingElements2 != 2 * numElements,
-               "Expected: %zd, found:%zd", numElements * 2,
-               matchingElements + matchingElements2);
+  size_t matchingElements2 = std::count(ptr2, ptr2 + numElements, (int)0xDEADF00D);
+  CHECK_RESULT(matchingElements + matchingElements2 != 2 * numElements, "Expected: %zd, found:%zd",
+               numElements * 2, matchingElements + matchingElements2);
   delete[] ptr;
   delete[] ptr2;
 }
@@ -242,8 +228,8 @@ void OCLSVM::runFineGrainedSystemLargeAllocations() {
     CHECK_ERROR(error_, "clSetKernelArgSVMPointer() failed");
 
     size_t gws[1] = {numElements};
-    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                              NULL, gws, NULL, 0, NULL, NULL);
+    error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                              NULL, NULL);
     CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
 
     error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -255,8 +241,7 @@ void OCLSVM::runFineGrainedSystemLargeAllocations() {
       if ((int)ptr64[i * 1024] != 0xBAADF00D) {
         uint64_t temp = ptr64[i * 1024];
         delete[] ptr;
-        CHECK_RESULT(temp != 0xBAADF00D, "Found: %d, Expected:%d", temp,
-                     0xBAADF00D);
+        CHECK_RESULT(temp != 0xBAADF00D, "Found: %d, Expected:%d", temp, 0xBAADF00D);
       }
     }
     delete[] ptr;
@@ -282,8 +267,8 @@ void OCLSVM::runLinkedListSearchUsingFineGrainedSystem() {
   CHECK_ERROR(error_, "clSetKernelArgSVMPointer() failed");
 
   size_t gws[1] = {1};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
 
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
@@ -299,8 +284,8 @@ void OCLSVM::runLinkedListSearchUsingFineGrainedSystem() {
     ptr = (Node*)ptr->next_;
     delete tmp;
   }
-  CHECK_RESULT(matchingElements != inputSize, "Expected: %d, found:%d",
-               inputSize, matchingElements);
+  CHECK_RESULT(matchingElements != inputSize, "Expected: %d, found:%d", inputSize,
+               matchingElements);
 }
 
 static int atomicIncrement(volatile int* loc) {
@@ -321,8 +306,7 @@ void OCLSVM::runPlatformAtomics() {
   }
 
   volatile int* value = (volatile int*)clSVMAlloc(
-      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, sizeof(int),
-      0);
+      context_, CL_MEM_SVM_FINE_GRAIN_BUFFER | CL_MEM_SVM_ATOMICS, sizeof(int), 0);
   CHECK_RESULT(!value, "clSVMAlloc() failed");
   *value = 0;
   const int numIterations = 1000000;
@@ -333,8 +317,8 @@ void OCLSVM::runPlatformAtomics() {
   CHECK_ERROR(error_, "clSetKernelArg() failed");
 
   size_t gws[1] = {1};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
 
   for (int i = 0; i < numIterations; i++) {
@@ -362,8 +346,7 @@ void OCLSVM::runEnqueueOperations() {
   cl_command_queue queue = cmdQueues_[_deviceId];
   // coarse-grained buffer semantics: the SVM pointer needs to be mapped
   // before the pointer can write to it
-  error_ =
-      clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_WRITE, ptr0, size, 0, NULL, NULL);
+  error_ = clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_WRITE, ptr0, size, 0, NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueSVMMap() failed");
   std::fill(ptr0, ptr0 + numElements, 1);
   error_ = clEnqueueSVMUnmap(queue, ptr0, 0, NULL, NULL);
@@ -374,8 +357,7 @@ void OCLSVM::runEnqueueOperations() {
   CHECK_ERROR(error_, "clEnqueueSVMMemcpy() failed");
 
   // verification: the 2nd buffer should be identical to the 1st
-  error_ = clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_READ, ptr1, size, 0, NULL,
-                           &userEvent);
+  error_ = clEnqueueSVMMap(queue, CL_TRUE, CL_MAP_READ, ptr1, size, 0, NULL, &userEvent);
   CHECK_ERROR(error_, "clEnqueueSVMMap() failed");
 
   error_ = clWaitForEvents(1, &userEvent);
@@ -383,12 +365,10 @@ void OCLSVM::runEnqueueOperations() {
 
   size_t observed = std::count(ptr1, ptr1 + numElements, 1);
   size_t expected = numElements;
-  CHECK_RESULT(observed != expected, "Expected: %zd, found:%zd", expected,
-               observed);
+  CHECK_RESULT(observed != expected, "Expected: %zd, found:%zd", expected, observed);
 
   void* ptrs[2] = {ptr0, ptr1};
-  error_ =
-      clEnqueueSVMFree(queue, countOf(ptrs), ptrs, NULL, NULL, 0, NULL, NULL);
+  error_ = clEnqueueSVMFree(queue, countOf(ptrs), ptrs, NULL, NULL, 0, NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueSVMFree() failed");
   error_ = clFinish(queue);
   CHECK_ERROR(error_, "clFinish() failed");
@@ -421,8 +401,8 @@ void OCLSVM::runSvmArgumentsAreRecognized() {
   size_t gws[1] = {1};
 
   // run dummy kernel
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(error_, "Queue::finish() failed");
@@ -433,8 +413,8 @@ void OCLSVM::runSvmArgumentsAreRecognized() {
   CHECK_ERROR(error_, "clSetKernelArg() failed");
 
   // re-execute the dummy kernel using different actual parameters
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
   CHECK_ERROR(error_, "clEnqueueNDRangeKernel() failed");
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(error_, "Queue::finish() failed");
@@ -446,15 +426,15 @@ void OCLSVM::runSvmCommandsExecutedInOrder() {
   const int numElements = 5000;
 #else
   const int numElements = 100000;
-#endif // EMU_ENV
+#endif  // EMU_ENV
   size_t size = numElements * sizeof(int);
   // allocate SVM memory
   int* data = (int*)clSVMAlloc(context_, CL_MEM_READ_WRITE, size, 0);
   CHECK_RESULT(!data, "clSVMAlloc failed");
 
   // map the SVM buffer to host
-  cl_int status = clEnqueueSVMMap(cmdQueues_[_deviceId], CL_TRUE, CL_MAP_WRITE,
-                                  data, size, 0, NULL, NULL);
+  cl_int status =
+      clEnqueueSVMMap(cmdQueues_[_deviceId], CL_TRUE, CL_MAP_WRITE, data, size, 0, NULL, NULL);
   CHECK_ERROR(status, "Error when mapping SVM buffer");
 
   // fill buffer with 0s
@@ -472,15 +452,14 @@ void OCLSVM::runSvmCommandsExecutedInOrder() {
 
   cl_event event;
   size_t overallSize = (size_t)numElements;
-  status = clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL,
-                                  &overallSize, NULL, 0, NULL, &event);
+  status = clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, &overallSize, NULL, 0,
+                                  NULL, &event);
   CHECK_ERROR(status, "Error when enqueuing kernel");
   error_ = clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(status, "clFinish()");
 
   // map the SVM buffer to host
-  status = clEnqueueSVMMap(cmdQueues_[_deviceId], CL_TRUE, CL_MAP_READ, data,
-                           size, 0, NULL, NULL);
+  status = clEnqueueSVMMap(cmdQueues_[_deviceId], CL_TRUE, CL_MAP_READ, data, size, 0, NULL, NULL);
   CHECK_ERROR(status, "Error when mapping SVM buffer");
 
   bool pass = true;
@@ -499,8 +478,7 @@ void OCLSVM::runSvmCommandsExecutedInOrder() {
   CHECK_ERROR(status, "Error when unmapping SVM buffer");
 
   // free the SVM buffer
-  status = clEnqueueSVMFree(cmdQueues_[_deviceId], 1, (void**)&data, NULL, NULL,
-                            0, NULL, NULL);
+  status = clEnqueueSVMFree(cmdQueues_[_deviceId], 1, (void**)&data, NULL, NULL, 0, NULL, NULL);
   CHECK_ERROR(status, "Error when freeing the SVM buffer");
   error_ = clFinish(cmdQueues_[_deviceId]);
   CHECK_ERROR(error_, "clFinish() failed");
@@ -521,8 +499,7 @@ void OCLSVM::runIdentifySvmBuffers() {
   clSVMAlloc(context_, CL_MEM_READ_WRITE, size * 4, 0);
 
   // buffer using the entire SVM region should be identified as such
-  cl_mem buf1 =
-      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, size, ptr, &status);
+  cl_mem buf1 = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, size, ptr, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
   size_t paramSize = 0;
@@ -532,20 +509,18 @@ void OCLSVM::runIdentifySvmBuffers() {
                "clGetMemObjectInfo(CL_MEM_USES_SVM_POINTER) "
                "returned wrong size.");
 
-  status = clGetMemObjectInfo(buf1, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool),
-                              &usesSVMpointer, 0);
+  status = clGetMemObjectInfo(buf1, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool), &usesSVMpointer, 0);
   CHECK_ERROR(status, "clGetMemObjectInfo failed");
   CHECK_RESULT(usesSVMpointer != CL_TRUE,
                "clGetMemObjectInfo(CL_MEM_USES_SVM_POINTER) "
                "returned CL_FALSE for buffer created from SVM pointer.");
 
   // Buffer that uses random region within SVM buffers
-  cl_mem buf2 = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, 256,
-                               (char*)ptr + size - 256, &status);
+  cl_mem buf2 =
+      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, 256, (char*)ptr + size - 256, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
-  status = clGetMemObjectInfo(buf2, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool),
-                              &usesSVMpointer, 0);
+  status = clGetMemObjectInfo(buf2, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool), &usesSVMpointer, 0);
   CHECK_ERROR(status, "clGetMemObjectInfo failed");
   CHECK_RESULT(usesSVMpointer != CL_TRUE,
                "clGetMemObjectInfo(CL_MEM_USES_SVM_POINTER) "
@@ -553,12 +528,10 @@ void OCLSVM::runIdentifySvmBuffers() {
 
   // for any other pointer the query should return false
   void* randomPtr = malloc(size);
-  cl_mem buf3 =
-      clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, size, randomPtr, &status);
+  cl_mem buf3 = clCreateBuffer(context_, CL_MEM_USE_HOST_PTR, size, randomPtr, &status);
   CHECK_ERROR(status, "clCreateBuffer failed.");
 
-  status = clGetMemObjectInfo(buf3, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool),
-                              &usesSVMpointer, 0);
+  status = clGetMemObjectInfo(buf3, CL_MEM_USES_SVM_POINTER, sizeof(cl_bool), &usesSVMpointer, 0);
   CHECK_ERROR(status, "clGetMemObjectInfo failed");
   CHECK_RESULT(usesSVMpointer == CL_TRUE,
                "clGetMemObjectInfo(CL_MEM_USES_SVM_POINTER) "
@@ -573,8 +546,8 @@ void OCLSVM::runIdentifySvmBuffers() {
 
 cl_bool OCLSVM::isOpenClSvmAvailable(cl_device_id device_id) {
 #ifdef CL_VERSION_2_0
-  error_ = clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_SVM_CAPABILITIES,
-                           sizeof(svmCaps_), &svmCaps_, NULL);
+  error_ = clGetDeviceInfo(devices_[_deviceId], CL_DEVICE_SVM_CAPABILITIES, sizeof(svmCaps_),
+                           &svmCaps_, NULL);
   CHECK_ERROR_NO_RETURN(error_, "clGetDeviceInfo() failed");
   if (!(svmCaps_ & CL_DEVICE_SVM_COARSE_GRAIN_BUFFER)) {
     return CL_FALSE;

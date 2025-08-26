@@ -1,5 +1,4 @@
 import logging
-from collections import defaultdict
 from datetime import datetime
 from enum import Enum
 
@@ -35,50 +34,36 @@ class Logger:
     def set_output_area(self, output_area):
         self.output_area = output_area
 
-    def log(self, message, level=LogLevel.INFO, update_ui=True):
+    def log(self, message, level="INFO", update_ui=True):
         level_map = {
-            LogLevel.INFO: logging.INFO,
-            LogLevel.SUCCESS: logging.INFO,
-            LogLevel.WARNING: logging.WARNING,
-            LogLevel.ERROR: logging.ERROR,
+            "INFO": logging.INFO,
+            "SUCCESS": logging.INFO,
+            "WARNING": logging.WARNING,
+            "ERROR": logging.ERROR,
         }
-
         self.logger.log(level_map[level], message)
 
-        timestamp = datetime.now().strftime("%H:%M:%S")
-
-        if update_ui and self.output_area:
-            if level == LogLevel.ERROR:
-                formatted_msg = f"[{timestamp}] [ERROR] {message}"
-            elif level == LogLevel.WARNING:
-                formatted_msg = f"[{timestamp}] [WARNING] {message}"
-            elif level == LogLevel.SUCCESS:
-                formatted_msg = f"[{timestamp}] [SUCCESS] {message}"
-            else:
-                formatted_msg = f"[{timestamp}] [INFO] {message}"
-
-            if hasattr(self.output_area, "text"):
-                current_text = self.output_area.text
-                self.output_area.text = (
-                    f"{current_text}\n{formatted_msg}"
-                    if current_text
-                    else formatted_msg
-                )
-                # HACK: moving curson to end of output
-                # (Is there a better way to achieve this?)
-                self.output_area.cursor_location = (999999, 0)
+        if update_ui and self.output_area and hasattr(self.output_area, "text"):
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            formatted_msg = f"[{timestamp}] [{level}] {message}"
+            self.output_area.text = (
+                f"{self.output_area.text}\n{formatted_msg}"
+                if self.output_area.text
+                else formatted_msg
+            )
+            self.output_area.cursor_location = (999999, 0)
 
     def info(self, message, update_ui=True):
-        self.log(message, LogLevel.INFO, update_ui)
+        self.log(message, "INFO", update_ui)
 
     def success(self, message, update_ui=True):
-        self.log(message, LogLevel.SUCCESS, update_ui)
+        self.log(message, "SUCCESS", update_ui)
 
     def warning(self, message, update_ui=True):
-        self.log(message, LogLevel.WARNING, update_ui)
+        self.log(message, "WARNING", update_ui)
 
     def error(self, message, update_ui=True):
-        self.log(message, LogLevel.ERROR, update_ui)
+        self.log(message, "ERROR", update_ui)
 
 
 def get_top_kernels_and_dispatch_ids(runs):
@@ -99,6 +84,7 @@ def get_top_kernels_and_dispatch_ids(runs):
         top_kernel_df, dispatch_id_df, on="Kernel_Name", how="outer"
     ).sort_values("Pct", ascending=False)
 
+    merged_df = merged_df.drop(columns=["Count", "GPU_ID"])
     return merged_df.to_dict("records")
 
 
@@ -125,8 +111,7 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
     #       args.max_stat_num
     #       args.df_file_dir
 
-    result_structure = defaultdict(dict)
-
+    result_structure = {}
     decimal_precision = getattr(args, "decimal", 2) if args else 2
 
     for panel_id, panel in archConfigs.panel_configs.items():
@@ -134,18 +119,20 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
             continue
 
         section_name = f"{panel_id // 100}. {panel['title']}"
+        section_data = {}
 
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 table_id = table_config["id"]
 
-                if table_id not in kernel_df:
+                if (
+                    table_id not in kernel_df
+                    or kernel_df[table_id] is None
+                    or kernel_df[table_id].empty
+                ):
                     continue
 
                 base_df = kernel_df[table_id]
-
-                if base_df is None or base_df.empty:
-                    continue
 
                 df = pd.DataFrame(index=base_df.index)
 
@@ -158,49 +145,40 @@ def process_panels_to_dataframes(args, kernel_df, archConfigs, roof_plot=None):
                 df = apply_rounding_logic(df, decimal_precision)
 
                 subsection_name = (
-                    str(table_config["id"] // 100) + "." + str(table_config["id"] % 100)
+                    f"{table_config['id'] // 100}.{table_config['id'] % 100}"
                 )
-                if "title" in table_config and table_config["title"]:
+                if table_config.get("title"):
                     subsection_name += " " + table_config["title"]
 
-                result_structure[section_name][subsection_name] = {
+                section_data[subsection_name] = {
                     "df": df,
-                    "tui_style": None,
+                    "tui_style": (
+                        table_config.get("tui_style")
+                        if type == "metric_table"
+                        else None
+                    ),
                 }
 
-                if type == "metric_table" and "tui_style" in table_config:
-                    result_structure[section_name][subsection_name]["tui_style"] = (
-                        table_config["tui_style"]
-                    )
+        if section_data:
+            result_structure[section_name] = section_data
 
-    return dict(result_structure)
+    return result_structure
 
 
 def apply_rounding_logic(df, decimal_precision):
-    df_copy = df.copy()
+    if df.empty:
+        return df
 
-    for column in df_copy.columns:
-        if column in ["Metric", "Tips", "coll_level", "Unit", "Kernel_Name", "Info"]:
-            continue
+    df_rounded = df.copy()
 
-        if df_copy[column].dtype in ["float64", "float32", "int64", "int32"]:
-            df_copy[column] = df_copy[column].round(decimal_precision)
-        else:
-            try:
-                numeric_series = pd.to_numeric(df_copy[column], errors="coerce")
-                if not numeric_series.isna().all():
-                    rounded_series = numeric_series.round(decimal_precision)
+    float_cols = df_rounded.select_dtypes(include=["float"]).columns
+    if len(float_cols) > 0:
+        df_rounded[float_cols] = df_rounded[float_cols].round(decimal_precision)
 
-                    if df_copy[column].dtype == "object":
-                        df_copy[column] = df_copy[column].combine(
-                            rounded_series,
-                            lambda orig, rounded: (
-                                rounded if pd.notna(rounded) else orig
-                            ),
-                        )
-                    else:
-                        df_copy[column] = rounded_series
-            except (ValueError, TypeError):
-                continue
+    other_cols = df_rounded.select_dtypes(exclude=["float"]).columns
+    for col in other_cols:
+        numeric_series = pd.to_numeric(df_rounded[col], errors="coerce")
+        if numeric_series.notna().any():
+            df_rounded[col] = numeric_series.round(decimal_precision)
 
-    return df_copy
+    return df_rounded

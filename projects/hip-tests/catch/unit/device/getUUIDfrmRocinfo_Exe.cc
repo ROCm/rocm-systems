@@ -53,10 +53,8 @@ int main(int argc, char** argv) {
     std::string rocminfo_line(command_op);
     if (std::string::npos != rocminfo_line.find("CPU-")) {
       continue;
-    } else if (auto loc = rocminfo_line.find("GPU-");
-                    loc != std::string::npos) {
-      if (std::string::npos ==
-          rocminfo_line.find("GPU-XX")) {
+    } else if (auto loc = rocminfo_line.find("GPU-"); loc != std::string::npos) {
+      if (std::string::npos == rocminfo_line.find("GPU-XX")) {
         std::vector<char> t_uuid(20, 0);
         std::memcpy(t_uuid.data(), &rocminfo_line[loc], 20);
         uuid_map[j] = t_uuid;
@@ -67,7 +65,7 @@ int main(int argc, char** argv) {
   std::string s = argv[1];
   std::string delimiter = ",";
   size_t pos = 0;
-  std::vector<std::string>token;
+  std::vector<std::string> token;
   while ((pos = s.find(delimiter)) != std::string::npos) {
     token.push_back(s.substr(4, 16));
     s.erase(0, pos + delimiter.length());

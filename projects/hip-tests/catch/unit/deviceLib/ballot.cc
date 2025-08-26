@@ -61,14 +61,14 @@ TEST_CASE("Unit_ballot") {
   for (unsigned i = 0; i < Num_Warps_per_Grid; i++) host_ballot[i] = 0;
 
   HIP_CHECK(hipMemcpy(device_ballot, host_ballot, Num_Warps_per_Grid * sizeof(unsigned int),
-                       hipMemcpyHostToDevice));
+                      hipMemcpyHostToDevice));
 
   hipLaunchKernelGGL(gpu_ballot, dim3(Num_Blocks_per_Grid), dim3(Num_Threads_per_Block), 0, 0,
                      device_ballot, Num_Warps_per_Block, pshift);
 
   HIP_CHECK(hipGetLastError());
   HIP_CHECK(hipMemcpy(host_ballot, device_ballot, Num_Warps_per_Grid * sizeof(unsigned int),
-                       hipMemcpyDeviceToHost));
+                      hipMemcpyDeviceToHost));
 
   for (unsigned i = 0; i < Num_Warps_per_Grid; i++) {
     if ((host_ballot[i] == 0) || (host_ballot[i] / warpSize == warpSize)) {

@@ -48,7 +48,8 @@ from utils.roofline_calc import (
     MFMA_DATATYPES,
     PEAK_OPS_DATATYPES,
     SUPPORTED_DATATYPES,
-    calc_ai,
+    calc_ai_analyze,
+    calc_ai_profile,
     constuct_roof,
 )
 from utils.utils import mibench
@@ -182,10 +183,9 @@ class Roofline:
         console_debug(
             "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
         )
-        self.__ai_data = calc_ai(
+        self.__ai_data = calc_ai_profile(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
-
         msg = "AI at each mem level:"
         for i in self.__ai_data:
             msg += "\n\t%s -> %s" % (i, self.__ai_data[i])
@@ -620,7 +620,7 @@ class Roofline:
 
         return fig
 
-    def cli_generate_plot(self, dtype):
+    def cli_generate_plot(self, dtype, workload=None, config=None, arch_config=None):
         """
         Plot CLI mode roofline analysis in terminal using plotext
 
@@ -668,10 +668,46 @@ class Roofline:
         else:
             # workload_dir is a string
             base_dir = workload_dir
-        self.roof_setup()
-
         # Convert to Path object for easier manipulation
         base_path = Path(base_dir)
+
+        roofline_csv = base_path / "roofline.csv"
+        if not roofline_csv.is_file():
+            console_log("roofline", "{} does not exist".format(roofline_csv))
+            return
+
+        # if workload is detected, utilize Roofline yamls.
+        # If not, fallback to legacy calc_ai
+        if workload is not None:
+            self.__ai_data = calc_ai_analyze(
+                workload=workload,
+                mspec=self.__mspec,
+                sort_type=self.__run_parameters.get("sort_type"),
+                config=config,
+                arch_config=arch_config,
+            )
+
+        else:
+            pmc_perf_csv = base_path / "pmc_perf.csv"
+            if not pmc_perf_csv.is_file():
+                console_error("roofline", "{} does not exist".format(pmc_perf_csv))
+            t_df = OrderedDict()
+            t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
+            profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
+            if profiling_config.get("format_rocprof_output") == "rocpd":
+                t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
+
+            self.__ai_data = calc_ai_profile(
+                self.__mspec, self.__run_parameters["sort_type"], t_df
+            )
+
+        self.__ceiling_data = constuct_roof(
+            roofline_parameters=self.__run_parameters, dtype=dtype
+        )
+        console_debug(f"AI data: {self.__ai_data}")
+        console_debug(f"Kernel names: {self.__ai_data.get('kernelNames', [])}")
+
+        self.roof_setup()
 
         # Check proper datatype input - takes single str
         if not isinstance(dtype, str):
@@ -681,20 +717,6 @@ class Roofline:
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
-
-        roofline_csv = base_path / "roofline.csv"
-        if not roofline_csv.is_file():
-            console_log("roofline", "{} does not exist".format(roofline_csv))
-            return
-
-        pmc_perf_csv = base_path / "pmc_perf.csv"
-        if not pmc_perf_csv.is_file():
-            console_error("roofline", "{} does not exist".format(pmc_perf_csv))
-        t_df = OrderedDict()
-        t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
-        profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
-        if profiling_config.get("format_rocprof_output") == "rocpd":
-            t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
         color_scheme = {
             "HBM": "blue+",
@@ -713,12 +735,6 @@ class Roofline:
             4: "at",
             5: "atom",
         }
-
-        self.__ceiling_data = constuct_roof(
-            roofline_parameters=self.__run_parameters,
-            dtype=dtype,
-        )
-        self.__ai_data = calc_ai(self.__mspec, self.__run_parameters["sort_type"], t_df)
 
         plt.clf()
         plt.plotsize(plt.tw(), plt.th())

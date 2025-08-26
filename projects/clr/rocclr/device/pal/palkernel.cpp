@@ -44,7 +44,8 @@ void HSAILKernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
   constexpr uint32_t ScratchRegAlignment = 256;
   workGroupInfo_.scratchRegs_ =
       amd::alignUp((workGroupInfo_.scratchRegs_ * device().info().wavefrontWidth_),
-                   ScratchRegAlignment) / device().info().wavefrontWidth_;
+                   ScratchRegAlignment) /
+      device().info().wavefrontWidth_;
   workGroupInfo_.privateMemSize_ = workGroupInfo_.scratchRegs_ * sizeof(uint32_t);
   workGroupInfo_.localMemSize_ = workGroupInfo_.usedLDSSize_ = groupSegmentSize;
   workGroupInfo_.usedSGPRs_ = numSGPRs;
@@ -52,7 +53,8 @@ void HSAILKernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
   workGroupInfo_.usedVGPRs_ = numVGPRs;
 
   if (!prog().isNull()) {
-    workGroupInfo_.availableLDSSize_ = palDevice().properties().gfxipProperties.shaderCore.ldsSizePerCu;
+    workGroupInfo_.availableLDSSize_ =
+        palDevice().properties().gfxipProperties.shaderCore.ldsSizePerCu;
     workGroupInfo_.availableSGPRs_ =
         palDevice().properties().gfxipProperties.shaderCore.numAvailableSgprs;
     workGroupInfo_.availableVGPRs_ =
@@ -65,8 +67,8 @@ void HSAILKernel::setWorkGroupInfo(const uint32_t privateSegmentSize,
     workGroupInfo_.availableVGPRs_ = 256;
     workGroupInfo_.preferredSizeMultiple_ = workGroupInfo_.wavefrontPerSIMD_ = 64;
   }
-  workGroupInfo_.maxDynamicSharedSizeBytes_ = static_cast<int>(workGroupInfo_.availableLDSSize_ -
-                                                               workGroupInfo_.localMemSize_);
+  workGroupInfo_.maxDynamicSharedSizeBytes_ =
+      static_cast<int>(workGroupInfo_.availableLDSSize_ - workGroupInfo_.localMemSize_);
 }
 
 bool HSAILKernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t* akc) {
@@ -85,19 +87,14 @@ bool HSAILKernel::setKernelCode(amd::hsa::loader::Symbol* sym, amd_kernel_code_t
 }
 
 HSAILKernel::HSAILKernel(std::string name, HSAILProgram* prog, bool internalKernel)
-    : device::Kernel(prog->device(), name, *prog),
-      index_(0),
-      code_(0),
-      codeSize_(0) {
+    : device::Kernel(prog->device(), name, *prog), index_(0), code_(0), codeSize_(0) {
   flags_.hsa_ = true;
   flags_.internalKernel_ = internalKernel;
 }
 
 HSAILKernel::~HSAILKernel() {}
 
-bool HSAILKernel::postLoad() {
-  return true;
-}
+bool HSAILKernel::postLoad() { return true; }
 
 bool HSAILKernel::init() {
 #if defined(WITH_COMPILER_LIB)
@@ -132,9 +129,9 @@ bool HSAILKernel::init() {
 
   // Pull out metadata from the ELF
   size_t sizeOfArgList;
-  acl_error error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(),
-                                         RT_ARGUMENT_ARRAY, openClKernelName.c_str(),
-                                         nullptr, &sizeOfArgList);
+  acl_error error =
+      amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_ARGUMENT_ARRAY,
+                            openClKernelName.c_str(), nullptr, &sizeOfArgList);
   if (error != ACL_SUCCESS) {
     return false;
   }
@@ -159,7 +156,8 @@ bool HSAILKernel::init() {
     return false;
   }
   error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_WORK_GROUP_SIZE,
-                                openClKernelName.c_str(), workGroupInfo_.compileSize_, &sizeOfWorkGroupSize);
+                                openClKernelName.c_str(), workGroupInfo_.compileSize_,
+                                &sizeOfWorkGroupSize);
   if (error != ACL_SUCCESS) {
     return false;
   }
@@ -169,7 +167,7 @@ bool HSAILKernel::init() {
   // Find total workgroup size
   if (workGroupInfo_.compileSize_[0] != 0) {
     workGroupInfo_.size_ = workGroupInfo_.compileSize_[0] * workGroupInfo_.compileSize_[1] *
-        workGroupInfo_.compileSize_[2];
+                           workGroupInfo_.compileSize_[2];
   } else {
     workGroupInfo_.size_ = device().info().preferredWorkGroupSize_;
   }
@@ -188,8 +186,9 @@ bool HSAILKernel::init() {
     if (nullptr == aclPrintfList) {
       return false;
     }
-    error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_GPU_PRINTF_ARRAY,
-                                  openClKernelName.c_str(), aclPrintfList, &sizeOfPrintfList);
+    error =
+        amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_GPU_PRINTF_ARRAY,
+                              openClKernelName.c_str(), aclPrintfList, &sizeOfPrintfList);
     if (error != ACL_SUCCESS) {
       return false;
     }
@@ -219,17 +218,17 @@ bool HSAILKernel::init() {
   index_ = md.kernel_index;
 
   size_t sizeOfWavesPerSimdHint = sizeof(workGroupInfo_.wavesPerSimdHint_);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_WAVES_PER_SIMD_HINT,
-                                openClKernelName.c_str(), &workGroupInfo_.wavesPerSimdHint_,
-                                &sizeOfWavesPerSimdHint);
+  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(),
+                                RT_WAVES_PER_SIMD_HINT, openClKernelName.c_str(),
+                                &workGroupInfo_.wavesPerSimdHint_, &sizeOfWavesPerSimdHint);
   if (error != ACL_SUCCESS) {
     return false;
   }
 
   size_t sizeOfWorkGroupSizeHint = sizeof(workGroupInfo_.compileSizeHint_);
-  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(), RT_WORK_GROUP_SIZE_HINT,
-                                openClKernelName.c_str(), workGroupInfo_.compileSizeHint_,
-                                &sizeOfWorkGroupSizeHint);
+  error = amd::Hsail::QueryInfo(palNullDevice().compiler(), prog().binaryElf(),
+                                RT_WORK_GROUP_SIZE_HINT, openClKernelName.c_str(),
+                                workGroupInfo_.compileSizeHint_, &sizeOfWorkGroupSizeHint);
   if (error != ACL_SUCCESS) {
     return false;
   }
@@ -265,10 +264,12 @@ const HSAILProgram& HSAILKernel::prog() const {
 }
 
 // ================================================================================================
-hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(
-    VirtualGPU& gpu, const amd::Kernel& kernel, const amd::NDRangeContainer& sizes,
-    const_address params, size_t ldsAddress, uint64_t vmDefQueue,
-    uint64_t* vmParentWrap, uint32_t* aql_index) const {
+hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(VirtualGPU& gpu, const amd::Kernel& kernel,
+                                                         const amd::NDRangeContainer& sizes,
+                                                         const_address params, size_t ldsAddress,
+                                                         uint64_t vmDefQueue,
+                                                         uint64_t* vmParentWrap,
+                                                         uint32_t* aql_index) const {
   // Provide private and local heap addresses
   static constexpr uint AddressShift = LP64_SWITCH(0, 32);
   const_address parameters = params;
@@ -288,8 +289,8 @@ hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(
   // The check below handles a special case of single context with multiple devices
   // when the devices use different compilers(HSAIL and LC) and have different signatures
   const amd::KernelSignature& signature =
-    (this->signature().version() == kernel.signature().version()) ?
-    kernel.signature() : this->signature();
+      (this->signature().version() == kernel.signature().version()) ? kernel.signature()
+                                                                    : this->signature();
 
   // If signatures don't match, then patch the parameters
   if (signature.version() != kernel.signature().version()) {
@@ -370,21 +371,21 @@ hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[0] / local[0]),
-                      it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[0] / local[0]), it.size_,
+                      it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountY:
         if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[1] / local[1]),
-                        it.size_, it.offset_);
+          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[1] / local[1]), it.size_,
+                        it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(1), it.size_, it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenBlockCountZ:
         if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[2] / local[2]),
-                        it.size_, it.offset_);
+          WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(global[2] / local[2]), it.size_,
+                        it.offset_);
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(1), it.size_, it.offset_);
         }
@@ -398,7 +399,7 @@ hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(
         } else {
           WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(1), it.size_, it.offset_);
         }
-      break;
+        break;
       case amd::KernelParameterDescriptor::HiddenGroupSizeZ:
         if (sizes.dimensions() >= 3) {
           WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(local[2]), it.size_, it.offset_);
@@ -407,50 +408,52 @@ hsa_kernel_dispatch_packet_t* HSAILKernel::loadArguments(
         }
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderX:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[0] % local[0]),
-                      it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[0] % local[0]), it.size_,
+                      it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderY:
         if (sizes.dimensions() >= 2) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[1] % local[1]),
-                        it.size_, it.offset_);
+          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[1] % local[1]), it.size_,
+                        it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenRemainderZ:
         if (sizes.dimensions() >= 3) {
-          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[2] % local[2]),
-                        it.size_, it.offset_);
+          WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(global[2] % local[2]), it.size_,
+                        it.offset_);
         }
         break;
       case amd::KernelParameterDescriptor::HiddenGridDims:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(sizes.dimensions()),
-                      it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint16_t>(sizes.dimensions()), it.size_,
+                      it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenPrivateBase:
-        WriteAqlArgAt(hidden_arguments,
-                      (palDevice().properties().gpuMemoryProperties.privateApertureBase >> AddressShift),
-                      it.size_, it.offset_);
+        WriteAqlArgAt(
+            hidden_arguments,
+            (palDevice().properties().gpuMemoryProperties.privateApertureBase >> AddressShift),
+            it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenSharedBase:
-        WriteAqlArgAt(hidden_arguments,
-                      (palDevice().properties().gpuMemoryProperties.sharedApertureBase >> AddressShift),
-                      it.size_, it.offset_);
+        WriteAqlArgAt(
+            hidden_arguments,
+            (palDevice().properties().gpuMemoryProperties.sharedApertureBase >> AddressShift),
+            it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenQueuePtr:
         // @note: It's not a real AQL queue
         WriteAqlArgAt(hidden_arguments, gpu.hsaQueueMem()->vmAddress(), it.size_, it.offset_);
         break;
       case amd::KernelParameterDescriptor::HiddenDynamicLdsSize:
-        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(ldsAddress - ldsSize()),
-               it.size_, it.offset_);
+        WriteAqlArgAt(hidden_arguments, static_cast<uint32_t>(ldsAddress - ldsSize()), it.size_,
+                      it.offset_);
         break;
     }
   }
 
   // Load all kernel arguments
   if (signature.version() == kernel.signature().version()) {
-    memcpy(aqlArgBuf, parameters, std::min(static_cast<uint32_t>(argsBufferSize()),
-                                           signature.paramsSize()));
+    memcpy(aqlArgBuf, parameters,
+           std::min(static_cast<uint32_t>(argsBufferSize()), signature.paramsSize()));
   }
 
   hsa_kernel_dispatch_packet_t* hsaDisp = gpu.GetAqlPacketSlot(aql_index);
@@ -499,13 +502,11 @@ const LightningProgram& LightningKernel::prog() const {
 }
 
 #if defined(USE_COMGR_LIBRARY)
-bool LightningKernel::init() {
-  return GetAttrCodePropMetadata();
-}
+bool LightningKernel::init() { return GetAttrCodePropMetadata(); }
 
 bool LightningKernel::postLoad() {
   if (codeObjectVer() == 2) {
-    symbolName_ =  name();
+    symbolName_ = name();
   }
 
   // Copy codeobject of this kernel from the program CPU segment
@@ -556,7 +557,7 @@ bool LightningKernel::postLoad() {
   }
   if ((workGroupInfo_.usedStackSize_ & 0x1) == 0x1) {
     workGroupInfo_.scratchRegs_ =
-        std::max<uint32_t>(device().StackSize(), workGroupInfo_.scratchRegs_ * sizeof(uint32_t)) ;
+        std::max<uint32_t>(device().StackSize(), workGroupInfo_.scratchRegs_ * sizeof(uint32_t));
     workGroupInfo_.scratchRegs_ = amd::alignUp(workGroupInfo_.scratchRegs_, 16) / sizeof(uint32_t);
     workGroupInfo_.privateMemSize_ = workGroupInfo_.scratchRegs_ * sizeof(uint32_t);
   }
@@ -575,19 +576,19 @@ bool LightningKernel::postLoad() {
 }
 
 bool LightningKernel::setKernelDescriptor(amd::hsa::loader::Symbol* sym,
-    llvm::amdhsa::kernel_descriptor_t* akd) {
-    if (!sym) {
-        return false;
-    }
-    if (!sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, reinterpret_cast<void*>(&code_))) {
-        return false;
-    }
+                                          llvm::amdhsa::kernel_descriptor_t* akd) {
+  if (!sym) {
+    return false;
+  }
+  if (!sym->GetInfo(HSA_EXECUTABLE_SYMBOL_INFO_KERNEL_OBJECT, reinterpret_cast<void*>(&code_))) {
+    return false;
+  }
 
-    // Copy code object of this kernel from the program CPU segment
-    memcpy(akd, reinterpret_cast<void*>(prog().findHostKernelAddress(code_)),
-        sizeof(llvm::amdhsa::kernel_descriptor_t));
+  // Copy code object of this kernel from the program CPU segment
+  memcpy(akd, reinterpret_cast<void*>(prog().findHostKernelAddress(code_)),
+         sizeof(llvm::amdhsa::kernel_descriptor_t));
 
-    return true;
+  return true;
 }
 
 #endif  // defined(USE_COMGR_LIBRARY)
