@@ -207,7 +207,7 @@ class db_analysis(OmniAnalyze_Base):
         # Write database
         Database.write()
         console_debug("Completed writing database")
-        print(f"Created file: {db_name}")
+        console_warning(f"Created file: {db_name}")
 
     def calc_roofline_ceilings(self):
         roofline_ceilings_per_workload = dict()
