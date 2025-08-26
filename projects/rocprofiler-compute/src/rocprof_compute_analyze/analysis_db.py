@@ -559,7 +559,7 @@ class db_analysis(OmniAnalyze_Base):
             roofline_data_expressions = dict(
                 zip(roofline_data_df["Metric"], roofline_data_df["Value"])
             )
-            metric_expressions = {
+            roofline_data_expressions = {
                 "total_flops": roofline_data_expressions["Performance (GFLOPs)"],
                 "l1_cache_data": roofline_data_expressions["AI L1"],
                 "l2_cache_data": roofline_data_expressions["AI L2"],
