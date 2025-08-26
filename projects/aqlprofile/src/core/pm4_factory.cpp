@@ -24,7 +24,7 @@
 
 #include <mutex>
 #include <shared_mutex>
-
+#include <iostream>
 namespace aql_profile {
 namespace {
 struct locked_agent_cache {
@@ -61,6 +61,7 @@ aqlprofile_agent_handle_t RegisterAgent(const aqlprofile_agent_info_v1_t* agent_
   int_agent_info.domain = agent_info->domain;
   int_agent_info.bdf_id = agent_info->location_id;
 
+  std::cout << "gfxip: " << agent_info->agent_gfxip << " CU count: " << agent_info->cu_num << '\n';
   auto len = strlen(agent_info->agent_gfxip);
   memset(int_agent_info.name, 0, sizeof(int_agent_info.name));
   memcpy(int_agent_info.name, agent_info->agent_gfxip,
