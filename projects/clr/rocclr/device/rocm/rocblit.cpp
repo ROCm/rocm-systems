@@ -2250,13 +2250,15 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
 
   bool ipcShared = srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared();
 
-  bool useShaderCopyPath =
-      setup_.disableHwlCopyBuffer_ || (sizeIn[0] <= dev().settings().sdmaCopyThreshold_) ||
-      (!(p2p || ipcShared) &&
-           (!srcMemory.isHostMemDirectAccess() && !dstMemory.isHostMemDirectAccess() &&
-            !(copyMetadata.copyEnginePreference_ ==
-              amd::CopyMetadata::CopyEnginePreference::SDMA)) ||
-       (copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::BLIT));
+  bool useShaderCopyPath = setup_.disableHwlCopyBuffer_ ||
+                           (copyMetadata.copyEnginePreference_ ==
+                            amd::CopyMetadata::CopyEnginePreference::BLIT) ||
+                           (sizeIn[0] <= dev().settings().sdmaCopyThreshold_ &&
+                            !(p2p || ipcShared) &&
+                            !srcMemory.isHostMemDirectAccess() &&
+                            !dstMemory.isHostMemDirectAccess() &&
+                            copyMetadata.copyEnginePreference_ !=
+                              amd::CopyMetadata::CopyEnginePreference::SDMA);
 
   if (!useShaderCopyPath) {
     if (amd::IS_HIP) {
