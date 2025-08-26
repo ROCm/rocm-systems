@@ -83,7 +83,7 @@ class tui_analysis(OmniAnalyze_Base):
         kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)
 
         # 1. load top kernel
-        parser.load_kernel_top(
+        parser.load_non_mertrics_table(
             workload=self._runs[self.path], dir=self.path, args=self.args
         )
 
