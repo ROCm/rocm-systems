@@ -28,7 +28,6 @@ THE SOFTWARE.
 #include <cstdint>
 #include <memory>
 #include <set>
-#include <sstream>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -1060,9 +1059,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
 
       uint64_t sum = 0;
       uint32_t count = 0;
-      for (uint32_t i = 0; i < AMDSMI_MAX_NUM_XCC; i++) {
-        uint32_t busy = xcp.gfx_busy_inst[i];
-        if (busy != UINT32_MAX) {
+      for (unsigned int busy : xcp.gfx_busy_inst) {
+         if (busy != UINT32_MAX) {
           sum += busy;
           count++;
         }
@@ -1086,9 +1084,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_partition_field_(uint32_t gpu_index
 
       uint64_t sum = 0;
       uint32_t count = 0;
-      for (uint32_t i = 0; i < AMDSMI_MAX_NUM_VCN; i++) {
-        uint16_t vcn = xcp.vcn_busy[i];
-        if (vcn != UINT16_MAX) {
+      for (unsigned short vcn : xcp.vcn_busy) {
+         if (vcn != UINT16_MAX) {
           sum += vcn;
           count++;
         }
@@ -1335,14 +1332,13 @@ rdc_status_t RdcMetricFetcherImpl::fetch_cpu_field_(uint32_t gpu_index, rdc_fiel
       uint32_t sock_count = 0;
       amdsmi_status_t ret_count = amdsmi_get_cpu_socket_count(&sock_count);
       if (ret_count == AMDSMI_STATUS_SUCCESS && sock_count > 0) {
-        auto* soc_info = new amdsmi_sock_info_t[sock_count];
-        value->status = amdsmi_get_cpu_cores_per_socket(sock_count, soc_info);
+        std::vector<amdsmi_sock_info_t> soc_info(sock_count);
+        value->status = amdsmi_get_cpu_cores_per_socket(sock_count, soc_info.data());
         value->type = INTEGER;
         if (value->status == AMDSMI_STATUS_SUCCESS) {
           // Return cores for the first socket or specific socket based on processor_handle
           value->value.l_int = static_cast<int64_t>(soc_info[0].cores_per_socket);
         }
-        delete[] soc_info;
       } else {
         value->status = ret_count;
       }
