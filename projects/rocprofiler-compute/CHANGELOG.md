@@ -103,10 +103,10 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * sL1D-L2 BW
 
 * Analysis output:
-  * Remove ``-o`` or ``--output`` analyze mode option.
-  * Remove ``--save-dfs`` analyze mode option.
-  * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
-  * Add ``--output-name`` analysis mode option to override the default file/folder name.
+  * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
+    * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
+    * Add ``--output-name`` analysis mode option to override the default file/folder name.
+  * Replace `--save-dfs` analyze mode option with `--output-format csv`
 
 ### Resolved issues
 
