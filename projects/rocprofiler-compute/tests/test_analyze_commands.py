@@ -25,6 +25,7 @@
 
 import os
 import shutil
+from pathlib import Path
 from unittest.mock import Mock
 
 import pandas as pd
@@ -608,7 +609,7 @@ def test_decimal_3(binary_handler_analyze_rocprof_compute):
 
 @pytest.mark.misc
 def test_save_dfs(binary_handler_analyze_rocprof_compute):
-    output_path = "tests/workloads/vcopy/saved_analysis"
+    output_path = Path(test_utils.get_output_dir())
     for dir in indirs:
         workload_dir = test_utils.setup_workload_dir(dir)
         code = binary_handler_analyze_rocprof_compute([
@@ -629,6 +630,7 @@ def test_save_dfs(binary_handler_analyze_rocprof_compute):
 
         shutil.rmtree(output_path)
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], output_path)
 
 
 @pytest.mark.col
