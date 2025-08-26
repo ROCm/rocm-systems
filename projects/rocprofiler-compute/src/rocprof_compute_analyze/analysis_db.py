@@ -394,9 +394,7 @@ class db_analysis(OmniAnalyze_Base):
                 },
             )
         except Exception as e:
-            console_warning(
-                f"Failed to evaluate expression for {name}: {value} - {e}"
-            )
+            console_warning(f"Failed to evaluate expression for {name}: {value} - {e}")
             return None
 
     def calc_expressions(self):
@@ -405,25 +403,34 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
-            for key, value in self._roofline_ceilings_per_workload[workload_path].items():
+            for key, value in self._roofline_ceilings_per_workload[
+                workload_path
+            ].items():
                 sys_info[f"{key}_empirical_peak"] = value
 
             # Calculate PER_XCD variables first
             for key, value in build_in_vars.items():
                 if "PER_XCD" in key:
-                    sys_info[key] = db_analysis.evaluate(key, value, pmc_df, sys_info, parse=True)
+                    sys_info[key] = db_analysis.evaluate(
+                        key, value, pmc_df, sys_info, parse=True
+                    )
 
             # variable dependent on PER_XCD variables
             for key, value in build_in_vars.items():
                 if "PER_XCD" not in key:
-                    sys_info[key] = db_analysis.evaluate(key, value, pmc_df, sys_info, parse=True)
+                    sys_info[key] = db_analysis.evaluate(
+                        key, value, pmc_df, sys_info, parse=True
+                    )
 
             # Get name and print warning
             values_data_per_workload[workload_path]["value"] = values_data_per_workload[
                 workload_path
             ].apply(
                 lambda row: db_analysis.evaluate(
-                    f"{row['metric_id']} - {row['value_name']}", row["value"], pmc_df, sys_info
+                    f"{row['metric_id']} - {row['value_name']}",
+                    row["value"],
+                    pmc_df,
+                    sys_info,
                 ),
                 axis=1,
             )
@@ -470,7 +477,8 @@ class db_analysis(OmniAnalyze_Base):
                     ],
                 }
                 for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id != 402 # Skip roofline data points handled in calc_roofline_data
+                if metric_df_id
+                != 402  # Skip roofline data points handled in calc_roofline_data
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
                 for metric_id, row in metric_df.iterrows()
             ])
@@ -481,7 +489,8 @@ class db_analysis(OmniAnalyze_Base):
                     "value": row[value_name].strip(),
                 }
                 for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
-                if metric_df_id != 402 # Skip roofline data points handled in calc_roofline_data
+                if metric_df_id
+                != 402  # Skip roofline data points handled in calc_roofline_data
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
                 for metric_id, row in metric_df.iterrows()
                 for value_name in metric_df.drop(
@@ -572,7 +581,12 @@ class db_analysis(OmniAnalyze_Base):
                 {
                     "kernel_name": kernel_name,
                     **{
-                        metric_name: db_analysis.evaluate(metric_name, roofline_data_expressions[metric_name], pmc_df[pmc_df["Kernel_Name"] == kernel_name], sys_info)
+                        metric_name: db_analysis.evaluate(
+                            metric_name,
+                            roofline_data_expressions[metric_name],
+                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
+                            sys_info,
+                        )
                         for metric_name in [
                             "total_flops",
                             "l1_cache_data",
