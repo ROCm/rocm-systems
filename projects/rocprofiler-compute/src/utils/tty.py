@@ -141,6 +141,14 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
 
+    if args.output_format == "csv":
+        if args.output_name:
+            csv_dir = Path(f"{args.output_name}")
+        else:
+            csv_dir = Path(f"rocprof_compute_{get_uuid()}")
+        if not csv_dir.exists():
+            csv_dir.mkdir()
+
     for panel_id, panel in archConfigs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
@@ -484,21 +492,14 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     ):
                         ss += table_id_str + " " + table_config["title"] + "\n"
 
-                    if args.output_format == "csv":
-                        if args.output_name:
-                            p = Path(f"{args.output_name}")
-                        else:
-                            p = Path(f"rocprof_compute_{get_uuid()}")
-                        if not p.exists():
-                            p.mkdir()
-                        if p.is_dir():
-                            if "title" in table_config and table_config["title"]:
-                                table_id_str += "_" + table_config["title"]
-                            csv_filename = str(
-                                p.joinpath(table_id_str.replace(" ", "_") + ".csv"),
-                            )
-                            df.to_csv(csv_filename, index=False)
-                            print(f"Created file: {csv_filename}")
+                    if args.output_format == "csv" and csv_dir.is_dir():
+                        if "title" in table_config and table_config["title"]:
+                            table_id_str += "_" + table_config["title"]
+                        csv_filename = str(
+                            csv_dir.joinpath(table_id_str.replace(" ", "_") + ".csv"),
+                        )
+                        df.to_csv(csv_filename, index=False)
+                        console_warning(f"Created file: {csv_filename}")
 
                     # Only show top N kernels (as specified in --max-kernel-num)
                     # in "Top Stats" section
