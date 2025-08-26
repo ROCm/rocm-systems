@@ -27,6 +27,7 @@ jobs:
         with:
           sparse-checkout: projects/rocprofiler-compute
       - name: Verify VERSION file consistent with tag
+        working-directory: projects/rocprofiler-compute
         run: utils/ver_check.py --tag ${{github.ref_name}}
       - name: Install Python
         uses: actions/setup-python@v5
