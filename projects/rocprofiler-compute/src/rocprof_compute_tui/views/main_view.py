@@ -31,7 +31,6 @@ Contains the main view layout and organization for the application.
 from pathlib import Path
 
 from textual import on, work
-from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import DataTable
@@ -55,10 +54,7 @@ class MainView(Horizontal):
 
     def __init__(self):
         super().__init__(id="main-container")
-        self.start_path = (
-            # NOTE: is cwd the best choice?
-            Path.cwd() if DEFAULT_START_PATH is None else Path(DEFAULT_START_PATH)
-        )
+        self.start_path = Path(DEFAULT_START_PATH) if DEFAULT_START_PATH else Path.cwd()
         self.logger = Logger()
         self.logger.info("MainView initialized", update_ui=False)
 
@@ -66,7 +62,7 @@ class MainView(Horizontal):
         """Required for stdout compatibility."""
         pass
 
-    def compose(self) -> ComposeResult:
+    def compose(self):
         self.logger.info("Composing main view layout", update_ui=False)
         yield MenuBar()
 
@@ -91,38 +87,40 @@ class MainView(Horizontal):
             yield RightPanel()
 
     @on(DataTable.CellSelected)
-    def on_data_table_cell_selected(self, event: DataTable.CellSelected) -> None:
-        try:
-            row_data = event.data_table.get_row_at(event.coordinate.row)
-            self.metric_description.text = (
-                f"Selected Metric ID: {row_data[0]}\nSelected Metric: {row_data[1]}\n"
-            )
-            self.logger.info(f"Row {event.coordinate.row} data displayed")
-        except Exception as e:
-            error_msg = f"Error displaying row {event.coordinate.row}: {str(e)}"
-            self.metric_description.text = error_msg
-            self.logger.error(error_msg)
+    def on_data_table_cell_selected(self, event):
+        table = event.data_table
+        row_idx = event.coordinate.row
+
+        visible_data = table.get_row_at(row_idx)
+        description = (
+            table._df.iloc[row_idx].get("Description", "No description")
+            if hasattr(table, "_df")
+            else "N/A"
+        )
+
+        self.metric_description.text = (
+            f"Selected Metric ID: {visible_data[0]}\n"
+            f"Selected Metric: {visible_data[1]}\n"
+            f"Description: {description}"
+        )
 
     @work(thread=True)
-    def run_analysis(self) -> None:
+    def run_analysis(self):
         self.kernel_to_df_dict = {}
         self.top_kernel_to_df_list = []
 
         if not self.selected_path:
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    "No directory selected for analysis", LogLevel.ERROR
-                )
+            self._update_kernel_view(
+                "No directory selected for analysis", LogLevel.ERROR
             )
             return
 
         try:
             self.logger.info(f"Starting analysis on: {self.selected_path}")
+            self.logger.info("Loading...")
 
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
-                )
+            self._update_kernel_view(
+                f"Running analysis on: {self.selected_path}", LogLevel.SUCCESS
             )
 
             # 1. Create and TUI analyzer
@@ -135,39 +133,37 @@ class MainView(Horizontal):
             sysinfo_path = Path(self.selected_path) / "sysinfo.csv"
             if not sysinfo_path.exists():
                 raise FileNotFoundError(f"sysinfo.csv not found at {sysinfo_path}")
+
             sys_info = file_io.load_sys_info(sysinfo_path).iloc[0].to_dict()
             self.app.load_soc_specs(sys_info)
+            analyzer.set_soc(self.app.soc)
 
             # 3. run analysis
-            analyzer.set_soc(self.app.soc)
             analyzer.pre_processing()
             self.kernel_to_df_dict = analyzer.run_kernel_analysis()
             self.top_kernel_to_df_list = analyzer.run_top_kernel()
 
             if not self.kernel_to_df_dict or not self.top_kernel_to_df_list:
-                self.app.call_from_thread(
-                    lambda: self.query_one("#kernel-view").update_view(
-                        "Analysis completed but not all data was returned",
-                        LogLevel.WARNING,
-                    )
+                self._update_kernel_view(
+                    "Analysis completed but not all data was returned", LogLevel.WARNING
                 )
             else:
                 self.app.call_from_thread(self.refresh_results)
                 self.logger.info("Kernel Analysis completed successfully")
-                # self.logger.info(f"{self.kernel_to_df_dict}")
 
         except Exception as e:
             import traceback
 
             error_msg = f"Analysis failed: {str(e)}"
             self.logger.error(f"{error_msg}\n{traceback.format_exc()}")
-            self.app.call_from_thread(
-                lambda: self.query_one("#kernel-view").update_view(
-                    error_msg, LogLevel.ERROR
-                )
-            )
+            self._update_kernel_view(error_msg, LogLevel.ERROR)
 
-    def refresh_results(self) -> None:
+    def _update_kernel_view(self, message, log_level):
+        self.app.call_from_thread(
+            lambda: self.query_one("#kernel-view").update_view(message, log_level)
+        )
+
+    def refresh_results(self):
         kernel_view = self.query_one("#kernel-view")
         if kernel_view:
             kernel_view.update_results(
@@ -177,7 +173,7 @@ class MainView(Horizontal):
         else:
             self.logger.error("Kernel view not found or no data available")
 
-    def refresh_view(self) -> None:
+    def refresh_view(self):
         if self.kernel_to_df_dict and self.top_kernel_to_df_list:
             self.refresh_results()
         else:
