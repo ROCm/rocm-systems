@@ -50,6 +50,7 @@ from utils.parser import (
     to_quantile,
     to_round,
     to_std,
+    to_sum,
 )
 from utils.roofline_calc import (
     CACHE_HIERARCHY,
@@ -389,6 +390,7 @@ class db_analysis(OmniAnalyze_Base):
                     "to_quantile": to_quantile,
                     "to_round": to_round,
                     "to_std": to_std,
+                    "to_sum": to_sum,
                 },
             )
         except Exception as e:
