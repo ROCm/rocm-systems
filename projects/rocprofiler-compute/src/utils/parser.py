@@ -926,69 +926,33 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             "value using --specs-correction"
         )
 
-    default_peaks = [
-        "FP16Flops",
-        "FP32Flops",
-        "FP64Flops",
-        "MFMAF64Flops",
-        "MFMAF32Flops",
-        "MFMAF16Flops",
-        "MFMABF16Flops",
-        "MFMAF8Flops",
-        "MFMAI8Ops",
-        "HBMBw",
-        "L2Bw",
-        "L1Bw",
-        "LDSBw",
-        "MFMA_FLOPs_F6F4",
-    ]
-
-    ammolite__FP16Flops_empirical_peak = 0
-    ammolite__FP32Flops_empirical_peak = 0
-    ammolite__FP64Flops_empirical_peak = 0
-    ammolite__MFMAF64Flops_empirical_peak = 0
-    ammolite__MFMAF32Flops_empirical_peak = 0
-    ammolite__MFMAF16Flops_empirical_peak = 0
-    ammolite__MFMABF16Flops_empirical_peak = 0
-    ammolite__MFMAF8Flops_empirical_peak = 0
-    ammolite__MFMAI8Ops_empirical_peak = 0
-    ammolite__HBMBw_empirical_peak = 0
-    ammolite__L2Bw_empirical_peak = 0
-    ammolite__L1Bw_empirical_peak = 0
-    ammolite__LDSBw_empirical_peak = 0
-    ammolite__MFMA_FLOPs_F6F4_empirical_peak = 0
+    empirical_peaks = {}
 
     if not empirical_peaks_df.empty:
         peak_data_row = empirical_peaks_df.iloc[0]
-
-        if "FP16Flops" in empirical_peaks_df.columns:
-            ammolite__FP16Flops_empirical_peak = peak_data_row["FP16Flops"]
-        if "FP32Flops" in empirical_peaks_df.columns:
-            ammolite__FP32Flops_empirical_peak = peak_data_row["FP32Flops"]
-        if "FP64Flops" in empirical_peaks_df.columns:
-            ammolite__FP64Flops_empirical_peak = peak_data_row["FP64Flops"]
-        if "MFMAF64Flops" in empirical_peaks_df.columns:
-            ammolite__MFMAF64Flops_empirical_peak = peak_data_row["MFMAF64Flops"]
-        if "MFMAF32Flops" in empirical_peaks_df.columns:
-            ammolite__MFMAF32Flops_empirical_peak = peak_data_row["MFMAF32Flops"]
-        if "MFMAF16Flops" in empirical_peaks_df.columns:
-            ammolite__MFMAF16Flops_empirical_peak = peak_data_row["MFMAF16Flops"]
-        if "MFMABF16Flops" in empirical_peaks_df.columns:
-            ammolite__MFMABF16Flops_empirical_peak = peak_data_row["MFMABF16Flops"]
-        if "MFMAF8Flops" in empirical_peaks_df.columns:
-            ammolite__MFMAF8Flops_empirical_peak = peak_data_row["MFMAF8Flops"]
-        if "MFMAI8Ops" in empirical_peaks_df.columns:
-            ammolite__MFMAI8Ops_empirical_peak = peak_data_row["MFMAI8Ops"]
-        if "HBMBw" in empirical_peaks_df.columns:
-            ammolite__HBMBw_empirical_peak = peak_data_row["HBMBw"]
-        if "L2Bw" in empirical_peaks_df.columns:
-            ammolite__L2Bw_empirical_peak = peak_data_row["L2Bw"]
-        if "L1Bw" in empirical_peaks_df.columns:
-            ammolite__L1Bw_empirical_peak = peak_data_row["L1Bw"]
-        if "LDSBw" in empirical_peaks_df.columns:
-            ammolite__LDSBw_empirical_peak = peak_data_row["LDSBw"]
-        if "MFMA_FLOPs_F6F4" in empirical_peaks_df.columns:
-            ammolite__MFMA_FLOPs_F6F4_empirical_peak = peak_data_row["MFMA_FLOPs_F6F4"]
+        
+        for col in empirical_peaks_df.columns:
+            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
+    else:
+        peak_names = [
+            "FP16Flops",
+            "FP32Flops", 
+            "FP64Flops",
+            "MFMAF64Flops",
+            "MFMAF32Flops",
+            "MFMAF16Flops",
+            "MFMABF16Flops",
+            "MFMAF8Flops",
+            "MFMAI8Ops",
+            "HBMBw",
+            "L2Bw",
+            "L1Bw",
+            "LDSBw",
+            "MFMA_FLOPs_F6F4",
+        ]
+        # init peaks to 0
+        for peak_name in peak_names:
+            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
 
     # TODO: fix all $normUnit in Unit column or title
 
@@ -1141,7 +1105,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
     ammolite_vars = {
         key: val for key, val in locals().items() if key.startswith("ammolite__")
     }
-
+    combined_locals = {**ammolite_vars, **empirical_peaks}
     # Empirically, 16 is about as much as we need.
     processes = min(16, multiprocessing.cpu_count() // 2)
 
@@ -1149,7 +1113,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
     with multiprocessing.Pool(
         processes=processes,
         initializer=init_metric_evaluator,
-        initargs=(raw_pmc_df, ammolite_vars),
+        initargs=(raw_pmc_df, combined_locals),
     ) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)
 
