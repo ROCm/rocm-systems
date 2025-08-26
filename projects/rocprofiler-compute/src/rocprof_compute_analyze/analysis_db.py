@@ -553,6 +553,8 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+            gfx_arch = sys_info["gpu_arch"]
+            roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
 
             def evaluate_roofline_metric(pmc_df, sys_info, metric_name):
                 if metric_name == "total_flops":
