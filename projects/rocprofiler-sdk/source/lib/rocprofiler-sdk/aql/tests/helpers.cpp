@@ -303,8 +303,8 @@ TEST(aql_helpers, get_dim_info_compare_v1)
 
         for(auto& metric : metrics)
         {
-            std::map<int, uint64_t> dims;
-            std::map<int, uint64_t> dims_v1;
+            std::map<int, uint64_t> dims{};
+            std::map<int, uint64_t> dims_v1{};
             auto                    query = aql::get_query_info(agent->id, metric);
             for(unsigned block_index = 0; block_index < query.instance_count; ++block_index)
             {
