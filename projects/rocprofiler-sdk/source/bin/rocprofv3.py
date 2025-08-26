@@ -705,6 +705,16 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         Note: glog still installs signal handlers which provide backtraces""",
     )
 
+    add_parser_bool_argument(
+        advanced_options,
+        "--process-sync",
+        help="""Enables the process synchronization in the rocprofv3 tool finalization stage.
+        When --process-sync is set to true,
+        and rocprofv3 tool will force process to wait for its peer processes finishing write the trace data,
+        then they proceed.
+        Note: some workloads will teminate the process group when one of the process is finished""",
+    )
+
     advanced_options.add_argument(
         "--minimum-output-data",
         help="""Output files are generated only if output data size > minimum output data".
@@ -1508,6 +1518,9 @@ def run(app_args, args, **kwargs):
 
     if args.disable_signal_handlers is not None:
         update_env("ROCPROF_SIGNAL_HANDLERS", not args.disable_signal_handlers)
+
+    if args.process_sync is not None:
+        update_env("ROCPROF_PROCESS_SYNC", args.process_sync)
 
     if args.minimum_output_data:
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)

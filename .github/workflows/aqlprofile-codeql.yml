@@ -2,6 +2,8 @@ name: "AqlProfile CodeQL Advanced"
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/aqlprofile/**'
   pull_request:
@@ -44,7 +46,7 @@ jobs:
           build-mode: none
         - language: actions
           build-mode: none
-    
+
     steps:
     - name: Install OS requirements
       timeout-minutes: 10
@@ -55,14 +57,14 @@ jobs:
         sudo apt-add-repository ppa:git-core/ppa
         sudo apt-get update
         sudo apt install -y git
-        
+
     - name: Checkout repository
       uses: actions/checkout@v4
       with:
         sparse-checkout: |
           projects/aqlprofile
           .github/workflows/aqlprofile-code-ql.yml
-    
+
     - name: Configure Git Safe Directory
       shell: bash
       run: |

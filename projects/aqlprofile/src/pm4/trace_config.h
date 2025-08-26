@@ -41,6 +41,7 @@ struct TraceConfig {
   // PERF
   uint32_t perfMASK = ~0u;
   uint32_t perfCTRL = 0;
+  uint32_t perfPeriod = 0;
   std::vector<std::pair<size_t, size_t>> perfcounters{};
   // GC configurations used by both TT and SPM
   uint32_t se_number = 0;

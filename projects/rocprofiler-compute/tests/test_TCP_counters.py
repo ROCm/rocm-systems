@@ -23,23 +23,18 @@
 
 ##############################################################################
 
-
 import csv
-import inspect
-import os
 import re
-import shutil
 import subprocess
-import sys
 from importlib.machinery import SourceFileLoader
 from pathlib import Path
-from unittest.mock import patch
 
-import pandas as pd
 import pytest
 import test_utils
 
-rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
+rocprof_compute = SourceFileLoader(
+    "rocprof-compute", "src/rocprof-compute"
+).load_module()
 
 config = {}
 config["vseq"] = ["./tests/vsequential_access"]
@@ -48,7 +43,6 @@ config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
 config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
-
 
 SUPPORTED_ARCHS = {
     "gfx940": {"mi300": ["MI300A_A0"]},
@@ -153,7 +147,6 @@ def test_L1_cache_counters(
     base = Path(test_utils.get_output_dir())
 
     for app_name in app_names:
-
         workload_dir = str(base / app_name)
 
         # 1. profile the app
@@ -168,9 +161,15 @@ def test_L1_cache_counters(
         assert return_code == 0
 
         # 2. analyze the results
-        return_code = binary_handler_analyze_rocprof_compute(
-            ["analyze", "--path", workload_dir, "-b", "16.3", "--save-dfs", workload_dir]
-        )
+        return_code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--path",
+            workload_dir,
+            "-b",
+            "16.3",
+            "--save-dfs",
+            workload_dir,
+        ])
         assert return_code == 0
 
         # 3. save results in local

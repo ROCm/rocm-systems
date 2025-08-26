@@ -1,0 +1,62 @@
+/*
+ * Copyright (c) 2016-2020 The Khronos Group Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ *
+ * OpenCL is a trademark of Apple Inc. used under license by Khronos.
+ */
+
+#include <windows.h>
+
+#define OPENCL_ICD_LOADER_VERSION_MAJOR 2
+#define OPENCL_ICD_LOADER_VERSION_MINOR 2
+#define OPENCL_ICD_LOADER_VERSION_REV   6
+
+#ifdef RC_INVOKED
+
+#define OPENCL_ICD_LOADER_VAL(_v) #_v
+#define OPENCL_ICD_LOADER_TOSTRING(_d) OPENCL_ICD_LOADER_VAL(_d)
+#define OPENCL_ICD_LOADER_VERSION_STRING \
+    OPENCL_ICD_LOADER_TOSTRING(OPENCL_ICD_LOADER_VERSION_MAJOR) "." \
+    OPENCL_ICD_LOADER_TOSTRING(OPENCL_ICD_LOADER_VERSION_MINOR) "." \
+    OPENCL_ICD_LOADER_TOSTRING(OPENCL_ICD_LOADER_VERSION_REV)
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION    OPENCL_ICD_LOADER_VERSION_MAJOR,OPENCL_ICD_LOADER_VERSION_MINOR,OPENCL_ICD_LOADER_VERSION_REV,0
+PRODUCTVERSION OPENCL_ICD_LOADER_VERSION_MAJOR,OPENCL_ICD_LOADER_VERSION_MINOR,OPENCL_ICD_LOADER_VERSION_REV,0
+FILETYPE       VFT_DLL
+
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904E4"
+        BEGIN
+            VALUE "FileDescription" ,"OpenCL Client DLL"
+            VALUE "ProductName"     ,"Khronos OpenCL ICD Loader"
+            VALUE "LegalCopyright"  ,"Copyright \251 The Khronos Group Inc 2016-2019"
+            VALUE "FileVersion"     ,OPENCL_ICD_LOADER_VERSION_STRING ".0"
+            VALUE "CompanyName"     ,"Khronos Group"
+            VALUE "InternalName"    ,"OpenCL"
+            VALUE "OriginalFilename","OpenCL.dll"
+        END
+    END
+
+    BLOCK "VarFileInfo"
+    BEGIN
+        // extend this line for localized versions
+        VALUE "Translation", 0x0409, 0x04E4
+    END
+END
+
+#endif
+
