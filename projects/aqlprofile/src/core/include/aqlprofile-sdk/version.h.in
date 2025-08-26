@@ -52,35 +52,35 @@
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_GIT_DESCRIBE
- * @brief String encoding of `git describe --tags` when aqlprofile-sdk was built.
+ * @brief String encoding of `git describe --tags` when aqlprofile was built.
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_GIT_REVISION
- * @brief String encoding of `git rev-parse HEAD` when aqlprofile-sdk was built.
+ * @brief String encoding of `git rev-parse HEAD` when aqlprofile was built.
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_LIBRARY_ARCH
- * @brief Architecture triplet of aqlprofile-sdk build.
+ * @brief Architecture triplet of aqlprofile build.
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_SYSTEM_NAME
- * @brief Target operating system for aqlprofile-sdk build, e.g. Linux.
+ * @brief Target operating system for aqlprofile build, e.g. Linux.
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_SYSTEM_PROCESSOR
- * @brief Target architecture for aqlprofile-sdk build.
+ * @brief Target architecture for aqlprofile build.
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_SYSTEM_VERSION
- * @brief Version of the operating system which built aqlprofile-sdk
+ * @brief Version of the operating system which built aqlprofile
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_COMPILER_ID
- * @brief C++ compiler identifier which built aqlprofile-sdk, e.g., GNU
+ * @brief C++ compiler identifier which built aqlprofile, e.g., GNU
  * @addtogroup VERSIONING_GROUP
  *
  * @def AQLPROFILE_COMPILER_VERSION
- * @brief C++ compiler version which built aqlprofile-sdk
+ * @brief C++ compiler version which built aqlprofile
  * @addtogroup VERSIONING_GROUP
  *
  */
