@@ -34,8 +34,6 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include "lib/rocprofiler-sdk-prestore/table.hpp"
-
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -1227,45 +1225,15 @@ iterate_loaded_code_objects(code_object_iterator_t&& func)
             },
             std::move(func));
 }
-}  // namespace code_object
-}  // namespace rocprofiler
 
-ROCPROFILER_EXTERN_C_INIT
-
-int
-rocprofiler_load_prestore_code_objects(void* incoming_table)
+void load_attach_code_objects(rocprofiler_attach_dispatch_table_t& attach_table)
 {
-    if(!incoming_table)
-    {
-        ROCP_ERROR << "incoming table is nullptr";
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    uint32_t incoming_version = *(reinterpret_cast<uint32_t*>(incoming_table));
-
-    if(incoming_version != ROCPROFILER_PRESTORE_TABLE_CURRENT_VERSION)
-    {
-        ROCP_ERROR << "incoming table is blank or bad version";
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    }
-
-    auto prestore_table = reinterpret_cast<rocprofiler_prestore_dispatch_table_t*>(incoming_table);
-
-    std::vector<hsa_executable_t> exported_executables;
-    uint64_t                      exported_executables_count;
-
-    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(
-                      nullptr, &exported_executables_count) != 0);
-    exported_executables.resize(exported_executables_count);
-    ROCP_FATAL_IF(prestore_table->rocprofiler_prestore_export_all_code_objects(
-                      exported_executables.data(), &exported_executables_count) != 0);
-    ROCP_INFO << "Got " << exported_executables_count << " executables from the prestore library";
-    for(auto& exec : exported_executables)
-    {
-        ROCP_INFO << "Adding code object for " << exec.handle;
-        rocprofiler::code_object::executable_freeze_internal(exec);
-    }
-    return ROCPROFILER_STATUS_SUCCESS;
+    auto iter_func = [](hsa_executable_t executable, void*){
+        executable_freeze_internal(executable);
+    };
+    attach_table.rocprofiler_attach_iterate_all_code_objects(iter_func, nullptr);
+    // TODO: add registration for new objects
 }
 
-ROCPROFILER_EXTERN_C_FINI
+}  // namespace code_object
+}  // namespace rocprofiler
