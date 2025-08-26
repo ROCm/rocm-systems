@@ -401,6 +401,36 @@ def write_region_csv(importData, config) -> None:
     write_sql_query_to_csv(importData, config, query, "regions")
 
 
+def write_pc_sampling_csv(importData, config) -> None:
+    """Write PC sampling data to a CSV file using the normalized pc_sample view."""
+
+    # Unified PC sampling query using normalized schema
+    pc_sample_query = """
+        SELECT
+            sample_id AS Sample_Id,
+            guid AS GUID,
+            timestamp AS Sample_Timestamp,
+            nid AS Node_Id,
+            pid AS Process_Id,
+            tid AS Thread_Id,
+            agent_name AS Agent_Name,
+            agent_type AS Agent_Type,
+            track_id AS Track_Id,
+            event_id AS Event_Id,
+            stack_id AS Stack_Id,
+            parent_stack_id AS Parent_Stack_Id,
+            corr_id AS Correlation_Id,
+            field_name AS Field_Name,
+            field_description AS Field_Description,
+            value_type AS Value_Type,
+            field_value AS Field_Value
+        FROM "pc_sample"
+        ORDER BY
+            sample_id ASC, field_name ASC
+    """
+    write_sql_query_to_csv(importData, config, pc_sample_query, "pc_sampling")
+
+
 def write_csv(importData, config):
 
     write_agent_info_csv(importData, config)
@@ -410,6 +440,7 @@ def write_csv(importData, config):
     write_memory_copy_csv(importData, config)
     write_region_csv(importData, config)
     write_scratch_memory_csv(importData, config)
+    write_pc_sampling_csv(importData, config)
 
 
 def execute(input, config=None, **kwargs):

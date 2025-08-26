@@ -372,3 +372,81 @@ This information is useful for understanding how many instructions per cycle (IP
 .. note::
 
   The stochastic PC sampling is supported on AMD Instinct MI300, MI325, MI350, and MI355.
+
+ROCPD database output
+=====================
+
+For advanced analysis and querying capabilities, PC sampling data can be stored in a SQLite database using the ROCPD format:
+
+.. code-block:: bash
+
+  rocprofv3 --pc-sampling-beta-enabled --pc-sampling-method host_trap --pc-sampling-unit time --pc-sampling-interval 1 --output-format rocpd -- <application_path>
+
+This generates a SQLite database file (``<process_id>_rocpd.db``) containing PC sampling data with the following benefits:
+
+- **SQL querying**: Use standard SQL to filter, aggregate, and analyze PC sampling data
+- **Normalized storage**: PC sampling fields stored using a flexible field registry pattern similar to PMC counters
+- **Cross-referencing**: Easy correlation between samples, kernel dispatches, and API calls via parent_id relationships
+- **Performance**: Fast queries on large datasets using database indexing
+- **Future-proof**: Normalized schema accommodates new PC sampling fields without schema changes
+
+Database schema
+~~~~~~~~~~~~~~~
+
+The ROCPD database uses a normalized approach for PC sampling data following the PMC pattern:
+
+**Core tables:**
+
+- ``rocpd_sample``: Sample records with timestamps and track information
+- ``rocpd_event``: Event metadata with parent_id linking samples to kernel dispatches
+- ``rocpd_info_pc_sample``: Field registry defining all PC sampling fields (name, description, value_type)
+- ``rocpd_pc_sample_event``: Field values for each sample event
+
+**Key features:**
+
+- **Field registry pattern**: PC sampling fields are registered in ``rocpd_info_pc_sample`` similar to PMC counters
+- **Type-safe values**: Each field specifies its ``value_type`` (INT, TEXT, or REAL)
+- **Parent-child relationships**: Samples link to kernel dispatches via ``parent_id`` in ``rocpd_event``
+- **Flexible schema**: New fields can be added without altering table structure
+
+Browsing PC sampling data
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use the normalized ``pc_sample`` view to query PC sampling data:
+
+.. code-block:: sql
+
+  -- View all PC sampling fields for a specific sample
+  SELECT sample_id, timestamp, field_name, field_description, value_type, field_value
+  FROM pc_sample
+  WHERE sample_id = 1;
+
+  -- Filter by specific fields (e.g., sampling method)
+  SELECT sample_id, timestamp, field_value
+  FROM pc_sample
+  WHERE field_name = 'sampling_method';
+
+  -- Query stochastic-specific fields
+  SELECT sample_id, timestamp, field_name, field_value
+  FROM pc_sample
+  WHERE field_name IN ('wave_issued', 'inst_type', 'stall_reason', 'wave_count');
+
+**Querying samples by kernel dispatch:**
+
+.. code-block:: sql
+
+  -- Find all samples for a specific dispatch using parent_id relationship
+  SELECT S.sample_id, S.timestamp, S.field_name, S.field_value, KD.dispatch_id, KS.kernel_name
+  FROM pc_sample S
+  INNER JOIN rocpd_event E ON E.id = S.event_id
+  INNER JOIN rocpd_event KDE ON KDE.id = E.parent_id
+  INNER JOIN rocpd_kernel_dispatch KD ON KD.event_id = KDE.id
+  INNER JOIN rocpd_info_kernel_symbol KS ON KS.id = KD.kernel_id
+  WHERE KD.dispatch_id = 1;
+
+The normalized view provides flexibility for querying any PC sampling field without requiring schema updates for new sampling methods or architectures.
+
+.. figure:: /data/pc_sampling_data_view.png
+   :alt: PC sampling data in database browser
+   :align: center
+   :width: 100%

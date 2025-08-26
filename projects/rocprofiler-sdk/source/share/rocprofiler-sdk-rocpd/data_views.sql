@@ -724,3 +724,35 @@ GROUP BY
     K.dispatch_id,
     PMC_I.name,
     K.agent_id;
+
+-- PC Sampling normalized view
+CREATE VIEW IF NOT EXISTS
+    `pc_sample` AS
+SELECT
+    S.id AS sample_id,
+    S.guid,
+    S.timestamp,
+    T.nid,
+    P.pid,
+    TH.tid,
+    A.name AS agent_name,
+    A.type AS agent_type,
+    S.track_id,
+    S.event_id,
+    E.stack_id,
+    E.parent_stack_id,
+    E.correlation_id AS corr_id,
+    PSF.name AS field_name,
+    PSF.description AS field_description,
+    PSF.value_type,
+    PSE.value AS field_value
+FROM
+    `rocpd_sample{{uuid}}` S
+    INNER JOIN `rocpd_track{{uuid}}` T ON T.id = S.track_id AND T.guid = S.guid
+    INNER JOIN `rocpd_info_process{{uuid}}` P ON P.id = T.pid AND P.guid = T.guid
+    INNER JOIN `rocpd_info_thread{{uuid}}` TH ON TH.id = T.tid AND TH.guid = T.guid
+    INNER JOIN `rocpd_event{{uuid}}` E ON E.id = S.event_id AND E.guid = S.guid
+    INNER JOIN `rocpd_pc_sample_event{{uuid}}` PSE ON PSE.event_id = S.event_id AND PSE.guid = S.guid
+    INNER JOIN `rocpd_info_pc_sample{{uuid}}` PSF ON PSF.id = PSE.field_id AND PSF.guid = PSE.guid
+    LEFT JOIN `rocpd_info_agent{{uuid}}` A ON A.id = PSF.agent_id AND A.guid = PSF.guid
+;

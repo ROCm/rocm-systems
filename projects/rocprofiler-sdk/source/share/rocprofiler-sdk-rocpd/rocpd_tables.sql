@@ -137,6 +137,24 @@ CREATE TABLE IF NOT EXISTS
         FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
     );
 
+-- PC sampling field registration
+CREATE TABLE IF NOT EXISTS
+    `rocpd_info_pc_sample{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "nid" INTEGER NOT NULL,
+        "pid" INTEGER NOT NULL,
+        "agent_id" INTEGER,
+        "name" TEXT NOT NULL,
+        "description" TEXT,
+        "value_type" TEXT CHECK ("value_type" IN ('INT', 'REAL', 'TEXT')),
+        "units" TEXT DEFAULT "",
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (nid) REFERENCES `rocpd_info_node{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (pid) REFERENCES `rocpd_info_process{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES `rocpd_info_agent{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
 CREATE TABLE IF NOT EXISTS
     `rocpd_info_code_object{{uuid}}` (
         "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
@@ -203,10 +221,12 @@ CREATE TABLE IF NOT EXISTS
         "stack_id" INTEGER,
         "parent_stack_id" INTEGER,
         "correlation_id" INTEGER,
+        "parent_id" INTEGER,
         "call_stack" JSONB DEFAULT "{}" NOT NULL,
         "line_info" JSONB DEFAULT "{}" NOT NULL,
         "extdata" JSONB DEFAULT "{}" NOT NULL,
-        FOREIGN KEY (category_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE
+        FOREIGN KEY (category_id) REFERENCES `rocpd_string{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (parent_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
 -- stores arguments for events
@@ -233,6 +253,19 @@ CREATE TABLE IF NOT EXISTS
         "value" REAL DEFAULT 0.0,
         "extdata" JSONB DEFAULT "{}",
         FOREIGN KEY (pmc_id) REFERENCES `rocpd_info_pmc{{uuid}}` (id) ON UPDATE CASCADE,
+        FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
+    );
+
+-- PC sampling field values per event
+CREATE TABLE IF NOT EXISTS
+    `rocpd_pc_sample_event{{uuid}}` (
+        "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+        "guid" TEXT DEFAULT "{{guid}}" NOT NULL,
+        "event_id" INTEGER NOT NULL,
+        "field_id" INTEGER NOT NULL,
+        "value" ANY,           -- Supports INT, TEXT, REAL based on field definition
+        "extdata" JSONB DEFAULT "{}" NOT NULL,
+        FOREIGN KEY (field_id) REFERENCES `rocpd_info_pc_sample{{uuid}}` (id) ON UPDATE CASCADE,
         FOREIGN KEY (event_id) REFERENCES `rocpd_event{{uuid}}` (id) ON UPDATE CASCADE
     );
 
