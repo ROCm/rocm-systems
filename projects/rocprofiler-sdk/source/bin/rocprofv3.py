@@ -1010,6 +1010,20 @@ def get_args(cmd_args, inp_args):
     return patch_args(dotdict(data))
 
 
+def int_auto(num_str):
+    if isinstance(num_str, str):
+        if "0x" in num_str:
+            return int(num_str, 16)
+        else:
+            return int(num_str, 10)
+    elif isinstance(num_str, int):
+        return num_str
+    else:
+        raise ValueError(
+            f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
+        )
+
+
 def run(app_args, args, **kwargs):
 
     app_env = dict(os.environ)
@@ -1502,22 +1516,48 @@ def run(app_args, args, **kwargs):
     else:
         update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
 
-    if args.spm:
-        update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
-        update_env(
-            "ROCPROF_SPM_COUNTERS", "spm: {}".format(" ".join(args.spm)), overwrite=True
-        )
-    else:
-        update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
+    if (
+        args.spm_buffer_size
+        or args.spm_timeout_ms
+        or args.spm_timeout_ms
+        or args.spm_frequency_sclk
+    ):
 
-    if args.spm_buffer_size:
-        update_env("ROCPROF_SPM_BUFFER_SIZE", args.spm_buffer_size)
+        if not args.spm:
+            fatal_error(
+                "SPM unavailable. The feature is implicitly disabled. To enable it, use --spm-beta-enable option or set ROCPROFILER_SPM_COUNTER_COLLECTION_BETA_ENABLED=ON in the environment"
+            )
+        if args.spm:
+            if (
+                args.pmc
+                or args.pc_sampling_beta_enabled
+                or os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None)
+                is not None
+            ):
+                fatal_error(
+                    "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
+                )
+            update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
+            update_env(
+                "ROCPROF_SPM_COUNTERS",
+                "spm: {}".format(" ".join(args.spm)),
+                overwrite=True,
+            )
+        else:
+            update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
 
-    if args.spm_timeout_ms:
-        update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout_ms)
+        if args.spm_buffer_size:
+            update_env(
+                "ROCPROF_SPM_BUFFER_SIZE", int_auto(args.spm_buffer_size), overwrite=True
+            )
 
-    if args.spm_frequency_sclk:
-        update_env("ROCPROF_SPM_FREQUENCY_SCLK", args.spm_frequency_sclk)
+        if args.spm_timeout_ms:
+            update_env("ROCPROF_SPM_TIMEOUT_MS", args.spm_timeout_ms, overwrite=True)
+
+        if args.spm_frequency_sclk:
+            update_env(
+                "ROCPROF_SPM_FREQUENCY_SCLK", args.spm_frequency_sclk, overwrite=True
+            )
 
     if args.log_level in ("info", "trace", "env"):
         log_config(app_env)
@@ -1582,19 +1622,6 @@ def run(app_args, args, **kwargs):
         update_env("ROCPROF_MINIMUM_OUTPUT_BYTES", args.minimum_output_data * 1024)
 
     if args.advanced_thread_trace:
-
-        def int_auto(num_str):
-            if isinstance(num_str, str):
-                if "0x" in num_str:
-                    return int(num_str, 16)
-                else:
-                    return int(num_str, 10)
-            elif isinstance(num_str, int):
-                return num_str
-            else:
-                raise ValueError(
-                    f"{type(num_str)} is not supported. {num_str} should be of type integer or string."
-                )
 
         update_env("ROCPROF_ADVANCED_THREAD_TRACE", True, overwrite=True)
 

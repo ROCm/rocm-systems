@@ -74,7 +74,7 @@ void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
                   rocprofiler_spm_record_flags_t    flags,
-                  rocprofiler_user_data_t*          userdata);
+                  rocprofiler_user_data_t           userdata);
 void
 finalize();
 

@@ -27,6 +27,8 @@ set(COUNTER_LIST
 
 set(IS_DISABLED False)
 
+list(GET rocprofiler-sdk-tests-gfx-info 0 spm-gpu-0-gfx-info)
+
 # SPM
 add_test(
     NAME rocprofv3-test-spm-execute
@@ -37,10 +39,10 @@ add_test(
 
 # PMC
 add_test(
-    NAME rocprofv3-test-pmc-compare-to-spm
+    NAME rocprofv3-test-spm-compare-to-pmc
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pmc ${COUNTER_LIST} -d
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV JSON -o pmc --
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm --output-format CSV -o pmc --
         $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
@@ -60,7 +62,7 @@ set_tests_properties(
                ${IS_DISABLED})
 
 set_tests_properties(
-    rocprofv3-test-pmc-compare-to-spm
+    rocprofv3-test-spm-compare-to-pmc
     PROPERTIES TIMEOUT
                45
                LABELS
@@ -77,7 +79,9 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --pmc
         ${CMAKE_CURRENT_BINARY_DIR}/out_spm/pmc_counter_collection.csv --spm
-        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_streaming_performance_monitor.csv
+        --spm-json ${CMAKE_CURRENT_BINARY_DIR}/out_spm/spm_results.json --gfx-info
+        ${spm-gpu-0-gfx-info})
 
 set_tests_properties(
     rocprofv3-test-spm-validate
@@ -86,7 +90,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                DEPENDS
-               "rocprofv3-test-spm-execute;rocprofv3-test-pmc-compare-to-spm"
+               "rocprofv3-test-spm-execute;rocprofv3-test-spm-compare-to-pmc"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED

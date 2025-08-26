@@ -1508,7 +1508,7 @@ void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
                   rocprofiler_spm_record_flags_t    flags,
-                  rocprofiler_user_data_t*          userdata)
+                  rocprofiler_user_data_t           userdata)
 {
     auto lk = std::shared_lock{tool_metadata->spm_mut};
     if(record_count == 0) return;
@@ -1516,16 +1516,18 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
     if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA)
     {
         auto counter_record        = tool::tool_spm_counter_record_t{};
-        counter_record.dispatch_id = userdata->value;
-        if(record_count > 0) counter_record.agent_id = records[0].agent_id;
-        auto serialized_records = std::vector<tool::tool_spm_counter_value_t>{};
+        counter_record.dispatch_id = userdata.value;
+        auto serialized_records    = std::vector<tool::tool_spm_counter_value_t>{};
         for(size_t count = 0; count < record_count; count++)
         {
             auto _counter_id = rocprofiler_counter_id_t{};
             ROCPROFILER_CALL(rocprofiler_query_record_counter_id(records[count].id, &_counter_id),
                              "query record counter id");
-            serialized_records.emplace_back(tool::tool_spm_counter_value_t{
-                _counter_id, records[count].value, records[count].timestamp});
+            serialized_records.emplace_back(
+                tool::tool_spm_counter_value_t{_counter_id,
+                                               records[count].value,
+                                               records[count].timestamp,
+                                               records[count].agent_id});
         }
 
         if(!serialized_records.empty())
@@ -1538,7 +1540,7 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
     if(flags & ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST)
     {
         ROCP_CI_LOG(WARNING) << "Data Lost. Agent:" << records[0].agent_id.handle
-                             << " dispatch_id:" << userdata->value;
+                             << " dispatch_id:" << userdata.value;
     }
 }
 rocprofiler_client_finalize_t client_finalizer  = nullptr;

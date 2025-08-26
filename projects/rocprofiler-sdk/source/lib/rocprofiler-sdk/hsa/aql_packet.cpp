@@ -310,7 +310,7 @@ SPMPacket::kfd_stop()
         ROCP_WARNING << "Double call to KFD stop!";
 
     ROCP_FATAL_IF(!decode_data_fn) << " decode data_fn null";
-    this->decode_data_fn(nullptr, 0, ROCPROFILER_SPM_RECORD_FLAG_END, &user_data);
+    this->decode_data_fn(nullptr, 0, ROCPROFILER_SPM_RECORD_FLAG_END, user_data);
 }
 
 SPMPacket::~SPMPacket()

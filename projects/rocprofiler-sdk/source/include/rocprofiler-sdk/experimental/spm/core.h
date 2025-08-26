@@ -42,7 +42,7 @@ typedef enum rocprofiler_spm_record_flags_t
     ROCPROFILER_SPM_RECORD_FLAG_DATA_LOST = 0,
     ROCPROFILER_SPM_RECORD_FLAG_END,
     ROCPROFILER_SPM_RECORD_FLAG_DATA,
-    ROCPROFILER_SPM_RECORD_FLAG_DATA_LAST,
+    ROCPROFILER_SPM_RECORD_FLAG_LAST,
 } rocprofiler_spm_record_flags_t;
 
 typedef struct
@@ -67,7 +67,7 @@ typedef struct
 typedef void (*rocprofiler_spm_data_callback_t)(rocprofiler_spm_counter_record_t* records,
                                                 size_t                            record_count,
                                                 rocprofiler_spm_record_flags_t    flags,
-                                                rocprofiler_user_data_t*          userdata);
+                                                rocprofiler_user_data_t           userdata);
 typedef struct
 {
     rocprofiler_spm_parameter_type_t type;

@@ -113,8 +113,6 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
                 counters::set_dim_in_rec(instance_id,
                                          rocprofiler::counters::ROCPROFILER_DIMENSION_XCC,
                                          spm_packet->spm_desc.buffer_num);
-                counters::set_dim_in_rec(
-                    instance_id, rocprofiler::counters::ROCPROFILER_DIMENSION_SHADER_ENGINE, se);
                 counters::set_counter_in_rec(instance_id, event.id);
                 for(size_t it = 0; it < size_1; it++)
                 {
@@ -150,7 +148,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
     }
 
     spm_packet->decode_data_fn(
-        &records[0], records.size(), ROCPROFILER_SPM_RECORD_FLAG_DATA, &(spm_packet->user_data));
+        &records[0], records.size(), ROCPROFILER_SPM_RECORD_FLAG_DATA, (spm_packet->user_data));
 }
 }  // namespace SPM
 }  // namespace rocprofiler

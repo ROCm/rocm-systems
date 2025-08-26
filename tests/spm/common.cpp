@@ -60,7 +60,7 @@ void
 spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   size_t                            record_count,
                   rocprofiler_spm_record_flags_t /* flags*/,
-                  rocprofiler_user_data_t* /*userdata*/)
+                  rocprofiler_user_data_t /*userdata*/)
 {
     std::unique_lock<std::shared_mutex> lk(mut);
     // if(!flags&ROCPROFILER_SPM_RECORD_FLAG_DATA) return;
@@ -83,7 +83,11 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
         if(val.find(_info.name) == val.end()) val[_info.name] = 0;
         val[_info.name] += value;
     }
+}
 
+void
+finalize()
+{
     for(auto& [agent, value_by_name] : id_values())
     {
         float tcp_access = value_by_name["TCP_TOTAL_READ"] + value_by_name["TCP_TOTAL_WRITE"];
@@ -155,10 +159,6 @@ spm_data_callback(rocprofiler_spm_counter_record_t* records,
                   << std::endl;
     }
 }
-
-void
-finalize()
-{}
 
 rocprofiler_status_t
 iterate_agent_counters(rocprofiler_agent_id_t    agent_id,

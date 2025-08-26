@@ -161,7 +161,7 @@ SPMAgentManager::stop_context()
     for(auto& [id, queue] : queues)
     {
         auto pack = queue->params;
-        pack.data_fn(nullptr, 0, ROCPROFILER_SPM_RECORD_FLAG_END, &(pack.user_data));
+        pack.data_fn(nullptr, 0, ROCPROFILER_SPM_RECORD_FLAG_END, pack.user_data);
     }
 }
 
