@@ -462,7 +462,8 @@ class db_analysis(OmniAnalyze_Base):
                         + int(metric_id.split(".")[1])
                     ],
                 }
-                for metric_df in self._arch_configs[gfx_arch].dfs.values()
+                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
+                if metric_df_id != "402" # Skip roofline data points handled in calc_roofline_data
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
                 for metric_id, row in metric_df.iterrows()
             ])
@@ -472,7 +473,8 @@ class db_analysis(OmniAnalyze_Base):
                     "value_name": value_name,
                     "value": row[value_name].strip(),
                 }
-                for metric_df in self._arch_configs[gfx_arch].dfs.values()
+                for metric_df_id, metric_df in self._arch_configs[gfx_arch].dfs.items()
+                if metric_df_id != "402" # Skip roofline data points handled in calc_roofline_data
                 if set(metric_df.columns).intersection({"Metric", "Channel"})
                 for metric_id, row in metric_df.iterrows()
                 for value_name in metric_df.drop(
