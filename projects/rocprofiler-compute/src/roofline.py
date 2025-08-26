@@ -172,9 +172,9 @@ class Roofline:
         # Create the directory
         Path(final_dir).mkdir(parents=True, exist_ok=True)
 
-    def validate_apply_kernel_filter(self, df, mode, path=None):
+    def validate_apply_kernel_filter(self, df, path=None):
         if self.__run_parameters["kernel_filter"] is True:
-            if mode == "profile":
+            if self.__args.mode == "profile":
                 df_pmc = df["pmc_perf"]
                 df_filtered = df_pmc.copy()
                 df_list = (df_pmc.loc[:, "Kernel_Name"]).to_list()
@@ -199,8 +199,8 @@ class Roofline:
                     )
                 # Fix df structure to resemble same df arg passed in
                 df["pmc_perf"] = df_filtered
-            elif mode == "analyze":
-                top_kernels_csv = path / "pmc_kernel_top.csv"
+            elif self.__args.mode == "analyze":
+                top_kernels_csv = Path(path).joinpath("pmc_kernel_top.csv")
                 if not top_kernels_csv.is_file():
                     console_error(
                         "roofline", "{} does not exist".format(top_kernels_csv)
@@ -233,7 +233,9 @@ class Roofline:
             "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
         )
         # Verify kernels have been profiled and filter the df
-        ret_df = self.validate_apply_kernel_filter(df=ret_df, mode="profile")
+        ret_df = self.validate_apply_kernel_filter(
+            df=ret_df, path=self.__run_parameters.get("workload_dir")
+        )
         self.__ai_data = calc_ai_profile(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
@@ -756,9 +758,7 @@ class Roofline:
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
-            t_df = self.validate_apply_kernel_filter(
-                df=t_df, mode="analyze", path=base_path
-            )
+            t_df = self.validate_apply_kernel_filter(df=t_df, path=base_path)
             self.__ai_data = calc_ai_profile(
                 self.__mspec, self.__run_parameters["sort_type"], t_df
             )
