@@ -4,15 +4,15 @@ Panel Config:
   title: Roofline
   metrics_description:
     VALU FLOPs (F16): 'The total 16-bit floating-point operations executed per second
-      on the VALU. This is presented as the value of the peak empirical F16 FLOPs
+      on the VALU. This is presented with the value of the peak empirical F16 FLOPs
       achievable on the specific accelerator. Note: this does not include any F16
       operations from MFMA instructions.'
     VALU FLOPs (F32): 'The total 32-bit floating-point operations executed per second
-      on the VALU. This is presented as the value of the peak empirical F32 FLOPs
+      on the VALU. This is presented with the value of the peak empirical F32 FLOPs
       achievable on the specific accelerator. Note: this does not include any F32
       operations from MFMA instructions.'
     VALU FLOPs (F64): 'The total 64-bit floating-point operations executed per second
-      on the VALU. This is presented as the value of the peak empirical F64 FLOPs
+      on the VALU. This is presented with the value of the peak empirical F64 FLOPs
       achievable on the specific accelerator. Note: this does not include any F64
       operations from MFMA instructions.'
     MFMA FLOPs (F8): The total number of 8-bit brain floating point MFMA operations
