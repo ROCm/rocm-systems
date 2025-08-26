@@ -369,7 +369,7 @@ class db_analysis(OmniAnalyze_Base):
                     value = value.replace("raw_pmc_df", "pmc_df")
                     value = value.replace("pmc_df['sys_info']", "sys_info")
                 else:
-                    value = value.replace("raw_pmc_df.get('pmc_perf')", "pmc_df")
+                    value = value.replace("raw_pmc_df['pmc_perf']", "pmc_df")
                     value = re.sub(
                         "ammolite__([0-9A-Za-z_]+)",
                         lambda m: f'sys_info["{m.group(1)}"]',
