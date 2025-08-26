@@ -16,6 +16,7 @@ panels:
   data source:
   - raw_csv_table:
       id: 101
+      title: System Info
       source: sysinfo.csv
       columnwise: true
 - id: 200
@@ -1878,10 +1879,6 @@ panels:
           L2 Hit:
             value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum))
               if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
-          L2 Rd Lat:
-            value: null
-          L2 Wr Lat:
-            value: null
           Fabric_L2 Rd:
             value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
           Fabric_L2 Wr:
@@ -2012,10 +2009,6 @@ panels:
           L2 Hit:
             value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum))
               if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
-          L2 Rd Lat:
-            value: null
-          L2 Wr Lat:
-            value: null
           Fabric_L2 Rd:
             value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
           Fabric_L2 Wr:
@@ -2146,10 +2139,6 @@ panels:
           L2 Hit:
             value: ROUND(AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum))
               if ((TCC_HIT_sum + TCC_MISS_sum) != 0) else 0)), 0)
-          L2 Rd Lat:
-            value: null
-          L2 Wr Lat:
-            value: null
           Fabric_L2 Rd:
             value: ROUND(AVG((TCC_EA0_RDREQ_sum / $denom)), 0)
           Fabric_L2 Wr:
@@ -11704,11 +11693,6 @@ panels:
             min: MIN(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             max: MAX(((100 * TD_TC_STALL_sum) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
-          "Workgroup manager \u2192 Data-Return Stall":
-            avg: null
-            min: null
-            max: null
-            unit: pct
           Coalescable Instructions:
             avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))
@@ -13338,7 +13322,7 @@ panels:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric:
         gfx90a:
           Req:
@@ -13532,7 +13516,7 @@ panels:
         avg: Avg
         min: Min
         max: Max
-        units: Units
+        units: Unit
       metric:
         gfx90a: {}
         gfx941: {}
