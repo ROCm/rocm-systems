@@ -930,13 +930,13 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
 
     if not empirical_peaks_df.empty:
         peak_data_row = empirical_peaks_df.iloc[0]
-        
+
         for col in empirical_peaks_df.columns:
             empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
     else:
         peak_names = [
             "FP16Flops",
-            "FP32Flops", 
+            "FP32Flops",
             "FP64Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
