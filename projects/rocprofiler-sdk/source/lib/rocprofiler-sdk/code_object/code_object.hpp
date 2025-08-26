@@ -25,6 +25,8 @@
 #include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 
+#include "lib/rocprofiler-sdk-attach/include/table.h"
+
 #include <hsa/hsa_api_trace.h>
 
 #include <cstdint>
@@ -33,9 +35,9 @@
 
 ROCPROFILER_EXTERN_C_INIT
 // Hidden function used to load all previously captured code objects after an attachment.
-// Takes a dispatch table of prestore functions usually provided by rocprofiler_register.
+// Takes a dispatch table of attach functions usually provided by rocprofiler_register.
 int
-rocprofiler_load_prestore_code_objects(void* incoming_table) ROCPROFILER_PUBLIC_API;
+rocprofiler_load_attach_code_objects(void* incoming_table) ROCPROFILER_PUBLIC_API;
 ROCPROFILER_EXTERN_C_FINI
 
 namespace rocprofiler
