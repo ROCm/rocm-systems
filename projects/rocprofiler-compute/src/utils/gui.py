@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import colorlover
 import pandas as pd
 import plotly.express as px
@@ -87,23 +86,21 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
         color = "white" if i > len(bounds) / 2.0 else "inherit"
 
         for column in df_numeric_columns:
-            styles.append(
-                {
-                    "if": {
-                        "filter_query": (
-                            "{{{column}}} >= {min_bound}"
-                            + (
-                                " && {{{column}}} < {max_bound}"
-                                if (i < len(bounds) - 1)
-                                else ""
-                            )
-                        ).format(column=column, min_bound=min_bound, max_bound=max_bound),
-                        "column_id": column,
-                    },
-                    "backgroundColor": backgroundColor,
-                    "color": color,
-                }
-            )
+            styles.append({
+                "if": {
+                    "filter_query": (
+                        "{{{column}}} >= {min_bound}"
+                        + (
+                            " && {{{column}}} < {max_bound}"
+                            if (i < len(bounds) - 1)
+                            else ""
+                        )
+                    ).format(column=column, min_bound=min_bound, max_bound=max_bound),
+                    "column_id": column,
+                },
+                "backgroundColor": backgroundColor,
+                "color": color,
+            })
         legend.append(
             html.Div(
                 style={"display": "inline-block", "width": "60px"},
@@ -203,7 +200,9 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Avg"] = [float(x) if x != "" else float(0) for x in display_df["Avg"]]
+        display_df["Avg"] = [
+            float(x) if x != "" else float(0) for x in display_df["Avg"]
+        ]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(
@@ -265,7 +264,9 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                 ).update_xaxes(range=[0, 110])
             )
     else:
-        console_error("Table id %s. Cannot determine barchart type." % table_config["id"])
+        console_error(
+            "Table id %s. Cannot determine barchart type." % table_config["id"]
+        )
 
     # update layout for each of the charts
     for fig in d_figs:

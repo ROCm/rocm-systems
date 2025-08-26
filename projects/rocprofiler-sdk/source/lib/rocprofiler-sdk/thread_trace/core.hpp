@@ -67,6 +67,8 @@ struct thread_trace_parameter_pack
     uint8_t  perfcounter_ctrl   = 0;
     uint64_t shader_engine_mask = DEFAULT_SE_MASK;
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
+    uint64_t perf_exclude_mask  = 0;
+    bool     no_detail_simd     = false;
 
     bool bSerialize = false;
 

@@ -42,17 +42,13 @@ include(ExternalProject)
 include(GNUInstallDirs)
 
 # version control info
-find_package(Git)
-if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
-    execute_process(
-        COMMAND git log --pretty=format:%h -n 1
-        OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
-        OUTPUT_STRIP_TRAILING_WHITESPACE)
-    message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
-    set(GIT_CLONE TRUE)
-else()
-    set(GIT_CLONE FALSER)
-endif()
+execute_process(
+    COMMAND git log --pretty=format:%h -n 1
+    OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
+    OUTPUT_STRIP_TRAILING_WHITESPACE)
+message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
+configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
+               ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
 
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -162,12 +158,6 @@ if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
 
-# git versioning file
-if(${GIT_CLONE})
-    configure_file(${PROJECT_SOURCE_DIR}/cmake/VERSION.sha.in
-                   ${PROJECT_SOURCE_DIR}/VERSION.sha @ONLY)
-endif()
-
 # Setup testing collateral
 
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
@@ -251,6 +241,14 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m section
         --junitxml=tests/test_profile_section.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
+    NAME test_profile_pc_sampling
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -s -m pc_sampling
+        --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
         ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
@@ -477,6 +475,7 @@ add_custom_target(
         --include-package-data=plotly --include-package=kaleido
         --include-package-data=kaleido --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
         --include-package=utils --include-package-data=utils rocprof-compute
     # Remove library rpath from executable

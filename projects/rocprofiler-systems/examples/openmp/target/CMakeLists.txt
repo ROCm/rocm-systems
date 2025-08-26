@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(NOT OMP_TARGET_COMPILER)
     find_program(

@@ -139,6 +139,9 @@ TEST(thread_trace, configure_test)
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}});
     params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {0}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK, {0}});
+    params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {0}});
 
     auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
@@ -278,7 +281,9 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
         params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, {0x1000000}});
         params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, {0xF}});
-        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTERS_CTRL, {0}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_PERFCOUNTER_EXCLUDE_MASK, {0}});
+        params.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, {0}});
 
         {
             auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");

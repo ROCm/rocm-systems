@@ -23,8 +23,6 @@
 
 ##############################################################################
 
-
-import os
 from pathlib import Path
 
 import config
@@ -67,15 +65,13 @@ class rocprof_v1_profiler(RocProfCompute_Base):
             '"' + app_cmd + '"',
         ]
         # store original args for debug message
-        store_app_cmd(
-            [
-                "--timestamp",
-                "on",
-                "-o",
-                self.get_args().path + "/" + fbase + ".csv",
-                app_cmd,
-            ]
-        )
+        store_app_cmd([
+            "--timestamp",
+            "on",
+            "-o",
+            self.get_args().path + "/" + fbase + ".csv",
+            app_cmd,
+        ])
         return args
 
     # -----------------------

@@ -103,7 +103,7 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
 
         // Check if we are testing for large buffers
-        static const char* var            = getenv("ATT_BUFFER_SIZE_MB");
+        static const char* var            = std::getenv("ATT_BUFFER_SIZE_MB");
         static uint64_t    buffer_size_mb = (var ? atoi(var) : 96) * 1024ul * 1024ul;
 
         std::vector<rocprofiler_thread_trace_parameter_t> parameters;
@@ -111,7 +111,15 @@ query_available_agents(rocprofiler_agent_version_t /* version */,
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT, 0xF});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_BUFFER_SIZE, buffer_size_mb});
         parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SHADER_ENGINE_MASK, 0x1});
-        parameters.push_back({ROCPROFILER_THREAD_TRACE_PARAMETER_SERIALIZE_ALL, 0});
+
+        static const bool extra_args =
+            std::getenv("ATT_NODETAIL") ? std::stoi(std::getenv("ATT_NODETAIL")) != 0 : false;
+        if(extra_args)
+        {
+            // Dont generate instruction profiling, only occupancy and shaderdata
+            parameters.emplace_back(rocprofiler_thread_trace_parameter_t{
+                ROCPROFILER_THREAD_TRACE_PARAMETER_NO_DETAIL, 1});
+        }
 
         ROCPROFILER_CALL(
             rocprofiler_configure_device_thread_trace_service(agent_ctx,

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
 
 if(
     CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR
@@ -224,9 +224,6 @@ rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_PERFETTO_TOOLS
 rocprofiler_systems_add_option(ROCPROFILER_BUILD_SQLITE3
                                "Enable building sqlite3 library internally" OFF
 )
-rocprofiler_systems_add_option(ROCPROFSYS_ENABLE_BENCHMARK
-                               "Enable performance benchmarking capabilities for the project" OFF
-)
 
 if(ROCPROFSYS_USE_PAPI)
     rocprofiler_systems_add_option(ROCPROFSYS_BUILD_PAPI "Build PAPI from submodule" ON)
@@ -332,10 +329,6 @@ endif()
 if(ROCPROFSYS_BUILD_TESTING OR "$ENV{ROCPROFSYS_CI}" MATCHES "[1-9]+|ON|on|y|yes")
     enable_testing()
     include(CTest)
-endif()
-
-if(ROCPROFSYS_ENABLE_BENCHMARK)
-    add_compile_definitions(-DROCPROFSYS_USE_BENCHMARK=1)
 endif()
 
 # ------------------------------------------------------------------------------#
