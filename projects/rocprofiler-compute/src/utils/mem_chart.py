@@ -27,6 +27,7 @@ from decimal import Decimal
 from typing import Dict
 
 from plotille import Canvas
+import re
 
 
 def make_format_spec(num, align=">"):
@@ -80,49 +81,102 @@ def format_text(
     key_step_prec_leftalign=0,
     key_align="<",
     value_align=">",
+    max_value_length=6,  # max length before forcing scientific notation
 ):
     """
     Format a text string for canvas to display according to
-    input key value pair and make proper aligment
-    For invalid value, it displays N/A
-    All strings to be displayed on Canvas need to use this method
+    input key value pair and make proper alignment.
+    Displays N/A for invalid values.
+    Uses scientific notation for very large/small or long numeric values.
     """
+
+    def is_value_valid(v):
+        try:
+            return v is not None and not (isinstance(v, float) and v != v)  # not NaN
+        except:
+            return False
+
+    def make_format_spec(prec, align):
+        # Ensure prec is int
+        prec_int = int(prec) if prec else 0
+        if prec_int > 0:
+            return f"{align}{prec_int}.2f"
+        else:
+            return f"{align}6"
+
+    # 1. Format specifier for value alignment
     value_format = make_format_spec(value_step_prec_rightalign, value_align)
 
+    # 2. Format the value string
     if is_value_valid(value):
-        value_str = "{val:{format}}".format(val=value, format=value_format)
-    else:
-        import re
+        abs_val = abs(value) if isinstance(value, (int, float)) else None
 
+        use_sci = False
+        sci_str = None
+
+        if isinstance(value, (int, float)) and abs_val != 0:
+            if abs_val >= 1e9 or abs_val < 1e-3:
+                use_sci = True
+            else:
+                try:
+                    normal_str = f"{value:{value_format}}"
+                    sci_str = f"{value:.1e}"
+                    if len(normal_str) > len(sci_str):
+                        use_sci = True
+                except ValueError:
+                    use_sci = True
+
+        if use_sci:
+            value_str = sci_str if sci_str is not None else f"{value:.1e}"
+            width_match = re.search(r"\d+", value_format)
+            width = int(width_match.group()) if width_match else 6
+            align_char = value_format[0] if value_format else ">"
+            value_str = f"{value_str:{align_char}{width}}"
+        else:
+            # Differentiate formatting for numeric vs string types:
+            if isinstance(value, (int, float)):
+                value_str = f"{value:{value_format}}"
+            else:
+                # For strings or other types, just use str() and align width only
+                width_match = re.search(r"\d+", value_format)
+                width = int(width_match.group()) if width_match else 6
+                align_char = value_format[0] if value_format else "<"
+                value_str = f"{str(value):{align_char}{width}}"
+
+    else:
         match = re.search(r"[<>=^](\d+)", value_format)
         width = int(match.group(1)) if match else 6
 
-        # Use same alignment as in value_format (first char)
-        align = value_format[0]
+        align = value_format[0] if value_format else "<"
 
         value_str = f"{'N/A':{align}{width}}"
 
+    # 3. Format key string if exists
     key_format = (
         make_format_spec(key_step_prec_leftalign, key_align)
         if key is not None
         else None
     )
-    key_str = (
-        "{key:{key_format}}".format(key=key, key_format=key_format)
-        if key and isinstance(key, (int, float))
-        else str(key)
-        if key
-        else None
-    )
 
-    unit_string = post_description_with_space if not "N/A" in value_str else ""
+    if key is not None:
+        if isinstance(key, (int, float)):
+            key_str = f"{key:{key_format}}"
+        else:
+            key_str = str(key)
+    else:
+        key_str = None
 
-    result_str_no_unit = (
-        "{key}{mark}{value}".format(key=key_str, value=value_str, mark=mark_between)
-        if key is not None
-        else "{value}".format(value=value_str)
-    )
+    # 4. Add unit string only if value is valid
+    unit_string = post_description_with_space if "N/A" not in value_str else ""
+
+    # 5. Compose final string
+    if key_str is not None:
+        result_str_no_unit = f"{key_str}{mark_between}{value_str}"
+    else:
+        result_str_no_unit = f"{value_str}"
+
     result_str = result_str_no_unit + unit_string
+
     return result_str
 
 
