@@ -14,7 +14,7 @@ import multiprocessing
 # and default value for CTEST_SUBMIT_URL
 # _PROJECT_NAME = "rocprofiler-v2-internal"
 # _BASE_URL = "10.194.116.31/cdash"
-_PROJECT_NAME = "rocm-systems"
+_PROJECT_NAME = "rocm-systems-alt"
 _BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
 _PROJECTS = {
@@ -349,11 +349,11 @@ def generate_dashboard_script(args):
     _script += f"""
         set(STAGES "{STAGES}")
 
-        dashboard_submit(FILES "{BINARY_DIR}/Project.xml" RETURN_VALUE _submit_ret)
-
         set_property(GLOBAL PROPERTY SubProject "{SUBPROJECT}")
         set_property(GLOBAL PROPERTY Label "{SUBPROJECT}")
 
+        dashboard_submit(FILES "{BINARY_DIR}/Project.xml" RETURN_VALUE _submit_ret)
+        
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
                      CAPTURE_CMAKE_ERROR _update_err)
