@@ -313,7 +313,7 @@ class OmniAnalyze_Base:
             output_filename = self.__args.output_name or f"rocprof_compute_{get_uuid()}"
             output_filename += ".txt"
             self._output = open(output_filename, "w+")
-            print(f"Created file: {output_filename}")
+            console_warning(f"Created file: {output_filename}")
         elif self.__args.output_format == "stdout":
             self._output = sys.stdout
 
