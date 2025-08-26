@@ -608,6 +608,7 @@ hipError_t hipStreamGetCaptureInfo_v2(hipStream_t stream, hipStreamCaptureStatus
                                       size_t* numDependencies_out);
 hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device);
 hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
 hipError_t hipStreamGetPriority(hipStream_t stream, int* priority);
 hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* pCaptureStatus);
 hipError_t hipStreamQuery(hipStream_t stream);
@@ -1261,6 +1262,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipStreamGetCaptureInfo_v2_fn = hip::hipStreamGetCaptureInfo_v2;
   ptrDispatchTable->hipStreamGetDevice_fn = hip::hipStreamGetDevice;
   ptrDispatchTable->hipStreamGetFlags_fn = hip::hipStreamGetFlags;
+  ptrDispatchTable->hipStreamGetId_fn = hip::hipStreamGetId;
   ptrDispatchTable->hipStreamGetPriority_fn = hip::hipStreamGetPriority;
   ptrDispatchTable->hipStreamIsCapturing_fn = hip::hipStreamIsCapturing;
   ptrDispatchTable->hipStreamQuery_fn = hip::hipStreamQuery;
@@ -2058,13 +2060,14 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_fn, 491);
 HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_spt_fn, 492);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchAsync_v2_fn, 493);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemAdvise_v2_fn, 494);
+HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetId_fn, 495);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 495)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 496)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 14,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
