@@ -37,7 +37,7 @@ import subprocess
 import tempfile
 import time
 from pathlib import Path as path
-from typing import Optional
+from typing import Optional, Tuple
 
 import pandas as pd
 import yaml
@@ -58,7 +58,7 @@ rocprof_args = ""
 spi_pipe_counter_regexs = [r"SPI_CS\d+_(.*)", r"SPI_CSQ_P\d+_(.*)"]
 
 
-def is_tcc_channel_counter(counter):
+def is_tcc_channel_counter(counter) -> bool:
     return counter.startswith("TCC") and counter.endswith("]")
 
 
@@ -158,11 +158,11 @@ def extract_counter_info_extra_config_input_yaml(
     return None
 
 
-def using_v1():
+def using_v1() -> bool:
     return "ROCPROF" in os.environ.keys() and os.environ["ROCPROF"].endswith("rocprof")
 
 
-def using_v3():
+def using_v3() -> bool:
     return "ROCPROF" not in os.environ.keys() or (
         "ROCPROF" in os.environ.keys()
         and (
@@ -218,7 +218,7 @@ def get_version(rocprof_compute_home) -> dict:
     return versionData
 
 
-def get_version_display(version, sha, mode):
+def get_version_display(version, sha, mode) -> str:
     """Pretty print versioning info"""
     buf = io.StringIO()
     print("-" * 40, file=buf)
@@ -228,7 +228,7 @@ def get_version_display(version, sha, mode):
     return buf.getvalue()
 
 
-def detect_rocprof(args):
+def detect_rocprof(args) -> str:
     """Detect loaded rocprof version. Resolve path and set cmd globally."""
     global rocprof_cmd
 
@@ -278,14 +278,14 @@ def detect_rocprof(args):
     return rocprof_cmd
 
 
-def store_app_cmd(args):
+def store_app_cmd(args) -> None:
     global rocprof_args
     rocprof_args = args
 
 
 def capture_subprocess_output(
     subprocess_args, new_env=None, profileMode=False, enable_logging=True
-):
+) -> Tuple[bool, str]:
     console_debug("subprocess", "Running: " + " ".join(subprocess_args))
     # Start subprocess
     # bufsize = 1 means output is line buffered
@@ -353,7 +353,7 @@ def capture_subprocess_output(
 
 
 # Create a dictionary that maps agent ID to agent objects
-def get_agent_dict(data):
+def get_agent_dict(data) -> dict:
     agents = data["rocprofiler-sdk-tool"][0]["agents"]
 
     agent_map = {}
@@ -367,7 +367,7 @@ def get_agent_dict(data):
 
 # Returns a dictionary that maps agent ID to GPU ID
 # starting at 0.
-def get_gpuid_dict(data):
+def get_gpuid_dict(data) -> dict:
     agents = data["rocprofiler-sdk-tool"][0]["agents"]
 
     agent_list = []
@@ -393,7 +393,7 @@ def get_gpuid_dict(data):
 
 
 # Create a dictionary that maps counter ID to counter objects
-def v3_json_get_counters(data):
+def v3_json_get_counters(data) -> dict:
     counters = data["rocprofiler-sdk-tool"][0]["counters"]
 
     counter_map = {}
@@ -407,7 +407,7 @@ def v3_json_get_counters(data):
     return counter_map
 
 
-def v3_json_get_dispatches(data):
+def v3_json_get_dispatches(data) -> dict:
     records = data["rocprofiler-sdk-tool"][0]["buffer_records"]
 
     records_map = {}
@@ -420,7 +420,7 @@ def v3_json_get_dispatches(data):
     return records_map
 
 
-def v3_json_to_csv(json_file_path, csv_file_path):
+def v3_json_to_csv(json_file_path, csv_file_path) -> None:
     f = open(json_file_path, "rt")
     data = json.load(f)
 
@@ -542,7 +542,9 @@ def v3_json_to_csv(json_file_path, csv_file_path):
     df.to_csv(csv_file_path, index=False)
 
 
-def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_file):
+def v3_counter_csv_to_v2_csv(
+    counter_file, agent_info_filepath, converted_csv_file
+) -> None:
     """
     Convert the counter file of csv output for a certain csv from rocprofv3 format
     to rocprfv2 format.
@@ -682,20 +684,20 @@ def v3_counter_csv_to_v2_csv(counter_file, agent_info_filepath, converted_csv_fi
     result.to_csv(converted_csv_file, index=False)
 
 
-def parse_text(text_file):
+def parse_text(text_file) -> list[str]:
     """
     Parse the text file to get the pmc counters.
     """
 
-    def process_line(line):
+    def process_line(line) -> list[str]:
         if "pmc:" not in line:
-            return ""
+            return []
         line = line.strip()
         pos = line.find("#")
         if pos >= 0:
             line = line[0:pos]
 
-        def _dedup(_line, _sep):
+        def _dedup(_line, _sep) -> str:
             for itr in _sep:
                 _line = " ".join(_line.split(itr))
             return _line.strip()
@@ -719,7 +721,7 @@ def run_prof(
     loglevel,
     format_rocprof_output,
     retain_rocpd_output=False,
-):
+) -> None:
     fbase = path(fname).stem
 
     console_debug("pmc file: %s" % path(fname).name)
@@ -955,7 +957,7 @@ def run_prof(
 
 def pc_sampling_prof(
     method, interval, workload_dir, appcmd, rocprofiler_sdk_library_path
-):
+) -> None:
     """
     Run rocprof with pc sampling. Current support v3 only.
     """
@@ -1026,13 +1028,13 @@ def pc_sampling_prof(
         console_error("PC sampling failed.")
 
 
-def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
+def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps) -> list:
     """
     rocprofv3 specific output processing.
     takes care of json or csv formats, for csv format,
     additional processing is performed.
     """
-    results_files_csv = {}
+    results_files_csv = []
 
     if rocprof_output == "json":
         results_files_json = glob.glob(workload_dir + "/out/pmc_1/*/*.json")
@@ -1095,7 +1097,7 @@ def process_rocprofv3_output(rocprof_output, workload_dir, is_timestamps):
 
 
 @demarcate
-def process_kokkos_trace_output(workload_dir, fbase):
+def process_kokkos_trace_output(workload_dir, fbase) -> None:
     # marker api trace csv files are generated for each process
     marker_api_trace_csvs = glob.glob(
         workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
@@ -1120,7 +1122,7 @@ def process_kokkos_trace_output(workload_dir, fbase):
 
 
 @demarcate
-def process_hip_trace_output(workload_dir, fbase):
+def process_hip_trace_output(workload_dir, fbase) -> None:
     # marker api trace csv files are generated for each process
     hip_api_trace_csvs = glob.glob(workload_dir + "/out/pmc_1/*/*_hip_api_trace.csv")
     existing_hip_files_csv = [d for d in hip_api_trace_csvs if path(d).is_file()]
@@ -1142,7 +1144,7 @@ def process_hip_trace_output(workload_dir, fbase):
         )
 
 
-def replace_timestamps(workload_dir):
+def replace_timestamps(workload_dir) -> None:
     if not path(workload_dir, "timestamps.csv").is_file():
         return
 
@@ -1162,7 +1164,7 @@ def replace_timestamps(workload_dir):
         )
 
 
-def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc):
+def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc) -> None:
     console_debug("[gen_sysinfo]")
     df = mspec.get_class_members()
 
@@ -1179,7 +1181,7 @@ def gen_sysinfo(workload_name, workload_dir, app_cmd, skip_roof, mspec, soc):
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
 
 
-def detect_roofline(mspec):
+def detect_roofline(mspec) -> dict:
     from utils import specs
 
     rocm_ver = int(mspec.rocm_version[:1])
@@ -1240,7 +1242,7 @@ def detect_roofline(mspec):
     return target_binary
 
 
-def mibench(args, mspec):
+def mibench(args, mspec) -> None:
     """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     console_log("roofline", "No roofline data found. Generating...")
 
@@ -1301,7 +1303,7 @@ def mibench(args, mspec):
     )
 
 
-def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd):
+def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd) -> pd.DataFrame:
     """
     Flatten TCC per channel counters across all XCDs in partition.
     NB: This func highly depends on the default behavior of rocprofv2 on MI300,
@@ -1366,7 +1368,7 @@ def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd):
     return df
 
 
-def get_submodules(package_name):
+def get_submodules(package_name) -> None:
     """List all submodules for a target package"""
     import importlib
     import pkgutil
@@ -1384,7 +1386,7 @@ def get_submodules(package_name):
     return submodules
 
 
-def is_workload_empty(path):
+def is_workload_empty(path) -> None:
     """Peek workload directory to verify valid profiling output"""
     pmc_perf_path = path + "/pmc_perf.csv"
     if pathlib.Path(pmc_perf_path).is_file():
@@ -1400,7 +1402,7 @@ def is_workload_empty(path):
         console_error("analysis", "No profiling data found.")
 
 
-def print_status(msg):
+def print_status(msg) -> None:
     msg_length = len(msg)
 
     console_log("")
@@ -1410,7 +1412,7 @@ def print_status(msg):
     console_log("")
 
 
-def set_locale_encoding():
+def set_locale_encoding() -> None:
     try:
         # Attempt to set the locale to 'C.UTF-8'
         locale.setlocale(locale.LC_ALL, "C.UTF-8")
@@ -1433,7 +1435,7 @@ def set_locale_encoding():
             )
 
 
-def reverse_multi_index_df_pmc(final_df):
+def reverse_multi_index_df_pmc(final_df) -> Tuple[list, list]:
     """
     Util function to decompose multi-index dataframe.
     """
@@ -1459,7 +1461,7 @@ def reverse_multi_index_df_pmc(final_df):
     return dfs, coll_levels
 
 
-def merge_counters_spatial_multiplex(df_multi_index):
+def merge_counters_spatial_multiplex(df_multi_index) -> pd.DataFrame:
     """
     For spatial multiplexing, this merges counter values for the same kernel that
     runs on different devices. For time stamp, start time stamp will use median
@@ -1562,7 +1564,7 @@ def merge_counters_spatial_multiplex(df_multi_index):
     return final_df
 
 
-def convert_metric_id_to_panel_info(metric_id):
+def convert_metric_id_to_panel_info(metric_id) -> Optional[Tuple[int, int, int]]:
     """
     Convert metric id into panel information.
     Output is a tuples of the form (file_id, panel_id, metric_id).
@@ -1608,7 +1610,7 @@ def convert_metric_id_to_panel_info(metric_id):
         raise Exception(f"Invalid metric id: {metric_id}")
 
 
-def format_time(seconds):
+def format_time(seconds) -> str:
     hours = int(seconds // 3600)
     minutes = int((seconds % 3600) // 60)
     secs = int(seconds % 60)
@@ -1622,7 +1624,7 @@ def format_time(seconds):
     return ", ".join(parts[:-1]) + (" and " if len(parts) > 1 else "") + parts[-1]
 
 
-def parse_sets_yaml(arch):
+def parse_sets_yaml(arch) -> dict:
     filename = (
         config.rocprof_compute_home
         / "rocprof_compute_soc"

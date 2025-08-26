@@ -29,7 +29,7 @@ from typing import Dict
 from plotille import Canvas
 
 
-def make_format_spec(num, align=">"):
+def make_format_spec(num, align=">") -> str:
     """
     Generate alignment string for a given input
     """
@@ -57,7 +57,7 @@ def make_format_spec(num, align=">"):
         return f"{align}{num_str}f"
 
 
-def is_value_valid(value):
+def is_value_valid(value) -> bool:
     """
     Check if a value is valid and display N/A if not
     (to be valid, it needs to be not None, and be int or float)
@@ -80,7 +80,7 @@ def format_text(
     key_step_prec_leftalign=0,
     key_align="<",
     value_align=">",
-):
+) -> str:
     """
     Format a text string for canvas to display according to
     input key value pair and make proper aligment
@@ -110,9 +110,7 @@ def format_text(
     key_str = (
         "{key:{key_format}}".format(key=key, key_format=key_format)
         if key and isinstance(key, (int, float))
-        else str(key)
-        if key
-        else None
+        else str(key) if key else None
     )
 
     unit_string = post_description_with_space if not "N/A" in value_str else ""
@@ -144,7 +142,7 @@ class InstrBuff(RectFrame):
     wave_occupancy: int = None
     wave_life: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         # print("---------", self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
@@ -183,7 +181,7 @@ class InstrBuff(RectFrame):
 # Wires between Instr Buff and Instr Dispatch
 @dataclass
 class Wire_InstrBuff_InstrDispatch(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         # Todo: finer wires for connections
         canvas.line(self.x_min + 2, self.y_min, self.x_min + 2, self.y_max)
         canvas.line(self.x_max, self.y_min + 1.5, self.x_max, self.y_max - 1.5)
@@ -204,7 +202,7 @@ class InstrDispatch(RectFrame):
     rect_y_offset: float = 3.0
     instrs: Dict[str, int] = field(default_factory=dict)
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         self.top_rect_x_min = self.x_min + 2.0
@@ -248,7 +246,7 @@ class Exec(RectFrame):
     wavefronts: int = 0
     workgroups: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
 
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
@@ -359,7 +357,7 @@ class Wire_E_GLVS(RectFrame):
     vl1_atomic: int = None
     sl1_rd: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max - 2.0,
@@ -434,7 +432,7 @@ class Wire_E_GLVS(RectFrame):
 class Wire_InstrBuff_IL1Cache(RectFrame):
     il1_fetch: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         end_col = int(self.y_max - self.y_min)
         canvas.text(self.x_min, self.y_max - 1, "^")
         for i in range(2, end_col):
@@ -501,7 +499,7 @@ class LDS(RectFrame):
     util: int = None
     latency: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(
@@ -536,7 +534,7 @@ class VectorL1Cache(RectFrame):
     coales: int = None
     stall: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -592,7 +590,7 @@ class ScalarL1DCache(RectFrame):
     hit: int = None
     latency: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -626,7 +624,7 @@ class InstrL1Cache(RectFrame):
     hit: int = None
     latency: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -667,7 +665,7 @@ class Wires_L1_L2(RectFrame):
     sl1_l2_atomic: int = None
     il1_l2_req: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(
             self.x_min + self.text_v_x_offset,
             self.y_max - 2.0,
@@ -765,7 +763,7 @@ class L2Cache(RectFrame):
     rd_lat: int = None
     wr_lat: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
 
@@ -855,7 +853,7 @@ class Wire_L2_Fabric(RectFrame):
     wr: int = None
     atomic: int = None
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max - 2.0,
@@ -900,7 +898,7 @@ class Wire_L2_Fabric(RectFrame):
 # xGMI/PCIe block with wires to fabric
 @dataclass
 class xGMI_PCIe(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 1.0, self.y_max - 2.0, self.label)
         canvas.text(self.x_min + 3.0, self.y_max - 5.0, "^   |")
@@ -914,7 +912,7 @@ class xGMI_PCIe(RectFrame):
 class Fabric(RectFrame):
     lat: Dict[str, int] = field(default_factory=dict)
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 6.0, self.y_max - 2.0, "   " + self.label)
         canvas.text(self.x_min + 2.0, self.y_max - 4.0, "Latency (cycles)")
@@ -939,7 +937,7 @@ class Fabric(RectFrame):
 # GMI block with wires to fabric
 @dataclass
 class GMI(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(self.x_min + 3.0, self.y_max + 4.0, "^   |")
         canvas.text(self.x_min + 3.0, self.y_max + 3.0, "|   |")
         canvas.text(self.x_min + 3.0, self.y_max + 2.0, "|   |")
@@ -956,7 +954,7 @@ class Wire_Fabric_HBM(RectFrame):
     rd: int = 0
     wr: int = 0
 
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.text(
             self.x_min + self.text_x_offset,
             self.y_max,
@@ -988,7 +986,7 @@ class Wire_Fabric_HBM(RectFrame):
 # HBM
 @dataclass
 class HBM(RectFrame):
-    def draw(self, canvas):
+    def draw(self, canvas) -> None:
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
         canvas.text(self.x_min + 4.0, self.y_max - 2.0, self.label)
 
@@ -1001,7 +999,7 @@ class MemChart:
         self.y_min = y_min
         self.y_max = y_max
 
-    def draw(self, canvas, normal_unit, metric_dict):
+    def draw(self, canvas, normal_unit, metric_dict) -> None:
         # ----------------------------------------
         # Overall rect and title
         canvas.rect(self.x_min, self.y_min, self.x_max, self.y_max)
@@ -1292,7 +1290,7 @@ class MemChart:
         block_hbm.draw(canvas)
 
 
-def plot_mem_chart(arch, normal_unit, metric_dict):
+def plot_mem_chart(arch, normal_unit, metric_dict) -> str:
     """plot memory chart from an arch with given metrics dict"""
 
     # TODO: verify metrics dict for given arch first

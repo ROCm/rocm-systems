@@ -27,6 +27,7 @@ import os
 import re
 from collections import OrderedDict
 from pathlib import Path
+from typing import Optional
 
 import pandas as pd
 import yaml
@@ -56,14 +57,14 @@ top_stats_build_in_config = {
 }
 
 
-def load_sys_info(f):
+def load_sys_info(f) -> pd.DataFrame:
     """
     Load sys running info from csv file to a df.
     """
     return pd.read_csv(f)
 
 
-def load_panel_configs(dirs):
+def load_panel_configs(dirs) -> OrderedDict:
     """
     Load all panel configs from yaml file.
     """
@@ -92,7 +93,7 @@ def load_panel_configs(dirs):
     return od
 
 
-def load_profiling_config(config_dir):
+def load_profiling_config(config_dir) -> dict:
     """
     Load profiling config from yaml file.
     """
@@ -102,7 +103,7 @@ def load_profiling_config(config_dir):
             return prof_config
     except FileNotFoundError:
         console_log(f"Could not find profiling_config.yaml in {config_dir}")
-    return dict()
+    return {}
 
 
 @demarcate
@@ -113,10 +114,9 @@ def create_df_kernel_top_stats(
     filter_dispatch_ids,
     filter_nodes,
     time_unit,
-    max_stat_num,
     kernel_verbose,
     sortby="sum",
-):
+) -> None:
     """
     Create top stats info by grouping kernels with user's filters.
     """
@@ -161,9 +161,9 @@ def create_df_kernel_top_stats(
         axis=1,
     )
 
-    grouped = time_stats.groupby(by=["Kernel_Name"]).agg({
-        "ExeTime": ["count", "sum", "mean", "median"]
-    })
+    grouped = time_stats.groupby(by=["Kernel_Name"]).agg(
+        {"ExeTime": ["count", "sum", "mean", "median"]}
+    )
 
     time_unit_str = "(" + time_unit + ")"
     grouped.columns = [
@@ -200,7 +200,7 @@ def create_df_kernel_top_stats(
 @demarcate
 def create_df_pmc(
     raw_data_root_dir, nodes, spatial_multiplexing, kernel_verbose, verbose, config
-):
+) -> pd.DataFrame:
     """
     Load all raw pmc counters and join into one df.
     """
@@ -283,7 +283,7 @@ def create_df_pmc(
             return df
 
 
-def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
+def collect_wave_occu_per_cu(in_dir, out_dir, numSE) -> None:
     """
     Collect wave occupancy info from in_dir csv files
     and consolidate into out_dir/wave_occu_per_cu.csv.
@@ -315,11 +315,10 @@ def collect_wave_occu_per_cu(in_dir, out_dir, numSE):
                 all = pd.concat([all, tmp_df[SE_idx]], axis=1, copy=False)
 
     if not all.empty:
-        # print(all.transpose())
         all.to_csv(Path(out_dir, "wave_occu_per_cu.csv"), index=False)
 
 
-def is_single_panel_config(root_dir, supported_archs):
+def is_single_panel_config(root_dir, supported_archs) -> Optional[bool]:
     """
     Check the root configs dir structure to decide using one config set for all
     archs, or one for each arch.
@@ -338,7 +337,7 @@ def is_single_panel_config(root_dir, supported_archs):
         console_error("Found multiple panel config sets but incomplete for all archs.")
 
 
-def find_1st_sub_dir(directory):
+def find_1st_sub_dir(directory) -> Optional[Path]:
     """
     Find the first sub dir in a directory
     """
@@ -349,5 +348,5 @@ def find_1st_sub_dir(directory):
             if entry.is_dir():  # Check if it's a directory
                 return entry
     except FileNotFoundError:
-        print(f"The directory '{directory}' does not exist.")
+        console_error(f"The directory '{directory}' does not exist.", exit=False)
     return None

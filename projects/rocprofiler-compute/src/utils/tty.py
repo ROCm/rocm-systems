@@ -37,7 +37,7 @@ from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
 
-def string_multiple_lines(source, width, max_rows):
+def string_multiple_lines(source, width, max_rows) -> str:
     """
     Adjust string with multiple lines by inserting '\n'
     """
@@ -53,7 +53,7 @@ def string_multiple_lines(source, width, max_rows):
     return "\n".join(lines)
 
 
-def get_table_string(df, transpose=False, decimal=2):
+def get_table_string(df, transpose=False, decimal=2) -> str:
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
@@ -75,7 +75,7 @@ def get_table_string(df, transpose=False, decimal=2):
     )
 
 
-def convert_time_columns(df, time_unit):
+def convert_time_columns(df, time_unit) -> pd.DataFrame:
     """
     Convert time column values based on the specified time unit.
     Uses the Unit column to identify which columns contain time data.
@@ -111,7 +111,7 @@ def convert_time_columns(df, time_unit):
     return df_copy
 
 
-def has_time_data(df):
+def has_time_data(df) -> bool:
     """
     Check if the dataframe contains time data by looking at the Unit column.
     """
@@ -121,7 +121,7 @@ def has_time_data(df):
     return df["Unit"].str.lower().str.contains("ns", na=False).any()
 
 
-def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
+def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) -> None:
     """
     Show all panels with their data in plain text mode.
     """
@@ -459,11 +459,13 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                     )
 
                     # Check if any column in df is empty
-                    is_empty_columns_exist = any([
-                        df.columns[col_idx]
-                        for col_idx in range(len(df.columns))
-                        if df.replace("", None).iloc[:, col_idx].isnull().all()
-                    ])
+                    is_empty_columns_exist = any(
+                        [
+                            df.columns[col_idx]
+                            for col_idx in range(len(df.columns))
+                            if df.replace("", None).iloc[:, col_idx].isnull().all()
+                        ]
+                    )
                     # Do not print the table if any column is empty
                     if is_empty_columns_exist:
                         if "title" in table_config:
@@ -546,7 +548,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
             print(ss, file=output)
 
 
-def show_roof_plot(roof_plot):
+def show_roof_plot(roof_plot) -> None:
     # TODO: short term solution to display roofline plot
     print("\n" + "-" * 80)
     print("4. Roofline")
@@ -561,7 +563,7 @@ def show_roof_plot(roof_plot):
         )
 
 
-def show_kernel_stats(args, runs, archConfigs, output):
+def show_kernel_stats(args, runs, archConfigs, output) -> None:
     """
     Show the kernels and dispatches from "Top Stats" section.
     """

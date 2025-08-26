@@ -36,7 +36,7 @@ cache = dict()
 
 # Note: shortener is now dependent on a rocprof install with llvm
 def kernel_name_shortener(df, level):
-    def shorten_file(df, level):
+    def shorten_file(df, level) -> pd.DataFrame:
         global cache
 
         column_name = ""

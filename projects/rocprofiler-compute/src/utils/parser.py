@@ -31,7 +31,7 @@ import sys
 import warnings
 from collections import defaultdict
 from pathlib import Path
-from typing import Union
+from typing import Optional, Tuple, Union
 
 import astunparse
 import numpy as np
@@ -117,7 +117,7 @@ supported_call = {
 # ------------------------------------------------------------------------------
 
 
-def to_min(*args):
+def to_min(*args) -> float:
     if len(args) == 1 and isinstance(args[0], pd.core.series.Series):
         return args[0].min()
     elif min(args) == None:
@@ -126,7 +126,7 @@ def to_min(*args):
         return min(args)
 
 
-def to_max(*args):
+def to_max(*args) -> float:
     if len(args) == 1 and isinstance(args[0], pd.core.series.Series):
         return args[0].max()
     elif len(args) == 2 and (
@@ -140,7 +140,7 @@ def to_max(*args):
         return max(args)
 
 
-def to_avg(a):
+def to_avg(a) -> Optional[float]:
     if str(type(a)) == "<class 'NoneType'>":
         return np.nan
     elif isinstance(a, pd.core.series.Series):
@@ -167,7 +167,7 @@ def to_avg(a):
         raise Exception(f"to_avg: unsupported type: {type(a)}")
 
 
-def to_median(a):
+def to_median(a) -> Optional[float]:
     if a is None:
         return None
     elif isinstance(a, pd.core.series.Series):
@@ -178,14 +178,14 @@ def to_median(a):
         raise Exception("to_median: unsupported type.")
 
 
-def to_std(a):
+def to_std(a) -> Optional[float]:
     if isinstance(a, pd.core.series.Series):
         return a.std()
     else:
         raise Exception("to_std: unsupported type.")
 
 
-def to_int(a):
+def to_int(a) -> Optional[int]:
     if str(type(a)) == "<class 'NoneType'>":
         return None
     elif isinstance(a, (int, float, np.int64)):
@@ -199,7 +199,7 @@ def to_int(a):
         raise Exception("to_int: unsupported type.")
 
 
-def to_sum(a):
+def to_sum(a) -> Optional[float]:
     if str(type(a)) == "<class 'NoneType'>":
         return np.nan
     elif np.isnan(a).all():
@@ -212,7 +212,7 @@ def to_sum(a):
         raise Exception("to_sum: unsupported type.")
 
 
-def to_round(a, b):
+def to_round(a, b) -> Optional[float]:
     if isinstance(a, pd.core.series.Series):
         return a.round(b)
     else:
@@ -228,14 +228,14 @@ def to_quantile(a, b):
         raise Exception("to_quantile: unsupported type.")
 
 
-def to_mod(a, b):
+def to_mod(a, b) -> Optional[float]:
     if isinstance(a, pd.core.series.Series):
         return a.mod(b)
     else:
         return a % b
 
 
-def to_concat(a, b):
+def to_concat(a, b) -> str:
     return str(a) + str(b)
 
 
@@ -244,7 +244,7 @@ class CodeTransformer(ast.NodeTransformer):
     Python AST visitor to transform user defined equation string to df format
     """
 
-    def visit_Call(self, node):
+    def visit_Call(self, node) -> ast.Call:
         self.generic_visit(node)
         # print("--- debug visit_Call --- ", node.args, node.func)
         # print(astunparse.dump(node))
@@ -258,7 +258,7 @@ class CodeTransformer(ast.NodeTransformer):
                 )  # Could be removed if too strict
         return node
 
-    def visit_IfExp(self, node):
+    def visit_IfExp(self, node) -> ast.Expr:
         self.generic_visit(node)
         # print(
         #     "visit_IfExp",
@@ -311,7 +311,7 @@ class CodeTransformer(ast.NodeTransformer):
         return node
 
 
-def build_eval_string(equation, coll_level, config):
+def build_eval_string(equation, coll_level, config) -> str:
     """
     Convert user defined equation string to eval executable string.
     For example,
@@ -404,7 +404,7 @@ def build_eval_string(equation, coll_level, config):
     return s
 
 
-def update_denom_string(equation, unit):
+def update_denom_string(equation, unit) -> str:
     """
     Update $denom in equation with runtime normalization unit.
     """
@@ -419,7 +419,7 @@ def update_denom_string(equation, unit):
     return s
 
 
-def update_normUnit_string(equation, unit):
+def update_normUnit_string(equation, unit) -> str:
     """
     Update $normUnit in equation with runtime normalization unit.
     It is string replacement for display only.
@@ -436,7 +436,7 @@ def update_normUnit_string(equation, unit):
     ).capitalize()
 
 
-def gen_counter_list(formula):
+def gen_counter_list(formula) -> Tuple[bool, list[str]]:
     function_filter = {
         "MIN": None,
         "MAX": None,
@@ -504,7 +504,7 @@ def gen_counter_list(formula):
     return visited, counters
 
 
-def calc_builtin_var(var, sys_info):
+def calc_builtin_var(var, sys_info) -> Optional[int]:
     """
     Calculate build-in variable based on sys_info:
     """
@@ -517,7 +517,7 @@ def calc_builtin_var(var, sys_info):
 
 
 @demarcate
-def build_dfs(archConfigs, filter_metrics, sys_info):
+def build_dfs(archConfigs, filter_metrics, sys_info) -> None:
     """
     - Build dataframe for each type of data source within each panel.
       Each dataframe will be used as a template to load data with each run later.
@@ -738,7 +738,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
     setattr(archConfigs, "metric_counters", metric_counters)
 
 
-def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
+def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config) -> None:
     """
     Apply the real eval string to its field in the metric_table df.
     """
@@ -820,7 +820,9 @@ def run_metric_evaluator(row_expr: str) -> str:
 
 
 @demarcate
-def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
+def eval_metric(
+    dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config
+) -> None:
     """
     Execute the expr string for each metric in the df.
     """
@@ -969,9 +971,15 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
-    ammolite__GRBM_GUI_ACTIVE_PER_XCD = ammolite__build_in["GRBM_GUI_ACTIVE_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
-    ammolite__GRBM_COUNT_PER_XCD = ammolite__build_in["GRBM_COUNT_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
-    ammolite__GRBM_SPI_BUSY_PER_XCD = ammolite__build_in["GRBM_SPI_BUSY_PER_XCD"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__GRBM_GUI_ACTIVE_PER_XCD = ammolite__build_in[
+        "GRBM_GUI_ACTIVE_PER_XCD"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__GRBM_COUNT_PER_XCD = ammolite__build_in[
+        "GRBM_COUNT_PER_XCD"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__GRBM_SPI_BUSY_PER_XCD = ammolite__build_in[
+        "GRBM_SPI_BUSY_PER_XCD"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
 
     for key, value in build_in_vars.items():
         # next pass, we evaluate the builtins the depend on the per-XCD values
@@ -988,9 +996,15 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
-    ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]  # noqa: F841 - Ruff: var utilized during runtime
-    ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]  # noqa: F841 - Ruff: var utilized during runtime
-    ammolite__hbmBandwidth = ammolite__build_in["hbmBandwidth"]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__numActiveCUs = ammolite__build_in[
+        "numActiveCUs"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__kernelBusyCycles = ammolite__build_in[
+        "kernelBusyCycles"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
+    ammolite__hbmBandwidth = ammolite__build_in[
+        "hbmBandwidth"
+    ]  # noqa: F841 - Ruff: var utilized during runtime
 
     row_expr_indexes = []
     row_exprs = []
@@ -1035,7 +1049,9 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                                 r"raw_pmc_df\['(\w+)'\]\['(\w+)'\]", c
                                             )
                                             try:
-                                                t = raw_pmc_df[m.group(1)][  # noqa: F841
+                                                t = raw_pmc_df[
+                                                    m.group(1)
+                                                ][  # noqa: F841
                                                     m.group(2)
                                                 ].to_list()
                                                 print(c)
@@ -1115,7 +1131,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
 
 
 @demarcate
-def apply_filters(workload, dir, is_gui, debug):
+def apply_filters(workload, dir, is_gui, debug) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
@@ -1209,7 +1225,7 @@ def apply_filters(workload, dir, is_gui, debug):
     return ret_df
 
 
-def find_key_recursively(data, search_key):
+def find_key_recursively(data, search_key) -> Optional[pd.DataFrame]:
     """
     Recursively search for the search_key in the given data
     (which can be a dict or list).
@@ -1233,19 +1249,19 @@ def find_key_recursively(data, search_key):
     return None  # Return None if the key was not found
 
 
-def search_key_in_json(file_path, search_key):
+def search_key_in_json(file_path, search_key) -> Optional[pd.DataFrame]:
     # FIXME:
     #   Load the entire JSON into memory.
     #   Should not use for large file.
     with open(file_path, "r") as file:
         data = json.load(file)
         found = find_key_recursively(data, search_key)
-        if found == None:
+        if found is None:
             console_error(f"Key '{search_key}' not found in the JSON file.")
         return found
 
 
-def search_pc_sampling_record(records):
+def search_pc_sampling_record(records) -> Optional[list[Tuple]]:
     """
     Search PC sampling records, and group and sort them
     """
@@ -1528,7 +1544,7 @@ def load_pc_sampling_data_per_kernel(
 
 
 @demarcate
-def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
+def load_pc_sampling_data(workload, dir, file_prefix, sorting_type) -> pd.DataFrame:
     """
     Load PC sampling raw data, filter and sort it by specified conditions,
     then return df.
@@ -1618,7 +1634,7 @@ def load_pc_sampling_data(workload, dir, file_prefix, sorting_type):
 
 
 @demarcate
-def load_kernel_top(workload, dir, args):
+def load_kernel_top(workload, dir, args) -> None:
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the
     #     kernel names.
@@ -1677,7 +1693,7 @@ def load_kernel_top(workload, dir, args):
 
 
 @demarcate
-def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False):
+def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False) -> None:
     """
     - Load data for all "raw_csv_table"
     - Load data for "pc_sampling_table"
@@ -1697,7 +1713,7 @@ def load_table_data(workload, dir, is_gui, args, config, skipKernelTop=False):
     )
 
 
-def build_comparable_columns(time_unit):
+def build_comparable_columns(time_unit) -> list[str]:
     """
     Build comparable columns/headers for display
     """

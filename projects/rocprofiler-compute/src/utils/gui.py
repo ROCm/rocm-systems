@@ -23,6 +23,9 @@
 
 ##############################################################################
 
+from ast import Dict
+from typing import Any, Tuple
+
 import colorlover
 import pandas as pd
 import plotly.express as px
@@ -41,22 +44,21 @@ IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 ##################
 # HELPER FUNCTIONS
 ##################
-def filter_df(column, df, filt):
+def filter_df(column, df, filt) -> pd.DataFrame:
     filt_df = df
     if filt != []:
         filt_df = df.loc[df[schema.pmc_perf_file_prefix][column].astype(str).isin(filt)]
     return filt_df
 
 
-def multi_bar_chart(table_id, display_df):
+def multi_bar_chart(table_id, display_df) -> dict:
+    nested_bar = {}
     if table_id == 1604:
-        nested_bar = {}
         for index, row in display_df.iterrows():
             if not row["Coherency"] in nested_bar:
                 nested_bar[row["Coherency"]] = {}
             nested_bar[row["Coherency"]][row["Xfer"]] = row["Avg"]
     if table_id == 1705:  # L2 - Fabric Interface Stalls
-        nested_bar = {}
         for index, row in display_df.iterrows():
             if not row["Transaction"] in nested_bar:
                 nested_bar[row["Transaction"]] = {}
@@ -65,7 +67,9 @@ def multi_bar_chart(table_id, display_df):
     return nested_bar
 
 
-def discrete_background_color_bins(df, n_bins=5, columns="all"):
+def discrete_background_color_bins(
+    df, n_bins=5, columns="all"
+) -> Tuple[list[dict[str, Any]], html.Div]:
     bounds = [i * (1.0 / n_bins) for i in range(n_bins + 1)]
     if columns == "all":
         if "id" in df:
@@ -86,21 +90,25 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
         color = "white" if i > len(bounds) / 2.0 else "inherit"
 
         for column in df_numeric_columns:
-            styles.append({
-                "if": {
-                    "filter_query": (
-                        "{{{column}}} >= {min_bound}"
-                        + (
-                            " && {{{column}}} < {max_bound}"
-                            if (i < len(bounds) - 1)
-                            else ""
-                        )
-                    ).format(column=column, min_bound=min_bound, max_bound=max_bound),
-                    "column_id": column,
-                },
-                "backgroundColor": backgroundColor,
-                "color": color,
-            })
+            styles.append(
+                {
+                    "if": {
+                        "filter_query": (
+                            "{{{column}}} >= {min_bound}"
+                            + (
+                                " && {{{column}}} < {max_bound}"
+                                if (i < len(bounds) - 1)
+                                else ""
+                            )
+                        ).format(
+                            column=column, min_bound=min_bound, max_bound=max_bound
+                        ),
+                        "column_id": column,
+                    },
+                    "backgroundColor": backgroundColor,
+                    "color": color,
+                }
+            )
         legend.append(
             html.Div(
                 style={"display": "inline-block", "width": "60px"},
@@ -123,7 +131,7 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
 ####################
 # GRAPHICAL ELEMENTS
 ####################
-def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
+def build_bar_chart(display_df, table_config, barchart_elements) -> list:
     """
     Read data into a bar chart. ID will determine which subtype of barchart.
     """
@@ -281,7 +289,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
 def build_table_chart(
     display_df, table_config, original_df, display_columns, comparable_columns, decimal
-):
+) -> list:
     """
     Read data into a DashTable
     """

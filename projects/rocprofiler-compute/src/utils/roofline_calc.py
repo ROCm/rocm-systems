@@ -134,7 +134,7 @@ class AI_Data:
     avgDuration: float
 
 
-def get_font():
+def get_font() -> dict:
     return {
         "size": FONT_SIZE,
         "color": FONT_COLOR,
@@ -143,7 +143,7 @@ def get_font():
     }
 
 
-def get_color(catagory):
+def get_color(catagory) -> str:
     if catagory == "ai_l1":
         return "green"
     elif catagory == "ai_l2":
@@ -157,7 +157,7 @@ def get_color(catagory):
 # -------------------------------------------------------------------------------------
 #                           Plot BW at each cache level
 # -------------------------------------------------------------------------------------
-def calc_ceilings(roofline_parameters, dtype, benchmark_data):
+def calc_ceilings(roofline_parameters, dtype, benchmark_data) -> dict:
     """Given benchmarking data, calculate ceilings (or peak performance) for
     empirical roofline"""
     # TODO: This is where filtering by memory level will need to occur for standalone
@@ -258,7 +258,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 #                              Overlay application performance
 # -------------------------------------------------------------------------------------
 # Calculate relevant metrics for ai calculation
-def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
+def calc_ai_analyze(workload, mspec, sort_type, config, arch_config) -> dict:
     """
     Calculate per-kernel metrics and AI points with Roofline yamls using eval_metric.
     """
@@ -397,7 +397,7 @@ def calc_ai_analyze(workload, mspec, sort_type, config, arch_config):
     return plot_points
 
 
-def calc_ai_profile(mspec, sort_type, ret_df):
+def calc_ai_profile(mspec, sort_type, ret_df) -> dict:
     """Given counter data, calculate arithmetic intensity for each kernel
     in the application. Leverage hard-coded equations to calculate AI values.
 

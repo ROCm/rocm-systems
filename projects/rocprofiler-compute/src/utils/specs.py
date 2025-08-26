@@ -23,6 +23,7 @@
 
 ##############################################################################
 """Get host/gpu specs."""
+from __future__ import annotations
 
 import importlib
 import json
@@ -34,6 +35,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
+from typing import Optional, Tuple
 
 import pandas as pd
 
@@ -55,22 +57,23 @@ VERSION_LOC = [
 ]
 
 
-def detect_arch(_rocminfo):
+def detect_arch(_rocminfo) -> Optional[Tuple[str, int]]:
+    gpu_arch = None
+    idx1 = -1
+
     for idx1, linetext in enumerate(_rocminfo):
         # NOTE: currently supported socs are gfx archs only
         gpu_arch = search(r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", linetext)
-        if gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
+        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
             break
-        if str(gpu_arch) in mi_gpu_specs.get_gpu_series_dict().keys():
-            gpu_arch = str(gpu_arch)
-            break
-    if not gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
-        console_error("Cannot find a supported arch in rocminfo: " + str(gpu_arch))
+
+    if not gpu_arch or gpu_arch not in mi_gpu_specs.get_gpu_series_dict().keys():
+        console_error(f"Cannot find a supported arch in rocminfo: {gpu_arch}")
     else:
         return (gpu_arch, idx1)
 
 
-def detect_gpu_chip_id(_rocminfo):
+def detect_gpu_chip_id(_rocminfo) -> Optional[str]:
     gpu_chip_id = None
 
     for idx1, linetext in enumerate(_rocminfo):
@@ -100,7 +103,7 @@ def kw_only(cls):
     return cls
 
 
-def generate_machine_specs(args, sysinfo: dict = None):
+def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]:
     if sysinfo is not None:
         try:
             sysinfo_ver = str(sysinfo["version"])
@@ -636,18 +639,18 @@ class MachineSpecs:
         },
     )
 
-    def get_hbm_channels(self):
+    def get_hbm_channels(self) -> int:
         if self.memory_partition and self.memory_partition.lower().startswith("nps"):
             hbmchannels = 128
             if self.memory_partition.lower() == "nps4":
                 hbmchannels /= 4
             elif self.memory_partition.lower() == "nps8":
                 hbmchannels /= 8
-            return hbmchannels
+            return int(hbmchannels)
         else:
             return int(self.total_l2_chan)
 
-    def get_class_members(self):
+    def get_class_members(self) -> pd.DataFrame:
         all_populated = True
         data = {}
         # dataclass uses an OrderedDict for member variables, ensuring order consistency
@@ -675,7 +678,7 @@ class MachineSpecs:
             console_warning("Missing specs fields for %s" % self.gpu_arch)
         return pd.DataFrame(data, index=[0])
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         topstr = (
             "Machine Specifications: describing the state of the machine that "
             "ROCm Compute Profiler data was collected on.\n"
@@ -719,7 +722,7 @@ class MachineSpecs:
         return topstr + get_table_string(df, transpose=False, decimal=2)
 
 
-def get_rocm_ver():
+def get_rocm_ver() -> str:
     rocm_found = False
     for itr in VERSION_LOC:
         _path = str(path(os.getenv("ROCM_PATH", "/opt/rocm")).joinpath(".info", itr))
@@ -747,7 +750,7 @@ def get_rocm_ver():
     return rocm_ver
 
 
-def run(cmd, exit_on_error=False):
+def run(cmd, exit_on_error=False) -> str:
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:
@@ -767,14 +770,14 @@ def run(cmd, exit_on_error=False):
     return p.stdout.decode("utf-8")
 
 
-def search(pattern, string):
+def search(pattern, string) -> Optional[str]:
     m = re.search(pattern, string, re.MULTILINE)
     if m is not None:
         return m.group(1)
     return None
 
 
-def total_sqc(archname, numCUs, numSEs):
+def total_sqc(archname, numCUs, numSEs) -> int:
     cu_per_se = float(numCUs) / float(numSEs)
     sq_per_se = cu_per_se / 2
     if archname.lower() in ["mi50", "mi100"]:
@@ -783,7 +786,7 @@ def total_sqc(archname, numCUs, numSEs):
     return int(sq_per_se) * int(numSEs)
 
 
-def total_l2_banks(gpu_arch, gpu_model, L2Banks, compute_partition):
+def total_l2_banks(gpu_arch, gpu_model, L2Banks, compute_partition) -> Optional[int]:
     xcd_count = mi_gpu_specs.get_num_xcds(gpu_arch, gpu_model, compute_partition)
 
     # TODO: MachineSpecs and OmniSoC mspec should converge...
