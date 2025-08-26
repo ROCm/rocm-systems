@@ -109,6 +109,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_type_id), 288) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, runtime_visibility), 292) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, uuid), 296) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, firmware_info), 300) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
     constexpr auto expected_rocp_agent_size = 376;
