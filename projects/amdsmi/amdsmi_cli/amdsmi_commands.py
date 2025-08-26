@@ -1461,7 +1461,7 @@ class AMDSMICommands():
                 fan=None, voltage_curve=None, overdrive=None, perf_level=None,
                 xgmi_err=None, energy=None, mem_usage=None, voltage=None, schedule=None,
                 guard=None, guest_data=None, fb_usage=None, xgmi=None, throttle=None,
-                ):
+                base_board=None, gpu_board=None):
         """Get Metric information for target gpu
 
         Args:
@@ -1523,6 +1523,10 @@ class AMDSMICommands():
         if self.helpers.is_hypervisor() or self.helpers.is_baremetal() or self.helpers.is_linux():
             if usage:
                 args.usage = usage
+            if base_board:
+                args.base_board = base_board
+            if gpu_board:
+                args.gpu_board = gpu_board
             if power:
                 args.power = power
             if clock:
@@ -1537,10 +1541,10 @@ class AMDSMICommands():
                 args.ecc = ecc
             if ecc_blocks:
                 args.ecc_blocks = ecc_blocks
-            current_platform_args += ["usage", "power", "clock", "temperature", "voltage", "pcie", "ecc", "ecc_blocks"]
+            current_platform_args += ["usage", "power", "clock", "temperature", "voltage", "pcie", "ecc", "ecc_blocks", "base_board","gpu_board"]
             current_platform_values += [args.usage, args.power, args.clock,
                                         args.temperature, args.voltage, args.pcie]
-            current_platform_values += [args.ecc, args.ecc_blocks]
+            current_platform_values += [args.ecc, args.ecc_blocks, args.base_board, args.gpu_board]
 
         if self.helpers.is_baremetal() and self.helpers.is_linux():
             if fan:
@@ -2245,6 +2249,99 @@ class AMDSMICommands():
             if args.pcie:
                 values_dict['pcie'] = pcie_dict
 
+        if "gpu_board" in current_platform_args:
+            if args.gpu_board:
+                gpu_board_temp_dict = {}
+                gpu_board_temp_types = [
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_RETIMER_X,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_IBC,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_IBC_2,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_VDD18_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_04_HBM_B_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_NODE_OAM_X_04_HBM_D_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD0,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD1,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD2,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_VDD3,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOC_A,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOC_C,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOCIO_A,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_SOCIO_C,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_085_HBM,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_B,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDCR_11_HBM_D,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDD_USR,
+                    amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32
+                ]
+                for type in gpu_board_temp_types:
+                    type_name = type.name.replace("GPUBOARD", "GPU_BOARD")
+                    try:
+                        gpu_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(args.gpu, type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                        if gpu_board_temp_holder != "N/A":
+                            gpu_board_temp_dict[f'{type_name}'] = self.helpers.unit_format(self.logger,
+                                                                                 gpu_board_temp_holder,
+                                                                                 '\N{DEGREE SIGN}C')
+                        else:
+                            gpu_board_temp_dict[f'{type_name}'] = "N/A"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        gpu_board_temp_dict[f'{type_name}'] = "N/A"
+                        logging.debug("Failed to get gpu_board %s for gpu %s | %s", type_name, gpu_id, e.get_error_info())
+                # if every value is N/A, then we don't want to display the values unless explicitly told to
+                # all args_list being True indicates that this gpu_board is not explicitly called itself
+                args_list = [getattr(args, arg) for arg in current_platform_args]
+                if all(value == "N/A" for value in gpu_board_temp_dict.values()) and all(arg == True for arg in args_list):
+                    gpu_board_temp_dict = {}
+                if gpu_board_temp_dict:
+                    values_dict['gpu_board'] = {'temperature':gpu_board_temp_dict}
+        if "base_board" in current_platform_args:
+            if args.base_board:
+                base_board_temp_dict = {}
+                base_board_temp_types = [
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FRONT,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_BACK,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_OAM7,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_IBC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_UFPGA,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_OAM1,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_0_1_HSC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_2_3_HSC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_4_5_HSC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_6_7_HSC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA_0V72_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_UBB_FPGA_3V3_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_0_1_2_3_1V2_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_4_5_6_7_1V2_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_0_1_0V9_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_4_5_0V9_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_2_3_0V9_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_RETIMER_6_7_0V9_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_0_1_2_3_3V3_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_OAM_4_5_6_7_3V3_VR,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC_HSC,
+                    amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC
+                ]
+                for type in base_board_temp_types:
+                    type_name = type.name.replace("BASEBOARD", "BASE_BOARD")
+                    try:
+                        base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(args.gpu, type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
+                        if base_board_temp_holder != "N/A":
+                            
+                            base_board_temp_dict[f'{type_name}'] = self.helpers.unit_format(self.logger,
+                                                                                     base_board_temp_holder,
+                                                                                     '\N{DEGREE SIGN}C')
+                        else:
+                            base_board_temp_dict[f'{type_name}'] = "N/A"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        base_board_temp_dict[f'{type_name}'] = "N/A"
+                        logging.debug("Failed to get base_board %s for gpu %s | %s", type_name, gpu_id, e.get_error_info())
+                # if every value is N/A, then we don't want to display the values unless explicitly told to
+                # all args_list being True indicates that this base_board is not explicitly called itself
+                args_list = [getattr(args, arg) for arg in current_platform_args]
+                if all(value == "N/A" for value in base_board_temp_dict.values()) and all(arg == True for arg in args_list):
+                    base_board_temp_dict = {}
+                if base_board_temp_dict:
+                    values_dict['base_board'] = {'temperature':base_board_temp_dict}
         if "ecc" in current_platform_args:
             if args.ecc:
                 ecc_count = {}
@@ -3035,7 +3132,7 @@ class AMDSMICommands():
                 cpu_temp=None, cpu_dimm_temp_range_rate=None, cpu_dimm_pow_consumption=None,
                 cpu_dimm_thermal_sensor=None,
                 core=None, core_boost_limit=None, core_curr_active_freq_core_limit=None,
-                core_energy=None, throttle=None):
+                core_energy=None, throttle=None, base_board=None, gpu_board=None):
         """Get Metric information for target gpu
 
         Args:
@@ -3110,7 +3207,7 @@ class AMDSMICommands():
         gpu_attributes = ["usage", "watch", "watch_time", "iterations", "power", "clock",
                           "temperature", "ecc", "ecc_blocks", "pcie", "fan", "voltage_curve",
                           "overdrive", "perf_level", "xgmi_err", "energy", "mem_usage", "voltage", "schedule",
-                          "guard", "guest_data", "fb_usage", "xgmi", "throttle"]
+                          "guard", "guest_data", "fb_usage", "xgmi", "throttle", "base_board", "gpu_board"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -3184,7 +3281,7 @@ class AMDSMICommands():
                                 fan, voltage_curve, overdrive, perf_level,
                                 xgmi_err, energy, mem_usage, voltage, schedule,
                                 guard, guest_data, fb_usage, xgmi, throttle,
-                                )
+                                base_board, gpu_board)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 # If no args are set, print out all CPU and Core metrics info
@@ -3219,7 +3316,7 @@ class AMDSMICommands():
                                 clock, temperature, ecc, ecc_blocks, pcie,
                                 fan, voltage_curve, overdrive, perf_level,
                                 xgmi_err, energy, mem_usage, voltage, schedule, throttle,
-                                )
+                                base_board, gpu_board)
         if self.logger.is_json_format():
             self.logger.combine_arrays_to_json()
 
