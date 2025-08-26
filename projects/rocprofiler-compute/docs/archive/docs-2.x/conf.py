@@ -13,9 +13,13 @@ import sys
 
 # If extensions (or modules to document with autodoc) are in another directory,
 # add these directories to sys.path here. If the directory is relative to the
-# documentation root, use str(Path(<rel_path>).absolute().resolve()) to make it absolute, like shown here.
-#
+# documentation root, use str(Path(<rel_path>).absolute().resolve()
+# to make it absolute, like shown here.
 from pathlib import Path
+
+from pygments.styles import get_all_styles
+from recommonmark.parser import CommonMarkParser
+from recommonmark.transform import AutoStructify
 
 sys.path.insert(0, str(Path("..").absolute().resolve()))
 
@@ -56,11 +60,9 @@ extensions = [
 
 show_authors = True
 
-
 myst_heading_anchors = 4
 # enable replacement of (tm) & friends
 myst_enable_extensions = ["replacements", "dollarmath"]
-
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -83,8 +85,6 @@ source_suffix = {
 # sphinxmark_text_color = (128, 128, 128)
 # sphinxmark_text_spacing = 800
 # sphinxmark_text_opacity = 30
-
-from recommonmark.parser import CommonMarkParser
 
 source_parsers = {".md": CommonMarkParser}
 
@@ -110,7 +110,6 @@ pygments_style = None
 latex_engine = "lualatex"
 latex_show_urls = "footnote"
 
-
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
@@ -132,7 +131,6 @@ html_static_path = ["_static"]
 latex_elements = {
     "sphinxsetup": "verbatimwrapslines=true, verbatimforcewraps=true",
 }
-
 
 # -- Options for HTMLHelp output ---------------------------------------------
 
@@ -157,8 +155,6 @@ html_theme_options = {
     "titles_only": False,
 }
 
-from pygments.styles import get_all_styles
-
 # The name of the Pygments (syntax highlighting) style to use.
 styles = list(get_all_styles())
 preferences = ("emacs", "pastie", "colorful")
@@ -166,8 +162,6 @@ for pref in preferences:
     if pref in styles:
         pygments_style = pref
         break
-
-from recommonmark.transform import AutoStructify
 
 
 # app setup hook

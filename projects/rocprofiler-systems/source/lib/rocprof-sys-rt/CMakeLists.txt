@@ -5,6 +5,9 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_EXTENSIONS ON)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 
+# Ensure .S files are compiled as assembly
+set(NEED_NATIVE_ASSEMBLER ON)
+
 # ------------------------------------------------------------------------------#
 # target sources
 # ------------------------------------------------------------------------------#
@@ -73,7 +76,7 @@ set(RT_STATIC_ONLY_SRC_LIST_aarch64 src/RTstatic_ctors_dtors-aarch64.c)
 # that gcc can handle .S.
 enable_language(ASM)
 file(GLOB SRC_ASSEMBLY "src/*.S")
-if(NEED_NATIVE_ASSEMBER)
+if(NEED_NATIVE_ASSEMBLER)
     set_source_files_properties(${SRC_ASSEMBLY} PROPERTIES LANGUAGE ASM)
 else()
     set_source_files_properties(${SRC_ASSEMBLY} PROPERTIES LANGUAGE C)

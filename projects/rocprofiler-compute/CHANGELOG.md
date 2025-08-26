@@ -7,10 +7,19 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 ### Added
 
 * Add `rocpd` choice for `--format-rocprof-output` option in profile mode
+
 * Add `--retain-rocpd-output` option in profile mode to save large raw rocpd databases in workload directory
+
 * Show description of metrics during analysis
   * Use `--include-cols Description` to show the Description column, which is excluded by default from the
   ROCm Compute Profiler CLI output.
+
+* Add missing counters based on register specification which enables missing metrics
+  * Enable SQC_DCACHE_INFLIGHT_LEVEL counter and associated metrics
+  * Enable TCP_TCP_LATENCY counter and associated counter for all GPUs except MI300
+
+* Added interactive metric descriptions in TUI analyze mode
+  * users can now left click on any metric cell to view detailed descriptions in the dedicated `METRIC DESCRIPTION` tab
 
 ### Changed
 
@@ -47,18 +56,67 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * sL1D-L2 BW Utilization (section 1401)
   * Bandwidth Utilization (section 1601)
 
+* Update `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
+  * Theoretical LDS Bandwidth
+  * vL1D Cache BW
+  * L2 Cache BW
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * Kernel Time
+  * Kernel Time (Cycles)
+  * SIMD Utilization
+  * Clock Rate
+
+* Add `Compute Throughput` panel to TUI with the following metrics:
+  * VALU FLOPs
+  * VALU IOPs
+  * MFMA FLOPs (F8)
+  * MFMA FLOPs (BF16)
+  * MFMA FLOPs (F16)
+  * MFMA FLOPs (F32)
+  * MFMA FLOPs (F64)
+  * MFMA FLOPs (F6F4) (in gfx950)
+  * MFMA IOPs (Int8)
+  * SALU Utilization
+  * VALU Utilization
+  * MFMA Utilization
+  * VMEM Utilization
+  * Branch Utilization
+  * IPC
+
+* Add `Memory Throughput` panel to TUI with the following metrics:
+  * vL1D Cache BW
+  * vL1D Cache Utilization
+  * Theoretical LDS Bandwidth
+  * LDS Utilization
+  * L2 Cache BW
+  * L2 Cache Utilization
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * sL1D Cache BW
+  * L1I BW
+  * Address Processing Unit Busy
+  * Data-Return Busy
+  * L1I-L2 Bandwidth
+  * sL1D-L2 BW
+
 ### Resolved issues
 
 * Fixed not detecting memory clock issue when using amd-smi
 * Fixed standalone GUI crashing
 * Fixed L2 read/write/atomic bandwidths on MI350
 * Update metric names for better alignment between analysis configuration and documentation
+* Fixed an issue where accumulation counters could not be collected on AMD Instinct MI100
 
 ### Known issues
 
 ### Optimized
 
 * Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
+
+* Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
+
+* Improve post-analysis runtime performance by caching and multi-processing
 
 ### Removed
 
@@ -67,7 +125,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * Remove aggregated analysis view from TUI mode
 
 
-## ROCm Compute Profiler 3.2.1 for ROCm 7.0.0
+## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
 ### Added
 

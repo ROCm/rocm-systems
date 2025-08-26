@@ -222,9 +222,9 @@ Panel Config:
         atomic req: L2-Fabric Atomic
       metric:
         ::_1:
-          read req: AVG((TO_INT(TCC_EA_RDREQ[::_1]) / $denom))
-          write req: AVG((TO_INT(TCC_EA_WRREQ[::_1]) / $denom))
-          atomic req: AVG((TO_INT(TCC_EA_ATOMIC[::_1]) / $denom))
+          read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
+          write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
+          atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
         placeholder_range:
           ::_1: $total_l2_chan
       cli_style: simple_multiple_bar
@@ -237,7 +237,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA_RDREQ_LEVEL[::_1] / TCC_EA_RDREQ[::_1]) if (TCC_EA_RDREQ[::_1]
+          expr: ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
             != 0) else None)
         placeholder_range:
           ::_1: $total_l2_chan
@@ -251,7 +251,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA_WRREQ_LEVEL[::_1] / TCC_EA_WRREQ[::_1]) if (TCC_EA_WRREQ[::_1]
+          expr: ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
             != 0) else None)
         placeholder_range:
           ::_1: $total_l2_chan
@@ -265,7 +265,7 @@ Panel Config:
         expr: Expression
       metric:
         ::_1:
-          expr: ((TCC_EA_ATOMIC_LEVEL[::_1] / TCC_EA_ATOMIC[::_1]) if (TCC_EA_ATOMIC[::_1]
+          expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if (TCC_EA0_ATOMIC[::_1]
             != 0) else 0)
         placeholder_range:
           ::_1: $total_l2_chan

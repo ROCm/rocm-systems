@@ -2,6 +2,8 @@ name: rocprofiler-compute Documentation
 
 on:
   push:
+    branches:
+      - develop
     paths:
       - 'projects/rocprofiler-compute/docs/archive/docs-2.x/**'
       - 'projects/rocprofiler-compute/docs/archive/docs-1.x/**'
