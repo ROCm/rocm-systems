@@ -192,7 +192,8 @@ from_json_code_object(const nlohmann::json& _json)
     rocprofiler_callback_tracing_code_object_load_data_t co = {};
     co.code_object_id = _json["code_object_id"].get<long long>();
     auto uri_str      = _json["uri"].get<std::string>();
-    strncpy(const_cast<char*>(co.uri), uri_str.c_str(), sizeof(co.uri) - 1);
+    co.uri            = new char[uri_str.size() + 1];
+    strncpy(const_cast<char*>(co.uri), uri_str.c_str(), uri_str.size() + 1);
     co.load_base    = _json["load_base"].get<long long>();
     co.load_size    = _json["load_size"].get<long long>();
     co.load_delta   = _json["load_delta"].get<long long>();
@@ -234,8 +235,9 @@ from_json_kernel_symbol(const nlohmann::json& _json)
     ks.kernel_id         = _json["kernel_id"].get<long long>();
     ks.code_object_id    = _json["code_object_id"].get<long long>();
     auto kernel_name_str = _json["kernel_name"].get<std::string>();
+    ks.kernel_name       = new char[kernel_name_str.size() + 1];
     strncpy(const_cast<char*>(ks.kernel_name), kernel_name_str.c_str(),
-            sizeof(ks.kernel_name) - 1);
+            kernel_name_str.size() + 1);
     ks.kernel_object             = _json["kernel_object"].get<long long>();
     ks.kernarg_segment_size      = _json["kernarg_segment_size"].get<int>();
     ks.kernarg_segment_alignment = _json["kernarg_segment_alignment"].get<int>();
@@ -380,6 +382,7 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
     const auto& process_json = _json["process"];
     auto        process      = from_json_process(process_json);
     registry.set_process(process);
+    std::cout << "adding process\n";
 
     const auto& pmc_array = _json["pmc_infos"];
     for(const auto& pmc_json : pmc_array)
@@ -387,6 +390,7 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto pmc = from_json_pmc(pmc_json);
         registry.add_pmc_info(pmc);
     }
+    std::cout << "adding pmc" << pmc_array.size() << "\n";
 
     const auto& thread_array = _json["threads"];
     for(const auto& thread_json : thread_array)
@@ -394,6 +398,7 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto thread = from_json_thread(thread_json);
         registry.add_thread_info(thread);
     }
+    std::cout << "adding thread" << thread_array.size() << "\n";
 
     const auto& track_array = _json["tracks"];
     for(const auto& track_json : track_array)
@@ -401,27 +406,39 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto track = from_json_track(track_json);
         registry.add_track(track);
     }
+    std::cout << "adding tracks" << track_array.size() << "\n";
 
     const auto& queue_array = _json["queues"];
     for(const auto& queue_json : queue_array)
     {
-        auto handle = queue_json["handle"].get<long long>();
+        auto handle = queue_json.get<long long>();
         registry.add_queue(static_cast<uint64_t>(handle));
+    }
+    std::cout << "adding queues" << queue_array.size() << "\n";
+    if(queue_array.empty())
+    {
+        registry.add_queue(0);
     }
 
     const auto& stream_array = _json["streams"];
     for(const auto& stream_json : stream_array)
     {
-        auto handle = stream_json["handle"].get<long long>();
+        auto handle = stream_json.get<long long>();
         registry.add_stream(static_cast<uint64_t>(handle));
+    }
+    std::cout << "adding streams" << stream_array.size() << "\n";
+    if(stream_array.empty())
+    {
+        registry.add_stream(0);
     }
 
     const auto& string_array = _json["strings"];
     for(const auto& string_json : string_array)
     {
-        auto str = string_json["value"].get<std::string>();
+        auto str = string_json.get<std::string>();
         registry.add_string(str);
     }
+    std::cout << "adding strings" << string_array.size() << "\n";
 
 #if ROCPROFSYS_USE_ROCM
     if(_json.contains("code_objects"))
@@ -432,6 +449,7 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
             auto code_object = from_json_code_object(code_object_json);
             registry.add_code_object(code_object);
         }
+        std::cout << "adding code objects" << code_object_array.size() << "\n";
     }
 
     if(_json.contains("kernel_symbols"))
@@ -442,6 +460,7 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
             auto kernel_symbol = from_json_kernel_symbol(kernel_symbol_json);
             registry.add_kernel_symbol(kernel_symbol);
         }
+        std::cout << "adding kernel symbols" << kernel_symbol_array.size() << "\n";
     }
 #endif
 
@@ -454,8 +473,11 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         for(const auto& agent_json : agents_array)
         {
             agents.push_back(from_json_agent(agent_json));
+            std::cout << "Added agent with handle: " << agents.back()->handle
+                      << std::endl;
         }
         agent_manager::get_instance().set_agents(agents);
+        std::cout << "adding agents" << agents_array.size() << "\n" << std::flush;
     }
 }
 
@@ -731,15 +753,20 @@ metadata_registry::load_from_file(const std::string& filepath)
 {
     try
     {
+        std::cout << "Load from file 1" << std::endl;
         std::ifstream file(filepath);
         if(!file.is_open())
         {
+            std::cout << "Load from file 2" << std::endl;
             return false;
         }
 
+        std::cout << "Load from file 3" << std::endl;
         nlohmann::json json;
         file >> json;
         file.close();
+
+        std::cout << "Load from file 4" << std::endl;
 
         rocprofsys::trace_cache::from_json(*this, json);
         return true;

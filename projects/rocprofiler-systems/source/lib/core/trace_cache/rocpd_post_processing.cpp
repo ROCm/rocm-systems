@@ -703,7 +703,7 @@ rocpd_post_processing::post_process_metadata()
     {
         return;
     }
-    ROCPROFSYS_DEBUG("Post processing metadata..");
+    std::cout << "Post processing metadata.." << std::endl;
     auto  data_processor = get_data_processor();
     auto& agent_mngr     = agent_manager::get_instance();
     auto  n_info         = node_info::get_instance();
@@ -712,10 +712,12 @@ rocpd_post_processing::post_process_metadata()
                                      n_info.system_name.c_str(), n_info.node_name.c_str(),
                                      n_info.release.c_str(), n_info.version.c_str(),
                                      n_info.machine.c_str(), n_info.domain_name.c_str());
+    std::cout << "adding node_info " << n_info.id << "\n";
 
     auto process_info = m_metadata.get_process_info();
     data_processor->insert_process_info(n_info.id, process_info.ppid, process_info.pid, 0,
                                         0, 0, 0, process_info.command.c_str(), "{}");
+    std::cout << "adding process " << process_info.pid << "\n";
 
     const auto& agents  = agent_mngr.get_agents();
     int         counter = 0;
@@ -729,18 +731,24 @@ rocpd_post_processing::post_process_metadata()
             rocpd_agent->model_name.c_str(), rocpd_agent->vendor_name.c_str(),
             rocpd_agent->product_name.c_str(), "");
         rocpd_agent->base_id = _base_id;
+        std::cout << "agent_handle" << rocpd_agent->handle << " base_id: " << _base_id
+                  << std::endl;
     }
+    std::cout << "adding agents" << agents.size() << "\n";
+
     auto _string_list = m_metadata.get_string_list();
     for(auto& _string : _string_list)
     {
         data_processor->insert_string(std::string(_string).c_str());
     }
+    std::cout << "adding strings" << _string_list.size() << "\n";
 
     auto _thread_info_list = m_metadata.get_thread_info_list();
     for(auto& t_info : _thread_info_list)
     {
         rocpd_insert_thread_id(t_info, n_info, process_info);
     }
+    std::cout << "adding threads" << _thread_info_list.size() << "\n";
 
     auto _track_info_list = m_metadata.get_track_info_list();
     for(auto& track : _track_info_list)
@@ -753,6 +761,7 @@ rocpd_post_processing::post_process_metadata()
         data_processor->insert_track(track.track_name.c_str(), n_info.id,
                                      process_info.pid, thread_id);
     }
+    std::cout << "adding tracks" << _track_info_list.size() << "\n";
 
     auto _code_object_list = m_metadata.get_code_object_list();
     for(const auto& code_object : _code_object_list)
@@ -773,6 +782,7 @@ rocpd_post_processing::post_process_metadata()
                                            code_object.load_base, code_object.load_size,
                                            code_object.load_delta, strg_type);
     }
+    std::cout << "adding code objects" << _code_object_list.size() << "\n";
 
     auto _kernel_symbols_list = m_metadata.get_kernel_symbol_list();
     for(const auto& kernel_symbol : _kernel_symbols_list)
@@ -788,6 +798,7 @@ rocpd_post_processing::post_process_metadata()
 
         data_processor->insert_string(kernel_name.c_str());
     }
+    std::cout << "adding kernel symbols" << _kernel_symbols_list.size() << "\n";
 
     auto _queue_list = m_metadata.get_queue_list();
     for(const auto& queue_handle : _queue_list)
@@ -797,6 +808,7 @@ rocpd_post_processing::post_process_metadata()
         data_processor->insert_queue_info(queue_handle, n_info.id, process_info.pid,
                                           ss.str().c_str());
     }
+    std::cout << "adding queues" << _queue_list.size() << "\n";
 
     auto _stream_list = m_metadata.get_stream_list();
     for(const auto& stream_handle : _stream_list)
@@ -806,6 +818,7 @@ rocpd_post_processing::post_process_metadata()
         data_processor->insert_stream_info(stream_handle, n_info.id, process_info.pid,
                                            ss.str().c_str());
     }
+    std::cout << "adding streams" << _stream_list.size() << "\n";
 
     auto buffer_info_list = m_metadata.get_buffer_name_info();
     for(const auto& buffer_info : buffer_info_list)
@@ -815,6 +828,7 @@ rocpd_post_processing::post_process_metadata()
             data_processor->insert_string(*item.second);
         }
     }
+    std::cout << "adding strings 2\n";
 
     auto callback_info_list = m_metadata.get_callback_tracing_info();
     for(const auto& cb_info : callback_info_list)
@@ -824,6 +838,7 @@ rocpd_post_processing::post_process_metadata()
             data_processor->insert_string(*item.second);
         }
     }
+    std::cout << "adding strings 3\n";
 
     auto pmc_info_list = m_metadata.get_pmc_info_list();
     for(const auto& pmc_info : pmc_info_list)
@@ -840,6 +855,7 @@ rocpd_post_processing::post_process_metadata()
             pmc_info.units.c_str(), pmc_info.value_type.c_str(), pmc_info.block.c_str(),
             pmc_info.expression.c_str(), pmc_info.is_constant, pmc_info.is_derived);
     }
+    std::cout << "adding pmc" << pmc_info_list.size() << "\n" << std::flush;
 #endif
 }
 

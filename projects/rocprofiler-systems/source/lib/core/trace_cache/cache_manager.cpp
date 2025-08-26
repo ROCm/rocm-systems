@@ -146,11 +146,16 @@ cache_manager::post_process_bulk()
         {
             if(!files.buff_storage.empty() && !files.metadata.empty())
             {
-                std::cout << "Creating database for [" << pid
+                std::cout << "\nCreating database for [" << pid
                           << "]: " << files.buff_storage << " " << files.metadata
                           << std::endl;
                 metadata_registry metadata;
-                metadata.load_from_file(files.metadata);
+                auto              res = metadata.load_from_file(files.metadata);
+                if(!res)
+                {
+                    std::cout << "LOAD FROM FILE FOR METADATA FAILED" << std::endl;
+                    continue;
+                }
                 rocpd_post_processing _post_processing(metadata, pid);
                 storage_parser        _parser(getpid(), files.buff_storage);
                 _post_processing.register_parser_callback(_parser);

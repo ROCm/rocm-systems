@@ -538,7 +538,7 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.agent_id.handle,
         record->dispatch_info.kernel_id,
         record->dispatch_info.dispatch_id,
-        record->dispatch_info.queue_id.handle,
+        queue_handle,
         record->correlation_id.internal,
         get_parent_stack_id(record->correlation_id),
         record->dispatch_info.private_segment_size,
