@@ -20,6 +20,7 @@ _GCOVR_GENERATE_CMD = None
 _PROJECTS = {
     f"{_PROJECT_NAME}": {
         "rocprofiler-register": [],
+        "rocm-smi-lib": [],
         "rocr-runtime": [],
         "rocminfo": [
             "rocr-runtime",
@@ -28,6 +29,8 @@ _PROJECTS = {
             "rocr-runtime",
             "rocprofiler-register",
         ],
+        "hip-tests": [],
+        "hipother": [],
         "clr": [
             "hip",
             "rocr-runtime",
@@ -48,6 +51,22 @@ _PROJECTS = {
         ],
         "rocprofiler-systems": [
             "rocprofiler-sdk",
+        ],
+        "rdc": [
+            "rocprofiler-sdk",
+        ],
+        "roctracer": [
+            "rocr-runtime",
+            "hip",
+            "clr",
+        ],
+        "rocprofiler": [
+            "aqlprofile",
+            "rocr-runtime",
+            "hip",
+            "clr",
+            "rocm-smi-lib",
+            "roctracer",
         ],
     },
 }
@@ -353,7 +372,7 @@ def generate_dashboard_script(args):
         set_property(GLOBAL PROPERTY Label "{SUBPROJECT}")
 
         dashboard_submit(FILES "{BINARY_DIR}/Project.xml" RETURN_VALUE _submit_ret)
-        
+
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
                      CAPTURE_CMAKE_ERROR _update_err)
