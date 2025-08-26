@@ -459,6 +459,10 @@ Roofline options
    Allows you to specify a device ID to collect performance data from when
    running a roofline benchmark on your system.
 
+``-k``, ``--kernel <kernel-substr>``
+   Allows for kernel filtering. Usage is equivalent with the current ``rocprof``
+   utility. See :ref:`profiling-kernel-filtering`.
+
 ``--roofline-data-type <datatype>``
    Allows you to specify data types that you want plotted in the roofline PDF output(s). Selecting more than one data type will overlay the results onto the same plot. Default: FP32
 
