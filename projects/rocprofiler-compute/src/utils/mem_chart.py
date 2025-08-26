@@ -22,12 +22,12 @@
 # SOFTWARE.
 ###############################################################################el
 
+import re
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Dict
 
 from plotille import Canvas
-import re
 
 
 def make_format_spec(num, align=">"):
