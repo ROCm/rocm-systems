@@ -17,6 +17,40 @@ import multiprocessing
 _PROJECT_NAME = "rocm-systems"
 _BASE_URL = "my.cdash.org"
 _GCOVR_GENERATE_CMD = None
+_PROJECTS = {
+    f"{_PROJECT_NAME}": {
+        "rocprofiler-register": [],
+        "rocr-runtime": [],
+        "rocminfo": [
+            "rocr-runtime",
+        ],
+        "hip": [
+            "rocr-runtime",
+            "rocprofiler-register",
+        ],
+        "clr": [
+            "hip",
+            "rocr-runtime",
+            "rocprofiler-register",
+        ],
+        "aqlprofile": [
+            "rocr-runtime",
+        ],
+        "rocprofiler-sdk": [
+            "aqlprofile",
+            "rocprofiler-register",
+            "rocr-runtime",
+            "hip",
+            "clr",
+        ],
+        "rocprofiler-compute": [
+            "rocprofiler-sdk",
+        ],
+        "rocprofiler-systems": [
+            "rocprofiler-sdk",
+        ],
+    },
+}
 
 # these are various default values
 _VISIBLE_PROJECT_NAME = _PROJECT_NAME.replace("-internal", "")
@@ -39,6 +73,33 @@ def which(cmd, require):
     return v if v is not None else ""
 
 
+def generate_project_xml(args):
+    if not os.path.exists(args.binary_dir):
+        os.makedirs(args.binary_dir)
+
+    projects = _PROJECTS[_PROJECT_NAME]
+
+    if args.project not in projects:
+        supported_projects = ", ".join(list(projects.keys()))
+        raise argparse.ArgumentError(
+            f"Unknown project name {args.project}. Supported: {supported_projects}"
+        )
+
+    xml_content = [f"""<Project name="{_PROJECT_NAME}">"""]
+
+    for proj, deps in projects.items():
+        if deps:
+            xml_content += [f"""  <SubProject name="{proj}">"""]
+            for ditr in deps:
+                xml_content += [f"""    <Dependency name="{ditr}"/>"""]
+            xml_content += ["""  </SubProject>"""]
+        else:
+            xml_content += [f"""  <SubProject name="{proj}"></SubProject>"""]
+
+    xml_content += ["</Project>"]
+    return "\n".join(xml_content) + "\n"
+
+
 def generate_custom(args, cmake_args, ctest_args):
     if not os.path.exists(args.binary_dir):
         os.makedirs(args.binary_dir)
@@ -56,6 +117,7 @@ def generate_custom(args, cmake_args, ctest_args):
     SUBMIT_URL = args.submit_url
     SOURCE_DIR = os.path.realpath(args.source_dir)
     BINARY_DIR = os.path.realpath(args.binary_dir)
+    SUBPROJECTS = " ".join([f'"{x}"' for x in _PROJECTS[_PROJECT_NAME].keys()])
     CMAKE_ARGS = " ".join(cmake_args)
     CTEST_ARGS = " ".join(['"{}"'.format(x.replace('"', '\\"')) for x in ctest_args])
 
@@ -221,6 +283,8 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_SOURCE_DIRECTORY {SOURCE_DIR})
         set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
 
+        set(CTEST_PROJECT_SUBPROJECTS {SUBPROJECTS})
+
         set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} {DEFAULT_CMAKE_ARGS} -DGPU_TARGETS={GPU_TARGETS} {CMAKE_ARGS}")
         set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all --parallel {BUILD_JOBS}")
         set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
@@ -237,6 +301,7 @@ def generate_dashboard_script(args):
     STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
     ARGN = "${ARGN}"
     SUBMIT_ERR = "${_cdash_submit_err}"
+    SUBPROJECT = args.project
     REPO_SOURCE_DIR = (
         os.path.dirname(os.path.dirname((SOURCE_DIR)))
         if not os.path.exists(os.path.join(SOURCE_DIR, ".git"))
@@ -283,6 +348,12 @@ def generate_dashboard_script(args):
 
     _script += f"""
         set(STAGES "{STAGES}")
+
+        dashboard_submit(FILES "{BINARY_DIR}/Project.xml" RETURN_VALUE _submit_ret)
+
+        set_property(GLOBAL PROPERTY SubProject "{SUBPROJECT}")
+        set_property(GLOBAL PROPERTY Label "{SUBPROJECT}")
+
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{REPO_SOURCE_DIR}" RETURN_VALUE _update_ret
                      CAPTURE_CMAKE_ERROR _update_err)
@@ -347,6 +418,9 @@ def parse_cdash_args(args):
 
     parser = argparse.ArgumentParser()
 
+    parser.add_argument(
+        "-p", "--project", help="ROCm project name", default=None, type=str, required=True
+    )
     parser.add_argument(
         "-n", "--name", help="Job name", default=None, type=str, required=True
     )
@@ -561,12 +635,17 @@ if __name__ == "__main__":
 
     from textwrap import dedent
 
+    _projects = dedent(generate_project_xml(args))
     _config = dedent(generate_custom(args, cmake_args, ctest_args))
     _script = dedent(generate_dashboard_script(args))
 
     if not args.quiet:
+        sys.stderr.write(f"##### Project.xml #####\n\n{_projects}\n\n")
         sys.stderr.write(f"##### CTestCustom.cmake #####\n\n{_config}\n\n")
         sys.stderr.write(f"##### dashboard.cmake #####\n\n{_script}\n\n")
+
+    with open(os.path.join(args.binary_dir, "Project.xml"), "w") as f:
+        f.write(f"{_projects}\n")
 
     with open(os.path.join(args.binary_dir, "CTestCustom.cmake"), "w") as f:
         f.write(f"{_config}\n")
