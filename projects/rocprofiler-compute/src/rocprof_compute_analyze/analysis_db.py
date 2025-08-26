@@ -350,6 +350,53 @@ class db_analysis(OmniAnalyze_Base):
             console_debug("Collected PC sampling data")
         return pc_sampling_data_per_workload
 
+    @staticmethod
+    def evaluate(name, value, pmc_df, sys_info, parse=False):
+        if parse:
+            value = re.sub(
+                r"\$([0-9A-Za-z_]+)",
+                lambda m: f'sys_info["{m.group(1)}"]',
+                value,
+            )
+            ast_node = ast.parse(value)
+            transformer = CodeTransformer()
+            transformer.visit(ast_node)
+            value = astunparse.unparse(ast_node)
+            value = value.replace("raw_pmc_df", "pmc_df")
+            value = value.replace("pmc_df['sys_info']", "sys_info")
+        else:
+            value = value.replace("raw_pmc_df['pmc_perf']", "pmc_df")
+            value = re.sub(
+                "ammolite__([0-9A-Za-z_]+)",
+                lambda m: f'sys_info["{m.group(1)}"]',
+                value,
+            )
+        try:
+            return eval(
+                compile(value, "<string>", "eval"),
+                {},  # no globals
+                {
+                    # only locals
+                    "pmc_df": pmc_df,
+                    "sys_info": sys_info,
+                    "to_avg": to_avg,
+                    "to_concat": to_concat,
+                    "to_int": to_int,
+                    "to_max": to_max,
+                    "to_median": to_median,
+                    "to_min": to_min,
+                    "to_mod": to_mod,
+                    "to_quantile": to_quantile,
+                    "to_round": to_round,
+                    "to_std": to_std,
+                },
+            )
+        except Exception as e:
+            console_warning(
+                f"Failed to evaluate expression for {name}: {value} - {e}"
+            )
+            return None
+
     def calc_expressions(self):
         values_data_per_workload = self._values_data_per_workload.copy()
 
@@ -359,68 +406,22 @@ class db_analysis(OmniAnalyze_Base):
             for key, value in self._roofline_ceilings_per_workload[workload_path].items():
                 sys_info[f"{key}_empirical_peak"] = value
 
-            def evaluate(name, value, parse=False):
-                if parse:
-                    value = re.sub(
-                        r"\$([0-9A-Za-z_]+)",
-                        lambda m: f'sys_info["{m.group(1)}"]',
-                        value,
-                    )
-                    ast_node = ast.parse(value)
-                    transformer = CodeTransformer()
-                    transformer.visit(ast_node)
-                    value = astunparse.unparse(ast_node)
-                    value = value.replace("raw_pmc_df", "pmc_df")
-                    value = value.replace("pmc_df['sys_info']", "sys_info")
-                else:
-                    value = value.replace("raw_pmc_df['pmc_perf']", "pmc_df")
-                    value = re.sub(
-                        "ammolite__([0-9A-Za-z_]+)",
-                        lambda m: f'sys_info["{m.group(1)}"]',
-                        value,
-                    )
-                try:
-                    return eval(
-                        compile(value, "<string>", "eval"),
-                        {},  # no globals
-                        {
-                            # only locals
-                            "pmc_df": pmc_df,
-                            "sys_info": sys_info,
-                            "to_avg": to_avg,
-                            "to_concat": to_concat,
-                            "to_int": to_int,
-                            "to_max": to_max,
-                            "to_median": to_median,
-                            "to_min": to_min,
-                            "to_mod": to_mod,
-                            "to_quantile": to_quantile,
-                            "to_round": to_round,
-                            "to_std": to_std,
-                        },
-                    )
-                except Exception as e:
-                    console_warning(
-                        f"Failed to evaluate expression for {name}: {value} - {e}"
-                    )
-                    return None
-
             # Calculate PER_XCD variables first
             for key, value in build_in_vars.items():
                 if "PER_XCD" in key:
-                    sys_info[key] = evaluate(key, value, parse=True)
+                    sys_info[key] = db_analysis.evaluate(key, value, pmc_df, sys_info, parse=True)
 
             # variable dependent on PER_XCD variables
             for key, value in build_in_vars.items():
                 if "PER_XCD" not in key:
-                    sys_info[key] = evaluate(key, value, parse=True)
+                    sys_info[key] = db_analysis.evaluate(key, value, pmc_df, sys_info, parse=True)
 
             # Get name and print warning
             values_data_per_workload[workload_path]["value"] = values_data_per_workload[
                 workload_path
             ].apply(
-                lambda row: evaluate(
-                    f"{row['metric_id']} - {row['value_name']}", row["value"]
+                lambda row: db_analysis.evaluate(
+                    f"{row['metric_id']} - {row['value_name']}", row["value"], pmc_df, sys_info
                 ),
                 axis=1,
             )
@@ -555,116 +556,21 @@ class db_analysis(OmniAnalyze_Base):
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
             gfx_arch = sys_info["gpu_arch"]
             roofline_data_df = self._arch_configs[gfx_arch].dfs[402]
-
-            def evaluate_roofline_metric(pmc_df, sys_info, metric_name):
-                if metric_name == "total_flops":
-                    return (
-                        (
-                            64
-                            * (
-                                pmc_df["SQ_INSTS_VALU_ADD_F16"]
-                                + pmc_df["SQ_INSTS_VALU_MUL_F16"]
-                                + (2 * pmc_df["SQ_INSTS_VALU_FMA_F16"])
-                                + pmc_df["SQ_INSTS_VALU_TRANS_F16"]
-                            )
-                        )
-                        + (
-                            64
-                            * (
-                                pmc_df["SQ_INSTS_VALU_ADD_F32"]
-                                + pmc_df["SQ_INSTS_VALU_MUL_F32"]
-                                + (2 * pmc_df["SQ_INSTS_VALU_FMA_F32"])
-                                + pmc_df["SQ_INSTS_VALU_TRANS_F32"]
-                            )
-                        )
-                        + (
-                            64
-                            * (
-                                pmc_df["SQ_INSTS_VALU_ADD_F64"]
-                                + pmc_df["SQ_INSTS_VALU_MUL_F64"]
-                                + (2 * pmc_df["SQ_INSTS_VALU_FMA_F64"])
-                                + pmc_df["SQ_INSTS_VALU_TRANS_F64"]
-                            )
-                        )
-                        + (pmc_df["SQ_INSTS_VALU_MFMA_MOPS_F16"] * 512)
-                        + (pmc_df["SQ_INSTS_VALU_MFMA_MOPS_BF16"] * 512)
-                        + (pmc_df["SQ_INSTS_VALU_MFMA_MOPS_F32"] * 512)
-                        + (pmc_df["SQ_INSTS_VALU_MFMA_MOPS_F64"] * 512)
-                        + (
-                            pmc_df["SQ_INSTS_VALU_MFMA_MOPS_F8"] * 512
-                            if "FP8" in SUPPORTED_DATATYPES[sys_info["gpu_arch"]]
-                            else 0
-                        )
-                        + (
-                            pmc_df["SQ_INSTS_VALU_MFMA_MOPS_F6F4"] * 512
-                            if (
-                                "FP4" in SUPPORTED_DATATYPES[sys_info["gpu_arch"]]
-                                or "FP6" in SUPPORTED_DATATYPES[sys_info["gpu_arch"]]
-                            )
-                            else 0
-                        )
-                    ).sum()
-                elif metric_name == "l1_cache_data":
-                    return pmc_df["TCP_TOTAL_CACHE_ACCESSES_sum"].sum() * 64
-                elif metric_name == "l2_cache_data":
-                    return (
-                        pmc_df["TCP_TCC_WRITE_REQ_sum"]
-                        + pmc_df["TCP_TCC_ATOMIC_WITH_RET_REQ_sum"]
-                        + pmc_df["TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"]
-                        + pmc_df["TCP_TCC_READ_REQ_sum"]
-                    ).sum() * 64
-                elif metric_name == "hbm_cache_data":
-                    if sys_info["gpu_series"] == "MI200":
-                        return (
-                            (pmc_df["TCC_EA_RDREQ_32B_sum"] * 32)
-                            + (
-                                (
-                                    pmc_df["TCC_EA_RDREQ_sum"]
-                                    - pmc_df["TCC_EA_RDREQ_32B_sum"]
-                                )
-                                * 64
-                            )
-                            + (pmc_df["TCC_EA_WRREQ_64B_sum"] * 64)
-                            + (
-                                (
-                                    pmc_df["TCC_EA_WRREQ_sum"]
-                                    - pmc_df["TCC_EA_WRREQ_64B_sum"]
-                                )
-                                * 32
-                            )
-                        ).sum()
-                    else:
-                        return (
-                            (pmc_df["TCC_BUBBLE_sum"] * 128)
-                            + (pmc_df["TCC_EA0_RDREQ_32B_sum"] * 32)
-                            + (
-                                (
-                                    pmc_df["TCC_EA0_RDREQ_sum"]
-                                    - pmc_df["TCC_BUBBLE_sum"]
-                                    - pmc_df["TCC_EA0_RDREQ_32B_sum"]
-                                )
-                                * 64
-                            )
-                            + (
-                                (
-                                    pmc_df["TCC_EA0_WRREQ_sum"]
-                                    - pmc_df["TCC_EA0_WRREQ_64B_sum"]
-                                )
-                                * 32
-                            )
-                            + (pmc_df["TCC_EA0_WRREQ_64B_sum"] * 64)
-                        ).sum()
-                return None
+            roofline_data_expressions = dict(
+                zip(roofline_data_df["Metric"], roofline_data_df["Value"])
+            )
+            metric_expressions = {
+                "total_flops": roofline_data_expressions["Performance (GFLOPs)"],
+                "l1_cache_data": roofline_data_expressions["AI L1"],
+                "l2_cache_data": roofline_data_expressions["AI L2"],
+                "hbm_cache_data": roofline_data_expressions["AI HBM"],
+            }
 
             roofline_df = pd.DataFrame([
                 {
                     "kernel_name": kernel_name,
                     **{
-                        metric_name: evaluate_roofline_metric(
-                            pmc_df[pmc_df["Kernel_Name"] == kernel_name],
-                            sys_info,
-                            metric_name,
-                        )
+                        metric_name: db_analysis.evaluate(metric_name, roofline_data_expressions[metric_name], pmc_df[pmc_df["Kernel_Name"] == kernel_name], sys_info)
                         for metric_name in [
                             "total_flops",
                             "l1_cache_data",
