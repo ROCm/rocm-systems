@@ -319,7 +319,7 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
   ${CMAKE_CURRENT_BINARY_DIR}/vcpy_kernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/managed_kernel.code
   ${CMAKE_CURRENT_BINARY_DIR}/kernel_count.code
-  ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.cc
+  ${CMAKE_CURRENT_BINARY_DIR}/emptyModuleCount.code
 )
 add_executable(testhipModuleLoadUnloadFunc_exe EXCLUDE_FROM_ALL testhipModuleLoadUnloadFunc_exe.cc)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS testhipModuleLoadUnloadFunc_exe)
