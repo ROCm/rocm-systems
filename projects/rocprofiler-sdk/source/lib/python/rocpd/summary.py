@@ -437,17 +437,19 @@ def generate_all_summaries(connection: RocpdImportData, **kwargs: Any) -> None:
     summary_queries = {}
 
     # Create the summary queries
-    summary_queries |= create_summary_queries(connection, by_rank)
-    summary_queries |= create_summary_region_queries(
-        connection, by_rank, region_categories=region_categories
+    summary_queries.update(create_summary_queries(connection, by_rank))
+    summary_queries.update(
+        create_summary_region_queries(
+            connection, by_rank, region_categories=region_categories
+        )
     )
 
     if domain_summary:
-        summary_queries |= create_domain_query(connection, summary_queries)
+        summary_queries.update(create_domain_query(connection, summary_queries))
         # Create domain summary per rank only if both domain_summary and summary_by_rank are enabled
         if by_rank:
-            summary_queries |= create_domain_query(
-                connection, summary_queries, by_rank=True
+            summary_queries.update(
+                create_domain_query(connection, summary_queries, by_rank=True)
             )
 
     # Export all summary queries
