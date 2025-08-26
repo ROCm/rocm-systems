@@ -541,9 +541,8 @@ cache_region(const rocprofiler_callback_tracing_record_t* record,
 }
 
 void
-cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record)
+cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
     auto queue_handle  = record->dispatch_info.queue_id.handle;
 
     trace_cache::get_metadata_registry().add_queue(queue_handle);
@@ -569,13 +568,13 @@ cache_kernel_dispatch(rocprofiler_buffer_tracing_kernel_dispatch_record_t* recor
         record->dispatch_info.grid_size.y,
         record->dispatch_info.grid_size.z,
         stream_handle);
+
 }
 
 void
-cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
+cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
-
+    trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::memory_copy,
         record->start_timestamp,
@@ -595,10 +594,8 @@ cache_memory_copy(rocprofiler_buffer_tracing_memory_copy_record_t* record)
 
 #if (ROCPROFILER_VERSION >= 600)
 void
-cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record)
+cache_memory_allocation(rocprofiler_buffer_tracing_memory_allocation_record_t* record, uint64_t stream_handle)
 {
-    auto stream_handle = get_stream_id(record).handle;
-
     trace_cache::get_metadata_registry().add_stream(stream_handle);
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::memory_alloc,
@@ -1200,7 +1197,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                                          "] Queue ", _queue_id.handle)
                                         .c_str(),
                                     record->thread_id);
-                    cache_kernel_dispatch(record);
+                    cache_kernel_dispatch(record, _stream_id);
                 }
 
                 if(get_use_timemory())
@@ -1327,7 +1324,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     cache_category<category::rocm_memory_copy>();
                     cache_add_track(track_name.c_str(), record->thread_id);
 
-                    cache_memory_copy(record);
+                    cache_memory_copy(record, _stream_id);
                 }
 
                 if(get_use_timemory())
@@ -1405,10 +1402,11 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
                         header->payload);
 
+                uint64_t _stream_id = get_stream_id(record).handle;
                 {
                     cache_category<category::rocm_memory_allocate>();
                     cache_add_thread_info(record->thread_id);
-                    cache_memory_allocation(record);
+                    cache_memory_allocation(record, _stream_id);
                 }
             }
 #endif
