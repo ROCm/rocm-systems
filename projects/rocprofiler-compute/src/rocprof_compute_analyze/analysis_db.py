@@ -587,12 +587,7 @@ class db_analysis(OmniAnalyze_Base):
                             pmc_df[pmc_df["Kernel_Name"] == kernel_name],
                             sys_info,
                         )
-                        for metric_name in [
-                            "total_flops",
-                            "l1_cache_data",
-                            "l2_cache_data",
-                            "hbm_cache_data",
-                        ]
+                        for metric_name in roofline_data_expressions
                     },
                 }
                 for kernel_name in self._top_kernels_per_workload[workload_path][
