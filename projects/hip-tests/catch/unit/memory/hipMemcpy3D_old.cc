@@ -44,17 +44,16 @@ static constexpr auto width{10};
 static constexpr auto height{10};
 static constexpr auto depth{10};
 
-template <typename T>
-class Memcpy3D {
+template <typename T> class Memcpy3D {
   size_t width, height, depth;
   size_t size;
   hipArray_t arr, arr1;
   hipChannelFormatKind formatKind;
   hipMemcpy3DParms myparms;
   T* hData;
+
  public:
-  Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
-      hipChannelFormatKind l_format);
+  Memcpy3D(size_t l_width, size_t l_height, size_t l_depth, hipChannelFormatKind l_format);
   void simple_Memcpy3D();
   void Extent_Validation();
   void NegativeTests();
@@ -68,19 +67,17 @@ class Memcpy3D {
 /*
  * This API sets the default values of hipMemcpy3DParms structure
  */
-template <typename T>
-void Memcpy3D<T>::SetDefaultData() {
+template <typename T> void Memcpy3D<T>::SetDefaultData() {
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.extent = make_hipExtent(width , height, depth);
+  myparms.extent = make_hipExtent(width, height, depth);
 }
 
 /*
  * Constructor initalized width,depth and height
  */
-template <typename T>
-Memcpy3D<T>::Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
-                      hipChannelFormatKind l_format) {
+template <typename T> Memcpy3D<T>::Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
+                                            hipChannelFormatKind l_format) {
   width = l_width;
   height = l_height;
   depth = l_depth;
@@ -91,34 +88,31 @@ Memcpy3D<T>::Memcpy3D(size_t l_width, size_t l_height, size_t l_depth,
  * Allocating Memory and initalizing data for both
  * device and host variables
  */
-template <typename T>
-void Memcpy3D<T>::AllocateMemory() {
+template <typename T> void Memcpy3D<T>::AllocateMemory() {
   size = width * height * depth * sizeof(T);
   hData = reinterpret_cast<T*>(malloc(size));
   memset(hData, 0, size);
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
-        hData[i*width*height + j*width +k] = i*width*height + j*width + k;
+        hData[i * width * height + j * width + k] = i * width * height + j * width + k;
       }
     }
   }
-  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(T)*8,
-                                                          0, 0, 0, formatKind);
-  HIP_CHECK(hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height,
-                                                depth), hipArrayDefault));
-  HIP_CHECK(hipMalloc3DArray(&arr1, &channelDesc, make_hipExtent(width, height,
-                                                 depth), hipArrayDefault));
+  hipChannelFormatDesc channelDesc = hipCreateChannelDesc(sizeof(T) * 8, 0, 0, 0, formatKind);
+  HIP_CHECK(
+      hipMalloc3DArray(&arr, &channelDesc, make_hipExtent(width, height, depth), hipArrayDefault));
+  HIP_CHECK(
+      hipMalloc3DArray(&arr1, &channelDesc, make_hipExtent(width, height, depth), hipArrayDefault));
 }
 
 /*
  * DeAllocates the Memory of device and host variables
  */
-template <typename T>
-void Memcpy3D<T>::DeAllocateMemory() {
-    HIP_CHECK(hipFreeArray(arr));
-    HIP_CHECK(hipFreeArray(arr1));
-    free(hData);
+template <typename T> void Memcpy3D<T>::DeAllocateMemory() {
+  HIP_CHECK(hipFreeArray(arr));
+  HIP_CHECK(hipFreeArray(arr1));
+  free(hData);
 }
 
 /*
@@ -135,8 +129,7 @@ void Memcpy3D<T>::DeAllocateMemory() {
  *
  * Validating the result by comparing "hData" and "hOutputData" variables
  */
-template <typename T>
-void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
+template <typename T> void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
   HIP_CHECK(hipSetDevice(0));
   int peerAccess = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 1, 0));
@@ -148,8 +141,7 @@ void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
     // H2D Scenario
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
     SetDefaultData();
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = arr;
 #ifdef __HIP_PLATFORM_NVIDIA__
     myparms.kind = cudaMemcpyHostToDevice;
@@ -161,12 +153,10 @@ void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
 
     // Device to host
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
-    T *hOutputData = reinterpret_cast<T*>(malloc(size));
-    memset(hOutputData, 0,  size);
+    T* hOutputData = reinterpret_cast<T*>(malloc(size));
+    memset(hOutputData, 0, size);
     SetDefaultData();
-    myparms.dstPtr = make_hipPitchedPtr(hOutputData,
-                                        width * sizeof(T),
-                                        width, height);
+    myparms.dstPtr = make_hipPitchedPtr(hOutputData, width * sizeof(T), width, height);
     myparms.srcArray = arr;
 #ifdef __HIP_PLATFORM_NVIDIA__
     myparms.kind = cudaMemcpyDeviceToHost;
@@ -194,13 +184,12 @@ void Memcpy3D<T>::D2H_H2D_DeviceMem_OnDiffDevice() {
  * Output: "arr2" variable in GPU-0
  *
  * hipMemcpy3D API is triggered from GPU-1
- * The "arr2" variable is then copied to "hOutputData" for validating 
+ * The "arr2" variable is then copied to "hOutputData" for validating
  * the result
  *
  * Validating the result by comparing "hData" and "hOutputData" variables
  */
-template <typename T>
-void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
+template <typename T> void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
   HIP_CHECK(hipSetDevice(0));
   int peerAccess = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&peerAccess, 0, 1));
@@ -210,9 +199,7 @@ void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     SetDefaultData();
 
     // Host to device copy
-    myparms.srcPtr = make_hipPitchedPtr(hData,
-        width * sizeof(T),
-        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = arr;
 #ifdef __HIP_PLATFORM_NVIDIA__
     myparms.kind = cudaMemcpyHostToDevice;
@@ -221,11 +208,9 @@ void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
 #endif
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
     hipArray_t arr2;
-    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(T)*8,
-        0, 0, 0, formatKind);
-    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1,
-          make_hipExtent(width, height,
-            depth), hipArrayDefault));
+    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(T) * 8, 0, 0, 0, formatKind);
+    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1, make_hipExtent(width, height, depth),
+                               hipArrayDefault));
 
     // Allocating Mem on GPU device 0 and trigger hipMemcpy3D from GPU 1
     HIP_CHECK(hipSetDevice(1));
@@ -246,14 +231,12 @@ void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
     // For validating the D2D copy copying it again to hOutputData and
     // verifying it with iniital data hData
     memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
-    T *hOutputData = reinterpret_cast<T*>(malloc(size));
+    T* hOutputData = reinterpret_cast<T*>(malloc(size));
     memset(hOutputData, 0, size);
     SetDefaultData();
 
     // Device to host
-    myparms.dstPtr = make_hipPitchedPtr(hOutputData,
-        width * sizeof(T),
-        width, height);
+    myparms.dstPtr = make_hipPitchedPtr(hOutputData, width * sizeof(T), width, height);
     myparms.srcArray = arr2;
 #ifdef __HIP_PLATFORM_NVIDIA__
     myparms.kind = cudaMemcpyDeviceToHost;
@@ -274,8 +257,7 @@ void Memcpy3D<T>::D2D_DeviceMem_OnDiffDevice() {
 /*
  * This API verifies all the negative scenarios of hipMemcpy3D API
  */
-template <typename T>
-void Memcpy3D<T>::NegativeTests() {
+template <typename T> void Memcpy3D<T>::NegativeTests() {
   HIP_CHECK(hipSetDevice(0));
   AllocateMemory();
 
@@ -283,7 +265,7 @@ void Memcpy3D<T>::NegativeTests() {
   memset(&myparms, 0, sizeof(myparms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.extent = make_hipExtent(width , height, depth);
+  myparms.extent = make_hipExtent(width, height, depth);
 #ifdef __HIP_PLATFORM_NVIDIA__
   myparms.kind = cudaMemcpyHostToDevice;
 #else
@@ -291,109 +273,96 @@ void Memcpy3D<T>::NegativeTests() {
 #endif
 
   SECTION("Nullptr to destination array") {
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = nullptr;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Nullptr to source array") {
     myparms.srcArray = nullptr;
-    myparms.dstPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.dstPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing both Source ptr and array") {
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing both destination ptr and array") {
-    myparms.dstPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.dstPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = arr;
     myparms.srcArray = arr1;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing Max value to extent") {
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = arr;
-    myparms.extent = make_hipExtent(std::numeric_limits<int>::max(),
-                                    std::numeric_limits<int>::max(),
-                                    std::numeric_limits<int>::max());
+    myparms.extent =
+        make_hipExtent(std::numeric_limits<int>::max(), std::numeric_limits<int>::max(),
+                       std::numeric_limits<int>::max());
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing Source pitchedPtr as nullptr") {
-    myparms.srcPtr = make_hipPitchedPtr(nullptr, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(nullptr, width * sizeof(T), width, height);
     myparms.dstArray = arr;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing Dst pitchedPtr as nullptr") {
-    myparms.dstPtr = make_hipPitchedPtr(nullptr, width * sizeof(T),
-                                        width, height);
+    myparms.dstPtr = make_hipPitchedPtr(nullptr, width * sizeof(T), width, height);
     myparms.srcArray = arr;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing width > max width size in extent") {
-    myparms.extent = make_hipExtent(width+1 , height, depth);
+    myparms.extent = make_hipExtent(width + 1, height, depth);
     myparms.dstArray = arr;
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing hgt > max width size in extent") {
-    myparms.extent = make_hipExtent(width , height+1, depth);
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.extent = make_hipExtent(width, height + 1, depth);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     myparms.dstArray = arr;
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing depth > max width size in extent") {
-    myparms.extent = make_hipExtent(width , height, depth+1);
+    myparms.extent = make_hipExtent(width, height, depth + 1);
     myparms.dstArray = arr;
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing dst width pos > max allocated width") {
-    myparms.dstPos = make_hipPos(width+1, 0, 0);
+    myparms.dstPos = make_hipPos(width + 1, 0, 0);
     myparms.dstArray = arr;
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing dst height pos > max allocated hgt") {
-    myparms.dstPos = make_hipPos(0, height+1, 0);
+    myparms.dstPos = make_hipPos(0, height + 1, 0);
     myparms.dstArray = arr;
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing dst depth pos > max allocated depth") {
-    myparms.dstPos = make_hipPos(0, 0, depth+1);
+    myparms.dstPos = make_hipPos(0, 0, depth + 1);
     myparms.dstArray = arr;
-    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                        width, height);
+    myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
     REQUIRE(hipMemcpy3D(&myparms) != hipSuccess);
   }
 
   SECTION("Passing src width pos > max allocated width") {
-    myparms.srcPos = make_hipPos(width+1, 0, 0);
+    myparms.srcPos = make_hipPos(width + 1, 0, 0);
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -405,7 +374,7 @@ void Memcpy3D<T>::NegativeTests() {
   }
 
   SECTION("Passing src height pos > max allocated hgt") {
-    myparms.srcPos = make_hipPos(0, height+1, 0);
+    myparms.srcPos = make_hipPos(0, height + 1, 0);
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -417,7 +386,7 @@ void Memcpy3D<T>::NegativeTests() {
   }
 
   SECTION("Passing src height pos > max allocated hgt") {
-    myparms.srcPos = make_hipPos(0, 0, depth+1);
+    myparms.srcPos = make_hipPos(0, 0, depth + 1);
     myparms.srcArray = arr;
     myparms.dstArray = arr1;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -431,11 +400,8 @@ void Memcpy3D<T>::NegativeTests() {
   SECTION("Passing src array size  > dst array size") {
     // Passing src array size greater than destination array size
     hipArray_t arr2;
-    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(T)*8,
-                                                    0, 0, 0, formatKind);
-    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1,
-                              make_hipExtent(3, 3
-                              , 3), hipArrayDefault));
+    hipChannelFormatDesc channelDesc1 = hipCreateChannelDesc(sizeof(T) * 8, 0, 0, 0, formatKind);
+    HIP_CHECK(hipMalloc3DArray(&arr2, &channelDesc1, make_hipExtent(3, 3, 3), hipArrayDefault));
     myparms.srcArray = arr;
     myparms.dstArray = arr2;
 #ifdef __HIP_PLATFORM_NVIDIA__
@@ -453,15 +419,13 @@ void Memcpy3D<T>::NegativeTests() {
 /*
  * This API verifies the Extent validation Scenarios
  */
-template <typename T>
-void Memcpy3D<T>::Extent_Validation() {
+template <typename T> void Memcpy3D<T>::Extent_Validation() {
   HIP_CHECK(hipSetDevice(0));
   AllocateMemory();
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   myparms.srcPos = make_hipPos(0, 0, 0);
   myparms.dstPos = make_hipPos(0, 0, 0);
-  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                      width, height);
+  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
   myparms.dstArray = arr;
 #ifdef __HIP_PLATFORM_NVIDIA__
   myparms.kind = cudaMemcpyHostToDevice;
@@ -469,24 +433,22 @@ void Memcpy3D<T>::Extent_Validation() {
   myparms.kind = hipMemcpyHostToDevice;
 #endif
   SECTION("Passing Extent as 0") {
-    myparms.extent = make_hipExtent(0 , 0, 0);
+    myparms.extent = make_hipExtent(0, 0, 0);
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
   }
   SECTION("Passing Width 0 in Extent") {
-    myparms.extent = make_hipExtent(0 , height, depth);
+    myparms.extent = make_hipExtent(0, height, depth);
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
   }
   SECTION("Passing Height 0 in Extent") {
-    myparms.extent = make_hipExtent(width , 0, depth);
+    myparms.extent = make_hipExtent(width, 0, depth);
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
   }
   SECTION("Passing Depth 0 in Extent") {
-    myparms.extent = make_hipExtent(width , height, 0);
+    myparms.extent = make_hipExtent(width, height, 0);
     REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
   }
-  SECTION("Passing Depth 0 in Extent") {
-    REQUIRE(hipMemcpy3D(nullptr) != hipSuccess);
-  }
+  SECTION("Passing Depth 0 in Extent") { REQUIRE(hipMemcpy3D(nullptr) != hipSuccess); }
   DeAllocateMemory();
 }
 
@@ -502,16 +464,14 @@ void Memcpy3D<T>::Extent_Validation() {
  * Validating the result by comparing "hData" and "hOutputData" variables
  */
 
-template <typename T>
-void Memcpy3D<T>::simple_Memcpy3D() {
+template <typename T> void Memcpy3D<T>::simple_Memcpy3D() {
   HIP_CHECK(hipSetDevice(0));
   AllocateMemory();
 
   // Host to Device
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   SetDefaultData();
-  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T),
-                                      width, height);
+  myparms.srcPtr = make_hipPitchedPtr(hData, width * sizeof(T), width, height);
   myparms.dstArray = arr;
 #ifdef __HIP_PLATFORM_NVIDIA__
   myparms.kind = cudaMemcpyHostToDevice;
@@ -526,24 +486,23 @@ void Memcpy3D<T>::simple_Memcpy3D() {
   myparms.srcArray = arr;
   myparms.dstArray = arr1;
 #ifdef __HIP_PLATFORM_NVIDIA__
-    myparms.kind = cudaMemcpyDeviceToDevice;
+  myparms.kind = cudaMemcpyDeviceToDevice;
 #else
-    myparms.kind = hipMemcpyDeviceToDevice;
+  myparms.kind = hipMemcpyDeviceToDevice;
 #endif
   REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
-  T *hOutputData = reinterpret_cast<T*>(malloc(size));
-  memset(hOutputData, 0,  size);
+  T* hOutputData = reinterpret_cast<T*>(malloc(size));
+  memset(hOutputData, 0, size);
 
   // Device to host
   memset(&myparms, 0x0, sizeof(hipMemcpy3DParms));
   SetDefaultData();
-  myparms.dstPtr = make_hipPitchedPtr(hOutputData,
-                   width * sizeof(T), width, height);
+  myparms.dstPtr = make_hipPitchedPtr(hOutputData, width * sizeof(T), width, height);
   myparms.srcArray = arr1;
 #ifdef __HIP_PLATFORM_NVIDIA__
-    myparms.kind = cudaMemcpyDeviceToHost;
+  myparms.kind = cudaMemcpyDeviceToHost;
 #else
-    myparms.kind = hipMemcpyDeviceToHost;
+  myparms.kind = hipMemcpyDeviceToHost;
 #endif
   REQUIRE(hipMemcpy3D(&myparms) == hipSuccess);
 
@@ -568,8 +527,7 @@ void Memcpy3D<T>::simple_Memcpy3D() {
  *  - HIP_VERSION >= 5.2
  */
 
-TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]",
-                    int, unsigned int, float) {
+TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]", int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
   int device = -1;
   HIP_CHECK(hipGetDevice(&device));
@@ -583,10 +541,10 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]",
     if (std::is_same<TestType, float>::value) {
       Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindFloat);
       memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, unsigned int>::value)  {
+    } else if (std::is_same<TestType, unsigned int>::value) {
       Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindUnsigned);
       memcpy3d_obj.simple_Memcpy3D();
-    } else if (std::is_same<TestType, int>::value)  {
+    } else if (std::is_same<TestType, int>::value) {
       Memcpy3D<TestType> memcpy3d_obj(i, j, j, hipChannelFormatKindSigned);
       memcpy3d_obj.simple_Memcpy3D();
     }
@@ -609,8 +567,7 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpy3D_Basic", "[hipMemcpy3D]",
 
 TEST_CASE("Unit_hipMemcpy3D_ExtentValidation") {
   CHECK_IMAGE_SUPPORT
-  Memcpy3D<int> memcpy3d(width, height, depth,
-                         hipChannelFormatKindSigned);
+  Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
   memcpy3d.Extent_Validation();
 }
 
@@ -631,8 +588,7 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-Negative") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
-    Memcpy3D<int> memcpy3d(width, height, depth,
-                           hipChannelFormatKindSigned);
+    Memcpy3D<int> memcpy3d(width, height, depth, hipChannelFormatKindSigned);
     memcpy3d.NegativeTests();
   } else {
     SUCCEED("skipping the testcases as numDevices < 2");
@@ -659,14 +615,12 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice-OnPeerDevice") {
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices > 1) {
     SECTION("D2H & H2D On DiffDevice") {
-      Memcpy3D<float> memcpy3d_d2h_obj(width, height, depth,
-                                       hipChannelFormatKindFloat);
+      Memcpy3D<float> memcpy3d_d2h_obj(width, height, depth, hipChannelFormatKindFloat);
       memcpy3d_d2h_obj.D2H_H2D_DeviceMem_OnDiffDevice();
     }
 
     SECTION("D2D On DiffDevice") {
-      Memcpy3D<float> memcpy3d_d2d_obj(width, height, depth,
-                                       hipChannelFormatKindFloat);
+      Memcpy3D<float> memcpy3d_d2d_obj(width, height, depth, hipChannelFormatKindFloat);
       memcpy3d_d2d_obj.D2D_DeviceMem_OnDiffDevice();
     }
   } else {
@@ -696,22 +650,19 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test") {
   int numDevices = 0;
   HIP_CHECK(hipGetDeviceCount(&numDevices));
 
-  for (int i=0; i < numDevices; i++) {
+  for (int i = 0; i < numDevices; i++) {
     HIP_CHECK(hipSetDevice(i));
 
     SECTION("Verify with 128 for all height, width & depth value") {
-      Memcpy3D<int> memcpy3d_obj1(size_128b, size_128b, size_128b,
-                                    hipChannelFormatKindUnsigned);
+      Memcpy3D<int> memcpy3d_obj1(size_128b, size_128b, size_128b, hipChannelFormatKindUnsigned);
       memcpy3d_obj1.simple_Memcpy3D();
     }
     SECTION("Verify with 256 for height and 128 for width & depth value") {
-      Memcpy3D<int> memcpy3d_obj2(size_256b, size_128b, size_128b,
-                                  hipChannelFormatKindUnsigned);
+      Memcpy3D<int> memcpy3d_obj2(size_256b, size_128b, size_128b, hipChannelFormatKindUnsigned);
       memcpy3d_obj2.simple_Memcpy3D();
     }
     SECTION("Verify with 256 for width and 128 for height & depth value") {
-      Memcpy3D<float> memcpy3d_obj3(size_128b, size_256b, size_128b,
-                                     hipChannelFormatKindFloat);
+      Memcpy3D<float> memcpy3d_obj3(size_128b, size_256b, size_128b, hipChannelFormatKindFloat);
       memcpy3d_obj3.simple_Memcpy3D();
     }
     SECTION("Verify with 256 for depth and 128 for height & width value") {
@@ -723,6 +674,6 @@ TEST_CASE("Unit_hipMemcpy3D_multiDevice_Basic_Size_Test") {
 }
 
 /**
-* End doxygen group MemoryTest.
-* @}
-*/
+ * End doxygen group MemoryTest.
+ * @}
+ */

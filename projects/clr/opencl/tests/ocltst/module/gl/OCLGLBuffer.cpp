@@ -39,14 +39,11 @@ const static char* strKernel =
     "}                                                                         "
     "                             \n";
 
-OCLGLBuffer::OCLGLBuffer() : inGLBuffer_(0), outGLBuffer_(0) {
-  _numSubTests = 1;
-}
+OCLGLBuffer::OCLGLBuffer() : inGLBuffer_(0), outGLBuffer_(0) { _numSubTests = 1; }
 
 OCLGLBuffer::~OCLGLBuffer() {}
 
-void OCLGLBuffer::open(unsigned int test, char* units, double& conversion,
-                       unsigned int deviceId) {
+void OCLGLBuffer::open(unsigned int test, char* units, double& conversion, unsigned int deviceId) {
   // Initialize random number seed
   srand((unsigned int)time(NULL));
 
@@ -54,17 +51,14 @@ void OCLGLBuffer::open(unsigned int test, char* units, double& conversion,
   if (_errorFlag) return;
 
   // Build the kernel
-  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL,
-                                                 &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS),
-               "clCreateProgramWithSource()  failed (%d)", error_);
+  program_ = _wrapper->clCreateProgramWithSource(context_, 1, &strKernel, NULL, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clCreateProgramWithSource()  failed (%d)", error_);
 
-  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL,
-                                    NULL, NULL);
+  error_ = _wrapper->clBuildProgram(program_, 1, &devices_[deviceId], NULL, NULL, NULL);
   if (error_ != CL_SUCCESS) {
     char programLog[1024];
-    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId],
-                                    CL_PROGRAM_BUILD_LOG, 1024, programLog, 0);
+    _wrapper->clGetProgramBuildInfo(program_, devices_[deviceId], CL_PROGRAM_BUILD_LOG, 1024,
+                                    programLog, 0);
     printf("\n%s\n", programLog);
     fflush(stdout);
   }
@@ -96,70 +90,57 @@ void OCLGLBuffer::run(void) {
   glGenBuffers(1, &outGLBuffer_);
 
   glBindBuffer(GL_ARRAY_BUFFER, inGLBuffer_);
-  glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), inData,
-               GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), inData, GL_STATIC_DRAW);
 
   glBindBuffer(GL_ARRAY_BUFFER, outGLBuffer_);
-  glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), outDataGL,
-               GL_STATIC_DRAW);
+  glBufferData(GL_ARRAY_BUFFER, c_numOfElements * sizeof(cl_uint4), outDataGL, GL_STATIC_DRAW);
 
   glBindBuffer(GL_ARRAY_BUFFER, 0);
   glFinish();
 
   // Create input buffer from GL input buffer
-  buffer = _wrapper->clCreateFromGLBuffer(context_, CL_MEM_READ_ONLY,
-                                          inGLBuffer_, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create input GL buffer (%d)",
-               error_);
+  buffer = _wrapper->clCreateFromGLBuffer(context_, CL_MEM_READ_ONLY, inGLBuffer_, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create input GL buffer (%d)", error_);
   buffers_.push_back(buffer);
 
   // Create output buffer from GL output buffer
-  buffer = _wrapper->clCreateFromGLBuffer(context_, CL_MEM_WRITE_ONLY,
-                                          outGLBuffer_, &error_);
-  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create output GL buffer (%d)",
-               error_);
+  buffer = _wrapper->clCreateFromGLBuffer(context_, CL_MEM_WRITE_ONLY, outGLBuffer_, &error_);
+  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to create output GL buffer (%d)", error_);
   buffers_.push_back(buffer);
 
   // Create a CL output buffer
-  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE,
-                                    c_numOfElements * sizeof(cl_uint4), NULL,
-                                    &error_);
+  buffer = _wrapper->clCreateBuffer(context_, CL_MEM_READ_WRITE, c_numOfElements * sizeof(cl_uint4),
+                                    NULL, &error_);
   CHECK_RESULT((error_ != CL_SUCCESS), "clCreateBuffer() failed (%d)", error_);
   buffers_.push_back(buffer);
 
   // Assign args and execute
   for (unsigned int i = 0; i < buffers_.size(); i++) {
-    error_ =
-        _wrapper->clSetKernelArg(kernel_, i, sizeof(cl_mem), &buffers()[i]);
-    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)",
-                 error_);
+    error_ = _wrapper->clSetKernelArg(kernel_, i, sizeof(cl_mem), &buffers()[i]);
+    CHECK_RESULT((error_ != CL_SUCCESS), "clSetKernelArg() failed (%d)", error_);
   }
 
-  error_ = _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 2,
-                                               &buffers()[0], 0, NULL, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)",
-               error_);
+  error_ =
+      _wrapper->clEnqueueAcquireGLObjects(cmdQueues_[_deviceId], 2, &buffers()[0], 0, NULL, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to acquire GL objects (%d)", error_);
 
   size_t gws[1] = {c_numOfElements};
-  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1,
-                                            NULL, gws, NULL, 0, NULL, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed (%d)",
-               error_);
+  error_ = _wrapper->clEnqueueNDRangeKernel(cmdQueues_[_deviceId], kernel_, 1, NULL, gws, NULL, 0,
+                                            NULL, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueNDRangeKernel() failed (%d)", error_);
 
-  error_ = _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 2,
-                                               &buffers()[0], 0, NULL, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReleaseGLObjects failed (%d)",
-               error_);
+  error_ =
+      _wrapper->clEnqueueReleaseGLObjects(cmdQueues_[_deviceId], 2, &buffers()[0], 0, NULL, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "clEnqueueReleaseGLObjects failed (%d)", error_);
 
   error_ = _wrapper->clFinish(cmdQueues_[_deviceId]);
   CHECK_RESULT((error_ != CL_SUCCESS), "clFinish() failed (%d)", error_);
 
   // Get the results from both CL and GL buffers
-  error_ = _wrapper->clEnqueueReadBuffer(
-      cmdQueues_[_deviceId], buffers()[2], CL_TRUE, 0,
-      c_numOfElements * sizeof(cl_uint4), outDataCL, 0, NULL, NULL);
-  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to read output CL array! (%d)",
-               error_);
+  error_ =
+      _wrapper->clEnqueueReadBuffer(cmdQueues_[_deviceId], buffers()[2], CL_TRUE, 0,
+                                    c_numOfElements * sizeof(cl_uint4), outDataCL, 0, NULL, NULL);
+  CHECK_RESULT((error_ != CL_SUCCESS), "Unable to read output CL array! (%d)", error_);
 
   glBindBuffer(GL_ARRAY_BUFFER, outGLBuffer_);
   void* glMem = glMapBuffer(GL_ARRAY_BUFFER, GL_READ_ONLY);
@@ -190,15 +171,13 @@ void OCLGLBuffer::run(void) {
       CHECK_RESULT((outDataCL[i].s[j] != expectedCL.s[j]),
                    "Element %d in CL output buffer is incorrect!\n\t \
                          expected:{%d, %d, %d, %d} differs from actual:{%d, %d, %d, %d}",
-                   i, expectedCL.s[0], expectedCL.s[1], expectedCL.s[2],
-                   expectedCL.s[3], outDataCL[i].s[0], outDataCL[i].s[1],
-                   outDataCL[i].s[2], outDataCL[i].s[3]);
+                   i, expectedCL.s[0], expectedCL.s[1], expectedCL.s[2], expectedCL.s[3],
+                   outDataCL[i].s[0], outDataCL[i].s[1], outDataCL[i].s[2], outDataCL[i].s[3]);
       CHECK_RESULT((outDataGL[i].s[j] != expectedGL.s[j]),
                    "Element %d in GL output buffer is incorrect!\n\t \
                          expected:{%d, %d, %d, %d} differs from actual:{%d, %d, %d, %d}",
-                   i, expectedGL.s[0], expectedGL.s[1], expectedGL.s[2],
-                   expectedGL.s[3], outDataGL[i].s[0], outDataGL[i].s[1],
-                   outDataGL[i].s[2], outDataGL[i].s[3]);
+                   i, expectedGL.s[0], expectedGL.s[1], expectedGL.s[2], expectedGL.s[3],
+                   outDataGL[i].s[0], outDataGL[i].s[1], outDataGL[i].s[2], outDataGL[i].s[3]);
     }
   }
 }

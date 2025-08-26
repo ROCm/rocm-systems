@@ -86,8 +86,8 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
      WINDOWS_SWITCH(clEnqueueAcquireD3D10ObjectsKHR, NULL),
      WINDOWS_SWITCH(clEnqueueReleaseD3D10ObjectsKHR, NULL), clSetEventCallback, clCreateSubBuffer,
      clSetMemObjectDestructorCallback, clCreateUserEvent, clSetUserEventStatus,
-     clEnqueueReadBufferRect, clEnqueueWriteBufferRect, clEnqueueCopyBufferRect,
-     NULL, NULL, NULL, clCreateEventFromGLsyncKHR,
+     clEnqueueReadBufferRect, clEnqueueWriteBufferRect, clEnqueueCopyBufferRect, NULL, NULL, NULL,
+     clCreateEventFromGLsyncKHR,
 
      /* OpenCL 1.2*/
      clCreateSubDevices, clRetainDevice, clReleaseDevice, clCreateImage,
@@ -114,23 +114,16 @@ cl_icd_dispatch amd::ICDDispatchedObject::icdVendorDispatch_[] = {
          clEnqueueReleaseDX9MediaSurfacesKHR,
          NULL),  // KHRpfn_clEnqueueReleaseDX9MediaSurfacesKHR clEnqueueReleaseDX9MediaSurfacesKHR;
 
-     NULL,
-     NULL, NULL, NULL,
+     NULL, NULL, NULL, NULL,
 
      clCreateCommandQueueWithProperties, clCreatePipe, clGetPipeInfo, clSVMAlloc, clSVMFree,
      clEnqueueSVMFree, clEnqueueSVMMemcpy, clEnqueueSVMMemFill, clEnqueueSVMMap, clEnqueueSVMUnmap,
      clCreateSamplerWithProperties, clSetKernelArgSVMPointer, clSetKernelExecInfo,
-     clGetKernelSubGroupInfo,
-     clCloneKernel,
-     clCreateProgramWithIL,
-     clEnqueueSVMMigrateMem,
-     clGetDeviceAndHostTimer,
-     clGetHostTimer,
-     clGetKernelSubGroupInfo,
+     clGetKernelSubGroupInfo, clCloneKernel, clCreateProgramWithIL, clEnqueueSVMMigrateMem,
+     clGetDeviceAndHostTimer, clGetHostTimer, clGetKernelSubGroupInfo,
      clSetDefaultDeviceCommandQueue,
 
-     clSetProgramReleaseCallback,
-     clSetProgramSpecializationConstant }};
+     clSetProgramReleaseCallback, clSetProgramSpecializationConstant}};
 
 CL_API_ENTRY cl_int CL_API_CALL clIcdGetPlatformIDsKHR(cl_uint num_entries,
                                                        cl_platform_id* platforms,

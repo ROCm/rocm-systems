@@ -49,7 +49,7 @@ __global__ void test_kernel() {
   printf("%G\n", -123.456);
   printf("%c\n", 'x');
   printf("%s\n", N);
-  printf("%p\n", (void *)N);
+  printf("%p\n", (void*)N);
 #ifdef __HIP_PLATFORM_AMD__
   printf("%.*f %*.*s %p\n", 8, 3.14159, 8, 5, s, (void*)0xf01dab1eca55e77e);
 #else
@@ -63,4 +63,3 @@ int main() {
   static_cast<void>(hipDeviceSynchronize());
   return 0;
 }
-

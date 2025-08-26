@@ -38,8 +38,7 @@
 
 #define NUM_SIZES 4
 // 256KB, 1 MB, 4MB, 16 MB
-static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304,
-                                              16777216};
+static const unsigned int Sizes[NUM_SIZES] = {262144, 1048576, 4194304, 16777216};
 
 #define ITER_COUNT 2
 static const unsigned int Iterations[2] = {1, OCLPerfCPUMemSpeed::NUM_ITER};
@@ -52,16 +51,15 @@ OCLPerfCPUMemSpeed::OCLPerfCPUMemSpeed() {
 
 OCLPerfCPUMemSpeed::~OCLPerfCPUMemSpeed() {}
 
-static void CL_CALLBACK notify_callback(const char *errinfo,
-                                        const void *private_info, size_t cb,
-                                        void *user_data) {}
+static void CL_CALLBACK notify_callback(const char* errinfo, const void* private_info, size_t cb,
+                                        void* user_data) {}
 
-void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
-                              double &conversion, unsigned int deviceId) {
+void OCLPerfCPUMemSpeed::open(unsigned int test, char* units, double& conversion,
+                              unsigned int deviceId) {
   cl_uint numPlatforms;
   cl_platform_id platform = NULL;
   cl_uint num_devices = 0;
-  cl_device_id *devices = NULL;
+  cl_device_id* devices = NULL;
   cl_device_id device = NULL;
   _crcword = 0;
   conversion = 1.0f;
@@ -84,7 +82,7 @@ void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
   error_ = _wrapper->clGetPlatformIDs(0, NULL, &numPlatforms);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
   if (0 < numPlatforms) {
-    cl_platform_id *platforms = new cl_platform_id[numPlatforms];
+    cl_platform_id* platforms = new cl_platform_id[numPlatforms];
     error_ = _wrapper->clGetPlatformIDs(numPlatforms, platforms, NULL);
     CHECK_RESULT(error_ != CL_SUCCESS, "clGetPlatformIDs failed");
 #if 0
@@ -94,17 +92,15 @@ void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
 #endif
     platform = platforms[_platformIndex];
     char pbuf[100];
-    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex],
-                                         CL_PLATFORM_VENDOR, sizeof(pbuf), pbuf,
-                                         NULL);
+    error_ = _wrapper->clGetPlatformInfo(platforms[_platformIndex], CL_PLATFORM_VENDOR,
+                                         sizeof(pbuf), pbuf, NULL);
     num_devices = 0;
     if (!strcmp(pbuf, "Advanced Micro Devices, Inc.")) {
       isAMD = true;
     }
 
     /* Get the number of requested devices */
-    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL,
-                                      &num_devices);
+    error_ = _wrapper->clGetDeviceIDs(platforms[_platformIndex], type_, 0, NULL, &num_devices);
     CHECK_RESULT(num_devices == 0, "No devices found, cannot proceed");
     // Runtime returns an error when no GPU devices are present instead of just
     // returning 0 devices
@@ -144,19 +140,17 @@ void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
     numIter = std::min(numIter, 10u);
   }
 
-  devices = (cl_device_id *)malloc(num_devices * sizeof(cl_device_id));
+  devices = (cl_device_id*)malloc(num_devices * sizeof(cl_device_id));
   CHECK_RESULT(devices == 0, "no devices");
 
   /* Get the requested device */
-  error_ =
-      _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
+  error_ = _wrapper->clGetDeviceIDs(platform, type_, num_devices, devices, NULL);
   CHECK_RESULT(error_ != CL_SUCCESS, "clGetDeviceIDs failed");
 
   CHECK_RESULT(_deviceId >= num_devices, "Requested deviceID not available");
   device = devices[_deviceId];
 
-  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL,
-                                       &error_);
+  context_ = _wrapper->clCreateContext(NULL, 1, &device, notify_callback, NULL, &error_);
   CHECK_RESULT(context_ == 0, "clCreateContext failed");
 
   cmd_queue_ = _wrapper->clCreateCommandQueue(context_, device, 0, NULL);
@@ -176,24 +170,19 @@ void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
     flags |= CL_MEM_ALLOC_HOST_PTR;
   } else if (useHostPtr) {
     flags |= CL_MEM_USE_HOST_PTR;
-    hostMem = (char *)malloc(bufSize_ + alignment - 1 + offset);
+    hostMem = (char*)malloc(bufSize_ + alignment - 1 + offset);
     CHECK_RESULT(hostMem == 0, "malloc(hostMem) failed");
-    alignedMem =
-        (char *)((((intptr_t)hostMem + alignment - 1) & ~(alignment - 1)) +
-                 offset);
+    alignedMem = (char*)((((intptr_t)hostMem + alignment - 1) & ~(alignment - 1)) + offset);
   }
-  outBuffer_ =
-      _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedMem, &error_);
+  outBuffer_ = _wrapper->clCreateBuffer(context_, flags, bufSize_, alignedMem, &error_);
   CHECK_RESULT(outBuffer_ == 0, "clCreateBuffer(outBuffer) failed");
 
   // Force memory to be on GPU if possible
   {
-    cl_mem memBuffer =
-        _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
+    cl_mem memBuffer = _wrapper->clCreateBuffer(context_, 0, bufSize_, NULL, &error_);
     CHECK_RESULT(memBuffer == 0, "clCreateBuffer(memBuffer) failed");
 
-    _wrapper->clEnqueueCopyBuffer(cmd_queue_, memBuffer, outBuffer_, 0, 0,
-                                  bufSize_, 0, NULL, NULL);
+    _wrapper->clEnqueueCopyBuffer(cmd_queue_, memBuffer, outBuffer_, 0, 0, bufSize_, 0, NULL, NULL);
     _wrapper->clFinish(cmd_queue_);
 
     _wrapper->clReleaseMemObject(memBuffer);
@@ -203,22 +192,21 @@ void OCLPerfCPUMemSpeed::open(unsigned int test, char *units,
 void OCLPerfCPUMemSpeed::run(void) {
   CPerfCounter timer;
 
-  void *mem;
+  void* mem;
   // Warm up
-  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags,
-                                     0, bufSize_, 0, NULL, NULL, &error_);
+  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags, 0, bufSize_, 0,
+                                     NULL, NULL, &error_);
 
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0, NULL, NULL);
   CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
   error_ = _wrapper->clFinish(cmd_queue_);
   CHECK_RESULT(error_, "clFinish failed");
 
-  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags,
-                                     0, bufSize_, 0, NULL, NULL, &error_);
+  mem = _wrapper->clEnqueueMapBuffer(cmd_queue_, outBuffer_, CL_TRUE, mapFlags, 0, bufSize_, 0,
+                                     NULL, NULL, &error_);
 
-  char *cpumem = new char[bufSize_];
+  char* cpumem = new char[bufSize_];
 
   timer.Reset();
   timer.Start();
@@ -229,11 +217,11 @@ void OCLPerfCPUMemSpeed::run(void) {
   } else {
     if (gpuSrc) {
       for (unsigned int i = 0; i < numIter; i++) {
-        memcpy((void *)cpumem, mem, bufSize_);
+        memcpy((void*)cpumem, mem, bufSize_);
       }
     } else {
       for (unsigned int i = 0; i < numIter; i++) {
-        memcpy(mem, (void *)cpumem, bufSize_);
+        memcpy(mem, (void*)cpumem, bufSize_);
       }
     }
   }
@@ -243,8 +231,7 @@ void OCLPerfCPUMemSpeed::run(void) {
   delete[] cpumem;
 
   CHECK_RESULT(error_, "clEnqueueMapBuffer failed");
-  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0,
-                                             NULL, NULL);
+  error_ = _wrapper->clEnqueueUnmapMemObject(cmd_queue_, outBuffer_, mem, 0, NULL, NULL);
   CHECK_RESULT(error_, "clEnqueueUnmapBuffer failed");
   error_ = _wrapper->clFinish(cmd_queue_);
   CHECK_RESULT(error_, "clFinish failed");
@@ -265,7 +252,7 @@ void OCLPerfCPUMemSpeed::run(void) {
   } else {
     SNPRINTF(str, sizeof(str), "(GB/s)");
   }
-  const char *str2 = NULL;
+  const char* str2 = NULL;
   if (testMemset)
     str2 = "memset to dev";
   else {
@@ -276,21 +263,18 @@ void OCLPerfCPUMemSpeed::run(void) {
   }
 
   char buf[256];
-  SNPRINTF(buf, sizeof(buf), " (%8d bytes) %15s i: %4d %29s ", bufSize_, str2,
-           numIter, str);
+  SNPRINTF(buf, sizeof(buf), " (%8d bytes) %15s i: %4d %29s ", bufSize_, str2, numIter, str);
   testDescString = buf;
 }
 
 unsigned int OCLPerfCPUMemSpeed::close(void) {
   if (outBuffer_) {
     error_ = _wrapper->clReleaseMemObject(outBuffer_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseMemObject(outBuffer_) failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseMemObject(outBuffer_) failed");
   }
   if (cmd_queue_) {
     error_ = _wrapper->clReleaseCommandQueue(cmd_queue_);
-    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS,
-                           "clReleaseCommandQueue failed");
+    CHECK_RESULT_NO_RETURN(error_ != CL_SUCCESS, "clReleaseCommandQueue failed");
   }
   if (context_) {
     error_ = _wrapper->clReleaseContext(context_);

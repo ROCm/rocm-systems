@@ -49,10 +49,10 @@ namespace cooperative_groups {
  */
 class thread_group {
  protected:
-  __hip_uint32_t _type;  //! Type of the thread_group.
+  __hip_uint32_t _type;         //! Type of the thread_group.
   __hip_uint32_t _num_threads;  //! Total number of threads in the thread_group.
-  __hip_uint64_t _mask;  //! Lanemask for coalesced and tiled partitioned group types,
-                         //! LSB represents lane 0, and MSB represents lane 63
+  __hip_uint64_t _mask;         //! Lanemask for coalesced and tiled partitioned group types,
+                                //! LSB represents lane 0, and MSB represents lane 63
 
   //! Construct a thread group, and set thread group type and other essential
   //! thread group properties. This generic thread group is directly constructed
@@ -103,9 +103,9 @@ class thread_group {
    *
    *  \details Causes all threads in the group to wait at this synchronization point,
    *           and for all shared and global memory accesses by the threads to complete,
-   *           before running synchronization. This guarantees the visibility of accessed data 
+   *           before running synchronization. This guarantees the visibility of accessed data
    *           for all threads in the group.
-   *          
+   *
    * \note     There are potential read-after-write (RAW), write-after-read (WAR), or
    *           write-after-write (WAW) hazards, when threads in the group access the
    *           same addresses in shared or global memory. The data hazards can
@@ -146,7 +146,6 @@ class multi_grid_group : public thread_group {
       : thread_group(internal::cg_multi_grid, size) {}
 
  public:
-
   //! Number of invocations participating in this multi-grid group. In other
   //! words, the number of GPUs.
   __CG_QUALIFIER__ __hip_uint32_t num_grids() { return internal::multi_grid::num_grids(); }
@@ -155,7 +154,9 @@ class multi_grid_group : public thread_group {
   //! [0, num_grids()) of the GPU that kernel is running on.
   __CG_QUALIFIER__ __hip_uint32_t grid_rank() { return internal::multi_grid::grid_rank(); }
   //! @copydoc thread_group::thread_rank
-  __CG_QUALIFIER__ __hip_uint32_t thread_rank() const { return internal::multi_grid::thread_rank(); }
+  __CG_QUALIFIER__ __hip_uint32_t thread_rank() const {
+    return internal::multi_grid::thread_rank();
+  }
   //! @copydoc thread_group::is_valid
   __CG_QUALIFIER__ bool is_valid() const { return internal::multi_grid::is_valid(); }
   //! @copydoc thread_group::sync
@@ -163,8 +164,8 @@ class multi_grid_group : public thread_group {
 };
 
 /** \addtogroup CooperativeGConstruct Construct functions of Cooperative groups
-  * \ingroup CooperativeG
-  *  @{ */
+ * \ingroup CooperativeG
+ *  @{ */
 
 /** \brief   User-exposed API interface to construct grid cooperative group type
  *           object - `multi_grid_group`.
@@ -196,7 +197,8 @@ class grid_group : public thread_group {
 
  protected:
   //! Construct grid thread group (through the API this_grid())
-  explicit __CG_QUALIFIER__ grid_group(__hip_uint32_t size) : thread_group(internal::cg_grid, size) {}
+  explicit __CG_QUALIFIER__ grid_group(__hip_uint32_t size)
+      : thread_group(internal::cg_grid, size) {}
 
  public:
   //! @copydoc thread_group::thread_rank
@@ -237,6 +239,7 @@ class thread_block : public thread_group {
                                                        unsigned int tile_size);
   friend __CG_QUALIFIER__ thread_group tiled_partition(const thread_block& parent,
                                                        unsigned int tile_size);
+
  protected:
   // Construct a workgroup thread group (through the API this_thread_block())
   explicit __CG_QUALIFIER__ thread_block(__hip_uint32_t size)
@@ -269,9 +272,13 @@ class thread_block : public thread_group {
   //! Returns 3-dimensional thread index within the block.
   __CG_STATIC_QUALIFIER__ dim3 thread_index() { return internal::workgroup::thread_index(); }
   //! @copydoc thread_group::thread_rank
-  __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() { return internal::workgroup::thread_rank(); }
+  __CG_STATIC_QUALIFIER__ __hip_uint32_t thread_rank() {
+    return internal::workgroup::thread_rank();
+  }
   //! @copydoc thread_group::num_threads
-  __CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() { return internal::workgroup::num_threads(); }
+  __CG_STATIC_QUALIFIER__ __hip_uint32_t num_threads() {
+    return internal::workgroup::num_threads();
+  }
   //! @copydoc thread_group::size
   __CG_STATIC_QUALIFIER__ __hip_uint32_t size() { return num_threads(); }
   //! @copydoc thread_group::is_valid
@@ -282,7 +289,7 @@ class thread_block : public thread_group {
   __CG_QUALIFIER__ dim3 group_dim() { return internal::workgroup::block_dim(); }
 };
 
-/** \ingroup CooperativeGConstruct 
+/** \ingroup CooperativeGConstruct
  *  \brief   User-exposed API interface to construct workgroup cooperative
  *           group type object - `thread_block`.
  *
@@ -335,7 +342,9 @@ class tiled_group : public thread_group {
 
  public:
   //! @copydoc thread_group::num_threads
-  __CG_QUALIFIER__ unsigned int num_threads() const { return (coalesced_info.tiled_info.num_threads); }
+  __CG_QUALIFIER__ unsigned int num_threads() const {
+    return (coalesced_info.tiled_info.num_threads);
+  }
 
   //! @copydoc thread_group::size
   __CG_QUALIFIER__ unsigned int size() const { return num_threads(); }
@@ -346,9 +355,7 @@ class tiled_group : public thread_group {
   }
 
   //! @copydoc thread_group::sync
-  __CG_QUALIFIER__ void sync() const {
-    internal::tiled_group::sync();
-  }
+  __CG_QUALIFIER__ void sync() const { internal::tiled_group::sync(); }
 };
 
 template <unsigned int size, class ParentCGTy> class thread_block_tile;
@@ -363,11 +370,12 @@ template <unsigned int size, class ParentCGTy> class thread_block_tile;
 class coalesced_group : public thread_group {
  private:
   friend __CG_QUALIFIER__ coalesced_group coalesced_threads();
-  friend __CG_QUALIFIER__ thread_group tiled_partition(const thread_group& parent, unsigned int tile_size);
-  friend __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent, unsigned int tile_size);
+  friend __CG_QUALIFIER__ thread_group tiled_partition(const thread_group& parent,
+                                                       unsigned int tile_size);
+  friend __CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
+                                                          unsigned int tile_size);
   friend __CG_QUALIFIER__ coalesced_group binary_partition(const coalesced_group& cgrp, bool pred);
-  template <unsigned int fsize, class fparent>
-  friend __CG_QUALIFIER__ coalesced_group
+  template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
   __CG_QUALIFIER__ coalesced_group new_tiled_group(unsigned int tile_size) const {
@@ -381,9 +389,11 @@ class coalesced_group : public thread_group {
     // prepare a mask for further partitioning it so that it stays coalesced.
     if (coalesced_info.tiled_info.is_tiled) {
       unsigned int base_offset = (thread_rank() & (~(tile_size - 1)));
-      unsigned int masklength = min(static_cast<unsigned int>(num_threads()) - base_offset, tile_size);
-      lane_mask full_mask = (static_cast<int>(warpSize) == 32) ? static_cast<lane_mask>((1u << 32) - 1)
-                                             : static_cast<lane_mask>(-1ull);
+      unsigned int masklength =
+          min(static_cast<unsigned int>(num_threads()) - base_offset, tile_size);
+      lane_mask full_mask = (static_cast<int>(warpSize) == 32)
+                                ? static_cast<lane_mask>((1u << 32) - 1)
+                                : static_cast<lane_mask>(-1ull);
       lane_mask member_mask = full_mask >> (warpSize - masklength);
 
       member_mask <<= (__lane_id() & ~(tile_size - 1));
@@ -404,7 +414,7 @@ class coalesced_group : public thread_group {
         // Make sure the lane is active
         if (active) {
           if (lanes_to_skip <= 0 && tile_rank < tile_size) {
-             // Prepare a member_mask that is appropriate for a tile
+            // Prepare a member_mask that is appropriate for a tile
             member_mask |= active;
             tile_rank++;
           }
@@ -414,59 +424,54 @@ class coalesced_group : public thread_group {
       coalesced_group coalesced_tile = coalesced_group(member_mask);
       coalesced_tile.coalesced_info.tiled_info.meta_group_rank = thread_rank() / tile_size;
       coalesced_tile.coalesced_info.tiled_info.meta_group_size =
-                                                      (num_threads() + tile_size - 1) / tile_size;
+          (num_threads() + tile_size - 1) / tile_size;
       return coalesced_tile;
     }
-     return coalesced_group(0);
+    return coalesced_group(0);
   }
 
  protected:
- // Constructor
+  // Constructor
   explicit __CG_QUALIFIER__ coalesced_group(lane_mask member_mask)
       : thread_group(internal::cg_coalesced_group) {
-    coalesced_info.member_mask = member_mask; // Which threads are active
-    coalesced_info.num_threads = __popcll(coalesced_info.member_mask); // How many threads are active
-    coalesced_info.tiled_info.is_tiled = false; // Not a partitioned group
+    coalesced_info.member_mask = member_mask;  // Which threads are active
+    coalesced_info.num_threads =
+        __popcll(coalesced_info.member_mask);    // How many threads are active
+    coalesced_info.tiled_info.is_tiled = false;  // Not a partitioned group
     coalesced_info.tiled_info.meta_group_rank = 0;
     coalesced_info.tiled_info.meta_group_size = 1;
   }
 
  public:
-   //! @copydoc thread_group::num_threads
-   __CG_QUALIFIER__ unsigned int num_threads() const {
-     return coalesced_info.num_threads;
-   }
+  //! @copydoc thread_group::num_threads
+  __CG_QUALIFIER__ unsigned int num_threads() const { return coalesced_info.num_threads; }
 
-   //! @copydoc thread_group::size
-   __CG_QUALIFIER__ unsigned int size() const {
-     return num_threads();
-   }
+  //! @copydoc thread_group::size
+  __CG_QUALIFIER__ unsigned int size() const { return num_threads(); }
 
-   //! @copydoc thread_group::thread_rank
-   __CG_QUALIFIER__ unsigned int thread_rank() const {
-     return internal::coalesced_group::masked_bit_count(coalesced_info.member_mask);
-   }
+  //! @copydoc thread_group::thread_rank
+  __CG_QUALIFIER__ unsigned int thread_rank() const {
+    return internal::coalesced_group::masked_bit_count(coalesced_info.member_mask);
+  }
 
-   //! @copydoc thread_group::sync
-   __CG_QUALIFIER__ void sync() const {
-       internal::coalesced_group::sync();
-    }
+  //! @copydoc thread_group::sync
+  __CG_QUALIFIER__ void sync() const { internal::coalesced_group::sync(); }
 
-   //! Returns the linear rank of the group within the set of tiles partitioned
-   //! from a parent group (bounded by meta_group_size).
-   __CG_QUALIFIER__ unsigned int meta_group_rank() const {
-       return coalesced_info.tiled_info.meta_group_rank;
-    }
+  //! Returns the linear rank of the group within the set of tiles partitioned
+  //! from a parent group (bounded by meta_group_size).
+  __CG_QUALIFIER__ unsigned int meta_group_rank() const {
+    return coalesced_info.tiled_info.meta_group_rank;
+  }
 
-   //! Returns the number of groups created when the parent group was partitioned.
-   __CG_QUALIFIER__ unsigned int meta_group_size() const {
-       return coalesced_info.tiled_info.meta_group_size;
-   }
+  //! Returns the number of groups created when the parent group was partitioned.
+  __CG_QUALIFIER__ unsigned int meta_group_size() const {
+    return coalesced_info.tiled_info.meta_group_size;
+  }
 
   /** \brief Shuffle operation on group level.
    *
    *  \details Exchanging variables between threads without use of shared memory.
-   *           Shuffle operation is a direct copy of ``var`` from ``srcRank`` 
+   *           Shuffle operation is a direct copy of ``var`` from ``srcRank``
    *           thread ID of group.
    *
    *  \tparam T The type can be a 32-bit integer or single-precision
@@ -475,14 +480,13 @@ class coalesced_group : public thread_group {
    *                  group is copied to other threads.
    *  \param srcRank [in] The source thread ID of the group for copy.
    */
-  template <class T>
-  __CG_QUALIFIER__ T shfl(T var, int srcRank) const {
-
+  template <class T> __CG_QUALIFIER__ T shfl(T var, int srcRank) const {
     srcRank = srcRank % static_cast<int>(num_threads());
 
     int lane = (num_threads() == warpSize) ? srcRank
-             : (static_cast<int>(warpSize) == 64)     ? __fns64(coalesced_info.member_mask, 0, (srcRank + 1))
-                                    : __fns32(coalesced_info.member_mask, 0, (srcRank + 1));
+               : (static_cast<int>(warpSize) == 64)
+                   ? __fns64(coalesced_info.member_mask, 0, (srcRank + 1))
+                   : __fns32(coalesced_info.member_mask, 0, (srcRank + 1));
 
     return __shfl(var, lane, warpSize);
   }
@@ -501,9 +505,7 @@ class coalesced_group : public thread_group {
    *                         between caller thread ID and source of copy thread
    *                         ID. sourceID = (threadID + lane_delta) % size()
    */
-  template <class T>
-  __CG_QUALIFIER__ T shfl_down(T var, unsigned int lane_delta) const {
-
+  template <class T> __CG_QUALIFIER__ T shfl_down(T var, unsigned int lane_delta) const {
     // Note: The cuda implementation appears to use the remainder of lane_delta
     // and WARP_SIZE as the shift value rather than lane_delta itself.
     // This is not described in the documentation and is not done here.
@@ -515,8 +517,7 @@ class coalesced_group : public thread_group {
     int lane;
     if (static_cast<int>(warpSize) == 64) {
       lane = __fns64(coalesced_info.member_mask, __lane_id(), lane_delta + 1);
-    }
-    else {
+    } else {
       lane = __fns32(coalesced_info.member_mask, __lane_id(), lane_delta + 1);
     }
 
@@ -541,9 +542,7 @@ class coalesced_group : public thread_group {
    *                         between caller thread ID and source of copy thread
    *                         ID. sourceID = (threadID - lane_delta) % size()
    */
-  template <class T>
-  __CG_QUALIFIER__ T shfl_up(T var, unsigned int lane_delta) const {
-
+  template <class T> __CG_QUALIFIER__ T shfl_up(T var, unsigned int lane_delta) const {
     // Note: The cuda implementation appears to use the remainder of lane_delta
     // and WARP_SIZE as the shift value rather than lane_delta itself.
     // This is not described in the documentation and is not done here.
@@ -555,8 +554,7 @@ class coalesced_group : public thread_group {
     int lane;
     if (static_cast<int>(warpSize) == 64) {
       lane = __fns64(coalesced_info.member_mask, __lane_id(), -(lane_delta + 1));
-    }
-    else if (static_cast<int>(warpSize) == 32) {
+    } else if (static_cast<int>(warpSize) == 32) {
       lane = __fns32(coalesced_info.member_mask, __lane_id(), -(lane_delta + 1));
     }
 
@@ -575,11 +573,11 @@ class coalesced_group : public thread_group {
    *
    *  \param pred [in] The predicate to evaluate on group threads.
    */
-   __CG_QUALIFIER__ unsigned long long ballot(int pred) const {
-     return internal::helper::adjust_mask(
-         coalesced_info.member_mask,
-         __ballot_sync<unsigned long long>(coalesced_info.member_mask, pred));
-   }
+  __CG_QUALIFIER__ unsigned long long ballot(int pred) const {
+    return internal::helper::adjust_mask(
+        coalesced_info.member_mask,
+        __ballot_sync<unsigned long long>(coalesced_info.member_mask, pred));
+  }
 
   /** \brief Any function on group level.
    *
@@ -587,9 +585,9 @@ class coalesced_group : public thread_group {
    *
    *  \param pred [in] The predicate to evaluate on group threads.
    */
-   __CG_QUALIFIER__ int any(int pred) const {
-     return __any_sync(static_cast<unsigned long long>(coalesced_info.member_mask), pred);
-   }
+  __CG_QUALIFIER__ int any(int pred) const {
+    return __any_sync(static_cast<unsigned long long>(coalesced_info.member_mask), pred);
+  }
 
   /** \brief All function on group level.
    *
@@ -597,27 +595,27 @@ class coalesced_group : public thread_group {
    *
    *  \param pred [in] The predicate to evaluate on group threads.
    */
-   __CG_QUALIFIER__ int all(int pred) const {
-     return __all_sync(static_cast<unsigned long long>(coalesced_info.member_mask), pred);
-   }
+  __CG_QUALIFIER__ int all(int pred) const {
+    return __all_sync(static_cast<unsigned long long>(coalesced_info.member_mask), pred);
+  }
 
   /** \brief Match any function on group level.
    *
    *  \details Returns a bit mask containing a 1-bit for every participating
-   *           thread if that thread has the same value in ``value`` as the 
+   *           thread if that thread has the same value in ``value`` as the
    *           caller thread.
    *
    *  \param value [in] The value to examine on the current thread in group.
    */
-   template <typename T> __CG_QUALIFIER__ unsigned long long match_any(T value) const {
-     return internal::helper::adjust_mask(
-         coalesced_info.member_mask,
-         __match_any_sync(static_cast<unsigned long long>(coalesced_info.member_mask), value));
-   }
+  template <typename T> __CG_QUALIFIER__ unsigned long long match_any(T value) const {
+    return internal::helper::adjust_mask(
+        coalesced_info.member_mask,
+        __match_any_sync(static_cast<unsigned long long>(coalesced_info.member_mask), value));
+  }
 
   /** \brief Match all function on group level.
    *
-   *  \details Returns a bit mask containing a 1-bit for every participating 
+   *  \details Returns a bit mask containing a 1-bit for every participating
    *           thread if they all have the same value in ``value`` as the caller
    *           thread. The predicate ``pred`` is set to true if all
    *           participating threads have the same value in ``value``.
@@ -626,16 +624,16 @@ class coalesced_group : public thread_group {
    *  \param pred [out] The predicate is set to true if all participating
    *                    threads in the thread group have the same value.
    */
-   template <typename T> __CG_QUALIFIER__ unsigned long long match_all(T value, int& pred) const {
-     return internal::helper::adjust_mask(
-         coalesced_info.member_mask,
-         __match_all_sync(static_cast<unsigned long long>(coalesced_info.member_mask), value,
-                          &pred));
-   }
-#endif // HIP_DISABLE_WARP_SYNC_BUILTINS
+  template <typename T> __CG_QUALIFIER__ unsigned long long match_all(T value, int& pred) const {
+    return internal::helper::adjust_mask(
+        coalesced_info.member_mask,
+        __match_all_sync(static_cast<unsigned long long>(coalesced_info.member_mask), value,
+                         &pred));
+  }
+#endif  // HIP_DISABLE_WARP_SYNC_BUILTINS
 };
 
-/** \ingroup CooperativeGConstruct 
+/** \ingroup CooperativeGConstruct
  *  \brief   User-exposed API to create coalesced groups.
  *
  *  \details A collective operation that groups all active lanes into a new
@@ -644,7 +642,7 @@ class coalesced_group : public thread_group {
  *  on Microsoft Windows.
  */
 __CG_QUALIFIER__ coalesced_group coalesced_threads() {
-    return cooperative_groups::coalesced_group(__builtin_amdgcn_read_exec());
+  return cooperative_groups::coalesced_group(__builtin_amdgcn_read_exec());
 }
 
 #ifndef DOXYGEN_SHOULD_SKIP_THIS
@@ -743,31 +741,33 @@ __CG_QUALIFIER__ void thread_group::sync() const {
 #endif
 
 /** \addtogroup CooperativeGAPI User-exposed API of Cooperative groups
-  * \ingroup CooperativeG
-  *  @{ */
+ * \ingroup CooperativeG
+ *  @{ */
 
 /** \brief   Returns the size of the group.
  *
- *  \details Total number of threads in the thread group, and this serves the 
- *           purpose for all derived cooperative group types because their 
+ *  \details Total number of threads in the thread group, and this serves the
+ *           purpose for all derived cooperative group types because their
  *           `size` is directly saved during the construction.
- * 
+ *
  *  \tparam CGTy  The cooperative group class template parameter.
  *  \param g [in] The cooperative group for size returns.
- * 
+ *
  *  \note    Implementation of publicly exposed `wrapper` API on top of basic
  *           cooperative group type APIs. This function is implemented on Linux
  *           and is under development on Microsoft Windows.
  */
-template <class CGTy> __CG_QUALIFIER__ __hip_uint32_t group_size(CGTy const& g) { return g.num_threads(); }
+template <class CGTy> __CG_QUALIFIER__ __hip_uint32_t group_size(CGTy const& g) {
+  return g.num_threads();
+}
 
 /** \brief   Returns the rank of thread of the group.
  *
  *  \details Rank of the calling thread within [0, \link num_threads() num_threads() \endlink).
- * 
+ *
  *  \tparam CGTy  The cooperative group class template parameter.
  *  \param g [in] The cooperative group for rank returns.
- * 
+ *
  *  \note    Implementation of publicly exposed `wrapper` API on top of basic
  *           cooperative group type APIs. This function is implemented on Linux
  *           and is under development on Microsoft Windows.
@@ -780,7 +780,7 @@ template <class CGTy> __CG_QUALIFIER__ __hip_uint32_t thread_rank(CGTy const& g)
  *
  *  \tparam CGTy  The cooperative group class template parameter.
  *  \param g [in] The cooperative group for validity check.
- * 
+ *
  *  \note    Implementation of publicly exposed `wrapper` API on top of basic
  *           cooperative group type APIs. This function is implemented on Linux
  *           and is under development on Microsoft Windows.
@@ -788,10 +788,10 @@ template <class CGTy> __CG_QUALIFIER__ __hip_uint32_t thread_rank(CGTy const& g)
 template <class CGTy> __CG_QUALIFIER__ bool is_valid(CGTy const& g) { return g.is_valid(); }
 
 /** \brief   Synchronizes the threads in the group.
- * 
+ *
  *  \tparam CGTy  The cooperative group class template parameter.
  *  \param g [in] The cooperative group for synchronization.
- * 
+ *
  *  \note    Implementation of publicly exposed `wrapper` API on top of basic
  *           cooperative group type APIs. This function is implemented on Linux
  *           and is under development on Microsoft Windows.
@@ -834,24 +834,19 @@ template <unsigned int size> class thread_block_tile_base : public tile_base<siz
                 "Tile size is either not a power of 2 or greater than the wavefront size");
   using tile_base<size>::numThreads;
 
-  template <unsigned int fsize, class fparent>
-  friend __CG_QUALIFIER__ coalesced_group
+  template <unsigned int fsize, class fparent> friend __CG_QUALIFIER__ coalesced_group
   binary_partition(const thread_block_tile<fsize, fparent>& tgrp, bool pred);
 
 #if !defined(HIP_DISABLE_WARP_SYNC_BUILTINS)
   __CG_QUALIFIER__ unsigned long long build_mask() const {
     unsigned long long mask = ~0ull >> (64 - numThreads);
     // thread_rank() gives thread id from 0..thread launch size.
-    return mask << (((internal::workgroup::thread_rank() % warpSize) / numThreads) *
-                    numThreads);
+    return mask << (((internal::workgroup::thread_rank() % warpSize) / numThreads) * numThreads);
   }
-#endif // HIP_DISABLE_WARP_SYNC_BUILTINS
+#endif  // HIP_DISABLE_WARP_SYNC_BUILTINS
 
  public:
-
-  __CG_STATIC_QUALIFIER__ void sync() {
-    internal::tiled_group::sync();
-  }
+  __CG_STATIC_QUALIFIER__ void sync() { internal::tiled_group::sync(); }
 
   template <class T> __CG_QUALIFIER__ T shfl(T var, int srcRank) const {
     return (__shfl(var, srcRank, numThreads));
@@ -888,14 +883,13 @@ template <unsigned int size> class thread_block_tile_base : public tile_base<siz
     const auto mask = build_mask();
     return internal::helper::adjust_mask(mask, __match_all_sync(mask, value, &pred));
   }
-#endif // HIP_DISABLE_WARP_SYNC_BUILTINS
+#endif  // HIP_DISABLE_WARP_SYNC_BUILTINS
 };
 
 /** \brief   User exposed API that captures the state of the parent group pre-partition
  */
-template <unsigned int tileSize, typename ParentCGTy>
-class parent_group_info {
-public:
+template <unsigned int tileSize, typename ParentCGTy> class parent_group_info {
+ public:
   //! Returns the linear rank of the group within the set of tiles partitioned
   //! from a parent group (bounded by meta_group_size)
   __CG_STATIC_QUALIFIER__ unsigned int meta_group_rank() {
@@ -914,37 +908,37 @@ public:
  *  \note     This type is implemented on Linux, under development
  *            on Microsoft Windows.
  */
-template <unsigned int tileSize, class ParentCGTy>
-class thread_block_tile_type : public thread_block_tile_base<tileSize>,
-                               public tiled_group,
-                               public parent_group_info<tileSize, ParentCGTy> {
+template <unsigned int tileSize, class ParentCGTy> class thread_block_tile_type
+    : public thread_block_tile_base<tileSize>,
+      public tiled_group,
+      public parent_group_info<tileSize, ParentCGTy> {
   _CG_STATIC_CONST_DECL_ unsigned int numThreads = tileSize;
   typedef thread_block_tile_base<numThreads> tbtBase;
-  protected:
-    __CG_QUALIFIER__ thread_block_tile_type() : tiled_group(numThreads) {
-      coalesced_info.tiled_info.num_threads = numThreads;
-      coalesced_info.tiled_info.is_tiled = true;
-    }
-  public:
-    using tbtBase::num_threads;
-    using tbtBase::size;
-    using tbtBase::sync;
-    using tbtBase::thread_rank;
+
+ protected:
+  __CG_QUALIFIER__ thread_block_tile_type() : tiled_group(numThreads) {
+    coalesced_info.tiled_info.num_threads = numThreads;
+    coalesced_info.tiled_info.is_tiled = true;
+  }
+
+ public:
+  using tbtBase::num_threads;
+  using tbtBase::size;
+  using tbtBase::sync;
+  using tbtBase::thread_rank;
 };
 
 // Partial template specialization
-template <unsigned int tileSize>
-class thread_block_tile_type<tileSize, void> : public thread_block_tile_base<tileSize>,
-                               public tiled_group
-                             {
+template <unsigned int tileSize> class thread_block_tile_type<tileSize, void>
+    : public thread_block_tile_base<tileSize>, public tiled_group {
   _CG_STATIC_CONST_DECL_ unsigned int numThreads = tileSize;
 
   typedef thread_block_tile_base<numThreads> tbtBase;
 
  protected:
-
-    __CG_QUALIFIER__ thread_block_tile_type(unsigned int meta_group_rank, unsigned int meta_group_size)
-        : tiled_group(numThreads) {
+  __CG_QUALIFIER__ thread_block_tile_type(unsigned int meta_group_rank,
+                                          unsigned int meta_group_size)
+      : tiled_group(numThreads) {
     coalesced_info.tiled_info.num_threads = numThreads;
     coalesced_info.tiled_info.is_tiled = true;
     coalesced_info.tiled_info.meta_group_rank = meta_group_rank;
@@ -967,10 +961,10 @@ class thread_block_tile_type<tileSize, void> : public thread_block_tile_base<til
   __CG_QUALIFIER__ unsigned int meta_group_size() const {
     return coalesced_info.tiled_info.meta_group_size;
   }
-// Doxygen end group CooperativeG
-/**
-* @}
-*/
+  // Doxygen end group CooperativeG
+  /**
+   * @}
+   */
 };
 
 __CG_QUALIFIER__ thread_group this_thread() {
@@ -978,7 +972,7 @@ __CG_QUALIFIER__ thread_group this_thread() {
   return g;
 }
 
-/** \ingroup CooperativeGConstruct 
+/** \ingroup CooperativeGConstruct
  *  \brief   User-exposed API to partition groups.
  *
  *  \details A collective operation that partitions the parent group into a
@@ -989,12 +983,10 @@ __CG_QUALIFIER__ thread_group tiled_partition(const thread_group& parent, unsign
   if (parent.cg_type() == internal::cg_tiled_group) {
     const tiled_group* cg = static_cast<const tiled_group*>(&parent);
     return cg->new_tiled_group(tile_size);
-  }
-  else if(parent.cg_type() == internal::cg_coalesced_group) {
+  } else if (parent.cg_type() == internal::cg_coalesced_group) {
     const coalesced_group* cg = static_cast<const coalesced_group*>(&parent);
     return cg->new_tiled_group(tile_size);
-  }
-  else {
+  } else {
     const thread_block* tb = static_cast<const thread_block*>(&parent);
     return tb->new_tiled_group(tile_size);
   }
@@ -1010,18 +1002,18 @@ __CG_QUALIFIER__ tiled_group tiled_partition(const tiled_group& parent, unsigned
 }
 
 // If a coalesced group is passed to be partitioned, it should remain coalesced
-__CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent, unsigned int tile_size) {
-    return (parent.new_tiled_group(tile_size));
+__CG_QUALIFIER__ coalesced_group tiled_partition(const coalesced_group& parent,
+                                                 unsigned int tile_size) {
+  return (parent.new_tiled_group(tile_size));
 }
 
 namespace impl {
 template <unsigned int size, class ParentCGTy> class thread_block_tile_internal;
 
-template <unsigned int size, class ParentCGTy>
-class thread_block_tile_internal : public thread_block_tile_type<size, ParentCGTy> {
+template <unsigned int size, class ParentCGTy> class thread_block_tile_internal
+    : public thread_block_tile_type<size, ParentCGTy> {
  protected:
-  template <unsigned int tbtSize, class tbtParentT>
-  __CG_QUALIFIER__ thread_block_tile_internal(
+  template <unsigned int tbtSize, class tbtParentT> __CG_QUALIFIER__ thread_block_tile_internal(
       const thread_block_tile_internal<tbtSize, tbtParentT>& g)
       : thread_block_tile_type<size, ParentCGTy>(g.meta_group_rank(), g.meta_group_size()) {}
 
@@ -1034,12 +1026,12 @@ class thread_block_tile_internal : public thread_block_tile_type<size, ParentCGT
  *
  *  \details  Represents one tiled thread group in a wavefront.
  *            This group type also supports sub-wave level intrinsics.
- * 
+ *
  *  \note     This type is implemented on Linux, under development
  *            on Microsoft Windows.
  */
-template <unsigned int size, class ParentCGTy>
-class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCGTy> {
+template <unsigned int size, class ParentCGTy> class thread_block_tile
+    : public impl::thread_block_tile_internal<size, ParentCGTy> {
  protected:
   __CG_QUALIFIER__ thread_block_tile(const ParentCGTy& g)
       : impl::thread_block_tile_internal<size, ParentCGTy>(g) {}
@@ -1067,7 +1059,7 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
   /** \brief Shuffle operation on group level.
    *
    *  \details Exchanging variables between threads without use of shared memory.
-   *           Shuffle operation is a direct copy of ``var`` from ``srcRank`` 
+   *           Shuffle operation is a direct copy of ``var`` from ``srcRank``
    *           thread ID of group.
    *
    *  \tparam T The type can be a 32-bit integer or single-precision
@@ -1113,13 +1105,13 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
   /** \brief Shuffle xor operation on group level.
    *
    *  \details Exchanging variables between threads without use of shared memory.
-   *           Shuffle xor operation is copy of var from thread with thread ID 
+   *           Shuffle xor operation is copy of var from thread with thread ID
    *           of group based on laneMask XOR of the caller thread ID.
    *
    *  \tparam T The type can be a 32-bit integer or single-precision
    *            floating point.
    *  \param var [in] The source variable to copy.
-   *  \param laneMask [in] The laneMask is the mask for XOR operation. 
+   *  \param laneMask [in] The laneMask is the mask for XOR operation.
    *                       sourceID = threadID ^ laneMask
    */
   template <class T> __CG_QUALIFIER__ T shfl_xor(T var, unsigned int laneMask) const;
@@ -1152,7 +1144,7 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
   /** \brief Match any function on group level.
    *
    *  \details Returns a bit mask containing a 1-bit for every participating
-   *           thread if that thread has the same value in ``value`` as the 
+   *           thread if that thread has the same value in ``value`` as the
    *           caller thread.
    *
    *  \param value [in] The value to examine on the current thread in group.
@@ -1161,7 +1153,7 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
 
   /** \brief Match all function on group level.
    *
-   *  \details Returns a bit mask containing a 1-bit for every participating 
+   *  \details Returns a bit mask containing a 1-bit for every participating
    *           thread if they all have the same value in ``value`` as the caller
    *           thread. The predicate ``pred`` is set to true if all
    *           participating threads have the same value in ``value``.
@@ -1175,8 +1167,8 @@ class thread_block_tile : public impl::thread_block_tile_internal<size, ParentCG
 #endif
 };
 
-template <unsigned int size>
-class thread_block_tile<size, void> : public impl::thread_block_tile_internal<size, void> {
+template <unsigned int size> class thread_block_tile<size, void>
+    : public impl::thread_block_tile_internal<size, void> {
   template <unsigned int, class ParentCGTy> friend class thread_block_tile;
 
  protected:
@@ -1191,24 +1183,24 @@ template <unsigned int size, class ParentCGTy = void> class thread_block_tile;
 namespace impl {
 template <unsigned int size, class ParentCGTy> struct tiled_partition_internal;
 
-template <unsigned int size>
-struct tiled_partition_internal<size, thread_block> : public thread_block_tile<size, thread_block> {
+template <unsigned int size> struct tiled_partition_internal<size, thread_block>
+    : public thread_block_tile<size, thread_block> {
   __CG_QUALIFIER__ tiled_partition_internal(const thread_block& g)
       : thread_block_tile<size, thread_block>(g) {}
 };
 
 }  // namespace impl
 
-/** \ingroup CooperativeGConstruct 
+/** \ingroup CooperativeGConstruct
  *  \brief   Create a partition.
  *
  *  \details This constructs a templated class derived from thread_group. The
  *           template defines the tile size of the new thread group at compile
  *           time.
- * 
+ *
  *  \tparam size       The new size of the partition.
  *  \tparam ParentCGTy The cooperative group class template parameter of the input group.
- * 
+ *
  *  \param g [in] The coalesced group for split.
  */
 template <unsigned int size, class ParentCGTy>
@@ -1242,10 +1234,10 @@ __CG_QUALIFIER__ coalesced_group binary_partition(const coalesced_group& cgrp, b
  *  \brief Binary partition.
  *
  *  \details This splits the input thread group into two partitions determined by predicate.
- * 
+ *
  *  \tparam size   The size of the input thread block tile group.
  *  \tparam parent The cooperative group class template parameter of the input group.
- * 
+ *
  *  \param tgrp [in] The thread block tile group for split.
  *  \param pred [in] The predicate used during the group split up.
  */

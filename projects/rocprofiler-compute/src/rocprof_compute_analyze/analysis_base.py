@@ -30,8 +30,17 @@ from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
 
+import pandas as pd
+
+import config
 from utils import file_io, parser, schema
-from utils.logger import console_debug, console_error, console_log, demarcate
+from utils.logger import (
+    console_debug,
+    console_error,
+    console_log,
+    console_warning,
+    demarcate,
+)
 from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
 
 
@@ -68,9 +77,14 @@ class OmniAnalyze_Base:
         if list_stats:
             ac.panel_configs = file_io.top_stats_build_in_config
         else:
-            arch_panel_config = (
+            arch_panel_config = [
                 config_dir if single_panel_config else config_dir.joinpath(arch)
-            )
+            ]
+            # Use restructured perf metrics in TUI analyze mode
+            if self.__args.tui and arch in ["gfx942", "gfx950"]:
+                arch_panel_config.append(
+                    f"{config.rocprof_compute_home}/rocprof_compute_tui/utils/{arch}"
+                )
             ac.panel_configs = file_io.load_panel_configs(arch_panel_config)
 
         # TODO: filter_metrics should/might be one per arch
@@ -155,14 +169,17 @@ class OmniAnalyze_Base:
         if self.__args.list_metrics:
             self.list_metrics()
 
-        # load required configs
-        for d in self.__args.path:
-            sysinfo_path = (
-                Path(d[0])
+        def get_sysinfo_path(data_path):
+            return (
+                Path(data_path)
                 if self.__args.nodes is None
                 and self.__args.spatial_multiplexing is not True
-                else file_io.find_1st_sub_dir(d[0])
+                else file_io.find_1st_sub_dir(data_path)
             )
+
+        # load required configs
+        for d in self.__args.path:
+            sysinfo_path = get_sysinfo_path(d[0])
             sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_arch"]
             args = self.__args
@@ -182,13 +199,22 @@ class OmniAnalyze_Base:
             #    For regular single node case, load sysinfo.csv directly
             #    For multi-node, either the default "all", or specified some,
             #    pick up the one in the 1st sub_dir. We could fix it properly later.
-            sysinfo_path = (
-                Path(d[0])
-                if self.__args.nodes is None
-                and self.__args.spatial_multiplexing is not True
-                else file_io.find_1st_sub_dir(d[0])
-            )
+            w = schema.Workload()
+            sysinfo_path = get_sysinfo_path(d[0])
             w.sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+
+            if not getattr(self.get_args(), "no_roof", False):
+                try:
+                    roofline_csv_path = sysinfo_path / "roofline.csv"
+                    roofline_df = pd.read_csv(roofline_csv_path)
+                    w.roofline_peaks = roofline_df
+
+                except FileNotFoundError:
+                    console_warning("roofline.csv not found.")
+                    w.roofline_peaks = pd.DataFrame()
+            else:
+                w.roofline_peaks = pd.DataFrame()
+
             arch = w.sys_info.iloc[0]["gpu_arch"]
             mspec = self.get_socs()[arch]._mspec
             if self.__args.specs_correction:

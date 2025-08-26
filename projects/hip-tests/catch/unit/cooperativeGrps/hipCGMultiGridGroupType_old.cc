@@ -179,16 +179,16 @@ __global__ void test_kernel(unsigned int* atomic_val, unsigned int* array, uint3
       // until all of the other wavefronts have incremented the
       // per-loop atomic and hit the grid.sync()
 #if HT_AMD
-      while (__hip_atomic_load(&per_loop_atomic[i], __ATOMIC_RELAXED,
-            __HIP_MEMORY_SCOPE_AGENT) < (grid_blocks - 1)) {
+      while (__hip_atomic_load(&per_loop_atomic[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) <
+             (grid_blocks - 1)) {
         __builtin_amdgcn_s_sleep(127);
       }
 
       // Give the other waves time to maybe go around the loop again
       // if the barrier has failed
       __builtin_amdgcn_s_sleep(127);
-#else // CUDA does not seem to need an ordered atomic load
-      while(per_loop_atomic[i] < (grid_blocks - 1)) {
+#else  // CUDA does not seem to need an ordered atomic load
+      while (per_loop_atomic[i] < (grid_blocks - 1)) {
       }
 #endif
     }
@@ -234,15 +234,15 @@ static void verify_recorded_values(unsigned int* recorded_values, uint32_t loops
       // Check the recorded value
       unsigned int recorded_value = recorded_values[grid_id * loops + i];
       REQUIRE(recorded_value == expected_value);
-      INFO("Mismatch at loop " << i << " for grid " << grid_id << ": expected "
-           << expected_value << ", got " << recorded_value);
+      INFO("Mismatch at loop " << i << " for grid " << grid_id << ": expected " << expected_value
+                               << ", got " << recorded_value);
     }
   }
 }
 
-template <typename F>
-static void test_cg_multi_grid_group_type(F kernel_func, int num_devices, int block_size,
-                                          bool specific_api_test) {
+template <typename F> static void test_cg_multi_grid_group_type(F kernel_func, int num_devices,
+                                                                int block_size,
+                                                                bool specific_api_test) {
   // Create a stream each device
   hipStream_t stream[MaxGPUs];
   for (int i = 0; i < num_devices; i++) {
@@ -469,8 +469,8 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   int max_blocks_per_sm = INT_MAX;
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &max_blocks_per_sm_arr[i], test_kernel, num_threads_in_block, 0));
+    HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(&max_blocks_per_sm_arr[i], test_kernel,
+                                                           num_threads_in_block, 0));
     if (max_blocks_per_sm_arr[i] < max_blocks_per_sm) {
       max_blocks_per_sm = max_blocks_per_sm_arr[i];
     }
@@ -489,7 +489,7 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   std::vector<hipStream_t> streams(num_devices);
   std::vector<unsigned int*> per_loop_atomic(num_devices);
   // Allocate and initialize grid-specific counters and values using hipHostMalloc
-  unsigned int* grid_counters, *recorded_values, *grid_values;
+  unsigned int *grid_counters, *recorded_values, *grid_values;
   HIP_CHECK(hipHostMalloc(&grid_counters, sizeof(unsigned int) * num_devices));
   HIP_CHECK(hipHostMalloc(&recorded_values, sizeof(unsigned int) * num_devices * loops));
   HIP_CHECK(hipHostMalloc(&grid_values, sizeof(unsigned int) * num_devices));

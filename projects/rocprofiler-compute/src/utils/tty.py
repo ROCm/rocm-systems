@@ -32,6 +32,7 @@ from tabulate import tabulate
 
 import config
 from utils import mem_chart, parser
+from utils.kernel_name_shortener import kernel_name_shortener
 from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
@@ -146,6 +147,111 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
             continue
         ss = ""  # store content of all data_source from one panel
 
+        if panel_id == 400:
+            has_roofline_style = any(
+                data_source.get(type, {}).get("cli_style") == "Roofline"
+                for data_source in panel["data source"]
+                for type in data_source
+            )
+
+            if has_roofline_style and (
+                not args.filter_metrics or "4" in args.filter_metrics
+            ):
+                print("\n" + "=" * 80, file=output)
+                print("4. Roofline", file=output)
+                print("=" * 80, file=output)
+
+                for run_path, workload in runs.items():
+                    if (
+                        hasattr(workload, "roofline_metrics")
+                        and workload.roofline_metrics
+                    ):
+                        print(
+                            "\n(4.1) Per-Kernel Roofline Metrics and "
+                            "(4.2) AI Plot Points",
+                            file=output,
+                        )
+                        print("-" * 80, file=output)
+
+                        kernel_top_df = workload.dfs.get(1, pd.DataFrame())
+                        if not kernel_top_df.empty:
+                            kernel_name_shortener(kernel_top_df, args.kernel_verbose)
+
+                        for i, (kernel_id, metrics) in enumerate(
+                            workload.roofline_metrics.items()
+                        ):
+                            if (
+                                not kernel_top_df.empty
+                                and kernel_id in kernel_top_df.index
+                            ):
+                                kernel_name = kernel_top_df.loc[
+                                    kernel_id, "Kernel_Name"
+                                ]
+                                kernel_pct = (
+                                    kernel_top_df.loc[kernel_id, "Pct"]
+                                    if "Pct" in kernel_top_df.columns
+                                    else 0
+                                )
+                            else:
+                                kernel_name = metrics.get("name", f"Kernel {kernel_id}")
+                                kernel_pct = 0
+
+                            display_name = (
+                                kernel_name[:80] + "..."
+                                if len(kernel_name) > 80
+                                else kernel_name
+                            )
+                            print(
+                                f"\nKernel {kernel_id}: "
+                                f"{display_name} "
+                                f"({kernel_pct:.1f}%)",
+                                file=output,
+                            )
+
+                            base_indent = "  "
+                            table_indent_prefix = f"{base_indent}|   "
+
+                            tables = {
+                                401: (
+                                    "4.1 Roofline Rate Metrics:",
+                                    metrics.get("ai_table", pd.DataFrame()),
+                                ),
+                                402: (
+                                    "4.2 Roofline AI Plot Points:",
+                                    metrics.get("calc_table", pd.DataFrame()),
+                                ),
+                            }
+
+                            print(f"{base_indent}|")
+
+                            for table_id, (table_name, df) in tables.items():
+                                if df.empty:
+                                    continue
+
+                                print(f"{base_indent}├─ {table_name}", file=output)
+
+                                display_df = df.copy()
+
+                                for col in hidden_cols:
+                                    if col in display_df.columns:
+                                        display_df = display_df.drop(columns=[col])
+
+                                table_string = get_table_string(
+                                    display_df, transpose=False, decimal=args.decimal
+                                )
+                                indented_table_string = textwrap.indent(
+                                    table_string, table_indent_prefix
+                                )
+                                print(indented_table_string, file=output)
+
+                    else:
+                        print("\nNo per-kernel metrics available", file=output)
+
+                # Show the roofline plot
+                if roof_plot:
+                    show_roof_plot(roof_plot)
+                continue
+
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 # If block filtering was used during analysis, then don't use profiling
@@ -170,16 +276,6 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None):
                         f"{table_id_str} "
                         f"{table_config['title']}"
                     )
-                    continue
-
-                # Show roofline
-                # Check if we have filter_metrics for analyze stage:
-                # no filter_metrics = show all,
-                # filter_metrics containing "4" = user requesting roofline chart
-                if panel_id == 400 and (
-                    not args.filter_metrics or "4" in args.filter_metrics
-                ):
-                    show_roof_plot(roof_plot)
                     continue
 
                 # Metrics baseline comparison mode
@@ -454,7 +550,7 @@ def show_roof_plot(roof_plot):
     # TODO: short term solution to display roofline plot
     print("\n" + "-" * 80)
     print("4. Roofline")
-    print("4.1 Roofline")
+    print("4.3 Roofline Plot")
     if roof_plot:
         print(roof_plot)
     else:
