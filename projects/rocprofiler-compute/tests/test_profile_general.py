@@ -782,7 +782,6 @@ def test_analyze_rocpd(
         "db",
         "--output-name",
         f"{db_name}",
-        db_name,
         "--path",
         workload_dir,
     ])
