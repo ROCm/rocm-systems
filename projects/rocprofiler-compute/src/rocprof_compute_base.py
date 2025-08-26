@@ -30,6 +30,7 @@ import socket
 import sys
 import time
 from pathlib import Path
+from typing import Optional
 
 import yaml
 
@@ -60,20 +61,21 @@ from utils.utils import (
 
 class RocProfCompute:
     def __init__(self) -> None:
-        self.__args = None
+        self.__args: Optional[argparse.Namespace] = None
         self.__profiler_mode = None
         self.__analyze_mode = None
         # gpu name, or in case of analyze mode, all loaded gpu name(s)
         self.__soc_name = set()
         self.__soc = {}  # set of key, value pairs. Where arch->OmniSoc() obj
-        self.__version = {"ver": None, "ver_pretty": None}
+        self.__version: dict[str, Optional[str]] = {"ver": None, "ver_pretty": None}
         self.__options = {}
         self.__supported_archs = mi_gpu_specs.get_gpu_series_dict()
-        self.__mspec: MachineSpecs = None  # to be initialized in load_soc_specs()
+        self.__mspec: MachineSpecs  # to be initialized in load_soc_specs()
 
         setup_console_handler()
         self.set_version()
         self.parse_args()
+        assert self.__args is not None
         self.__mode = self.__args.mode
 
         gui_value = getattr(self.__args, "gui", None)
@@ -137,7 +139,7 @@ class RocProfCompute:
             self.__analyze_mode = "cli"
 
     @demarcate
-    def load_soc_specs(self, sysinfo: dict = None) -> None:
+    def load_soc_specs(self, sysinfo: Optional[dict] = None) -> None:
         """Load OmniSoC instance for RocProfCompute run"""
         self.__mspec = generate_machine_specs(self.__args, sysinfo)
         if self.__args.specs:
@@ -224,9 +226,11 @@ class RocProfCompute:
             console_error("Unsupported arch")
 
         ac = schema.ArchConfig()
-        ac.panel_configs = file_io.load_panel_configs([self.__args.config_dir / arch])
+        ac.panel_configs = file_io.load_panel_configs(
+            [str(self.__args.config_dir / arch)]
+        )
         sys_info = self.__mspec.get_class_members().iloc[0]
-        parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
+        parser.build_dfs(arch_configs=ac, filter_metrics=[], sys_info=sys_info)
 
         for key, value in ac.metric_list.items():
             dot_count = str(key).count(".")

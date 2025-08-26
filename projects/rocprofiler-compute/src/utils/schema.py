@@ -30,7 +30,7 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 
@@ -38,7 +38,7 @@ import pandas as pd
 @dataclass
 class ArchConfig:
     # [id: panel_config] pairs
-    panel_configs: OrderedDict = field(default=dict)
+    panel_configs: OrderedDict[int, Any] = field(default_factory=OrderedDict)
 
     # [id: df] pairs
     dfs: Dict[int, pd.DataFrame] = field(default_factory=dict)
@@ -60,8 +60,8 @@ class ArchConfig:
 
 @dataclass
 class Workload:
-    sys_info: pd.DataFrame = None
-    raw_pmc: pd.DataFrame = None
+    sys_info: pd.DataFrame = pd.DataFrame()
+    raw_pmc: Optional[pd.DataFrame] = None
     dfs: Dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: Dict[int, str] = field(default_factory=dict)
     filter_kernel_ids: List[int] = field(default_factory=list)
@@ -69,6 +69,7 @@ class Workload:
     filter_dispatch_ids: List[int] = field(default_factory=list)
     filter_nodes: List[str] = field(default_factory=list)
     avail_ips: List[int] = field(default_factory=list)
+    roofline_peaks: pd.DataFrame = pd.DataFrame()
 
 
 # Metrics will be calculated ONLY when the header(key) is in below list

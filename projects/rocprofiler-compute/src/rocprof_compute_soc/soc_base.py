@@ -44,7 +44,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.mi_gpu_spec import mi_gpu_specs
-from utils.parser import build_in_vars, supported_denom
+from utils.parser import BUILD_IN_VARS, SUPPORTED_DENOM
 from utils.utils import (
     add_counter_extra_config_input_yaml,
     capture_subprocess_output,
@@ -378,10 +378,14 @@ class OmniSoC_Base:
             if counter_name.startswith("TCC") and counter_name.endswith("["):
                 counters.remove(counter_name)
                 counter_name = counter_name.split("[")[0]
-                counters = counters.union({
-                    f"{counter_name}[{i}]"
-                    for i in range(num_xcd_for_pmc_file * int(self._mspec._l2_banks))
-                })
+                counters = counters.union(
+                    {
+                        f"{counter_name}[{i}]"
+                        for i in range(
+                            num_xcd_for_pmc_file * int(self._mspec._l2_banks)
+                        )
+                    }
+                )
 
         return counters
 
@@ -438,7 +442,7 @@ class OmniSoC_Base:
         hw_counter_matches, variable_matches = self.parse_counters_text(config_text)
 
         # get hw counters and variables for all supported denominators
-        for formula in supported_denom.values():
+        for formula in SUPPORTED_DENOM.values():
             hw_counter_matches_denom, variable_matches_denom = self.parse_counters_text(
                 formula
             )
@@ -449,11 +453,11 @@ class OmniSoC_Base:
         while variable_matches:
             subvariable_matches = set()
             for var in variable_matches:
-                if var in build_in_vars:
+                if var in BUILD_IN_VARS:
                     (
                         hw_counter_matches_vars,
                         variable_matches_vars,
-                    ) = self.parse_counters_text(build_in_vars[var])
+                    ) = self.parse_counters_text(BUILD_IN_VARS[var])
                     hw_counter_matches.update(hw_counter_matches_vars)
                     subvariable_matches.update(variable_matches_vars)
             # process new found variables

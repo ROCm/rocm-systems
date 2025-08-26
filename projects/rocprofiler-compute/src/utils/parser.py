@@ -33,7 +33,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Optional
 
-import astunparse
+import astunparse  # type: ignore
 import numpy as np
 import pandas as pd
 

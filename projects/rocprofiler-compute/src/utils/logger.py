@@ -27,7 +27,7 @@ import logging
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Optional
 
 # Define the colors
 BLACK, RED, GREEN, YELLOW, BLUE, MAGENTA, CYAN, WHITE = range(8)
@@ -198,7 +198,7 @@ def setup_file_handler(loglevel: int, workload_dir: str) -> None:
 
 # Setup logger priority - called after argument parsing
 def setup_logging_priority(
-    verbosity: int, quietmode: bool, appmode: str, guimode: bool
+    verbosity: int, quietmode: bool, appmode: str, guimode: Optional[bool] = None
 ) -> int:
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, TRACE_LEVEL]

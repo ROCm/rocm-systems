@@ -108,7 +108,7 @@ class OmniAnalyze_Base:
         # print(ac)
 
         parser.build_dfs(
-            archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info
+            arch_configs=ac, filter_metrics=filter_metrics, sys_info=sys_info
         )
         self._arch_configs[arch] = ac
         return self._arch_configs

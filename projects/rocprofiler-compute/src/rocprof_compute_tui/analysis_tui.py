@@ -108,7 +108,7 @@ class tui_analysis(OmniAnalyze_Base):
 
     def initalize_runs(self, normalization_filter=None):
         # Load system info and configure
-        sys_info = file_io.load_sys_info(Path(self.path) / "sysinfo.csv")
+        sys_info = file_io.load_sys_info(str(Path(self.path) / "sysinfo.csv"))
         arch = sys_info.iloc[0]["gpu_arch"]
 
         self.generate_configs(
@@ -131,11 +131,8 @@ class tui_analysis(OmniAnalyze_Base):
         )
 
         roofline_path = Path(self.path) / "roofline.csv"
-        w.roofline_peaks = (
-            pd.read_csv(roofline_path)
-            if not getattr(self.args, "no_roof", False) and roofline_path.exists()
-            else pd.DataFrame()
-        )
+        if roofline_path.is_file() and not getattr(self.args, "no_roof", False):
+            w.roofline_peaks = pd.read_csv(roofline_path)
 
         w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
         w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)

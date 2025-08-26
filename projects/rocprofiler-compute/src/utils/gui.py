@@ -25,10 +25,10 @@
 
 from typing import Any
 
-import colorlover
+import colorlover  # type: ignore
 import pandas as pd
-import plotly.express as px
-from dash import dash_table, html
+import plotly.express as px  # type: ignore
+from dash import dash_table, html  # type: ignore
 
 from utils import schema
 from utils.logger import console_error

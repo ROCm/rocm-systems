@@ -25,9 +25,9 @@
 import re
 from dataclasses import dataclass, field
 from decimal import Decimal
-from typing import Any, Union
+from typing import Any, Optional, Union
 
-from plotille import Canvas
+from plotille import Canvas  # type: ignore
 
 
 def make_format_spec(num: Union[int, float], align: str = ">") -> str:
@@ -131,8 +131,8 @@ class RectFrame:
 # Instr Buff Block
 @dataclass
 class InstrBuff(RectFrame):
-    wave_occupancy: int | None = None
-    wave_life: int | None = None
+    wave_occupancy: Optional[int] = None
+    wave_life: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         # print("---------", self.x_min, self.y_min, self.x_max, self.y_max)
@@ -340,11 +340,11 @@ class Exec(RectFrame):
 class Wire_E_GLVS(RectFrame):
     text_x_offset: float = 3.0
 
-    lds_req: int | None = None
-    vl1_rd: int | None = None
-    vl1_wr: int | None = None
-    vl1_atomic: int | None = None
-    sl1_rd: int | None = None
+    lds_req: Optional[int] = None
+    vl1_rd: Optional[int] = None
+    vl1_wr: Optional[int] = None
+    vl1_atomic: Optional[int] = None
+    sl1_rd: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(
@@ -444,8 +444,8 @@ class Wire_InstrBuff_IL1Cache(RectFrame):
 # GDS Block
 @dataclass
 class GDS(RectFrame):
-    gws: int | None = None
-    latency: int | None = None
+    gws: Optional[int] = None
+    latency: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -485,8 +485,8 @@ class GDS(RectFrame):
 # LDS Block
 @dataclass
 class LDS(RectFrame):
-    util: int | None = None
-    latency: int | None = None
+    util: Optional[int] = None
+    latency: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -518,10 +518,10 @@ class LDS(RectFrame):
 # Vector L1 Cache Block
 @dataclass
 class VectorL1Cache(RectFrame):
-    hit: int | None = None
-    latency: int | None = None
-    coales: int | None = None
-    stall: int | None = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
+    coales: Optional[int] = None
+    stall: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -576,8 +576,8 @@ class VectorL1Cache(RectFrame):
 # Scalar L1D Cache
 @dataclass
 class ScalarL1DCache(RectFrame):
-    hit: int | None = None
-    latency: int | None = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -610,8 +610,8 @@ class ScalarL1DCache(RectFrame):
 # Instr L1 Cache
 @dataclass
 class InstrL1Cache(RectFrame):
-    hit: int | None = None
-    latency: int | None = None
+    hit: Optional[int] = None
+    latency: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -646,13 +646,13 @@ class InstrL1Cache(RectFrame):
 class Wires_L1_L2(RectFrame):
     text_v_x_offset: float = 0.0
 
-    vl1_l2_rd: int | None = None
-    vl1_l2_wr: int | None = None
-    vl1_l2_atomic: int | None = None
-    sl1_l2_rd: int | None = None
-    sl1_l2_wr: int | None = None
-    sl1_l2_atomic: int | None = None
-    il1_l2_req: int | None = None
+    vl1_l2_rd: Optional[int] = None
+    vl1_l2_wr: Optional[int] = None
+    vl1_l2_atomic: Optional[int] = None
+    sl1_l2_rd: Optional[int] = None
+    sl1_l2_wr: Optional[int] = None
+    sl1_l2_atomic: Optional[int] = None
+    il1_l2_req: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(
@@ -745,12 +745,12 @@ class Wires_L1_L2(RectFrame):
 # L2 Cache
 @dataclass
 class L2Cache(RectFrame):
-    rd: int | None = None
-    wr: int | None = None
-    atomic: int | None = None
-    hit: int | None = None
-    rd_lat: int | None = None
-    wr_lat: int | None = None
+    rd: Optional[int] = None
+    wr: Optional[int] = None
+    atomic: Optional[int] = None
+    hit: Optional[int] = None
+    rd_lat: Optional[int] = None
+    wr_lat: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(self.x_min, self.y_max + 1.0, self.label)
@@ -838,9 +838,9 @@ class L2Cache(RectFrame):
 class Wire_L2_Fabric(RectFrame):
     text_x_offset: float = 3.0
 
-    rd: int | None = None
-    wr: int | None = None
-    atomic: int | None = None
+    rd: Optional[int] = None
+    wr: Optional[int] = None
+    atomic: Optional[int] = None
 
     def draw(self, canvas: Canvas) -> None:
         canvas.text(
