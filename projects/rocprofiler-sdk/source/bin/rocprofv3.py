@@ -1516,36 +1516,23 @@ def run(app_args, args, **kwargs):
     else:
         update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
 
-    if (
-        args.spm_buffer_size
-        or args.spm_timeout_ms
-        or args.spm_timeout_ms
-        or args.spm_frequency_sclk
-    ):
-
-        if not args.spm:
+    if args.spm:
+        if (
+            args.pmc
+            or args.pc_sampling_beta_enabled
+            or os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is not None
+        ):
             fatal_error(
-                "SPM unavailable. The feature is implicitly disabled. To enable it, use --spm-beta-enable option or set ROCPROFILER_SPM_COUNTER_COLLECTION_BETA_ENABLED=ON in the environment"
+                "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
             )
-        if args.spm:
-            if (
-                args.pmc
-                or args.pc_sampling_beta_enabled
-                or os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None)
-                is not None
-            ):
-                fatal_error(
-                    "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
-                )
+        else:
+            update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
             update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
             update_env(
                 "ROCPROF_SPM_COUNTERS",
                 "spm: {}".format(" ".join(args.spm)),
                 overwrite=True,
             )
-        else:
-            update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
-
         if args.spm_buffer_size:
             update_env(
                 "ROCPROF_SPM_BUFFER_SIZE", int_auto(args.spm_buffer_size), overwrite=True

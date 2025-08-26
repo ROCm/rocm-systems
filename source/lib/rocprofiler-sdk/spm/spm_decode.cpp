@@ -90,7 +90,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
     }
     // Prealloc SE_NUM for MI300.
     for(auto& v : counters)
-        v.shaders.resize(4);
+        v.shaders.resize(8);
 
     auto status =
         spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, size, &counters);
@@ -148,7 +148,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
     }
 
     spm_packet->decode_data_fn(
-        &records[0], records.size(), ROCPROFILER_SPM_RECORD_FLAG_DATA, (spm_packet->user_data));
+        records.data(), records.size(), ROCPROFILER_SPM_RECORD_FLAG_DATA, spm_packet->user_data);
 }
 }  // namespace SPM
 }  // namespace rocprofiler
