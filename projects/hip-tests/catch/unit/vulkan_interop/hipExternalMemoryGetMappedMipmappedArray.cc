@@ -81,7 +81,7 @@ TEST_CASE("Unit_hipExternalMemoryGetMappedMipmappedArray_Vulkan_Positive_Read_Wr
   HIP_CHECK(hipGetMipmappedArrayLevel(&level_arr, mipmapped_arr, 1));
 
   size_t level_arr_size = mipmapped_arr_desc.extent.width * mipmapped_arr_desc.extent.height *
-      mipmapped_arr_desc.extent.depth;
+                          mipmapped_arr_desc.extent.depth;
 
   REQUIRE(WriteAndValidateData<type>(level_arr, level_arr_size) == true);
 

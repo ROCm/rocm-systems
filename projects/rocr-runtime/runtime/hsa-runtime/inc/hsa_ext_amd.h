@@ -1579,7 +1579,10 @@ typedef enum hsa_amd_memory_pool_flag_s {
    *  Allocates executable memory
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
-
+  /**
+   *  Allocates uncached memory
+   */
+  HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
 
 /**

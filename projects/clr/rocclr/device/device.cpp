@@ -339,9 +339,9 @@ const Isa* Isa::findIsa(uint32_t versionMajor, uint32_t versionMinor, uint32_t v
   auto supportedIsas_ = supportedIsas();
   auto isaIter = std::find_if(supportedIsas_.first, supportedIsas_.second, [&](const Isa& isa) {
     return versionMajor == isa.versionMajor_ && versionMinor == isa.versionMinor_ &&
-        versionStepping == isa.versionStepping_ &&
-        (isa.sramecc_ == amd::Isa::Feature::Unsupported || isa.sramecc_ == sramecc) &&
-        (isa.xnack_ == amd::Isa::Feature::Unsupported || isa.xnack_ == xnack);
+           versionStepping == isa.versionStepping_ &&
+           (isa.sramecc_ == amd::Isa::Feature::Unsupported || isa.sramecc_ == sramecc) &&
+           (isa.xnack_ == amd::Isa::Feature::Unsupported || isa.xnack_ == xnack);
   });
   return isaIter == supportedIsas_.second ? nullptr : isaIter;
 }
@@ -1132,7 +1132,7 @@ bool Device::IpcCreate(void* dev_ptr, size_t* mem_size, char* handle, size_t* me
 
   // Calculate the memory offset from the original base ptr
   *mem_offset = reinterpret_cast<address>(dev_ptr) - reinterpret_cast<address>(orig_dev_ptr) +
-      amd_mem_obj->getOffset();
+                amd_mem_obj->getOffset();
 
   *mem_size = amd_mem_obj->getSize();
 

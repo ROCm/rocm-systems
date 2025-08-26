@@ -341,9 +341,8 @@ bool Settings::create(const Pal::DeviceProperties& palProp,
 #endif
   }
 
-  if (apuSystem_ &&
-      ((heaps[Pal::GpuHeapLocal].logicalSize + heaps[Pal::GpuHeapInvisible].logicalSize) <
-       (150 * Mi))) {
+  if (apuSystem_ && ((heaps[Pal::GpuHeapLocal].logicalSize +
+                      heaps[Pal::GpuHeapInvisible].logicalSize) < (150 * Mi))) {
     remoteAlloc_ = true;
   }
 

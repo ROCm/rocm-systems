@@ -173,9 +173,9 @@ __global__ void kernel_cg_group_partition_dynamic(unsigned int tile_size, int* r
   return;
 }
 
-template <typename F>
-static void common_group_partition(F kernel_func, unsigned int tile_size, void** params,
-                                   size_t num_params, bool use_global_mem) {
+template <typename F> static void common_group_partition(F kernel_func, unsigned int tile_size,
+                                                         void** params, size_t num_params,
+                                                         bool use_global_mem) {
   int block_size = 1;
   int threads_per_blk = 64;
 

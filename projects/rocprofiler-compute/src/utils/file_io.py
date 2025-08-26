@@ -63,24 +63,25 @@ def load_sys_info(f):
     return pd.read_csv(f)
 
 
-def load_panel_configs(dir):
+def load_panel_configs(dirs):
     """
     Load all panel configs from yaml file.
     """
     d = {}
-    for root, dirs, files in os.walk(dir):
-        for f in files:
-            if f.endswith(".yaml"):
-                with open(str(Path(root).joinpath(f))) as file:
-                    config = yaml.safe_load(file)
-                    # metric key can be None due to some metric tables
-                    # not having any metrics
-                    # metric key should be empty dict instead of None
-                    for data_source in config["Panel Config"]["data source"]:
-                        metric_table = data_source.get("metric_table")
-                        if metric_table and metric_table["metric"] is None:
-                            metric_table["metric"] = {}
-                    d[config["Panel Config"]["id"]] = config["Panel Config"]
+    for dir in dirs:
+        for root, _, files in os.walk(dir):
+            for f in files:
+                if f.endswith(".yaml"):
+                    with open(Path(root) / f) as file:
+                        config_yml = yaml.safe_load(file)
+                        # metric key can be None due to some metric-
+                        # tables not having any metrics
+                        # metric key should be empty dict instead of None
+                        for data_source in config_yml["Panel Config"]["data source"]:
+                            metric_table = data_source.get("metric_table")
+                            if metric_table and metric_table["metric"] is None:
+                                metric_table["metric"] = {}
+                        d[config_yml["Panel Config"]["id"]] = config_yml["Panel Config"]
 
     # TODO: sort metrics as the header order in case they-
     # are not defined in the same order
