@@ -133,8 +133,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) 
             name for name, type in filter_panel_ids.items() if type == "metric_id"
         ]
     filter_panel_ids = [
-        int(convert_metric_id_to_panel_info(metric_id)[0])
+        int(result[0])
         for metric_id in filter_panel_ids
+        if (result := convert_metric_id_to_panel_info(metric_id)) is not None
     ]
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))

@@ -29,6 +29,7 @@ import textwrap
 from abc import abstractmethod
 from collections import OrderedDict
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -42,6 +43,22 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
+
+# the build-in config to list kernel names purpose only
+TOP_STATS_BUILD_IN_CONFIG: dict[int, dict[str, Any]] = {
+    0: {
+        "id": 0,
+        "title": "Top Kernels",
+        "data source": [{"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}],
+    },
+    1: {
+        "id": 1,
+        "title": "Dispatch List",
+        "data source": [
+            {"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}
+        ],
+    },
+}
 
 
 class OmniAnalyze_Base:
@@ -75,7 +92,7 @@ class OmniAnalyze_Base:
 
         ac = schema.ArchConfig()
         if list_stats:
-            ac.panel_configs = file_io.top_stats_build_in_config
+            ac.panel_configs = TOP_STATS_BUILD_IN_CONFIG
         else:
             arch_panel_config = [
                 config_dir if single_panel_config else config_dir.joinpath(arch)

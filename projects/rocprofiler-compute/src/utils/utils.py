@@ -68,7 +68,7 @@ def add_counter_extra_config_input_yaml(
     description: str,
     expression: str,
     architectures: list,
-    properties: list = None,
+    properties: Optional[list] = None,
 ) -> dict:
     """
     Add a new counter to the rocprofiler-sdk dictionary.
@@ -177,45 +177,48 @@ def get_version(rocprof_compute_home) -> dict:
 
     # symantic version info - note that version file(s) can reside in
     # two locations depending on development vs formal install
-    searchDirs = [rocprof_compute_home, rocprof_compute_home.parent]
+    search_dirs = [rocprof_compute_home, rocprof_compute_home.parent]
     found = False
-    versionDir = None
+    version_dir = None
+    VER = "unknown"
+    SHA = "unknown"
+    MODE = "unknown"
 
-    for dir in searchDirs:
-        version = str(path(dir).joinpath("VERSION"))
+    for directory in search_dirs:
+        version_file = directory / "VERSION"
         try:
-            with open(version, "r") as file:
+            with open(version_file, "r") as file:
                 VER = file.read().replace("\n", "")
                 found = True
-                versionDir = dir
+                version_dir = directory
                 break
         except Exception:
             pass
     if not found:
-        console_error("Cannot find VERSION file at {}".format(searchDirs))
+        console_error(f"Cannot find VERSION file at {search_dirs}")
 
     # git version info
-    try:
-        success, output = capture_subprocess_output(
-            ["git", "-C", versionDir, "log", "--pretty=format:%h", "-n", "1"],
-        )
-        if success:
-            SHA = output
-            MODE = "dev"
-        else:
-            raise Exception(output)
-    except Exception:
+    if version_dir is not None:
         try:
-            shaFile = path(versionDir).joinpath("VERSION.sha").absolute().resolve()
-            with open(shaFile, "r") as file:
-                SHA = file.read().replace("\n", "")
-                MODE = "release"
+            success, output = capture_subprocess_output(
+                ["git", "-C", version_dir, "log", "--pretty=format:%h", "-n", "1"],
+            )
+            if success:
+                SHA = output
+                MODE = "dev"
+            else:
+                raise Exception(output)
         except Exception:
-            SHA = "unknown"
-            MODE = "unknown"
+            try:
+                sha_file = version_dir / "VERSION.sha"
+                with open(sha_file, "r") as file:
+                    SHA = file.read().replace("\n", "")
+                    MODE = "release"
+            except Exception:
+                pass
 
-    versionData = {"version": VER, "sha": SHA, "mode": MODE}
-    return versionData
+    version_data = {"version": VER, "sha": SHA, "mode": MODE}
+    return version_data
 
 
 def get_version_display(version, sha, mode) -> str:
@@ -437,8 +440,9 @@ def v3_json_to_csv(json_file_path, csv_file_path) -> None:
     counter_info = v3_json_get_counters(data)
 
     # CSV headers. If there are no dispatches we still end up with a valid CSV file.
-    csv_data = dict.fromkeys(
-        [
+    csv_data = {
+        key: []
+        for key in [
             "Dispatch_ID",
             "GPU_ID",
             "Queue_ID",
@@ -457,7 +461,7 @@ def v3_json_to_csv(json_file_path, csv_file_path) -> None:
             "End_Timestamp",
             "Correlation_ID",
         ]
-    )
+    }
 
     for key in csv_data:
         csv_data[key] = []
@@ -1368,7 +1372,7 @@ def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd) -> pd.DataFram
     return df
 
 
-def get_submodules(package_name) -> None:
+def get_submodules(package_name) -> list:
     """List all submodules for a target package"""
     import importlib
     import pkgutil
@@ -1564,7 +1568,9 @@ def merge_counters_spatial_multiplex(df_multi_index) -> pd.DataFrame:
     return final_df
 
 
-def convert_metric_id_to_panel_info(metric_id) -> Optional[Tuple[int, int, int]]:
+def convert_metric_id_to_panel_info(
+    metric_id,
+) -> Optional[Tuple[str, Optional[int], Optional[int]]]:
     """
     Convert metric id into panel information.
     Output is a tuples of the form (file_id, panel_id, metric_id).

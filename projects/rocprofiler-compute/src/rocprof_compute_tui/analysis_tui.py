@@ -78,7 +78,6 @@ class tui_analysis(OmniAnalyze_Base):
             filter_dispatch_ids=workload.filter_dispatch_ids,
             filter_nodes=workload.filter_nodes,
             time_unit=self.args.time_unit,
-            max_stat_num=self.args.max_stat_num,
             kernel_verbose=self.args.kernel_verbose,
         )
         kernel_name_shortener(self._runs[self.path].raw_pmc, self.args.kernel_verbose)

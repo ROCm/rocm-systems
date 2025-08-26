@@ -145,7 +145,6 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_dispatch_ids=base_data[base_run].filter_dispatch_ids,
                 filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=self.get_args().time_unit,
-                max_stat_num=base_data[base_run].filter_top_n,
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # Only display basic metrics if no filters are applied
@@ -236,7 +235,6 @@ class webui_analysis(OmniAnalyze_Base):
                                 table_config=table_config,
                                 hidden_columns=self.__hidden_columns,
                                 barchart_elements=self.__barchart_elements,
-                                norm_filt=norm_filt,
                                 comparable_columns=comparable_columns,
                                 decimal=self.get_args().decimal,
                             )
@@ -314,10 +312,10 @@ class webui_analysis(OmniAnalyze_Base):
             )
 
             if self.get_args().spatial_multiplexing:
-                self._runs[
-                    self.dest_dir
-                ].raw_pmc = self.spatial_multiplex_merge_counters(
-                    self._runs[self.dest_dir].raw_pmc
+                self._runs[self.dest_dir].raw_pmc = (
+                    self.spatial_multiplex_merge_counters(
+                        self._runs[self.dest_dir].raw_pmc
+                    )
                 )
 
             file_io.create_df_kernel_top_stats(
@@ -327,7 +325,6 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_dispatch_ids=self._runs[self.dest_dir].filter_dispatch_ids,
                 filter_nodes=self._runs[self.dest_dir].filter_nodes,
                 time_unit=args.time_unit,
-                max_stat_num=args.max_stat_num,
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # create the loaded kernel stats
@@ -371,7 +368,6 @@ def determine_chart_type(
     table_config,
     hidden_columns,
     barchart_elements,
-    norm_filt,
     comparable_columns,
     decimal,
 ):
@@ -391,10 +387,11 @@ def determine_chart_type(
             f"The dataframe with id={table_config['id']} is empty! Not displaying it."
         )
     elif table_config["id"] in [x for i in barchart_elements.values() for x in i]:
-        d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
+        d_figs = build_bar_chart(display_df, table_config, barchart_elements)
         # Smaller formatting if barchart yeilds several graphs
         if (
-            len(d_figs) > 2
+            len(d_figs)
+            > 2
             # and not table_config["id"]
             # in barchart_elements["l2_cache_per_chan"]
         ):

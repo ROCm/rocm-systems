@@ -43,58 +43,80 @@ COLORS = {
     "TRACE": MAGENTA,
 }
 
+# Constants
+TRACE_LEVEL = logging.DEBUG - 5
 
-def demarcate(function) -> Callable[..., Any]:
-    def wrap_function(*args, **kwargs):
-        logging.trace("----- [entering function] -> %s()" % (function.__qualname__))
+LOG_LEVEL_MAPPING = {
+    "DEBUG": logging.DEBUG,
+    "debug": logging.DEBUG,
+    "TRACE": TRACE_LEVEL,
+    "trace": TRACE_LEVEL,
+    "INFO": logging.INFO,
+    "info": logging.INFO,
+    "ERROR": logging.ERROR,
+    "error": logging.ERROR,
+}
+
+
+def demarcate(function: Callable[..., Any]) -> Callable[..., Any]:
+    def wrap_function(*args: Any, **kwargs: Any) -> Any:
+        trace_logger(f"----- [entering function] -> {function.__qualname__}()")
         result = function(*args, **kwargs)
-        logging.trace("----- [exiting  function] -> %s()" % function.__qualname__)
+        trace_logger(f"----- [exiting  function] -> {function.__qualname__}()")
         return result
 
     return wrap_function
 
 
-def console_error(*argv, exit=True) -> None:
+def console_error(*argv: Any, exit: bool = True) -> None:
     if len(argv) > 1:
         logging.error(f"[{argv[0]}] {argv[1]}")
-    else:
+    elif len(argv) == 1:
         logging.error(f"{argv[0]}")
+    else:
+        logging.error("Empty error message")
     if exit:
         sys.exit(1)
 
 
-def console_log(*argv, indent_level=0) -> None:
+def console_log(*argv: Any, indent_level: int = 0) -> None:
     indent = ""
     if indent_level >= 1:
-        indent = " " * 3 * indent_level + "|-> "  # spaces per indent level
+        indent = " " * (3 * indent_level) + "|-> "  # spaces per indent level
 
     if len(argv) > 1:
         logging.info(indent + f"[{argv[0]}] {argv[1]}")
-    else:
+    elif len(argv) == 1:
         logging.info(indent + f"{argv[0]}")
+    else:
+        logging.info(indent + "Empty log message")
 
 
-def console_debug(*argv) -> None:
+def console_debug(*argv: Any) -> None:
     if len(argv) > 1:
         logging.debug(f"[{argv[0]}] {argv[1]}")
-    else:
+    elif len(argv) == 1:
         logging.debug(f"{argv[0]}")
+    else:
+        logging.debug("Empty debug message")
 
 
-def console_warning(*argv) -> None:
+def console_warning(*argv: Any) -> None:
     if len(argv) > 1:
         logging.warning(f"[{argv[0]}] {argv[1]}")
-    else:
+    elif len(argv) == 1:
         logging.warning(f"{argv[0]}")
+    else:
+        logging.warning("Empty warning message")
 
 
-def trace_logger(message, *args, **kwargs) -> None:
-    logging.log(logging.TRACE, message, *args, **kwargs)
+def trace_logger(message: str, *args: Any, **kwargs: Any) -> None:
+    logging.log(TRACE_LEVEL, message, *args, **kwargs)
 
 
 # Define the formatter
 class ColoredFormatter(logging.Formatter):
-    def format(self, record) -> str:
+    def format(self, record: logging.LogRecord) -> str:
         levelname = record.levelname
         if levelname in COLORS:
             levelname_color = (
@@ -105,7 +127,7 @@ class ColoredFormatter(logging.Formatter):
 
 
 class ColoredFormatterAll(logging.Formatter):
-    def format(self, record) -> str:
+    def format(self, record: logging.LogRecord) -> str:
         levelname = record.levelname
         if levelname in COLORS:
             if levelname == "INFO":
@@ -116,11 +138,12 @@ class ColoredFormatterAll(logging.Formatter):
                     f"%(levelname)s: %(message)s{RESET_SEQ}"
                 )
             formatter = logging.Formatter(log_fmt)
-        return formatter.format(record)
+            return formatter.format(record)
+        return super().format(record)
 
 
 class PlainFormatter(logging.Formatter):
-    def format(self, record) -> str:
+    def format(self, record: logging.LogRecord) -> str:
         if record.levelno == logging.ERROR:
             self._style._fmt = "%(levelname)s %(message)s"
         else:
@@ -133,9 +156,8 @@ class PlainFormatter(logging.Formatter):
 def setup_console_handler() -> None:
     logging.getLogger().handlers.clear()
     # register a trace level logger
-    logging.TRACE = logging.DEBUG - 5
-    logging.addLevelName(logging.TRACE, "TRACE")
-    setattr(logging, "TRACE", logging.TRACE)
+    logging.addLevelName(TRACE_LEVEL, "TRACE")
+    setattr(logging, "TRACE", TRACE_LEVEL)
     setattr(logging, "trace", trace_logger)
 
     color_setting = 1
@@ -165,8 +187,8 @@ def setup_console_handler() -> None:
 
 
 # Setup file handler - enabled in profile mode
-def setup_file_handler(loglevel, workload_dir) -> None:
-    filename = str(Path(workload_dir).joinpath("log.txt"))
+def setup_file_handler(loglevel: int, workload_dir: str) -> None:
+    filename = str(Path(workload_dir) / "log.txt")
     file_handler = logging.FileHandler(filename, "w")
     file_loglevel = min([loglevel, logging.INFO])
     file_handler.setLevel(file_loglevel)
@@ -175,9 +197,11 @@ def setup_file_handler(loglevel, workload_dir) -> None:
 
 
 # Setup logger priority - called after argument parsing
-def setup_logging_priority(verbosity, quietmode, appmode, guimode) -> str:
+def setup_logging_priority(
+    verbosity: int, quietmode: bool, appmode: str, guimode: bool
+) -> int:
     # set loglevel based on selected verbosity and quietmode
-    levels = [logging.INFO, logging.DEBUG, logging.TRACE]
+    levels = [logging.INFO, logging.DEBUG, TRACE_LEVEL]
 
     if quietmode:
         loglevel = logging.ERROR
@@ -192,18 +216,11 @@ def setup_logging_priority(verbosity, quietmode, appmode, guimode) -> str:
     # optional: override of default loglevel via env variable which takes precedence
     if "ROCPROFCOMPUTE_LOGLEVEL" in os.environ.keys():
         loglevel = os.environ["ROCPROFCOMPUTE_LOGLEVEL"]
-        if loglevel in {"DEBUG", "debug"}:
-            loglevel = logging.DEBUG
-        elif loglevel in {"TRACE", "trace"}:
-            loglevel = logging.TRACE
-        elif loglevel in {"INFO", "info"}:
-            loglevel = logging.INFO
-        elif loglevel in {"ERROR", "error"}:
-            loglevel = logging.ERROR
+
+        if loglevel in LOG_LEVEL_MAPPING:
+            loglevel = LOG_LEVEL_MAPPING[loglevel]
         else:
-            print(
-                "Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" % loglevel
-            )
+            print(f"Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting ({loglevel})")
             sys.exit(1)
 
     # update console loglevel based on command-line args/env settings

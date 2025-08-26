@@ -28,25 +28,8 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import yaml
-from isort import stream
 
 from utils.logger import console_debug, console_error, console_warning
-
-# Constants for MI series
-# NOTE: Currently supports MI50, MI100, MI200, MI300
-MI50 = 0
-MI100 = 1
-MI200 = 2
-MI300 = 3
-MI350 = 4
-
-MI_CONSTANS = {
-    MI50: "mi50",
-    MI100: "mi100",
-    MI200: "mi200",
-    MI300: "mi300",
-    MI350: "mi350",
-}
 
 # ----------------------------
 # Data Class handling to preserve the hierarchical gpu information
@@ -88,7 +71,7 @@ class MIGPUSpecs:
     # ----------------------------
 
     @classmethod
-    def _load_yaml(cls, file_path: str) -> dict[str, Any]:
+    def _load_yaml(cls, file_path: str) -> Optional[dict[str, Any]]:
         """
         Loads MI GPU YAML data /util into a Python dictionary.
 
@@ -99,7 +82,7 @@ class MIGPUSpecs:
             Dict[str, Any]: Parsed YAML data as a nested dictionary.
                             Exit with console error if an error occurs.
         """
-        console_debug("[load_yaml]")
+        console_debug("mi_gpu_spec", "[load_yaml]")
         try:
             with open(file_path, "r") as file:
                 data = yaml.safe_load(file)
@@ -137,31 +120,35 @@ class MIGPUSpecs:
         # Load the YAML data
         yaml_data = cls._load_yaml(yaml_file_path)
 
-        for series in yaml_data["mi_gpu_spec"]:
-            curr_gpu_series = series["gpu_series"]
-            console_debug("[parse_mi_gpu_spec] Processing series: %s" % curr_gpu_series)
-            for archs in series["gpu_archs"]:
-                curr_gpu_arch = archs["gpu_arch"]
-                cls._gpu_series_dict[curr_gpu_arch] = curr_gpu_series
-                cls._perfmon_config[curr_gpu_arch] = archs["perfmon_config"]
-                cls._gpu_model_dict[curr_gpu_arch] = []
-                for models in archs["models"]:
-                    curr_gpu_model = models["gpu_model"]
-                    cls._all_gpu_models.append(curr_gpu_model)
-                    cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
-                    cls._num_xcds_dict[curr_gpu_model] = (
-                        models.get("partition_mode", {})
-                        .get("compute_partition_mode", {})
-                        .get("num_xcds", {})
-                    )
-                    if "chip_ids" in models and "physical" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["physical"]] = (
-                            curr_gpu_model
+        if yaml_data and isinstance(yaml_data, dict):
+            for series in yaml_data.get("mi_gpu_spec"):
+                curr_gpu_series = series["gpu_series"]
+                console_debug(
+                    "mi_gpu_spec",
+                    "[parse_mi_gpu_spec] Processing series: %s" % curr_gpu_series,
+                )
+                for archs in series["gpu_archs"]:
+                    curr_gpu_arch = archs["gpu_arch"]
+                    cls._gpu_series_dict[curr_gpu_arch] = curr_gpu_series
+                    cls._perfmon_config[curr_gpu_arch] = archs["perfmon_config"]
+                    cls._gpu_model_dict[curr_gpu_arch] = []
+                    for models in archs["models"]:
+                        curr_gpu_model = models["gpu_model"]
+                        cls._all_gpu_models.append(curr_gpu_model)
+                        cls._gpu_model_dict[curr_gpu_arch].append(curr_gpu_model)
+                        cls._num_xcds_dict[curr_gpu_model] = (
+                            models.get("partition_mode", {})
+                            .get("compute_partition_mode", {})
+                            .get("num_xcds", {})
                         )
-                    if "chip_ids" in models and "virtual" in models["chip_ids"]:
-                        cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
-                            curr_gpu_model
-                        )
+                        if "chip_ids" in models and "physical" in models["chip_ids"]:
+                            cls._chip_id_dict[models["chip_ids"]["physical"]] = (
+                                curr_gpu_model
+                            )
+                        if "chip_ids" in models and "virtual" in models["chip_ids"]:
+                            cls._chip_id_dict[models["chip_ids"]["virtual"]] = (
+                                curr_gpu_model
+                            )
 
         # detect gpu arch to compute partition relationships
         cls._populate_gpu_arch_to_compute_partition_dict()
@@ -182,9 +169,10 @@ class MIGPUSpecs:
                         compute_partition
                     )
                     console_debug(
+                        "mi_gpu_spec",
                         "[populate_single_arch_partition_dict] Single model "
                         "arch found: %s -> %s (partition: %s)"
-                        % (gpu_arch, single_model, compute_partition)
+                        % (gpu_arch, single_model, compute_partition),
                     )
 
     @classmethod
