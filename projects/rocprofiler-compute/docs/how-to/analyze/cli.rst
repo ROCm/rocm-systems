@@ -318,10 +318,12 @@ Per-kernel roofline analysis
   When analyzing specific kernels, the roofline analysis provides detailed metrics for each filtered kernel:
 
   .. code-block:: shell-session
+
      $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 -b 4
   This generates enhanced roofline output showing per-kernel performance rates and arithmetic intensity calculations:
 
   .. code-block:: text
+
    ================================================================================
    4. Roofline
    ================================================================================
@@ -372,6 +374,7 @@ Per-kernel roofline analysis
   Analyze multiple kernels for comparison:
 
   .. code-block:: shell-session
+
      $ rocprof-compute analyze -p workloads/vcopy/MI200/ -k 0 1 2 -b 4
 
 Baseline comparison
@@ -384,3 +387,102 @@ Baseline comparison
   .. code-block:: shell
 
      rocprof-compute analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
+
+Analysis output format
+======================
+
+Use the ``--output-format <format>`` analyze mode option to specify the output format of the
+analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
+format is ``stdout``.
+
+* ``stdout`` format:
+   * Print analysis report to the terminal.
+   * NOTE: This option will not generate any file or folder.
+
+* ``txt`` format:
+   * Generate a file named ``rocprof_compute_<uuid>.txt`` in the current working directory.
+   * This file contains the entire analysis report as printed on the terminal.
+   * This is useful in case of searching across long analysis reports.
+   * NOTE: This option will disable output of analysis report to terminal.
+
+* ``csv`` format:
+   * Generate a folder named ``rocprof_compute_<uuid>`` in the current working directory.
+   * This folder contains multiple csv files representing the data in each metric table in the analysis report.
+   * This is useful for further programmatic analysis of analysis reports.
+   * NOTE: This will print the analysis report to the terminal as well.
+
+* ``db`` format:
+   * NOTE: This only works when provided workload paths are created using ``--format-rocprof-output rocpd`` profile mode option.
+   * Generate a file named ``rocprof_compute_<uuid>.db`` in the current working directory.
+   * This is a SQLite database file containing all the data in the analysis report structured according to :ref:`analysis database schema <analysis-database>`.
+   * This is useful for further programmatic analysis of analysis reports.
+   * NOTE: This option will disable output of analysis report to terminal.
+
+Default file/folder name ``rocprofiler_compute_<uuid>`` can be overriden using ``--output-name <name>`` analyze mode option.
+
+.. _analysis-database:
+
+Analysis database schema
+========================
+
+Analysis database tables
+
+.. image:: ../../data/analyze/analysis_data_dump_schema.png
+   :align: center
+   :alt: Analysis database tables
+
+Analysis database views
+
+.. image:: ../../data/analyze/analysis_data_dump_views.png
+   :align: center
+   :alt: Analysis database views
+
+Analysis database example
+
+.. note::
+
+   Some metrics cannot be calculated when corresponding counters are missing as shown in the warnings below
+
+.. note::
+
+   It is possible to merge the analysis data dump for multiple workload folders (resulting from multiple profiles) by repeating ``-p`` option for each workload
+
+.. code-block:: shell-session
+
+   $ rocprof-compute analyze --verbose --db test -p workloads/vmem/MI300X_A1 -p workloads/vmem1/MI300X_A1
+   DEBUG Execution mode = analyze
+
+                                    __                                       _
+   _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+   | '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+   | | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+   |_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+                  |_|                                           |_|
+
+      INFO Analysis mode = db
+   DEBUG [omnisoc init]
+   DEBUG [omnisoc init]
+   DEBUG [analysis] prepping to do some analysis
+      INFO [analysis] deriving rocprofiler-compute metrics...
+   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
+   WARNING Roofline ceilings not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem/MI300X_A1.
+   WARNING PC sampling data not found for /app/projects/rocprofiler-compute/workloads/vmem1/MI300X_A1.
+   DEBUG Collected dispatch data
+   DEBUG Applied analysis mode filters
+   DEBUG Calculated dispatch data
+   DEBUG Collected metrics data
+   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
+   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   WARNING Failed to evaluate expression for 3.1.25 - Value: to_round(to_avg(
+   (pmc_df.get("TCP_TCP_LATENCY_sum") / pmc_df.get("TCP_TA_TCP_STATE_READ_sum")).where((pmc_df.get("TCP_TA_TCP_STATE_READ_sum") != 0), None)), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   WARNING Failed to evaluate expression for 3.1.39 - Value: to_round((to_avg(
+   (pmc_df.get("pmc_perf_ACCUM") / pmc_df.get("SQC_ICACHE_REQ")).where((pmc_df.get("SQC_ICACHE_REQ") != 0), None)) * 100), 0) - unsupported operand type(s) for /: 'NoneType' and 'float'
+   DEBUG Calculated metric values
+   DEBUG Calculated roofline data points
+   DEBUG [analysis] generating analysis
+   DEBUG SQLite database initialized with name: test.db
+   DEBUG Initialized database: test.db
+   DEBUG Completed writing database

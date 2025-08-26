@@ -26,6 +26,8 @@ Full documentation for HIP is available at [rocm.docs.amd.com](https://rocm.docs
     - `hipMemPrefetchAsync_v2`  prefetches memory to the specified location
     - `hipMemAdvise_v2`         advise about the usage of a given memory range
     - `hipGetDriverEntryPoint ` gets function pointer of a HIP API.
+    - `hipSetValidDevices`      sets a default list of devices that can be used by HIP
+    - `hipStreamGetId`          queries the id of a stream
 * Changed HIP APIs
     - `hipMemAllocationType` now has hip exclusive enum hipMemAllocationTypeUncached
     - `hipMemCreate`  now checks for hipMemAllocationTypeUncached enum from
