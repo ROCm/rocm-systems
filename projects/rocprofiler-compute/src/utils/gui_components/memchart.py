@@ -2029,15 +2029,9 @@ def get_memchart(mem_data, base_data):
 def format_value_for_display(value, max_length=6):
     """
     Format values to prevent overflow in SVG text elements.
+    Use suffixes for large numbers but switch to scientific notation if shorter.
     """
-    #####
-    # TODO: this is quick fix to prevent value overflow.
-    # The long term solution should be dynamically adjust
-    # SVG dimensions and positions to maintain visual
-    # integrity while preventing overflow.
-    #####
-
-    # 1. If non-numerical
+    # 1. Try converting string to number if possible
     if isinstance(value, str):
         try:
             if "." in value:
@@ -2045,25 +2039,38 @@ def format_value_for_display(value, max_length=6):
             else:
                 value = int(value)
         except ValueError:
-            pass  # Keep as string
-    # 2. If numerical
+            pass  # Keep as string if conversion fails
+
+    # 2. If numerical, generate both suffix and scientific formats
     if isinstance(value, (int, float)):
-        value = abs(value)
-        if value >= 1000000000:
-            value = f"{value / 1000000000:.1f}B"
-        elif value >= 1000000:
-            value = f"{value / 1000000:.1f}M"
-        elif value >= 1000:
-            value = f"{value / 1000:.1f}K"
+        abs_val = abs(value)
+
+        # Suffix formatting
+        if abs_val >= 1e9:
+            suffix_str = f"{value / 1e9:.1f}B"
+        elif abs_val >= 1e6:
+            suffix_str = f"{value / 1e6:.1f}M"
+        elif abs_val >= 1000:
+            suffix_str = f"{value / 1000:.1f}K"
         elif value == int(value):
-            value = str(int(value))
+            suffix_str = str(int(value))
         else:
-            value = f"{value:.1f}"
+            suffix_str = f"{value:.1f}"
+
+        # Scientific notation
+        sci_str = f"{value:.1e}"
+
+        # Choose shorter (or suffix if equal length)
+        if len(sci_str) < len(suffix_str):
+            value_str = sci_str
+        else:
+            value_str = suffix_str
+
     else:
-        value = str(value)
+        value_str = str(value)
 
     # 3. Truncate if needed
-    if len(value) > max_length:
-        value = value[: max_length - 1] + "…"
+    if len(value_str) > max_length:
+        value_str = value_str[: max_length - 1] + "…"
 
-    return value
+    return value_str
