@@ -354,6 +354,8 @@ class db_analysis(OmniAnalyze_Base):
         for workload_path in self._runs.keys():
             pmc_df = self._pmc_df_per_workload[workload_path].copy()
             sys_info = self._runs[workload_path].sys_info.iloc[0].to_dict()
+            for key, value in self._roofline_ceilings_per_workload[workload_path]:
+                sys_info[f"{key}_empirical_peak"] = value
 
             def evaluate(name, value, parse=False):
                 if parse:
