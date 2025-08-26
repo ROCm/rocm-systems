@@ -283,7 +283,7 @@ class RocProfCompute:
 
         sys.exit(0)
 
-    def create_profiler(self):
+    def create_profiler(self) -> object:
         profiler_classes = {
             "rocprofv1": (
                 "rocprof_compute_profile.profiler_rocprof_v1",
@@ -350,38 +350,35 @@ class RocProfCompute:
         # -----------------------
 
         self.__soc[self.__mspec.gpu_arch].profiling_setup()
+
         # Write profiling configuration as yaml file
-        with open(Path(self.__args.path).joinpath("profiling_config.yaml"), "w") as f:
+        with open(Path(self.__args.path) / "profiling_config.yaml", "w") as f:
             args_dict = vars(self.__args)
             args_dict["config_dir"] = str(args_dict["config_dir"])
             yaml.dump(args_dict, f)
+
         # enable file-based logging
         setup_file_handler(self.__args.loglevel, self.__args.path)
 
         profiler.pre_processing()
         console_debug('starting "run_profiling" and about to start rocprof\'s workload')
+
         time_start_prof = time.time()
         profiler.run_profiling(self.__version["ver"], config.PROJECT_NAME)
         time_end_prof = time.time()
+
+        prof_duration = time_end_prof - time_start_prof
         console_debug(
-            (
-                'finished "run_profiling" and finished rocprof\'s workload, '
-                "time taken was {} m {} sec"
-            ).format(
-                int((time_end_prof - time_start_prof) / 60),
-                str((time_end_prof - time_start_prof) % 60),
-            )
+            f'finished "run_profiling" and finished rocprof\'s workload, '
+            f"time taken was {int(prof_duration / 60)} m {prof_duration % 60} sec"
         )
+
         profiler.post_processing()
         time_end_post = time.time()
-        console_debug(
-            'time taken for "post_processing" was {} seconds'.format(
-                int(time_end_post - time_end_prof)
-            )
-        )
-        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
-        return
+        post_duration = int(time_end_post - time_end_prof)
+        console_debug(f'time taken for "post_processing" was {post_duration} seconds')
+        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
     @demarcate
     def update_db(self) -> None:
@@ -411,8 +408,7 @@ class RocProfCompute:
     @demarcate
     def run_analysis(self) -> None:
         self.print_graphic()
-
-        console_log("Analysis mode = %s" % self.__analyze_mode)
+        console_log(f"Analysis mode = {self.__analyze_mode}")
 
         if self.__analyze_mode == "cli":
             from rocprof_compute_analyze.analysis_cli import cli_analysis
@@ -437,15 +433,13 @@ class RocProfCompute:
 
         # Load required SoC(s) from input
         for d in analyzer.get_args().path:
-            # FIXME
-            # sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
             sysinfo_path = (
                 Path(d[0])
                 if analyzer.get_args().nodes is None
-                and analyzer.get_args().spatial_multiplexing is not True
+                and not analyzer.get_args().spatial_multiplexing
                 else file_io.find_1st_sub_dir(d[0])
             )
-            sys_info = file_io.load_sys_info(sysinfo_path.joinpath("sysinfo.csv"))
+            sys_info = file_io.load_sys_info(sysinfo_path / "sysinfo.csv")
 
             sys_info = sys_info.to_dict("list")
             sys_info = {key: value[0] for key, value in sys_info.items()}
@@ -454,5 +448,3 @@ class RocProfCompute:
         analyzer.set_soc(self.__soc)
         analyzer.pre_processing()
         analyzer.run_analysis()
-
-        return

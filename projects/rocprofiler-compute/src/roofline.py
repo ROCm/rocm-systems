@@ -70,27 +70,27 @@ def wrap_text(text, width=92) -> str:
     return "<br>".join(wrapped_lines)
 
 
+def to_int(value) -> Union[float, int]:
+    return int(value) if value is not None else np.nan
+
+
 class Roofline:
     def __init__(self, args, mspec, run_parameters=None):
         self.__args = args
         self.__mspec = mspec
-        self.__run_parameters = (
-            run_parameters
-            if run_parameters
-            else {
-                "workload_dir": None,  # in some cases (i.e. --specs),
-                # path will not be given
-                "device_id": 0,
-                "sort_type": "kernels",
-                "mem_level": "ALL",
-                "include_kernel_names": False,
-                "is_standalone": False,
-                "roofline_data_type": ["FP32"],  # default to FP32
-            }
-        )
+        self.__run_parameters = run_parameters or {
+            "workload_dir": None,  # in some cases (i.e. --specs), path is not given
+            "device_id": 0,
+            "sort_type": "kernels",
+            "mem_level": "ALL",
+            "include_kernel_names": False,
+            "is_standalone": False,
+            "roofline_data_type": ["FP32"],  # default to FP32
+        }
         self.__ai_data = None
         self.__ceiling_data = None
         self.__figure = go.Figure()
+
         # Set roofline run parameters from args
         if hasattr(self.__args, "path") and not run_parameters:
             self.__run_parameters["workload_dir"] = self.__args.path
@@ -177,38 +177,35 @@ class Roofline:
         """
         if (
             not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
+            and self.__run_parameters["workload_dir"] is not None
         ):
             self.roof_setup()
 
-        console_debug(
-            "roofline", "Path: %s" % self.__run_parameters.get("workload_dir")
-        )
+        console_debug("roofline", f"Path: {self.__run_parameters.get('workload_dir')}")
+
         self.__ai_data = calc_ai_profile(
             self.__mspec, self.__run_parameters.get("sort_type"), ret_df
         )
+
         msg = "AI at each mem level:"
-        for i in self.__ai_data:
-            msg += "\n\t%s -> %s" % (i, self.__ai_data[i])
+        for key, value in self.__ai_data.items():
+            msg += f"\n\t{key} -> {value}"
         console_debug(msg)
 
         ops_figure = flops_figure = None
         ops_dt_list = flops_dt_list = ""
 
+        # Generate plots for each data type
         for dt in self.__run_parameters.get("roofline_data_type", []):
             gpu_arch = getattr(self.__mspec, "gpu_arch", "unknown_arch")
+
             if (
-                "SUPPORTED_DATATYPES" not in globals()
-                or gpu_arch not in SUPPORTED_DATATYPES
+                gpu_arch not in SUPPORTED_DATATYPES
                 or str(dt) not in SUPPORTED_DATATYPES[gpu_arch]
             ):
                 console_error(
-                    "{} is not a supported datatype for roofline profiling on {} "
-                    "(arch: {})".format(
-                        str(dt),
-                        getattr(self.__mspec, "gpu_model", "N/A"),
-                        gpu_arch,
-                    ),
+                    f"{dt} is not a supported datatype for roofline profiling on "
+                    f"{getattr(self.__mspec, 'gpu_model', 'N/A')} (arch: {gpu_arch})",
                     exit=False,
                 )
                 continue
@@ -216,25 +213,11 @@ class Roofline:
             ops_flops = "Ops" if (str(dt[:1]) == "I") else "Flops"
 
             if ops_flops == "Ops":
-                if ops_figure:
-                    ops_combo_figure = self.generate_plot(
-                        dtype=str(dt),
-                        fig=ops_figure,
-                    )
-                    ops_figure = ops_combo_figure
-                else:
-                    ops_figure = self.generate_plot(dtype=str(dt))
-                ops_dt_list += "_" + str(dt)
-            if ops_flops == "Flops":
-                if flops_figure:
-                    flops_combo_figure = self.generate_plot(
-                        dtype=str(dt),
-                        fig=flops_figure,
-                    )
-                    flops_figure = flops_combo_figure
-                else:
-                    flops_figure = self.generate_plot(dtype=str(dt))
-                flops_dt_list += "_" + str(dt)
+                ops_figure = self.generate_plot(dtype=str(dt), fig=ops_figure)
+                ops_dt_list += f"_{dt}"
+            else:
+                flops_figure = self.generate_plot(dtype=str(dt), fig=flops_figure)
+                flops_dt_list += f"_{dt}"
 
         if self.__run_parameters.get("include_kernel_names", False):
             if self.__ai_data is None:
@@ -635,14 +618,12 @@ class Roofline:
         """
         console_debug("roofline", "Generating roofline plot for CLI")
 
-        if not (str(dtype) in SUPPORTED_DATATYPES[self.__mspec.gpu_arch]):
+        if str(dtype) not in SUPPORTED_DATATYPES[self.__mspec.gpu_arch]:
             console_error(
-                "{} is not a supported datatype for roofline profiling on {}".format(
-                    str(dtype), self.__mspec.gpu_model
-                ),
+                f"{dtype} is not a supported datatype for roofline profiling on {self.__mspec.gpu_model}",
                 exit=False,
             )
-            return
+            return None
 
         # Normalize workload_dir to get the base directory
         workload_dir = self.__run_parameters.get("workload_dir")
@@ -663,21 +644,19 @@ class Roofline:
                 )
                 return
             # Handle nested list structure [0][0] or simple list [0]
-            base_dir = (
+            base_path = Path(
                 workload_dir[0][0]
                 if isinstance(workload_dir[0], (list, tuple))
                 else workload_dir[0]
             )
         else:
-            # workload_dir is a string
-            base_dir = workload_dir
-        # Convert to Path object for easier manipulation
-        base_path = Path(base_dir)
+            base_path = Path(workload_dir)
 
         roofline_csv = base_path / "roofline.csv"
+
         if not roofline_csv.is_file():
-            console_log("roofline", "{} does not exist".format(roofline_csv))
-            return
+            console_log("roofline", f"{roofline_csv} does not exist")
+            return None
 
         # if workload is detected, utilize Roofline yamls.
         # If not, fallback to legacy calc_ai
@@ -693,10 +672,12 @@ class Roofline:
         else:
             pmc_perf_csv = base_path / "pmc_perf.csv"
             if not pmc_perf_csv.is_file():
-                console_error("roofline", "{} does not exist".format(pmc_perf_csv))
+                console_error("roofline", f"{pmc_perf_csv} does not exist")
+
             t_df = OrderedDict()
             t_df["pmc_perf"] = pd.read_csv(pmc_perf_csv)
             profiling_config = file_io.load_profiling_config(self.__args.path[0][0])
+
             if profiling_config.get("format_rocprof_output") == "rocpd":
                 t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
 
@@ -716,7 +697,7 @@ class Roofline:
         if not isinstance(dtype, str):
             console_error("Unsupported datatype input - must be str")
 
-        # Change vL1D to a interpretable str, if required
+        # Replace vL1D with L1
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
@@ -744,133 +725,112 @@ class Roofline:
 
         ops_flops = "OP" if (dtype[:1] == "I") else "FLOP"  # For printing purposes
 
-        # Plot BW Lines
-        if self.__run_parameters["mem_level"] == "ALL":
-            cache_hierarchy = ["HBM", "L2", "L1", "LDS"]
-        else:
-            cache_hierarchy = self.__run_parameters["mem_level"]
+        mem_level = self.__run_parameters["mem_level"]
+        cache_hierarchy = (
+            ["HBM", "L2", "L1", "LDS"] if mem_level == "ALL" else mem_level
+        )
 
+        #################
+        # Plot BW Lines #
+        #################
         for cache_level in cache_hierarchy:
+            ceiling_data = self.__ceiling_data[cache_level.lower()]
+
             plt.plot(
-                self.__ceiling_data[cache_level.lower()][0],
-                self.__ceiling_data[cache_level.lower()][1],
-                label="{}-{}".format(cache_level, dtype),
+                ceiling_data[0],
+                ceiling_data[1],
+                label=f"{cache_level}-{dtype}",
                 marker="braille",
                 color=color_scheme[cache_level],
             )
             plt.text(
-                str(round(self.__ceiling_data[cache_level.lower()][2])) + " GB/s",
-                x=self.__ceiling_data[cache_level.lower()][0][0],
-                y=self.__ceiling_data[cache_level.lower()][1][0],
+                f"{round(ceiling_data[2])} GB/s",
+                x=ceiling_data[0][0],
+                y=ceiling_data[1][0],
                 background="black",
                 color="white",
                 alignment="left",
             )
             console_debug(
                 "roofline",
-                cache_level
-                + ": [{},{}], [{},{}], {}".format(
-                    str(self.__ceiling_data[cache_level.lower()][0][0]),
-                    str(self.__ceiling_data[cache_level.lower()][0][1]),
-                    str(self.__ceiling_data[cache_level.lower()][1][0]),
-                    str(self.__ceiling_data[cache_level.lower()][1][1]),
-                    str(self.__ceiling_data[cache_level.lower()][2]),
-                ),
+                f"{cache_level}: [{ceiling_data[0][0]},{ceiling_data[0][1]}], [{ceiling_data[1][0]},{ceiling_data[1][1]}], {ceiling_data[2]}",
             )
 
-        # Plot VALU and MFMA Peak
+        ###########################
+        # Plot VALU and MFMA Peak #
+        ###########################
         if dtype in PEAK_OPS_DATATYPES:
+            valu_data = self.__ceiling_data["valu"]
             plt.plot(
-                self.__ceiling_data["valu"][0],
-                [
-                    self.__ceiling_data["valu"][1][0] - 0.1,
-                    self.__ceiling_data["valu"][1][1] - 0.1,
-                ],
-                label="Peak VALU-{}".format(dtype),
+                valu_data[0],
+                [valu_data[1][0] - 0.1, valu_data[1][1] - 0.1],
+                label=f"Peak VALU-{dtype}",
                 marker="braille",
                 color=color_scheme["VALU"],
             )
             plt.text(
-                str(round(self.__ceiling_data["valu"][2])) + " G{}/s".format(ops_flops),
-                x=self.__ceiling_data["valu"][0][1] - 800,
-                y=self.__ceiling_data["valu"][1][1],
+                f"{round(valu_data[2])} G{ops_flops}/s",
+                x=valu_data[0][1] - 800,
+                y=valu_data[1][1],
                 background="black",
                 color="white",
                 alignment="right",
             )
             console_debug(
                 "roofline",
-                "VALU: [{},{}], [{},{}], {}".format(
-                    str(self.__ceiling_data["valu"][0][0]),
-                    str(self.__ceiling_data["valu"][0][1]),
-                    str(self.__ceiling_data["valu"][1][0]),
-                    str(self.__ceiling_data["valu"][1][1]),
-                    str(self.__ceiling_data["valu"][2]),
-                ),
+                f"VALU: [{valu_data[0][0]},{valu_data[0][1]}], [{valu_data[1][0]},{valu_data[1][1]}], {valu_data[2]}",
             )
         else:
-            console_warning("No PEAK measurement available for {}".format(dtype))
+            console_warning(f"No PEAK measurement available for {dtype}")
 
         if dtype in MFMA_DATATYPES:
+            mfma_data = self.__ceiling_data["mfma"]
             plt.plot(
-                self.__ceiling_data["mfma"][0],
-                [
-                    self.__ceiling_data["mfma"][1][0] - 0.1,
-                    self.__ceiling_data["mfma"][1][1] - 0.1,
-                ],
-                label="Peak MFMA-{}".format(dtype),
+                mfma_data[0],
+                [mfma_data[1][0] - 0.1, mfma_data[1][1] - 0.1],
+                label=f"Peak MFMA-{dtype}",
                 marker="braille",
                 color=color_scheme["MFMA"],
             )
             plt.text(
-                str(round(self.__ceiling_data["mfma"][2])) + " G{}/s".format(ops_flops),
-                x=self.__ceiling_data["mfma"][0][1] - 800,
-                y=self.__ceiling_data["mfma"][1][1],
+                f"{round(mfma_data[2])} G{ops_flops}/s",
+                x=mfma_data[0][1] - 800,
+                y=mfma_data[1][1],
                 background="black",
                 color="white",
                 alignment="right",
             )
             console_debug(
                 "roofline",
-                "MFMA: [{},{}], [{},{}], {}".format(
-                    str(self.__ceiling_data["mfma"][0][0]),
-                    str(self.__ceiling_data["mfma"][0][1]),
-                    str(self.__ceiling_data["mfma"][1][0]),
-                    str(self.__ceiling_data["mfma"][1][1]),
-                    str(self.__ceiling_data["mfma"][2]),
-                ),
+                f"MFMA: [{mfma_data[0][0]},{mfma_data[0][1]}], [{mfma_data[1][0]},{mfma_data[1][1]}], {mfma_data[2]}",
             )
         else:
-            console_warning("No MFMA measurement available for {}".format(dtype))
+            console_warning(f"No MFMA measurement available for {dtype}")
 
-        # Plot Application AI
+        #######################
+        # Plot Application AI #
+        #######################
         for cache_level in cache_hierarchy:
-            key = "ai_" + cache_level.lower()
+            key = f"ai_{cache_level.lower()}"
             if key in self.__ai_data:
-                for i in range(len(self.__ai_data["kernelNames"])):
-                    # Zero intensity level means no data reported for this cache level
+                kernel_names = self.__ai_data["kernelNames"]
+                for i in range(len(kernel_names)):
                     if self.__ai_data[key][0][i] > 0 and self.__ai_data[key][1][i] > 0:
                         plt.plot(
                             [self.__ai_data[key][0][i]],
                             [self.__ai_data[key][1][i]],
-                            label="AI_"
-                            + cache_level
-                            + "_{}".format(self.__ai_data["kernelNames"][i]),
+                            label=f"AI_{cache_level}_{kernel_names[i]}",
                             color=color_scheme[cache_level],
                             marker=kernel_markers[i % len(kernel_markers)],
                         )
                     console_debug(
                         "roofline",
-                        "AI_{}: {}, {}".format(
-                            self.__ai_data["kernelNames"][i],
-                            self.__ai_data[key][0][i],
-                            self.__ai_data[key][1][i],
-                        ),
+                        f"AI_{kernel_names[i]}: {self.__ai_data[key][0][i]}, {self.__ai_data[key][1][i]}",
                     )
 
-        plt.xlabel("Arithmetic Intensity ({})s/Byte)".format(ops_flops))
+        plt.xlabel(f"Arithmetic Intensity ({ops_flops})s/Byte)")
         plt.ylabel("Performance (GFLOP/sec)")
-        plt.title("Roofline ({}) - {}".format(dtype, base_path))
+        plt.title(f"Roofline ({dtype}) - {base_path}")
 
         # Canvas config
         plt.theme("pro")
@@ -878,52 +838,48 @@ class Roofline:
         plt.yscale("log")
 
         # Build figure
-        # Print plot using `plt._utility.write(self.cli_generate_plot(dtype))`
         return plt.build()
 
     @demarcate
     def standalone_roofline(self) -> None:
         if (
             not isinstance(self.__run_parameters["workload_dir"], list)
-            and self.__run_parameters["workload_dir"] != None
+            and self.__run_parameters["workload_dir"] is not None
         ):
             self.roof_setup()
 
-        # Change vL1D to a interpretable str, if required
+        # Replace vL1D with L1
         if "vL1D" in self.__run_parameters["mem_level"]:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        app_path = str(
-            Path(self.__run_parameters["workload_dir"]).joinpath("pmc_perf.csv")
-        )
-        roofline_exists = Path(app_path).is_file()
-        if not roofline_exists:
-            console_error("roofline", "{} does not exist".format(app_path))
+        app_path = Path(self.__run_parameters["workload_dir"]) / "pmc_perf.csv"
+
+        if not app_path.is_file():
+            console_error("roofline", f"{app_path} does not exist")
+
         t_df = OrderedDict()
         t_df["pmc_perf"] = pd.read_csv(app_path)
         profiling_config = file_io.load_profiling_config(self.__args.path)
+
         if profiling_config.get("format_rocprof_output") == "rocpd":
             t_df["pmc_perf"] = rocpd_data.process_rocpd_csv(t_df["pmc_perf"])
+
         self.empirical_roofline(ret_df=t_df)
 
     @abstractmethod
     def profile(self) -> None:
         if self.__args.roof_only:
             # check for roofline benchmark
-            console_log(
-                "roofline", "Checking for roofline.csv in " + str(self.__args.path)
-            )
-            roof_path = str(Path(self.__args.path).joinpath("roofline.csv"))
-            if not Path(roof_path).is_file():
+            console_log("roofline", f"Checking for roofline.csv in {self.__args.path}")
+            roof_path = Path(self.__args.path) / "roofline.csv"
+            if not roof_path.is_file():
                 mibench(self.__args, self.__mspec)
 
             # check for profiling data
-            console_log(
-                "roofline", "Checking for pmc_perf.csv in " + str(self.__args.path)
-            )
-            app_path = str(Path(self.__args.path).joinpath("pmc_perf.csv"))
-            if not Path(app_path).is_file():
+            console_log("roofline", f"Checking for pmc_perf.csv in {self.__args.path}")
+            app_path = Path(self.__args.path) / "pmc_perf.csv"
+            if not app_path.is_file():
                 console_log("roofline", "pmc_perf.csv not found. Generating...")
                 if not self.__args.remaining:
                     console_error(
@@ -949,10 +905,3 @@ class Roofline:
 
     def get_dtype(self) -> list[str]:
         return self.__run_parameters["roofline_data_type"]
-
-
-def to_int(a) -> Union[float, int]:
-    if a is None:
-        return np.nan
-    else:
-        return int(a)
