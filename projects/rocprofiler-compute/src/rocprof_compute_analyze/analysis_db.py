@@ -227,12 +227,12 @@ class db_analysis(OmniAnalyze_Base):
                 self._runs[workload_path].sys_info.iloc[0]["gpu_arch"]
             ]:
                 if dtype in PEAK_OPS_DATATYPES:
-                    if dtype.startswith("F"):
+                    if dtype.startswith("F") or dtype.startswith("B"):
                         keys.append(f"{dtype}Flops")
                     elif dtype.startswith("I"):
                         keys.append(f"{dtype}Ops")
                 if dtype in MFMA_DATATYPES:
-                    if dtype.startswith("F"):
+                    if dtype.startswith("F") or dtype.startswith("B"):
                         # FP16 -> F16
                         dtype = dtype.replace("FP", "F")
                         keys.append(f"MFMA{dtype}Flops")
