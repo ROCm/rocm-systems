@@ -43,6 +43,7 @@
 
 #include <cstddef>
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <sys/resource.h>
 #include <tuple>
@@ -199,10 +200,10 @@ serialize_freqs(const component::cpu_freq& freq)
 
     size_t offset = 0;
     do_for_enabled_cpus([&](const auto& idx) {
-        auto value                                         = freq.at(idx);
-        *reinterpret_cast<size_t*>(result.data() + offset) = idx;
+        auto value = freq.at(idx);
+        std::memcpy(result.data() + offset, &idx, sizeof(size_t));
         offset += sizeof(size_t);
-        *reinterpret_cast<float*>(result.data() + offset) = value;
+        std::memcpy(result.data() + offset, &value, sizeof(float));
         offset += sizeof(float);
     });
     return result;
@@ -258,6 +259,7 @@ sample()
     auto _rcache = tim::rusage_cache{ RUSAGE_SELF };
     auto _freqs  = component::cpu_freq{}.sample();
 
+    // user and kernel mode times are in microseconds
     trace_cache::get_buffer_storage().store(
         trace_cache::entry_type::cpu_freq_sample, _timestamp, tim::get_page_rss(),
         tim::get_virt_mem(), _rcache.get_peak_rss(),
@@ -267,7 +269,6 @@ sample()
         _rcache.get_user_mode_time() * 1000, _rcache.get_kernel_mode_time() * 1000,
         serialize_freqs(_freqs));
 
-    // user and kernel mode times are in microseconds
     data.emplace_back(
         _timestamp, tim::get_page_rss(), tim::get_virt_mem(), _rcache.get_peak_rss(),
         _rcache.get_num_priority_context_switch() +

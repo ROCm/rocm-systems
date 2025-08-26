@@ -36,6 +36,7 @@
 #    include <rocprofiler-sdk/cxx/name_info.hpp>
 #endif
 #include <set>
+#include <sstream>
 #include <stdint.h>
 #include <string.h>
 #include <string>

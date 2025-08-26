@@ -335,7 +335,7 @@ get_state()
 }
 
 std::vector<uint8_t>
-serialize_xcp_metrics(const bool& is_vcn_supported, const bool& is_jpeg_supported,
+serialize_xcp_metrics(const bool& use_vcn_activity, const bool& use_jpeg_activity,
                       const amdsmi_gpu_metrics_t& gpu_metrics)
 {
     // Chunk:
@@ -373,14 +373,14 @@ serialize_xcp_metrics(const bool& is_vcn_supported, const bool& is_jpeg_supporte
 
     std::vector<uint8_t> result;
 
-    const bool   is_vcn_jpeg_supporetd = (is_vcn_supported || is_jpeg_supported);
-    const size_t chunk_count           = is_vcn_jpeg_supporetd ? 1 : xcp_count;
+    const bool   is_vcn_jpeg_supported = (use_vcn_activity || use_jpeg_activity);
+    const size_t chunk_count           = is_vcn_jpeg_supported ? 1 : xcp_count;
     const size_t total_size = serialized_data_headers + (chunk_count * chunk_size);
 
     result.reserve(total_size);
 
-    result.push_back((uint8_t) is_vcn_supported);
-    result.push_back((uint8_t) is_jpeg_supported);
+    result.push_back((uint8_t) use_vcn_activity);
+    result.push_back((uint8_t) use_jpeg_activity);
     result.push_back(chunk_count);
     result.push_back(vcn_count);
     result.push_back(jpeg_count);
@@ -388,10 +388,10 @@ serialize_xcp_metrics(const bool& is_vcn_supported, const bool& is_jpeg_supporte
     for(size_t count = 0; count < chunk_count; ++count)
     {
         const auto* vcn_data =
-            (is_vcn_jpeg_supporetd ? gpu_metrics.vcn_activity
+            (is_vcn_jpeg_supported ? gpu_metrics.vcn_activity
                                    : gpu_metrics.xcp_stats[count].vcn_busy);
         const auto* jpeg_data =
-            (is_vcn_jpeg_supporetd ? gpu_metrics.jpeg_activity
+            (is_vcn_jpeg_supported ? gpu_metrics.jpeg_activity
                                    : gpu_metrics.xcp_stats[count].jpeg_busy);
 
         serialize_uint16_array(result, vcn_data, vcn_count);

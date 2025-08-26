@@ -572,16 +572,16 @@ rocpd_post_processing::get_cpu_freq_sample_callback() const
         float  value;
     };
 
-    auto deserialize_freqs = [](std::vector<uint8_t>& data) {
+    auto deserialize_freqs = [](std::vector<uint8_t>& buffer) {
         std::vector<core_freq_sample> result;
         size_t                        offset = 0;
 
-        while(offset + sizeof(float) + sizeof(size_t) <= data.size())
+        while(offset + sizeof(float) + sizeof(size_t) <= buffer.size())
         {
             core_freq_sample core_sample;
-            core_sample.id = *reinterpret_cast<size_t*>(data.data() + offset);
+            std::memcpy(&core_sample.id, buffer.data() + offset, sizeof(size_t));
             offset += sizeof(size_t);
-            core_sample.value = *reinterpret_cast<float*>(data.data() + offset);
+            std::memcpy(&core_sample.value, buffer.data() + offset, sizeof(float));
             offset += sizeof(float);
             result.push_back(core_sample);
         }
