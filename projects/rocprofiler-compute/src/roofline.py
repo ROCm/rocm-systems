@@ -614,8 +614,6 @@ class Roofline:
         if workload is not None:
             self.__ai_data = calc_ai_analyze(
                 workload=workload,
-                mspec=self.__mspec,
-                sort_type=self.__run_parameters.get("sort_type"),
                 config=config,
                 arch_config=arch_config,
             )

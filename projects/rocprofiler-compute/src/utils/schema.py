@@ -73,7 +73,7 @@ class Workload:
 
 
 # Metrics will be calculated ONLY when the header(key) is in below list
-supported_field = [
+SUPPORTED_FIELD = [
     "Value",
     "Minimum",
     "Maximum",
@@ -122,4 +122,4 @@ supported_field = [
 ]
 
 # The prefix of raw pmc_perf.csv
-pmc_perf_file_prefix = "pmc_perf"
+PMC_PERF_FILE_PREFIX = "pmc_perf"

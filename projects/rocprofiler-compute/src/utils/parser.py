@@ -426,7 +426,7 @@ def build_eval_string(equation: str, coll_level: str, config: dict[str, Any]) ->
         # Replace SQ_ACCUM_PREV_HIRES with coll_level_ACCUM then ignore coll_level df
         s = re.sub("SQ_ACCUM_PREV_HIRES", f"{coll_level}_ACCUM", s)
         s = re.sub(
-            r"raw_pmc_df", "raw_pmc_df['" + schema.pmc_perf_file_prefix + "']", s
+            r"raw_pmc_df", "raw_pmc_df['" + schema.PMC_PERF_FILE_PREFIX + "']", s
         )
     else:
         s = re.sub(r"raw_pmc_df", "raw_pmc_df['" + coll_level + "']", s)
@@ -583,7 +583,7 @@ def build_metric_row_values(
     if "alias" in entries:
         values.append(entries["alias"])
 
-    values.append(entries.get("coll_level", schema.pmc_perf_file_prefix))
+    values.append(entries.get("coll_level", schema.PMC_PERF_FILE_PREFIX))
 
     if "metrics_description" in panel:
         values.append(panel["metrics_description"].get(key, ""))
@@ -801,7 +801,7 @@ def build_metric_value_string(
     for table_id, df in dfs.items():
         if dfs_type[table_id] == "metric_table":
             for expr in df.columns:
-                if expr in schema.supported_field:
+                if expr in schema.SUPPORTED_FIELD:
                     # NB: apply all build-in before building the whole string
                     df[expr] = df[expr].apply(update_denom_string, unit=normal_unit)
 
@@ -829,7 +829,7 @@ def eval_builtin_vars(config: dict[str, Any]) -> dict[str, Any]:
         if "PER_XCD" not in key:
             continue
 
-        s = build_eval_string(value, schema.pmc_perf_file_prefix, config)
+        s = build_eval_string(value, schema.PMC_PERF_FILE_PREFIX, config)
         try:
             build_in[f"ammolite__{key}"] = eval(compile(s, "<string>", "eval"))
         except (TypeError, KeyError, AttributeError):
@@ -843,7 +843,7 @@ def eval_builtin_vars(config: dict[str, Any]) -> dict[str, Any]:
         if "PER_XCD" in key:
             continue
 
-        s = build_eval_string(value, schema.pmc_perf_file_prefix, config)
+        s = build_eval_string(value, schema.PMC_PERF_FILE_PREFIX, config)
         try:
             build_in[f"ammolite__{key}"] = eval(compile(s, "<string>", "eval"))
         except (TypeError, KeyError, AttributeError):
@@ -975,7 +975,7 @@ def collect_expressions_for_evaluation(
 ) -> None:
     for idx, row in df.iterrows():
         for expr in df.columns:
-            if expr in schema.supported_field and expr.lower() != "alias":
+            if expr in schema.SUPPORTED_FIELD and expr.lower() != "alias":
                 if row[expr]:
                     row_expr_indexes.append((table_id, idx, expr))
                     row_exprs.append(row[expr])
@@ -1055,7 +1055,7 @@ def apply_filters(
 
     if workload.filter_nodes:
         ret_df = ret_df.loc[
-            ret_df[schema.pmc_perf_file_prefix]["Node"]
+            ret_df[schema.PMC_PERF_FILE_PREFIX]["Node"]
             .astype(str)
             .isin([workload.filter_gpu_ids])
         ]
@@ -1064,7 +1064,7 @@ def apply_filters(
 
     if workload.filter_gpu_ids:
         ret_df = ret_df.loc[
-            ret_df[schema.pmc_perf_file_prefix]["GPU_ID"]
+            ret_df[schema.PMC_PERF_FILE_PREFIX]["GPU_ID"]
             .astype(str)
             .isin([workload.filter_gpu_ids])
         ]
@@ -1098,10 +1098,10 @@ def apply_filters(
 
             if kernels:
                 ret_df = ret_df.loc[
-                    ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(kernels)
+                    ret_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].isin(kernels)
                 ]
         elif all(isinstance(kid, str) for kid in workload.filter_kernel_ids):
-            df_cleaned = ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].apply(
+            df_cleaned = ret_df[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"].apply(
                 lambda x: x.strip() if isinstance(x, str) else x
             )
             ret_df = ret_df.loc[df_cleaned.isin(workload.filter_kernel_ids)]
@@ -1124,7 +1124,7 @@ def apply_filters(
             if m:
                 threshold = int(m.group(1))
                 ret_df = ret_df[
-                    ret_df[schema.pmc_perf_file_prefix]["Dispatch_ID"] > threshold
+                    ret_df[schema.PMC_PERF_FILE_PREFIX]["Dispatch_ID"] > threshold
                 ]
         else:
             dispatches = [int(x) for x in workload.filter_dispatch_ids]
@@ -1621,7 +1621,7 @@ def build_comparable_columns(time_unit: str) -> list[str]:
     """
     Build comparable columns/headers for display
     """
-    comparable_columns = schema.supported_field
+    comparable_columns = schema.SUPPORTED_FIELD
     top_stat_base = [
         "Count",
         "Sum",

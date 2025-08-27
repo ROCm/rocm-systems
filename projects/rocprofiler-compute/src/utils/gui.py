@@ -46,7 +46,7 @@ IS_DARK = True  # TODO: Remove hardcoded in favor of class property
 def filter_df(column: str, df: pd.DataFrame, filt: list[str]) -> pd.DataFrame:
     if not filt:
         return df
-    return df.loc[df[schema.pmc_perf_file_prefix][column].astype(str).isin(filt)]
+    return df.loc[df[schema.PMC_PERF_FILE_PREFIX][column].astype(str).isin(filt)]
 
 
 def multi_bar_chart(

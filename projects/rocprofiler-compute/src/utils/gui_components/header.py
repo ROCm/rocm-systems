@@ -48,7 +48,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
     kernel_names = list(
         map(
             str,
-            raw_pmc[schema.pmc_perf_file_prefix]["Kernel_Name"],
+            raw_pmc[schema.PMC_PERF_FILE_PREFIX]["Kernel_Name"],
         )
     )
     kernel_names = [x.strip() for x in kernel_names]
@@ -200,7 +200,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                         map(
                                                             str,
                                                             raw_pmc[
-                                                                schema.pmc_perf_file_prefix
+                                                                schema.PMC_PERF_FILE_PREFIX
                                                             ]["GPU_ID"],
                                                         )
                                                     ),
@@ -233,7 +233,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                     map(
                                                         str,
                                                         raw_pmc[
-                                                            schema.pmc_perf_file_prefix
+                                                            schema.PMC_PERF_FILE_PREFIX
                                                         ]["Dispatch_ID"],
                                                     )
                                                 ),

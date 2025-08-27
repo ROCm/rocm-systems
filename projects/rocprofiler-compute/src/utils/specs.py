@@ -35,7 +35,7 @@ from dataclasses import dataclass, field, fields
 from datetime import datetime
 from math import ceil
 from pathlib import Path as path
-from typing import Optional, Tuple
+from typing import Optional, Any
 
 import pandas as pd
 
@@ -45,7 +45,7 @@ from utils.mi_gpu_spec import mi_gpu_specs
 from utils.tty import get_table_string
 from utils.utils import get_version
 
-VERSION_LOC = [
+VERSION_LOC: list[str] = [
     "version",
     "version-dev",
     "version-hip-libraries",
@@ -57,40 +57,31 @@ VERSION_LOC = [
 ]
 
 
-def detect_arch(_rocminfo) -> Optional[Tuple[str, int]]:
-    gpu_arch = None
-    idx1 = -1
-
-    for idx1, linetext in enumerate(_rocminfo):
-        # NOTE: currently supported socs are gfx archs only
+def detect_arch(_rocminfo: list[str]) -> Optional[tuple[str, int]]:
+    for idx, linetext in enumerate(_rocminfo):
         gpu_arch = search(r"^\s*Name\s*:\s* ([Gg][Ff][Xx][a-zA-Z0-9]+).*\s*$", linetext)
-        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict().keys():
-            break
+        if gpu_arch and gpu_arch in mi_gpu_specs.get_gpu_series_dict()
+            return (gpu_arch, idx)
 
-    if not gpu_arch or gpu_arch not in mi_gpu_specs.get_gpu_series_dict().keys():
-        console_error(f"Cannot find a supported arch in rocminfo: {gpu_arch}")
-    else:
-        return (gpu_arch, idx1)
+    console_error(f"Cannot find a supported arch in rocminfo")
 
 
-def detect_gpu_chip_id(_rocminfo) -> Optional[str]:
-    gpu_chip_id = None
 
+def detect_gpu_chip_id(_rocminfo: list[str]) -> Optional[str]:
     for idx1, linetext in enumerate(_rocminfo):
         # NOTE: current supported socs only have numbers in Chip ID
         chip_found = search(r"^\s*Chip ID\s*:\s* ([0-9]+).*\s*$", linetext)
         if chip_found:
             gpu_chip_id = str(chip_found)
-            break
+            chip_id_dict = mi_gpu_specs.get_chip_id_dict()
 
-    if not gpu_chip_id:
-        console_warning("No Chip ID detected: " + str(gpu_chip_id))
-    elif (
-        gpu_chip_id not in mi_gpu_specs.get_chip_id_dict().keys()
-        and int(gpu_chip_id) not in mi_gpu_specs.get_chip_id_dict().keys()
-    ):
-        console_warning("Unknown Chip ID detected: " + str(gpu_chip_id))
-    return gpu_chip_id
+            if gpu_chip_id not in chip_id_dict and int(gpu_chip_id) not in chip_id_dict:
+                console_warning(f"Unknown Chip ID detected: {gpu_chip_id}")
+
+            return gpu_chip_id
+
+    console_warning("No Chip ID detected")
+    return None
 
 
 # Custom decorator to mimic the behavior of kw_only found in Python 3.10
@@ -103,7 +94,7 @@ def kw_only(cls):
     return cls
 
 
-def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]:
+def generate_machine_specs(args: Any, sysinfo: Optional[dict[str, Any]] = None) -> MachineSpecs:
     if sysinfo is not None:
         try:
             sysinfo_ver = str(sysinfo["version"])
@@ -112,6 +103,7 @@ def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]
                 "Detected mismatch in sysinfo versioning. You need to reprofile "
                 "to update data."
             )
+
         version = get_version(config.rocprof_compute_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
             console_warning(
@@ -119,67 +111,155 @@ def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]
                 "to update data."
             )
         return MachineSpecs(**sysinfo)
+
     # read timestamp info
     now = datetime.now()
     local_now = now.astimezone()
     local_tz = local_now.tzinfo
     local_tzname = local_tz.tzname(local_now)
-    timestamp = now.strftime("%c") + " (" + local_tzname + ")"
+    timestamp = f"{now.strftime('%c')} ({local_tzname})"
     hostname = socket.gethostname()
 
     # set specs version
-    vData = get_version(config.rocprof_compute_home)
-    version = vData["version"]
+    version_data  = get_version(config.rocprof_compute_home)
+    version = version_data ["version"]
     # NB: Just taking major as specs version.
     # May want to make this more specific in the future
+    # version will always follow 'major.minor.patch' format
     specs_version = version[
         : version.find(".")
-    ]  # version will always follow 'major.minor.patch' format
+    ]
 
     ##########################################
     ## A. Machine Specs
     ##########################################
-    cpuinfo = path("/proc/cpuinfo").read_text()
-    meminfo = path("/proc/meminfo").read_text()
-    version = path("/proc/version").read_text()
-    os_release = path("/etc/os-release").read_text()
-    cpu_model = search(r"^model name\s*: (.*?)$", cpuinfo)
-    sbios = (
-        path("/sys/class/dmi/id/bios_vendor").read_text().strip()
-        + path("/sys/class/dmi/id/bios_version").read_text().strip()
-    )
-    linux_kernel_version = search(r"version (\S*)", version)
-    amd_gpu_kernel_version = ""  # TODO: Extract amdgpu kernel version
-    cpu_memory = search(r"MemTotal:\s*(\S*)", meminfo)
-    gpu_memory = ""  # TODO: Extract gpu memory
-    linux_distro = search(r'PRETTY_NAME="(.*?)"', os_release)
-    if linux_distro is None:
-        linux_distro = ""
-    rocm_version = get_rocm_ver().strip()
+    machine_info = extract_machine_info()
+
     # FIXME: use device
+    # Load amd-smi data
+    gpu_info = extract_gpu_info()
+
+    ##########################################
+    ## B. SoC Specs
+    ##########################################
+    # read rocminfo
+    soc_info = extract_soc_info()
+    if soc_info is None:
+        return None
+
+    # Combine all specifications
+    specs = MachineSpecs(
+        version=specs_version,
+        timestamp=timestamp,
+        _rocminfo=soc_info["_rocminfo"],
+        hostname=hostname,
+        cpu_model=machine_info["cpu_model"],
+        sbios=machine_info["sbios"],
+        linux_kernel_version=machine_info["linux_kernel_version"],
+        amd_gpu_kernel_version="",
+        cpu_memory=machine_info["cpu_memory"],
+        gpu_memory="",
+        linux_distro=machine_info["linux_distro"],
+        rocm_version=get_rocm_ver().strip(),
+        vbios=gpu_info["vbios"],
+        compute_partition=gpu_info["compute_partition"],
+        memory_partition=gpu_info["memory_partition"],
+        gpu_arch=soc_info["gpu_arch"],
+        gpu_chip_id=soc_info["gpu_chip_id"],
+    )
+
+    # Load above SoC specs via module import
+    try:
+        soc_module = importlib.import_module(
+            "rocprof_compute_soc.soc_" + specs.gpu_arch
+        )
+        soc_class = getattr(soc_module, specs.gpu_arch + "_soc")
+        soc_obj = soc_class(args, specs)  # noqa: F841
+    except ModuleNotFoundError as e:
+        console_error(f"Arch {specs.gpu_arch} marked as supported, but couldn't find class implementation {e}.")
+
+    # Update arch specific specs
+    specs.gpu_model = mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
+    specs.num_xcd = mi_gpu_specs.get_num_xcds(
+        specs.gpu_arch, specs.gpu_model, specs.compute_partition
+    )
+    specs.total_l2_chan: str = total_l2_banks(
+        specs.gpu_arch, specs.gpu_model, specs._l2_banks, specs.compute_partition
+    )
+    specs.num_hbm_channels: str = str(specs.get_hbm_channels())
+
+    return specs
+
+
+def extract_machine_info() -> dict[str, Any]:
+    result =  {
+        "cpu_model": "",
+        "sbios": "",
+        "linux_kernel_version": "",
+        "cpu_memory": "",
+        "linux_distro": "",
+    }
+
+    try:
+        cpuinfo = path("/proc/cpuinfo").read_text()
+        meminfo = path("/proc/meminfo").read_text()
+        version = path("/proc/version").read_text()
+        os_release = path("/etc/os-release").read_text()
+
+        cpu_model = search(r"^model name\s*: (.*?)$", cpuinfo)
+        sbios = (
+            path("/sys/class/dmi/id/bios_vendor").read_text().strip() +
+            path("/sys/class/dmi/id/bios_version").read_text().strip()
+        )
+        linux_kernel_version = search(r"version (\S*)", version)
+        cpu_memory = search(r"MemTotal:\s*(\S*)", meminfo)
+        linux_distro = search(r'PRETTY_NAME="(.*?)"', os_release) or ""
+
+    except (OSError, IOError) as e:
+        console_warning(f"Could not read system files: {e}")
+        return result
+
+    return {
+        "cpu_model": cpu_model,
+        "sbios": sbios,
+        "linux_kernel_version": linux_kernel_version,
+        "cpu_memory": cpu_memory,
+        "linux_distro": linux_distro,
+    }
+
+
+def extract_gpu_info() -> dict[str, str]:
+    result = {
+        "vbios":"",
+        "compute_partition": "",
+        "memory_partition": ""
+    }
 
     # Load amd-smi static data for GPU 0
-    static_data = json.loads(
-        run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
-    )
+    static_output = run(["amd-smi", "static", "--gpu=0", "--json"], exit_on_error=True)
+    if static_output is None:
+        return result
+
+    try:
+        static_data = json.loads(static_output)
+    except json.JSONDecodeError as e:
+        console_warning(f"Failed to parse amd-smi static output: {e}")
+        return result
 
     # Extract GPU data
-    gpu_list = (
-        static_data
-        if isinstance(static_data, list)
-        else static_data.get("gpu_data", [])
-    )
+    gpu_list = static_data if isinstance(static_data, list) else static_data.get("gpu_data", [])
     gpu_data = gpu_list[0] if gpu_list else {}
-
     vbios = gpu_data.get("vbios", {}).get("part_number")
 
     # Load amd-smi partition data for GPU 0 (amd-smi >= 26.0.0)
-    try:
-        partition_data = json.loads(
-            run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False)
-        )
-    except json.JSONDecodeError:
-        partition_data = {}
+    partition_output = run(["amd-smi", "partition", "--gpu=0", "--json"], exit_on_error=False)
+    partition_data = {}
+
+    if partition_output:
+        try:
+            partition_data = json.loads(partition_output)
+        except json.JSONDecodeError:
+            partition_data = {}
 
     current_partition = partition_data.get("current_partition", [{}])[0]
 
@@ -189,9 +269,10 @@ def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]
         or gpu_data.get("partition", {}).get("accelerator_partition")
         or gpu_data.get("partition", {}).get("compute_partition")
     )
-    memory_partition = current_partition.get("memory") or gpu_data.get(
-        "partition", {}
-    ).get("memory_partition")
+    memory_partition = (
+        current_partition.get("memory")
+        or gpu_data.get("partition", {}).get("memory_partition")
+    )
 
     # Apply defaults and warnings
     if not compute_partition:
@@ -202,63 +283,41 @@ def generate_machine_specs(args, sysinfo: dict = None) -> Optional[MachineSpecs]
     if not memory_partition:
         console_warning("Cannot detect memory partition from amd-smi.")
 
-    console_debug(
-        "vbios is {}, compute partition is {}, memory partition is {}".format(
-            vbios, compute_partition, memory_partition
-        )
-    )
+    console_debug(f"vbios is {vbios}, compute partition is {compute_partition}, memory partition is {memory_partition}")
 
-    ##########################################
-    ## B. SoC Specs
-    ##########################################
-    # read rocminfo
+    return {
+        "vbios": vbios,
+        "compute_partition": compute_partition,
+        "memory_partition": memory_partition,
+    }
+
+
+def extract_soc_info() -> dict[str, Any]:
+    result = {
+        "_rocminfo": "",
+        "gpu_arch": "",
+        "gpu_chip_id": ""}
+    # Read rocminfo
     rocminfo_full = run(["rocminfo"])
-    _rocminfo = rocminfo_full.split("\n")
-    gpu_arch, idx = detect_arch(_rocminfo)
-    _rocminfo = _rocminfo[idx + 1 :]  # update rocminfo for target section
-    gpu_chip_id = detect_gpu_chip_id(_rocminfo)
-    specs = MachineSpecs(
-        version=specs_version,
-        timestamp=timestamp,
-        _rocminfo=_rocminfo,
-        hostname=hostname,
-        cpu_model=cpu_model,
-        sbios=sbios,
-        linux_kernel_version=linux_kernel_version,
-        amd_gpu_kernel_version=amd_gpu_kernel_version,
-        cpu_memory=cpu_memory,
-        gpu_memory=gpu_memory,
-        linux_distro=linux_distro,
-        rocm_version=rocm_version,
-        vbios=vbios,
-        compute_partition=compute_partition,
-        memory_partition=memory_partition,
-        gpu_arch=gpu_arch,
-        gpu_chip_id=gpu_chip_id,
-    )
+    if rocminfo_full is None:
+        return result
 
-    # Load above SoC specs via module import
-    try:
-        soc_module = importlib.import_module(
-            "rocprof_compute_soc.soc_" + specs.gpu_arch
-        )
-    except ModuleNotFoundError as e:
-        console_error(
-            "Arch %s marked as supported, but couldn't find class implementation %s."
-            % (specs.gpu_arch, e)
-        )
-    soc_class = getattr(soc_module, specs.gpu_arch + "_soc")
-    soc_obj = soc_class(args, specs)  # noqa: F841
-    # Update arch specific specs
-    specs.gpu_model = mi_gpu_specs.get_gpu_model(specs.gpu_arch, specs.gpu_chip_id)
-    specs.num_xcd = mi_gpu_specs.get_num_xcds(
-        specs.gpu_arch, specs.gpu_model, specs.compute_partition
-    )
-    specs.total_l2_chan: str = total_l2_banks(
-        specs.gpu_arch, specs.gpu_model, specs._l2_banks, specs.compute_partition
-    )
-    specs.num_hbm_channels: str = str(specs.get_hbm_channels())
-    return specs
+    rocminfo_lines = rocminfo_full.split("\n")
+    arch_result = detect_arch(rocminfo_lines)
+
+    if arch_result is None:
+        return result
+
+    gpu_arch, arch_idx = arch_result
+    rocminfo_lines = rocminfo_lines[arch_idx + 1:]  # update rocminfo for target section
+    gpu_chip_id = detect_gpu_chip_id(rocminfo_lines)
+
+    return {
+        "_rocminfo": rocminfo_lines,
+        "gpu_arch": gpu_arch,
+        "gpu_chip_id": gpu_chip_id,
+    }
+
 
 
 @kw_only

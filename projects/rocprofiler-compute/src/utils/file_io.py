@@ -208,7 +208,7 @@ def create_df_pmc(
                 # Process SQ*.csv or pmc_perf.csv files
                 # print("file ", f)
                 is_sq_file = file_name.endswith(".csv") and file_name.startswith("SQ")
-                is_pmc_perf = file_name == f"{schema.pmc_perf_file_prefix}.csv"
+                is_pmc_perf = file_name == f"{schema.PMC_PERF_FILE_PREFIX}.csv"
 
                 if is_sq_file or is_pmc_perf:
                     file_path = Path(root) / file_name
