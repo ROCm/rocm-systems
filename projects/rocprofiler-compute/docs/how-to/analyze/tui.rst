@@ -47,7 +47,7 @@ Select a kernel of interest to load the corresponding analysis results. The top 
    :width: 800
 
 4. After the analysis results are loaded, you can start interactive analysis with the detailed metrics by
-uncollapse contents to view tables, charts, and graphs visualizing the analysis data.
+expanding the collapsed contents to view tables, charts, and graphs, and visualizing the analysis data.
 The TUI supports basic keyboard shortcuts, including quit application commands for easy navigation.
 
 TUI analysis structure
