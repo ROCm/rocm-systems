@@ -171,10 +171,11 @@ class MIGPUSpecs:
                     )
 
     @classmethod
-    def get_gpu_series_dict(cls) -> Optional[dict[str, str]]:
+    def get_gpu_series_dict(cls) -> dict[str, str]:
         if not cls._gpu_series_dict:
             console_error(
-                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?"
+                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?",
+                exit=False,
             )
         return cls._gpu_series_dict
 
@@ -182,7 +183,8 @@ class MIGPUSpecs:
     def get_gpu_series(cls, gpu_arch: str) -> Optional[str]:
         if not cls._gpu_series_dict:
             console_error(
-                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?"
+                "gpu_series_dict not yet populated, did you run parse_mi_gpu_spec()?",
+                exit=False,
             )
 
         # Normalize the key by checking both the raw and lowercase versions
@@ -196,20 +198,22 @@ class MIGPUSpecs:
         return None
 
     @classmethod
-    def get_perfmon_config(cls, gpu_arch: str) -> Optional[Any]:
+    def get_perfmon_config(cls, gpu_arch: str) -> dict[Any, Any]:
         # Check that gpu_model_dict is populated first
         if not cls._perfmon_config:
             console_error(
                 "gpu_model_dict not yet populated. Did you run parse_mi_gpu_spec()?"
             )
-            return None
 
-        return cls._perfmon_config.get(gpu_arch.lower(), None)
+        return cls._perfmon_config.get(gpu_arch.lower(), {})
 
     @classmethod
     def get_gpu_model(
-        cls, gpu_arch: str, chip_id: Optional[str] = None
+        cls, gpu_arch: Optional[str], chip_id: Optional[str] = None
     ) -> Optional[str]:
+        if not gpu_arch or not chip_id:
+            return None
+
         # Check that gpu_model_dict is populated first
         if not cls._gpu_model_dict:
             console_error(
@@ -361,18 +365,12 @@ class MIGPUSpecs:
         return cls.set_default_gpu_settings(gpu_arch, gpu_model, compute_partition)
 
     @classmethod
-    def get_chip_id_dict(cls) -> Optional[dict[int, str]]:
-        if cls._chip_id_dict:
-            return cls._chip_id_dict
-        else:
-            console_error("chip_id_dict not populated")
+    def get_chip_id_dict(cls) -> dict[int, str]:
+        return cls._chip_id_dict
 
     @classmethod
-    def get_num_xcds_dict(cls) -> Optional[dict[str, dict[str, int]]]:
-        if cls._num_xcds_dict:
-            return cls._num_xcds_dict
-        else:
-            console_error("num_xcds_dict not populated")
+    def get_num_xcds_dict(cls) -> dict[str, dict[str, int]]:
+        return cls._num_xcds_dict
 
     @classmethod
     def get_gpu_arch_to_compute_partition_dict(cls) -> dict[str, dict[str, int]]:

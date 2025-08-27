@@ -26,6 +26,7 @@
 import copy
 import textwrap
 from pathlib import Path
+from typing import Any, Optional
 
 import pandas as pd
 from tabulate import tabulate
@@ -37,27 +38,30 @@ from utils.logger import console_error, console_log, console_warning
 from utils.utils import convert_metric_id_to_panel_info
 
 
-def string_multiple_lines(source, width, max_rows) -> str:
+def string_multiple_lines(source: str, width: int, max_rows: int) -> str:
     """
     Adjust string with multiple lines by inserting '\n'
     """
-    idx = 0
-    lines = []
-    while idx < len(source) and len(lines) < max_rows:
-        lines.append(source[idx : idx + width])
-        idx += width
+    lines: list[str] = []
+    for i in range(0, len(source), width):
+        if len(lines) >= max_rows:
+            break
+        lines.append(source[i : i + width])
 
-    if idx < len(source):
-        last = lines[-1]
-        lines[-1] = last[0:-3] + "..."
+    if len(lines) == max_rows and len(source) > max_rows * width:
+        lines[-1] = lines[-1][:-3] + "..."
+
     return "\n".join(lines)
 
 
-def get_table_string(df, transpose=False, decimal=2) -> str:
+def get_table_string(
+    df: pd.DataFrame, transpose: bool = False, decimal: int = 2
+) -> str:
     """
     Convert DataFrame to a formatted table string, wrapping specified columns.
     """
     df_to_show = df.transpose() if transpose else df
+
     wrap_columns = ["Description"]
     wrap_width = 40
     for col in wrap_columns:
@@ -71,38 +75,35 @@ def get_table_string(df, transpose=False, decimal=2) -> str:
         df_to_show,
         headers="keys",
         tablefmt="fancy_grid",
-        floatfmt="." + str(decimal) + "f",
+        floatfmt=f".{decimal}f",
     )
 
 
-def convert_time_columns(df, time_unit) -> pd.DataFrame:
+def convert_time_columns(df: pd.DataFrame, time_unit: str) -> pd.DataFrame:
     """
     Convert time column values based on the specified time unit.
     Uses the Unit column to identify which columns contain time data.
     """
+
     if time_unit not in config.TIME_UNITS or "Unit" not in df.columns:
         return df
 
     # Avoid modifying the original
     df_copy = df.copy()
-
     time_rows = df_copy["Unit"].str.lower().str.contains("ns", na=False)
-
     time_value_columns = ["Avg", "Min", "Max"]
 
     for col in time_value_columns:
-        if col in df_copy.columns:
-            mask = time_rows
-            if mask.any():
-                try:
-                    numeric_values = pd.to_numeric(
-                        df_copy.loc[mask, col], errors="coerce"
-                    )
-                    df_copy.loc[mask, col] = (
-                        numeric_values / config.TIME_UNITS[time_unit]
-                    )
-                except Exception:
-                    pass
+        if col in df_copy.columns and time_rows.any():
+            try:
+                numeric_values = pd.to_numeric(
+                    df_copy.loc[time_rows, col], errors="coerce"
+                )
+                df_copy.loc[time_rows, col] = (
+                    numeric_values / config.TIME_UNITS[time_unit]
+                )
+            except Exception:
+                pass
 
     # Update the Unit column
     if time_rows.any():
@@ -111,22 +112,31 @@ def convert_time_columns(df, time_unit) -> pd.DataFrame:
     return df_copy
 
 
-def has_time_data(df) -> bool:
+def has_time_data(df: pd.DataFrame) -> bool:
     """
     Check if the dataframe contains time data by looking at the Unit column.
     """
+
     if "Unit" not in df.columns:
         return False
     # NOTE: "ns" / "NS" / "nS" / "Ns" are reserved for Nanosec time unit
     return df["Unit"].str.lower().str.contains("ns", na=False).any()
 
 
-def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) -> None:
+def show_all(
+    args: Any,
+    runs: dict[str, Any],
+    arch_configs: Any,
+    output: Any,
+    profiling_config: dict[str, Any],
+    roof_plot: Optional[str] = None,
+) -> None:
     """
     Show all panels with their data in plain text mode.
     """
     comparable_columns = parser.build_comparable_columns(args.time_unit)
     filter_panel_ids = profiling_config.get("filter_blocks", [])
+
     if isinstance(filter_panel_ids, dict):
         # For backward compatibility
         filter_panel_ids = [
@@ -137,16 +147,18 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) 
         for metric_id in filter_panel_ids
         if (result := convert_metric_id_to_panel_info(metric_id)) is not None
     ]
+
     if args.include_cols:
         hidden_cols = list(set(config.HIDDEN_COLUMNS_CLI) - set(args.include_cols))
     else:
         hidden_cols = config.HIDDEN_COLUMNS_CLI
 
-    for panel_id, panel in archConfigs.panel_configs.items():
+    for panel_id, panel in arch_configs.panel_configs.items():
         # Skip panels that don't support baseline comparison
         if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
             continue
-        ss = ""  # store content of all data_source from one panel
+
+        panel_content = ""  # store content of all data_source from one panel
 
         if panel_id == 400:
             has_roofline_style = any(
@@ -485,7 +497,9 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) 
                         and table_config["title"]
                         and not is_empty_columns_exist
                     ):
-                        ss += table_id_str + " " + table_config["title"] + "\n"
+                        panel_content += (
+                            table_id_str + " " + table_config["title"] + "\n"
+                        )
 
                     if args.df_file_dir:
                         p = Path(args.df_file_dir)
@@ -526,7 +540,7 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) 
                             # NB: to avoid broken test with
                             # arbitrary number with "--cols" option
                             if "Metric" in df.columns and "Value" in df.columns:
-                                ss += mem_chart.plot_mem_chart(
+                                panel_content += mem_chart.plot_mem_chart(
                                     "",
                                     args.normal_unit,
                                     pd.DataFrame([df["Metric"], df["Value"]])
@@ -534,19 +548,19 @@ def show_all(args, runs, archConfigs, output, profiling_config, roof_plot=None) 
                                     .set_index("Metric")
                                     .to_dict()["Value"],
                                 )
-                                ss += "\n"
+                                panel_content += "\n"
                         else:
-                            ss += (
+                            panel_content += (
                                 get_table_string(
                                     df, transpose=transpose, decimal=args.decimal
                                 )
                                 + "\n"
                             )
 
-        if ss:
+        if panel_content:
             print("\n" + "-" * 80, file=output)
             print(str(panel_id // 100) + ". " + panel["title"], file=output)
-            print(ss, file=output)
+            print(panel_content, file=output)
 
 
 def show_roof_plot(roof_plot) -> None:
@@ -564,13 +578,13 @@ def show_roof_plot(roof_plot) -> None:
         )
 
 
-def show_kernel_stats(args, runs, archConfigs, output) -> None:
+def show_kernel_stats(args, runs, arch_configs, output) -> None:
     """
     Show the kernels and dispatches from "Top Stats" section.
     """
 
     df = pd.DataFrame()
-    for panel_id, panel in archConfigs.panel_configs.items():
+    for panel_id, panel in arch_configs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 for run, data in runs.items():
