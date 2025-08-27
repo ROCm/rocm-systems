@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2022 - Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2025 - Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -61,20 +61,11 @@ class RdcCpuSupportTest : public ::testing::Test {
 
 // Test CPU partition string parsing
 TEST_F(RdcCpuSupportTest, CpuPartitionStringParsing) {
-  // Test various CPU partition string formats
-  std::vector<std::string> cpu_partition_strings = {
-      "c0.0",  // CPU socket 0, instance 0
-      "c1.0",  // CPU socket 1, instance 0
-      "c0.1",  // CPU socket 0, instance 1
-      "c2.0",  // CPU socket 2, instance 0
-      "c15.7"  // CPU socket 15, instance 7
-  };
-
   // generate map to test this feature
-  std::map<std::pair<uint32_t, uint32_t>, std::string> test_map = {
+  std::map<std::pair<uint32_t, uint32_t>, std::string> cpu_partition_string_map = {
       {{0, 0}, "c0.0"}, {{1, 0}, "c1.0"}, {{0, 1}, "c0.1"}, {{2, 0}, "c2.0"}, {{15, 7}, "c15.7"}};
 
-  for (const auto& [indices, partition_str] : test_map) {
+  for (const auto& [indices, partition_str] : cpu_partition_string_map) {
     uint32_t device_index = 255;
     uint32_t instance_index = 255;
 
@@ -91,7 +82,7 @@ TEST_F(RdcCpuSupportTest, CpuPartitionStringParsing) {
 // Test CPU field group creation
 TEST_F(RdcCpuSupportTest, CpuFieldGroupCreation) {
   // Test creating field groups with CPU fields
-  std::vector<rdc_field_t> cpu_fields = {RDC_FI_CPU_COUNT, RDC_FI_CPU_MODEL};
+  std::vector<rdc_field_t> cpu_fields = {RDC_FI_CPU_SKT_COUNT, RDC_FI_CPU_MODEL};
 
   rdc_field_grp_t field_group_id = 0;
   const char* group_name = "cpu_test_group";
@@ -125,10 +116,10 @@ TEST_F(RdcCpuSupportTest, CpuFieldGroupCreation) {
 TEST_F(RdcCpuSupportTest, MixedGpuCpuFieldGroups) {
   // Test creating field groups with both GPU and CPU fields
   std::vector<rdc_field_t> mixed_fields = {
-      RDC_FI_GPU_UTIL,             // GPU field
-      RDC_FI_CPU_CCLK_LIMIT,       // CPU field
-      RDC_FI_GPU_TEMP,             // GPU field
-      RDC_FI_CPU_CORES_PER_SOCKET  // CPU field
+      RDC_FI_GPU_UTIL,           // GPU field
+      RDC_FI_CPU_CCLK_LIMIT,     // CPU field
+      RDC_FI_GPU_TEMP,           // GPU field
+      RDC_FI_CPU_FCLK_FREQUENCY  // CPU field
   };
 
   rdc_field_grp_t field_group_id = 0;
