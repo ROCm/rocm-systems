@@ -29,6 +29,7 @@ THE SOFTWARE.
  */
 
 #include <gtest/gtest.h>
+#include <sys/types.h>
 
 #include <string>
 #include <vector>
@@ -48,7 +49,7 @@ class RdcCpuSupportTest : public ::testing::Test {
   }
 
   void TearDown() override {
-    if (rdc_handle_) {
+    if (rdc_handle_ != nullptr) {
       rdc_stop_embedded(rdc_handle_);
       rdc_handle_ = nullptr;
     }
@@ -69,22 +70,21 @@ TEST_F(RdcCpuSupportTest, CpuPartitionStringParsing) {
       "c15.7"  // CPU socket 15, instance 7
   };
 
-  for (const std::string& partition_str : cpu_partition_strings) {
-    uint32_t device_index = 0;
-    uint32_t instance_index = 0;
+  // generate map to test this feature
+  std::map<std::pair<uint32_t, uint32_t>, std::string> test_map = {
+      {{0, 0}, "c0.0"}, {{1, 0}, "c1.0"}, {{0, 1}, "c0.1"}, {{2, 0}, "c2.0"}, {{15, 7}, "c15.7"}};
 
-    // Test parsing CPU partition strings
+  for (const auto& [indices, partition_str] : test_map) {
+    uint32_t device_index = 255;
+    uint32_t instance_index = 255;
+
     bool parsed = rdc_parse_partition_string(partition_str.c_str(), &device_index, &instance_index);
-
     EXPECT_TRUE(parsed) << "Should successfully parse CPU partition string: " << partition_str;
 
-    if (parsed) {
-      // Verify that parsed indices make sense for CPU
-      EXPECT_GE(device_index, 0) << "Device index should be non-negative";
-      EXPECT_LE(device_index, 255) << "Device index should be reasonable";
-      EXPECT_GE(instance_index, 0) << "Instance index should be non-negative";
-      EXPECT_LE(instance_index, 15) << "Instance index should be reasonable";
-    }
+    EXPECT_EQ(device_index, indices.first)
+        << "Device index should match for partition string: " << partition_str;
+    EXPECT_EQ(instance_index, indices.second)
+        << "Instance index should match for partition string: " << partition_str;
   }
 }
 
