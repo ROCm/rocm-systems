@@ -61,7 +61,7 @@ hierarchical categories to provide a more organized, top-down analysis approach:
    Supports interactive kernel selection to toggle between kernel(s) to view individual kernel
    analysis results.
 
-#. High Level Analysis
+#. High Level Analysis:
 
    Experimental performance metrics layout, reorganized performance metrics grouping to display the new
    GPU Speed-of-Light section, Compute Throughput section, and Memory Throughput section
