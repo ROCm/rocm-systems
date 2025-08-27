@@ -792,6 +792,7 @@ def init_metric_evaluator(
     globals().update(ammolite_vars)
     globals().update(empirical_peaks)
 
+
 def run_metric_evaluator(row_expr: str) -> str:
     try:
         # cache dataframes of 'raw_pmc_df'
@@ -820,10 +821,11 @@ def run_metric_evaluator(row_expr: str) -> str:
         else:
             console_error("analysis", str(ae))
 
+
 def create_empirical_peaks_dict(empirical_peaks_df):
     """Create empirical peaks dictionary"""
     empirical_peaks = {}
-    
+
     if not empirical_peaks_df.empty:
         peak_data_row = empirical_peaks_df.iloc[0]
         for col in empirical_peaks_df.columns:
@@ -831,7 +833,7 @@ def create_empirical_peaks_dict(empirical_peaks_df):
     else:
         peak_names = [
             "FP16Flops",
-            "FP32Flops", 
+            "FP32Flops",
             "FP64Flops",
             "MFMAF64Flops",
             "MFMAF32Flops",
@@ -848,8 +850,9 @@ def create_empirical_peaks_dict(empirical_peaks_df):
         # initialize peaks to 0
         for peak_name in peak_names:
             empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
-    
+
     return empirical_peaks
+
 
 @demarcate
 def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
@@ -957,7 +960,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             "wave_size is not available in sysinfo.csv, please provide the correct "
             "value using --specs-correction"
         )
-    
+
     empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
 
     # TODO: fix all $normUnit in Unit column or title
@@ -1033,16 +1036,31 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                     if matched_vars:
                                         for v in matched_vars:
                                             try:
-                                                value = eval(compile(v, "<string>", "eval"))
+                                                value = eval(
+                                                    compile(v, "<string>", "eval")
+                                                )
                                                 print("Var ", v, ":", value)
                                             except NameError:
                                                 if "_empirical_peak" in v:
                                                     if v in empirical_peaks:
-                                                        print("Var ", v, ":", empirical_peaks[v])
+                                                        print(
+                                                            "Var ",
+                                                            v,
+                                                            ":",
+                                                            empirical_peaks[v],
+                                                        )
                                                     else:
-                                                        print("Var ", v, ": [empirical peak not found]")
+                                                        print(
+                                                            "Var ",
+                                                            v,
+                                                            ": [empirical peak not found]",  # noqa
+                                                        )
                                                 else:
-                                                    print("Var ", v, ": [not available in main thread]")
+                                                    print(
+                                                        "Var ",
+                                                        v,
+                                                        ": [not available in main thread]",  # noqa
+                                                    )
                                     matched_cols = re.findall(
                                         r"raw_pmc_df\['\w+'\]\['\w+'\]", row[expr]
                                     )
@@ -1081,12 +1099,16 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                     except NameError as ne:
                                         if "empirical_peak" in str(ne):
                                             console_warning(
-                                                "Skipping debug evaluation. Empirical peak variables "
-                                                "not available in main thread: {}".format(str(ne))
+                                                "Skipping debug evaluation. Empirical peak variables "  # noqa
+                                                "not available in main thread: {}".format(  # noqa
+                                                    str(ne)
+                                                )
                                             )
                                         else:
                                             console_warning(
-                                                "Skipping debug evaluation. Variable not available: {}".format(str(ne))
+                                                "Skipping debug evaluation. Variable not available: {}".format(  # noqa
+                                                    str(ne)
+                                                )
                                             )
                                         print("~" * 40)
                                     except TypeError:
