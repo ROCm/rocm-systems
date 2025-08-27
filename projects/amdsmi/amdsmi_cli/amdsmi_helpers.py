@@ -1184,7 +1184,7 @@ class AMDSMIHelpers():
         if not getattr(self, "_cper_display_initialized", False):
             # Warning if no folder was specified elsewhere
             if not getattr(self, "_cper_warning_printed", False):
-               print(f"WARNING:No cper files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
+               print(f"WARNING:No CPER files will be dumped unless --folder=<folder_name> is specified and cper entries exist.")
                self._cper_warning_printed = True
 
             self._print_header(folder)
@@ -1197,10 +1197,13 @@ class AMDSMIHelpers():
             gpu_id = self.get_gpu_id_from_device_handle(device_handle)
             prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
                                               entry.get("notify_type", "Unknown"),
-                                              True)
+                                              False)
             output = f"{timestamp:<20} {gpu_id:<7} {prefix:<20}"
             if folder:
-                cper_data_file = f"{prefix}_{self.get_cper_count()}.cper"
+                prefix = self._severity_as_string(entry.get("error_severity", "Unknown"),
+                                                entry.get("notify_type", "Unknown"),
+                                                True)
+                cper_data_file = f"{prefix}_{self.get_cper_count() + 1}.cper"
                 afids = self.pvtDumpAfids(cper_data_file)
                 afids_str = ' '.join(map(str, afids))
                 output += f" {cper_data_file:<17} {afids_str}"
@@ -1256,7 +1259,7 @@ class AMDSMIHelpers():
                 prefix = self._severity_as_string(error_severity, notify_type, True)
 
                 # Generate filenames
-                count = self.get_cper_count()
+                count = self.get_cper_count() + 1
                 cper_name = f"{prefix}-{count}.cper"
                 json_name = f"{prefix}-{count}.json"
                 cper_path = folder / cper_name
@@ -1442,7 +1445,6 @@ class AMDSMIHelpers():
             return
 
         if args.folder and not getattr(self, "_cper_folder_prompted", False):
-            print(f"Dumping CPER file header entries in folder {args.folder}")
             self._cper_folder_prompted = True
 
         logger.set_cper_exit_message(False)
