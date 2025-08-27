@@ -17,7 +17,7 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
-set(counter-collection-env
+set(spm-dispatch-counter-collection-env
     "${PRELOAD_ENV}" "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
     "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION")
 
@@ -30,7 +30,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${counter-collection-env}"
+               "${spm-dispatch-counter-collection-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                FIXTURES_SETUP

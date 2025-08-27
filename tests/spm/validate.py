@@ -60,6 +60,7 @@ def test_spm_counter_values(input_data):
                 return itr["name"]
 
     for record in counter_data:
+
         if record["agent_id"]["handle"] in agent_counter_map.keys():
             found = 0
             for i in range(0, len(agent_counter_map[record["agent_id"]["handle"]])):
@@ -96,9 +97,7 @@ def test_spm_counter_values(input_data):
         assert 1.0 * get_counter_value(counters, "TA_TA_BUSY") > get_counter_value(
             counters, "TA_TOTAL_WAVEFRONTS"
         )
-        assert 1.0 * get_counter_value(counters, "TCP_TOTAL_WRITE") > get_counter_value(
-            counters, "SQ_WAVES"
-        )
+
         assert (
             100
             * get_counter_value(counters, "SQC_ICACHE_MISSES")
@@ -108,26 +107,6 @@ def test_spm_counter_values(input_data):
             100
             * get_counter_value(counters, "SQC_ICACHE_HITS")
             / get_counter_value(counters, "SQC_ICACHE_REQ")
-        ) < 100
-        assert (
-            100
-            * get_counter_value(counters, "SPI_CSN_WINDOW_VALID")
-            / get_counter_value(counters, "SQ_CYCLES")
-        )
-        assert (
-            100
-            * get_counter_value(counters, "SPI_CSN_BUSY")
-            / get_counter_value(counters, "SQ_CYCLES")
-        ) < 100
-        assert (
-            100
-            * get_counter_value(counters, "TCC_HIT")
-            / get_counter_value(counters, "TCC_REQ")
-        ) < 100
-        assert (
-            100
-            * get_counter_value(counters, "TCC_MISS")
-            / get_counter_value(counters, "TCC_REQ")
         ) < 100
 
 

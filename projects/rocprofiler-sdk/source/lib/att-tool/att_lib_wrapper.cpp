@@ -200,5 +200,6 @@ ATTDecoder::valid() const
 {
     return decoder.handle != 0;
 }
+
 }  // namespace att_wrapper
 }  // namespace rocprofiler

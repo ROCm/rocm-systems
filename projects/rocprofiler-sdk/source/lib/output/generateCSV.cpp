@@ -570,6 +570,7 @@ generate_csv(const output_config&                    cfg,
              const stats_entry_t&                    stats)
 {
     if(data.empty()) return;
+
     if(cfg.stats && stats)
         write_stats(get_stats_output_file(cfg, domain_type::COUNTER_COLLECTION), stats.entries);
 

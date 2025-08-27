@@ -1526,7 +1526,6 @@ def run(app_args, args, **kwargs):
                 "SPM feature cannot be enabled along with pc sampling or pmc counter collection"
             )
         else:
-            update_env("ROCPROF_SPM_COUNTER_COLLECTION", False, overwrite=True)
             update_env("ROCPROF_SPM_COUNTER_COLLECTION", True, overwrite=True)
             update_env(
                 "ROCPROF_SPM_COUNTERS",
