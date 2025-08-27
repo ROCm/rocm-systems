@@ -208,7 +208,7 @@ jobs:
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@v1.2
+      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
       with:
         key: ccache-${{ matrix.os }}-rocprofiler-mi300a-dind-${{ matrix.runner }}
         max-size: 2G
