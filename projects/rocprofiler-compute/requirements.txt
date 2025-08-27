@@ -12,6 +12,7 @@ plotille
 pymongo
 pyyaml
 setuptools
+sqlalchemy>=2.0.42
 tabulate
 textual
 textual_plotext

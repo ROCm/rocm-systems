@@ -114,6 +114,8 @@ supported_call = {
     "CONCAT": "to_concat",
 }
 
+PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
+
 # ------------------------------------------------------------------------------
 
 
@@ -1283,9 +1285,7 @@ def search_pc_sampling_record(records):
         )
     )
 
-    rocp_inst_not_issued_prefix_len = len(
-        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-    )
+    rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
 
     # Populate grouped_data
     for i, item in enumerate(records):
