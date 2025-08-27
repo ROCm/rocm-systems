@@ -515,7 +515,9 @@ def calc_builtin_var(var: Any, sys_info: Any) -> Optional[int]:
 
 
 def init_metric_evaluator(
-    raw_pmc_df: dict[str, pd.DataFrame], ammolite_vars: dict[str, Any]
+    raw_pmc_df: dict[str, pd.DataFrame],
+    ammolite_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
 ) -> None:
     if isinstance(raw_pmc_df, dict):
         raw_pmc_df_keys = set(raw_pmc_df.keys())
@@ -532,6 +534,7 @@ def init_metric_evaluator(
     # The process-local globals are used for performance optimization.
     globals().update(raw_pmc_df_items)
     globals().update(ammolite_vars)
+    globals().update(empirical_peaks)
 
 
 def run_metric_evaluator(row_expr: str) -> Any:
@@ -855,7 +858,6 @@ def eval_builtin_vars(config: dict[str, Any]) -> dict[str, Any]:
 
 def build_ammolite_vars(
     sys_info: Any,
-    empirical_peaks_df: pd.DataFrame,
     config: dict[str, Any],
 ) -> dict[str, Any]:
     ammolite_vars: dict[str, Any] = {}
@@ -911,17 +913,7 @@ def build_ammolite_vars(
         "$total_l2_chan", sys_info
     )
 
-    # Empirical peaks
-    if not empirical_peaks_df.empty:
-        peak_data_row = empirical_peaks_df.iloc[0]
-        for metric_name in empirical_peaks_df.columns:
-            var_name = f"ammolite__{metric_name}_empirical_peak"
-            ammolite_vars[var_name] = peak_data_row[metric_name]
-    else:
-        for peak_name in DEFAULT_PEAKS:
-            var_name = f"ammolite__{peak_name}_empirical_peak"
-            ammolite_vars[var_name] = 0
-
+    # TODO: fix all $normUnit in Unit column or title
     # Build derived variables
     build_in = eval_builtin_vars(config)
     ammolite_vars.update(build_in)
@@ -930,7 +922,10 @@ def build_ammolite_vars(
 
 
 def debug_expression(
-    expr: str, row_expr: str, raw_pmc_df: dict[str, pd.DataFrame]
+    expr: str,
+    row_expr: str,
+    raw_pmc_df: dict[str, pd.DataFrame],
+    empirical_peaks: dict[str, Any],
 ) -> None:
     print("~" * 40 + "\nExpression:")
     print(f"{expr} = {row_expr}")
@@ -939,7 +934,30 @@ def debug_expression(
     matched_vars = re.findall(r"ammolite__\w+", row_expr)
     if matched_vars:
         for v in matched_vars:
-            print(f"Var {v}: {eval(compile(v, '<string>', 'eval'))}")
+            try:
+                value = eval(compile(v, "<string>", "eval"))
+                print("Var ", v, ":", value)
+            except NameError:
+                if "_empirical_peak" in v:
+                    if v in empirical_peaks:
+                        print(
+                            "Var ",
+                            v,
+                            ":",
+                            empirical_peaks[v],
+                        )
+                    else:
+                        print(
+                            "Var ",
+                            v,
+                            ": [empirical peak not found]",  # noqa
+                        )
+                else:
+                    print(
+                        "Var ",
+                        v,
+                        ": [not available in main thread]",  # noqa
+                    )
 
     matched_cols = re.findall(r"raw_pmc_df\['\w+'\]\['\w+'\]", row_expr)
     if matched_cols:
@@ -955,6 +973,19 @@ def debug_expression(
     print("\nOutput:")
     try:
         print(eval(compile(row_expr, "<string>", "eval")))
+        print("~" * 40)
+    except NameError as ne:
+        if "empirical_peak" in str(ne):
+            console_warning(
+                "Skipping debug evaluation. Empirical peak variables "  # noqa
+                "not available in main thread: {}".format(str(ne))  # noqa
+            )
+        else:
+            console_warning(
+                "Skipping debug evaluation. Variable not available: {}".format(  # noqa
+                    str(ne)
+                )
+            )
         print("~" * 40)
     except (TypeError, KeyError) as e:
         console_warning(f"Skipping entry. Encountered error: {e}")
@@ -972,7 +1003,7 @@ def collect_expressions_for_evaluation(
     raw_pmc_df: dict[str, pd.DataFrame],
     row_expr_indexes: list[tuple[int, Any, str]],
     row_exprs: list[str],
-    ammolite_vars: dict[str, Any],
+    empirical_peaks: dict[str, Any],
 ) -> None:
     for idx, row in df.iterrows():
         for expr in df.columns:
@@ -982,11 +1013,43 @@ def collect_expressions_for_evaluation(
                     row_exprs.append(row[expr])
 
                     if debug:
-                        debug_expression(expr, row[expr], raw_pmc_df)
+                        debug_expression(expr, row[expr], raw_pmc_df, empirical_peaks)
                 else:
                     row[expr] = ""
 
-                    
+
+def create_empirical_peaks_dict(empirical_peaks_df: pd.DataFrame) -> dict[str, Any]:
+    """Create empirical peaks dictionary"""
+    empirical_peaks = {}
+
+    if not empirical_peaks_df.empty:
+        peak_data_row = empirical_peaks_df.iloc[0]
+        for col in empirical_peaks_df.columns:
+            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
+    else:
+        peak_names = [
+            "FP16Flops",
+            "FP32Flops",
+            "FP64Flops",
+            "MFMAF64Flops",
+            "MFMAF32Flops",
+            "MFMAF16Flops",
+            "MFMABF16Flops",
+            "MFMAF8Flops",
+            "MFMAI8Ops",
+            "HBMBw",
+            "L2Bw",
+            "L1Bw",
+            "LDSBw",
+            "MFMA_FLOPs_F6F4",
+        ]
+        # initialize peaks to 0
+        for peak_name in peak_names:
+            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
+
+    return empirical_peaks
+
+
 @demarcate
 def eval_metric(
     dfs: dict[int, pd.DataFrame],
@@ -1011,6 +1074,7 @@ def eval_metric(
 
     # Build ammolite variables from sys_info
     ammolite_vars = build_ammolite_vars(sys_info, empirical_peaks_df, config)
+    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
 
     # Collect expressions to evaluate
     row_expr_indexes: list[tuple[int, Any, str]] = []
@@ -1025,7 +1089,7 @@ def eval_metric(
                 raw_pmc_df,
                 row_expr_indexes,
                 row_exprs,
-                ammolite_vars,
+                empirical_peaks,
             )
 
     # Empirically, 16 is about as much as we need.
