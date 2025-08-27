@@ -632,6 +632,37 @@ class TlsAggregator {
 };
 extern thread_local TlsAggregator tls;
 
+
+struct KernelAttributes {
+  static KernelAttributes& instance() {
+      static KernelAttributes inst;
+      return inst;
+  }
+  public:
+  void SetLocalMemSizeKernel(uint64_t localMemSize) {
+    KernelattrilocalMemSize_ = localMemSize;
+  }
+  void SetLocalMemSizeFunc(uint64_t localMemSize) {
+    FuncattrilocalMemSize_ = localMemSize;
+  }
+  uint64_t GetLocalMemSize() const {
+    if(isFunc.load()) {
+      return FuncattrilocalMemSize_;
+    } else {
+      return KernelattrilocalMemSize_;
+    }
+  };
+  uint64_t GetLocalMemSizeKernel() const {
+    return KernelattrilocalMemSize_;
+  };
+  void SetIsFunc(bool isFunc) {
+    this->isFunc = isFunc;
+  }
+  private:
+  static std::atomic_bool isFunc{false};
+  uint64_t KernelattrilocalMemSize_;
+  uint64_t FuncattrilocalMemSize_;
+};
 /// Device representing the host - for pinned memory
 extern amd::Context* host_context;
 

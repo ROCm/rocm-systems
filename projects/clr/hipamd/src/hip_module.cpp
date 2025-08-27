@@ -130,9 +130,9 @@ hipError_t hipFuncGetAttribute(int* value, hipFunction_attribute attrib, hipFunc
     HIP_RETURN(hipErrorInvalidValue);
   }
 
-  hip::DeviceFunc* function = hip::DeviceFunc::asFunction(hfunc);
+  const hip::DeviceFunc* function = hip::DeviceFunc::asFunction(hfunc);
   if (function == nullptr) {
-    HIP_RETURN(hipErrorInvalidHandle);
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
   }
 
   amd::Kernel* kernel = function->kernel();
@@ -191,6 +191,68 @@ hipError_t hipFuncGetAttributes(hipFuncAttributes* attr, const void* func) {
   HIP_RETURN(hipSuccess);
 }
 
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  HIP_INIT_API(hipKernelSetAttribute, attrib, value, kernel, dev);
+
+  const hip::DeviceFunc* function = hip::DeviceFunc::asFunction(kernel);
+  if (function == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+  int deviceId;
+  hipError_t error = hipGetDevice(&deviceId);
+
+  if(deviceId != dev) {
+    HIP_RETURN(hipErrorInvalidDevice);
+  }
+  amd::Kernel* kernel = function->kernel();
+  if (kernel == nullptr) {
+    HIP_RETURN(hipErrorInvalidDeviceFunction);
+  }
+
+  device::Kernel* d_kernel =
+    (device::Kernel*)(kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0])));
+
+  const device::Kernel::WorkGroupInfo* wrkGrpInfo =
+      kernel->getDeviceKernel(*(hip::getCurrentDevice()->devices()[0]))->workGroupInfo();
+  
+  if (wrkGrpInfo == nullptr) {
+    HIP_RETURN(hipErrorMissingConfiguration);
+  }
+
+  switch (attrib) {
+    case HIP_FUNC_ATTRIBUTE_SHARED_SIZE_BYTES:
+      if (val > (hip::getCurrentDevice()->devices()[0]->info().localMemSize_)) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      KernelAttributes::instance().SetLocalMemSizeKernel(value);
+      wrkGrpInfo->localMemSize_ = KernelAttributes::instance().GetLocalMemSize();
+      break;
+    /* Read Only*/
+    case HIP_FUNC_ATTRIBUTE_MAX_THREADS_PER_BLOCK:
+    case HIP_FUNC_ATTRIBUTE_CONST_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_LOCAL_SIZE_BYTES:
+    case HIP_FUNC_ATTRIBUTE_NUM_REGS:
+    case HIP_FUNC_ATTRIBUTE_CACHE_MODE_CA:
+    case HIP_FUNC_ATTRIBUTE_PTX_VERSION:
+    case HIP_FUNC_ATTRIBUTE_BINARY_VERSION:
+      HIP_RETURN(hipErrorInvalidValue);
+      break;
+    case HIP_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES:
+      if ((value < 0) || (value > (d_kernel->workGroupInfo()->availableLDSSize_ -
+                                  d_kernel->workGroupInfo()->localMemSize_))) {
+        HIP_RETURN(hipErrorInvalidValue);
+      }
+      wrkGrpInfo->maxDynamicSharedSizeBytes_ = static_cast<size_t>(value);
+      break;
+    case HIP_FUNC_ATTRIBUTE_PREFERRED_SHARED_MEMORY_CARVEOUT:
+      break;
+    default:
+      HIP_RETURN(hipErrorInvalidValue);
+  }
+
+  HIP_RETURN(hipSuccess);
+}
+
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
   HIP_INIT_API(hipFuncSetAttribute, func, attr, value);
 
@@ -228,6 +290,9 @@ hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int valu
                                  d_kernel->workGroupInfo()->localMemSize_))) {
       HIP_RETURN(hipErrorInvalidValue);
     }
+    KernelAttributes::instance().SetLocalMemSizeFunc(value);
+    KernelAttributes::instance().SetIsFunc(true);
+    wrkGrpInfo->localMemSize_ = KernelAttributes::instance().GetLocalMemSize();
     d_kernel->workGroupInfo()->maxDynamicSharedSizeBytes_ = value;
   }
 

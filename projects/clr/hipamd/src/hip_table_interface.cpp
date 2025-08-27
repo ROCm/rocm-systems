@@ -390,6 +390,9 @@ hipError_t hipFuncGetAttributes(struct hipFuncAttributes* attr, const void* func
 hipError_t hipFuncSetAttribute(const void* func, hipFuncAttribute attr, int value) {
   return hip::GetHipDispatchTable()->hipFuncSetAttribute_fn(func, attr, value);
 }
+hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev) {
+  return hip::GetHipDispatchTable()->hipKernelSetAttribute_fn(attrib, value, kernel, dev);
+}
 hipError_t hipFuncSetCacheConfig(const void* func, hipFuncCache_t config) {
   return hip::GetHipDispatchTable()->hipFuncSetCacheConfig_fn(func, config);
 }

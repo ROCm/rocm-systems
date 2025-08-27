@@ -223,6 +223,7 @@ typedef hipError_t (*t_hipFuncGetAttribute)(int* value, hipFunction_attribute at
                                             hipFunction_t hfunc);
 typedef hipError_t (*t_hipFuncGetAttributes)(struct hipFuncAttributes* attr, const void* func);
 typedef hipError_t (*t_hipFuncSetAttribute)(const void* func, hipFuncAttribute attr, int value);
+typedef hipError_t (*t_hipKernelSetAttribute)(hipFunction_attribute attrib, int value, hipKernel_t kernel, hipDevice_t dev);
 typedef hipError_t (*t_hipFuncSetCacheConfig)(const void* func, hipFuncCache_t config);
 typedef hipError_t (*t_hipFuncSetSharedMemConfig)(const void* func, hipSharedMemConfig config);
 typedef hipError_t (*t_hipGLGetDevices)(unsigned int* pHipDeviceCount, int* pHipDevices,
