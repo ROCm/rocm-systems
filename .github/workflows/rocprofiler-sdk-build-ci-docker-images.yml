@@ -7,10 +7,10 @@ on:
   push:
     branches: [ develop ]
     paths:
-      - '.github/workflows/rocprofiler-sdk-build_ci_docker_images.yml'
+      - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
   pull_request:
     paths:
-      - '.github/workflows/rocprofiler-sdk-build_ci_docker_images.yml'
+      - '.github/workflows/rocprofiler-sdk-build-ci-docker-images.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
