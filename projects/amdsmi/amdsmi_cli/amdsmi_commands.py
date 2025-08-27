@@ -2274,7 +2274,7 @@ class AMDSMICommands():
                     amdsmi_interface.AmdSmiTemperatureType.GPUBOARD_VDDIO_11_E32
                 ]
                 for type in gpu_board_temp_types:
-                    type_name = type.name.replace("GPUBOARD", "GPU_BOARD")
+                    type_name = type.name.replace("GPUBOARD_", "")
                     try:
                         gpu_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(args.gpu, type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
                         if gpu_board_temp_holder != "N/A":
@@ -2322,7 +2322,7 @@ class AMDSMICommands():
                     amdsmi_interface.AmdSmiTemperatureType.BASEBOARD_IBC
                 ]
                 for type in base_board_temp_types:
-                    type_name = type.name.replace("BASEBOARD", "BASE_BOARD")
+                    type_name = type.name.replace("BASEBOARD_", "")
                     try:
                         base_board_temp_holder = amdsmi_interface.amdsmi_get_temp_metric(args.gpu, type, amdsmi_interface.AmdSmiTemperatureMetric.CURRENT)
                         if base_board_temp_holder != "N/A":

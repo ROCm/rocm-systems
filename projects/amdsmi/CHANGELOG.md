@@ -17,59 +17,59 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   any options. If the hardware does not support gpuboard or baseboard temperatures, then the values will be hidden from the default `metric` view.
 
 ```conosle
-% amd-smi metric -b
+$ amd-smi metric -b
 GPU: 0
     BASEBOARD:
         TEMPERATURE:
-            BASEBOARD_FIRST: 78
-            BASEBOARD_UBB_FRONT: 55
-            BASEBOARD_UBB_BACK: 49
-            BASEBOARD_UBB_OAM7: 86
-            BASEBOARD_UBB_IBC: 94
-            BASEBOARD_UBB_UFPGA: 49
-            BASEBOARD_UBB_OAM1: 78
-            BASEBOARD_OAM_0_1_HSC: 54
-            BASEBOARD_OAM_2_3_HSC: 32
-            BASEBOARD_OAM_4_5_HSC: 14
-            BASEBOARD_OAM_6_7_HSC: 85
-            BASEBOARD_UBB_FPGA_0V72_VR: 43
-            BASEBOARD_UBB_FPGA_3V3_VR: 41
-            BASEBOARD_RETIMER_0_1_2_3_1V2_VR: 64
-            BASEBOARD_RETIMER_4_5_6_7_1V2_VR: 56
-            BASEBOARD_RETIMER_0_1_0V9_VR: 74
-            BASEBOARD_RETIMER_4_5_0V9_VR: 34
-            BASEBOARD_RETIMER_2_3_0V9_VR: 85
-            BASEBOARD_RETIMER_6_7_0V9_VR: 92
-            BASEBOARD_OAM_0_1_2_3_3V3_VR: 29
-            BASEBOARD_OAM_4_5_6_7_3V3_VR: 13
-            BASEBOARD_IBC_HSC: 41
-            BASEBOARD_IBC: 43
+            FIRST: 78
+            UBB_FRONT: 55
+            UBB_BACK: 49
+            UBB_OAM7: 86
+            UBB_IBC: 94
+            UBB_UFPGA: 49
+            UBB_OAM1: 78
+            OAM_0_1_HSC: 54
+            OAM_2_3_HSC: 32
+            OAM_4_5_HSC: 14
+            OAM_6_7_HSC: 85
+            UBB_FPGA_0V72_VR: 43
+            UBB_FPGA_3V3_VR: 41
+            RETIMER_0_1_2_3_1V2_VR: 64
+            RETIMER_4_5_6_7_1V2_VR: 56
+            RETIMER_0_1_0V9_VR: 74
+            RETIMER_4_5_0V9_VR: 34
+            RETIMER_2_3_0V9_VR: 85
+            RETIMER_6_7_0V9_VR: 92
+            OAM_0_1_2_3_3V3_VR: 29
+            OAM_4_5_6_7_3V3_VR: 13
+            IBC_HSC: 41
+            IBC: 43
 
-% amd-smi metric -G
+$ amd-smi metric -G
 GPU: 0
     GPUBOARD:
         TEMPERATURE:
-            GPUBOARD_NODE_FIRST: 43
-            GPUBOARD_NODE_OAM_X_IBC: 24
-            GPUBOARD_NODE_OAM_X_IBC_2: 56
-            GPUBOARD_NODE_OAM_X_VDD18_VR: 34
-            GPUBOARD_NODE_OAM_X_04_HBM_B_VR: 53
-            GPUBOARD_NODE_OAM_X_04_HBM_D_VR: 47
-            GPUBOARD_VR_FIRST: 58
-            GPUBOARD_VDDCR_VDD1: 78
-            GPUBOARD_VDDCR_VDD2: 35
-            GPUBOARD_VDDCR_VDD3: 73
-            GPUBOARD_VDDCR_SOC_A: 12
-            GPUBOARD_VDDCR_SOC_C: 57
-            GPUBOARD_VDDCR_SOCIO_A: 39
-            GPUBOARD_VDDCR_SOCIO_C: 75
-            GPUBOARD_VDD_085_HBM: 64
-            GPUBOARD_VDDCR_11_HBM_B: 92
-            GPUBOARD_VDDCR_11_HBM_D: 87
-            GPUBOARD_VDD_USR: 46
-            GPUBOARD_VDDIO_11_E32: 98
+            NODE_RETIMER_X: 43
+            NODE_OAM_X_IBC: 24
+            NODE_OAM_X_IBC_2: 56
+            NODE_OAM_X_VDD18_VR: 34
+            NODE_OAM_X_04_HBM_B_VR: 53
+            NODE_OAM_X_04_HBM_D_VR: 47
+            VR_FIRST: 58
+            VDDCR_VDD1: 78
+            VDDCR_VDD2: 35
+            VDDCR_VDD3: 73
+            VDDCR_SOC_A: 12
+            VDDCR_SOC_C: 57
+            VDDCR_SOCIO_A: 39
+            VDDCR_SOCIO_C: 75
+            VDD_085_HBM: 64
+            VDDCR_11_HBM_B: 92
+            VDDCR_11_HBM_D: 87
+            VDD_USR: 46
+            VDDIO_11_E32: 98
 
-% amd-smi metric
+$ amd-smi metric
 GPU: 0
     USAGE:
         GFX_ACTIVITY: 0 %
@@ -94,13 +94,13 @@ GPU: 0
         ...
     GPUBOARD:
         TEMPERATURE:
-            GPUBOARD_NODE_FIRST: 43
-            GPUBOARD_NODE_OAM_X_IBC: 24
+            NODE_RETIMER_X: 43
+            NODE_OAM_X_IBC: 24
             ...
     BASEBOARD:
         TEMPERATURE:
-            BASEBOARD_FIRST: 78
-            BASEBOARD_UBB_FRONT: 55
+            UBB_FPGA: 78
+            UBB_FRONT: 55
             ...
     ECC:
         TOTAL_CORRECTABLE_COUNT: 0
