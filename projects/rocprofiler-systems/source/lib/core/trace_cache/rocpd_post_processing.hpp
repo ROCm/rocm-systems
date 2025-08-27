@@ -52,6 +52,8 @@ private:
     postprocessing_callback get_region_callback() const;
     postprocessing_callback get_in_time_sample_callback() const;
     postprocessing_callback get_pmc_event_with_sample_callback() const;
+    postprocessing_callback get_amd_smi_sample_callback() const;
+    postprocessing_callback get_cpu_freq_sample_callback() const;
 
     metadata_registry& m_metadata;
 };

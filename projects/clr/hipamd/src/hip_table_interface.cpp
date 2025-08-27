@@ -1428,6 +1428,9 @@ hipError_t hipStreamGetDevice(hipStream_t stream, hipDevice_t* device) {
 hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags) {
   return hip::GetHipDispatchTable()->hipStreamGetFlags_fn(stream, flags);
 }
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId) {
+  return hip::GetHipDispatchTable()->hipStreamGetId_fn(stream, streamId);
+}
 hipError_t hipStreamGetPriority(hipStream_t stream, int* priority) {
   return hip::GetHipDispatchTable()->hipStreamGetPriority_fn(stream, priority);
 }
