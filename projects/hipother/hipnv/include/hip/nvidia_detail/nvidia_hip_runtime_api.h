@@ -5025,6 +5025,10 @@ inline static hipError_t hipMemcpy2DArrayToArray(hipArray_t dst, size_t wOffsetD
       dst, wOffsetDst, hOffsetDst, src, wOffsetSrc, hOffsetSrc, width, height, kind));
 }
 
+inline static hipError_t hipSetValidDevices(int* device_arr, int len) {
+  return hipCUDAErrorTohipError(cudaSetValidDevices(device_arr, len));
+}
+
 #endif  //__CUDACC__
 
 #endif  // HIP_INCLUDE_HIP_NVIDIA_DETAIL_HIP_RUNTIME_API_H
