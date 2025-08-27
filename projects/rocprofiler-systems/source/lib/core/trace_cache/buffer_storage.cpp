@@ -113,6 +113,8 @@ buffer_storage::buffer_storage(pid_t _pid)
         _ofs.close();
         m_exit_finished = true;
         m_exit_condition.notify_one();
+        std::cout << "[PID:" << getpid() << "] :: Buffered storage flush finished"
+                  << "\n";
     });
 }
 
@@ -125,8 +127,8 @@ buffer_storage::shutdown()
 
     if(m_created_process != getpid())
     {
-        ROCPROFSYS_DEBUG(
-            "Buffer storage is not created in same process as shutting down..");
+        ROCPROFSYS_VERBOSE(
+            0, "Buffer storage is not created in same process as shutting down..\n");
         return;
     }
 

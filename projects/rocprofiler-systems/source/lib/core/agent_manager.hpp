@@ -39,6 +39,7 @@ struct agent_manager
     agent_manager(agent_manager&&)                 = delete;
     agent_manager& operator=(agent_manager&&)      = delete;
     ~agent_manager()                               = default;
+    agent_manager(std::vector<std::shared_ptr<agent>> agents);
 
     void         insert_agent(agent& agent);
     const agent& get_agent_by_type_index(size_t type_index, agent_type type) const;

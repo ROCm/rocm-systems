@@ -1,4 +1,24 @@
-
+// MIT License
+//
+// Copyright (c) 2025 Advanced Micro Devices, Inc. All Rights Reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
 
 #include "metadata_registry.hpp"
 #include "agent.hpp"
@@ -321,13 +341,11 @@ to_json(const metadata_registry& registry)
     }
     result["tracks"] = track_array;
 
-    auto           queue_list  = registry.get_queue_list();
-    nlohmann::json queue_array = nlohmann::json::array();
+    auto queue_list = registry.get_queue_list();
     for(const auto& queue : queue_list)
     {
         result["queues"].push_back(static_cast<long long>(queue));
     }
-    result["queues"] = queue_array;
 
     auto           stream_list  = registry.get_stream_list();
     nlohmann::json stream_array = nlohmann::json::array();
@@ -382,7 +400,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
     const auto& process_json = _json["process"];
     auto        process      = from_json_process(process_json);
     registry.set_process(process);
-    std::cout << "adding process\n";
 
     const auto& pmc_array = _json["pmc_infos"];
     for(const auto& pmc_json : pmc_array)
@@ -390,7 +407,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto pmc = from_json_pmc(pmc_json);
         registry.add_pmc_info(pmc);
     }
-    std::cout << "adding pmc" << pmc_array.size() << "\n";
 
     const auto& thread_array = _json["threads"];
     for(const auto& thread_json : thread_array)
@@ -398,7 +414,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto thread = from_json_thread(thread_json);
         registry.add_thread_info(thread);
     }
-    std::cout << "adding thread" << thread_array.size() << "\n";
 
     const auto& track_array = _json["tracks"];
     for(const auto& track_json : track_array)
@@ -406,7 +421,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto track = from_json_track(track_json);
         registry.add_track(track);
     }
-    std::cout << "adding tracks" << track_array.size() << "\n";
 
     const auto& queue_array = _json["queues"];
     for(const auto& queue_json : queue_array)
@@ -414,7 +428,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto handle = queue_json.get<long long>();
         registry.add_queue(static_cast<uint64_t>(handle));
     }
-    std::cout << "adding queues" << queue_array.size() << "\n";
     if(queue_array.empty())
     {
         registry.add_queue(0);
@@ -426,7 +439,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto handle = stream_json.get<long long>();
         registry.add_stream(static_cast<uint64_t>(handle));
     }
-    std::cout << "adding streams" << stream_array.size() << "\n";
     if(stream_array.empty())
     {
         registry.add_stream(0);
@@ -438,7 +450,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         auto str = string_json.get<std::string>();
         registry.add_string(str);
     }
-    std::cout << "adding strings" << string_array.size() << "\n";
 
 #if ROCPROFSYS_USE_ROCM
     if(_json.contains("code_objects"))
@@ -449,7 +460,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
             auto code_object = from_json_code_object(code_object_json);
             registry.add_code_object(code_object);
         }
-        std::cout << "adding code objects" << code_object_array.size() << "\n";
     }
 
     if(_json.contains("kernel_symbols"))
@@ -460,7 +470,6 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
             auto kernel_symbol = from_json_kernel_symbol(kernel_symbol_json);
             registry.add_kernel_symbol(kernel_symbol);
         }
-        std::cout << "adding kernel symbols" << kernel_symbol_array.size() << "\n";
     }
 #endif
 
@@ -473,11 +482,9 @@ from_json(metadata_registry& registry, const nlohmann::json& _json)
         for(const auto& agent_json : agents_array)
         {
             agents.push_back(from_json_agent(agent_json));
-            std::cout << "Added agent with handle: " << agents.back()->handle
-                      << std::endl;
         }
-        agent_manager::get_instance().set_agents(agents);
-        std::cout << "adding agents" << agents_array.size() << "\n" << std::flush;
+        registry.set_agents(agents);
+        // agent_manager::get_instance().set_agents(agents);
     }
 }
 
@@ -732,18 +739,16 @@ metadata_registry::save_to_file(const std::string& filepath) const
         auto json        = to_json(*this);
         auto json_string = json.dump();
 
-        std::ofstream file(filepath);
-        if(!file.is_open())
-        {
-            return false;
-        }
+        std::cout << "Saving metadata to file:" << filepath << std::endl;
+
+        std::ofstream file(filepath, std::ios::out);
 
         file << json_string;
         file.close();
-        std::cout << "saving to file" << filepath << std::endl;
         return true;
     } catch(const std::exception& e)
     {
+        std::cout << "Failed writing to file: " << filepath << std::endl;
         return false;
     }
 }
@@ -753,20 +758,15 @@ metadata_registry::load_from_file(const std::string& filepath)
 {
     try
     {
-        std::cout << "Load from file 1" << std::endl;
         std::ifstream file(filepath);
         if(!file.is_open())
         {
-            std::cout << "Load from file 2" << std::endl;
             return false;
         }
 
-        std::cout << "Load from file 3" << std::endl;
         nlohmann::json json;
         file >> json;
         file.close();
-
-        std::cout << "Load from file 4" << std::endl;
 
         rocprofsys::trace_cache::from_json(*this, json);
         return true;
@@ -795,6 +795,18 @@ metadata_registry::from_json_string(const std::string& json_string)
     {
         return false;
     }
+}
+
+void
+metadata_registry::set_agents(std::vector<std::shared_ptr<agent>> _agents)
+{
+    m_agents = std::move(_agents);
+}
+
+std::vector<std::shared_ptr<agent>>
+metadata_registry::get_agents() const
+{
+    return m_agents;
 }
 
 }  // namespace trace_cache

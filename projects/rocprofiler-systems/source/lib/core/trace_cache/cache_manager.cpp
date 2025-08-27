@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "cache_manager.hpp"
+#include "agent_manager.hpp"
 #include "core/config.hpp"
 #include "core/trace_cache/storage_parser.hpp"
 #include "debug.hpp"
@@ -30,6 +31,7 @@
 #include "trace_cache/rocpd_post_processing.hpp"
 #include <algorithm>
 #include <iterator>
+#include <vector>
 
 namespace rocprofsys
 {
@@ -96,74 +98,113 @@ cache_manager::post_process_bulk()
         std::string metadata;
     };
 
-    auto tmp_files = list_dir_files("/tmp/");
-
-    std::map<int, cache_files> cache_map{};
-
-    auto parse_and_fill_cache = [&cache_map](const std::string& filename) {
-        if(filename.find("buffered_storage_") != std::string::npos)
-        {
-            // Extract PID from buffered_storage_<parent_pid>_<pid>.bin
-            auto pos = filename.find_last_of('_');
-            if(pos != std::string::npos)
-            {
-                auto dot_pos = filename.find('.', pos);
-                if(dot_pos != std::string::npos)
-                {
-                    int pid = std::stoi(filename.substr(pos + 1, dot_pos - pos - 1));
-                    cache_map[pid].buff_storage = std::string("/tmp/" + filename);
-                }
-            }
-        }
-        else if(filename.find("metadata_") != std::string::npos)
-        {
-            // Extract PID from metadata_<parent_pid>_<pid>.json
-            auto pos = filename.find_last_of('_');
-            if(pos != std::string::npos)
-            {
-                auto dot_pos = filename.find('.', pos);
-                if(dot_pos != std::string::npos)
-                {
-                    int pid = std::stoi(filename.substr(pos + 1, dot_pos - pos - 1));
-                    cache_map[pid].metadata = std::string("/tmp/" + filename);
-                }
-            }
-        }
-    };
-
-    std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
-
     if(is_root_process())
     {
-        rocpd_post_processing _post_processing(m_metadata, getpid());
-        storage_parser        _parser(getpid(), filename);
-        _post_processing.register_parser_callback(_parser);
-        _post_processing.post_process_metadata();
-        _parser.consume_storage();
-        _post_processing.get_data_processor()->flush();
+        auto root_pid  = get_root_process_id();
+        auto tmp_files = list_dir_files("/tmp/");
+
+        std::map<int, cache_files> cache_map{};
+
+        auto parse_and_fill_cache = [&](const std::string& filename) {
+            if(filename.find("buffered_storage_") != std::string::npos)
+            {
+                // Extract parent PID and PID from buffered_storage_<parent_pid>_<pid>.bin
+                auto first_underscore = filename.find("buffered_storage_");
+                if(first_underscore != std::string::npos)
+                {
+                    auto start_pos =
+                        first_underscore + std::string("buffered_storage_").length();
+                    auto second_underscore = filename.find('_', start_pos);
+                    if(second_underscore != std::string::npos)
+                    {
+                        auto dot_pos = filename.find('.', second_underscore);
+                        if(dot_pos != std::string::npos)
+                        {
+                            int parent_pid = std::stoi(filename.substr(
+                                start_pos, second_underscore - start_pos));
+                            int pid        = std::stoi(filename.substr(
+                                second_underscore + 1, dot_pos - second_underscore - 1));
+
+                            if(parent_pid == root_pid)
+                            {
+                                cache_map[pid].buff_storage =
+                                    std::string("/tmp/" + filename);
+                            }
+                        }
+                    }
+                }
+            }
+            else if(filename.find("metadata_") != std::string::npos)
+            {
+                // Extract parent PID and PID from metadata_<parent_pid>_<pid>.json
+                auto first_underscore = filename.find("metadata_");
+                if(first_underscore != std::string::npos)
+                {
+                    auto start_pos = first_underscore + std::string("metadata_").length();
+                    auto second_underscore = filename.find('_', start_pos);
+                    if(second_underscore != std::string::npos)
+                    {
+                        auto dot_pos = filename.find('.', second_underscore);
+                        if(dot_pos != std::string::npos)
+                        {
+                            int parent_pid = std::stoi(filename.substr(
+                                start_pos, second_underscore - start_pos));
+                            int pid        = std::stoi(filename.substr(
+                                second_underscore + 1, dot_pos - second_underscore - 1));
+
+                            if(parent_pid == root_pid)
+                            {
+                                cache_map[pid].metadata = std::string("/tmp/" + filename);
+                            }
+                        }
+                    }
+                }
+            }
+        };
+
+        std::for_each(tmp_files.begin(), tmp_files.end(), parse_and_fill_cache);
+
+        std::vector<std::thread> rocpd_threads;
+        ROCPROFSYS_SCOPED_SAMPLING_ON_CHILD_THREADS(false);
+
+        rocpd_threads.emplace_back([this]() {
+            rocpd_post_processing _post_processing(
+                m_metadata, agent_manager::get_instance(), getpid());
+            storage_parser _parser(getpid(), filename);
+            _post_processing.register_parser_callback(_parser);
+            _post_processing.post_process_metadata();
+            _parser.consume_storage();
+            _post_processing.get_data_processor()->flush();
+        });
 
         for(const auto& [pid, files] : cache_map)
         {
             if(!files.buff_storage.empty() && !files.metadata.empty())
             {
-                std::cout << "\nCreating database for [" << pid
-                          << "]: " << files.buff_storage << " " << files.metadata
-                          << std::endl;
-                metadata_registry metadata;
-                auto              res = metadata.load_from_file(files.metadata);
-                if(!res)
-                {
-                    std::cout << "LOAD FROM FILE FOR METADATA FAILED" << std::endl;
-                    continue;
-                }
-                rocpd_post_processing _post_processing(metadata, pid);
-                storage_parser        _parser(getpid(), files.buff_storage);
-                _post_processing.register_parser_callback(_parser);
-                _post_processing.post_process_metadata();
-                _parser.consume_storage();
-                _post_processing.get_data_processor()->flush();
+                rocpd_threads.emplace_back([pid = pid, files = files]() {
+                    std::cout << "\nCreating database for [" << pid
+                              << "]: " << files.buff_storage << " " << files.metadata
+                              << std::endl;
+                    metadata_registry metadata;
+                    auto              res = metadata.load_from_file(files.metadata);
+                    if(!res)
+                    {
+                        std::cout << "LOAD FROM FILE FOR METADATA FAILED" << std::endl;
+                        return;
+                    }
+                    agent_manager         agent_mngr(metadata.get_agents());
+                    rocpd_post_processing _post_processing(metadata, agent_mngr, pid);
+                    storage_parser        _parser(getpid(), files.buff_storage);
+                    _post_processing.register_parser_callback(_parser);
+                    _post_processing.post_process_metadata();
+                    _parser.consume_storage();
+                    _post_processing.get_data_processor()->flush();
+                });
             }
         }
+
+        for(auto& thread : rocpd_threads)
+            thread.join();
     }
 }
 

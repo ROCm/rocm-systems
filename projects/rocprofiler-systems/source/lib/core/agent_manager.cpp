@@ -35,6 +35,10 @@ agent_manager::get_instance()
     return instance;
 }
 
+agent_manager::agent_manager(std::vector<std::shared_ptr<agent>> agents)
+: _agents{ std::move(agents) }
+{}
+
 void
 agent_manager::insert_agent(agent& _agent)
 {
