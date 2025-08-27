@@ -24,6 +24,7 @@
 ##############################################################################
 
 import copy
+import re
 import sys
 import textwrap
 from abc import abstractmethod
@@ -41,7 +42,7 @@ from utils.logger import (
     console_warning,
     demarcate,
 )
-from utils.utils import is_workload_empty, merge_counters_spatial_multiplex
+from utils.utils import get_uuid, is_workload_empty, merge_counters_spatial_multiplex
 
 
 class OmniAnalyze_Base:
@@ -284,6 +285,23 @@ class OmniAnalyze_Base:
             print("Node list:", "  ".join(nodes))
             sys.exit(0)
 
+        # Ensure analysis output does not overwrite existing files
+        if self.__args.output_name:
+            if not re.match(r"^[A-Za-z0-9_-]+$", self.__args.output_name):
+                console_error(
+                    "Analysis output file/folder name must "
+                    "contain only alphanumeric characters "
+                    "or underscores (_), hyphens (-)."
+                )
+            path_to_check = self.__args.output_name
+            if self.__args.output_format in ("txt", "db"):
+                path_to_check += f".{self.__args.output_format}"
+            if Path(path_to_check).exists():
+                console_error(
+                    f"Analysis output file/folder {path_to_check} already exists. "
+                    "Please choose a different name."
+                )
+
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -293,11 +311,13 @@ class OmniAnalyze_Base:
         console_debug("analysis", "prepping to do some analysis")
         console_log("analysis", "deriving rocprofiler-compute metrics...")
         # initalize output file
-        self._output = (
-            open(self.__args.output_file, "w+")
-            if self.__args.output_file
-            else sys.stdout
-        )
+        if self.__args.output_format == "txt":
+            output_filename = self.__args.output_name or f"rocprof_compute_{get_uuid()}"
+            output_filename += ".txt"
+            self._output = open(output_filename, "w+")
+            console_warning(f"Created file: {output_filename}")
+        elif self.__args.output_format == "stdout":
+            self._output = sys.stdout
 
         # Read profiling config
         self._profiling_config = file_io.load_profiling_config(self.__args.path[0][0])

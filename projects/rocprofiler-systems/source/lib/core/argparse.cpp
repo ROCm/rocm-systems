@@ -239,11 +239,6 @@ init_parser(parser_data& _data)
     auto _libexecpath = get_realpath(get_internal_script_path());
     update_env(_data, "ROCPROFSYS_SCRIPT_PATH", _libexecpath, UPD_REPLACE);
 
-#if defined(ROCPROFSYS_USE_OMPT)
-    if(!getenv("OMP_TOOL_LIBRARIES"))
-        update_env(_data, "OMP_TOOL_LIBRARIES", _data.dl_libpath, UPD_PREPEND);
-#endif
-
     return _data;
 }
 
@@ -619,10 +614,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
-                if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                    update_env(_data, "OMP_TOOL_LIBRARIES", _data.dl_libpath,
-                               UPD_PREPEND);
-
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     update_env(_data, "KOKKOS_TOOLS_LIBS", _data.omni_libpath,
                                UPD_PREPEND);
@@ -652,9 +643,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
                 _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
-
-                if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                    remove_env(_data, "OMP_TOOL_LIBRARIES");
 
                 if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
                     remove_env(_data, "KOKKOS_TOOLS_LIBS");
