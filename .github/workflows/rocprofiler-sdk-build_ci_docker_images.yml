@@ -43,7 +43,7 @@ jobs:
       - name: Checkout (shallow)
         uses: actions/checkout@v4
         with:
-          sparse-checkout: | 
+          sparse-checkout: |
             projects/rocprofiler-sdk/requirements.txt
             projects/rocprofiler-sdk/Docker/Dockerfile.ci
 
