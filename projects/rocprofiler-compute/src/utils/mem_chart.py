@@ -28,6 +28,7 @@ from decimal import Decimal
 from typing import Dict
 
 from plotille import Canvas
+from .utils import format_scientific_notation_if_needed
 
 
 def make_format_spec(num, align=">"):
@@ -109,46 +110,20 @@ def format_text(
 
     # 2. Format the value string
     if is_value_valid(value):
-        abs_val = abs(value) if isinstance(value, (int, float)) else None
-
-        use_sci = False
-        sci_str = None
-
-        if isinstance(value, (int, float)) and abs_val != 0:
-            if abs_val >= 1e9 or abs_val < 1e-3:
-                use_sci = True
-            else:
-                try:
-                    normal_str = f"{value:{value_format}}"
-                    sci_str = f"{value:.1e}"
-                    if len(normal_str) > len(sci_str):
-                        use_sci = True
-                except ValueError:
-                    use_sci = True
-
-        if use_sci:
-            value_str = sci_str if sci_str is not None else f"{value:.1e}"
+        if isinstance(value, (int, float)):
+            value_str = format_scientific_notation_if_needed(
+                value, value_format, max_value_length
+            )
+        else:
+            # For strings or other types, just use str() and align width only
             width_match = re.search(r"\d+", value_format)
             width = int(width_match.group()) if width_match else 6
-            align_char = value_format[0] if value_format else ">"
-            value_str = f"{value_str:{align_char}{width}}"
-        else:
-            # Differentiate formatting for numeric vs string types:
-            if isinstance(value, (int, float)):
-                value_str = f"{value:{value_format}}"
-            else:
-                # For strings or other types, just use str() and align width only
-                width_match = re.search(r"\d+", value_format)
-                width = int(width_match.group()) if width_match else 6
-                align_char = value_format[0] if value_format else "<"
-                value_str = f"{str(value):{align_char}{width}}"
-
+            align_char = value_format[0] if value_format else "<"
+            value_str = f"{str(value):{align_char}{width}}"
     else:
         match = re.search(r"[<>=^](\d+)", value_format)
         width = int(match.group(1)) if match else 6
-
         align = value_format[0] if value_format else "<"
-
         value_str = f"{'N/A':{align}{width}}"
 
     # 3. Format key string if exists

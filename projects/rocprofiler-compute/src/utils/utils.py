@@ -39,6 +39,7 @@ import time
 import uuid
 from pathlib import Path as path
 from typing import Optional
+from typing import Union
 
 import pandas as pd
 import yaml
@@ -1645,3 +1646,60 @@ def parse_sets_yaml(arch):
 
 def get_uuid(length=8):
     return uuid.uuid4().hex[:length]
+
+
+def format_scientific_notation_if_needed(
+    value: Union[int, float],
+    format_spec: str = ">6.2f",
+    max_length: int = 6,
+    sci_lower_bound: float = 1e-3,
+    sci_upper_bound: float = 1e9,
+) -> str:
+    """
+    Format a numeric value as normal or scientific notation string.
+
+    Uses scientific notation if:
+    - abs(value) < sci_lower_bound (but not zero)
+    - abs(value) >= sci_upper_bound
+    - formatted normal string length exceeds max_length
+
+    Parameters:
+    - value: numeric value to format
+    - format_spec: format specifier (e.g., '>6.2f')
+    - max_length: max allowed length for normal format string
+    - sci_lower_bound: lower bound for scientific notation usage
+    - sci_upper_bound: upper bound for scientific notation usage
+
+    Returns:
+    - formatted string according to the criteria, respecting alignment
+    """
+    abs_val = abs(value)
+
+    # Determine if scientific notation is needed
+    use_sci = False
+    if abs_val != 0:
+        if abs_val < sci_lower_bound or abs_val >= sci_upper_bound:
+            use_sci = True
+        else:
+            try:
+                normal_str = f"{value:{format_spec}}"
+                sci_str = f"{value:.1e}"
+                # Use scientific if normal is longer or too long
+                if (
+                    len(normal_str) > len(sci_str)
+                    or len(normal_str.strip()) > max_length
+                ):
+                    use_sci = True
+            except Exception:
+                use_sci = True
+
+    if use_sci:
+        sci_str = f"{value:.1e}"
+        width_match = re.search(r"\d+", format_spec)
+        width = int(width_match.group()) if width_match else 6
+        align_char = format_spec[0] if format_spec else ">"
+        formatted = f"{sci_str:{align_char}{width}}"
+    else:
+        formatted = f"{value:{format_spec}}"
+
+    return formatted
