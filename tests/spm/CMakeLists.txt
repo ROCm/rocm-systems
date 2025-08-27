@@ -3,88 +3,55 @@
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
-if(NOT CMAKE_HIP_COMPILER)
-    find_program(
-        amdclangpp_EXECUTABLE
-        NAMES amdclang++
-        HINTS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATHS ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
-        PATH_SUFFIXES bin llvm/bin NO_CACHE)
-    mark_as_advanced(amdclangpp_EXECUTABLE)
-
-    if(amdclangpp_EXECUTABLE)
-        set(CMAKE_HIP_COMPILER "${amdclangpp_EXECUTABLE}")
-    endif()
-endif()
-
 project(
-    rocprofiler-tests-spm
-    LANGUAGES CXX HIP
+    rocprofiler-sdk-tests-spm-counter-collection
+    LANGUAGES CXX
     VERSION 0.0.0)
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(Threads REQUIRED)
 
-set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_HIP_STANDARD 17)
-set(CMAKE_HIP_EXTENSIONS OFF)
-set(CMAKE_HIP_STANDARD_REQUIRED ON)
-set(IS_DISABLED False)
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+else()
+    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+endif()
 
-foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
-    if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
-        set(CMAKE_HIP_FLAGS_${_TYPE} "${CMAKE_CXX_FLAGS_${_TYPE}}")
-    endif()
-endforeach()
+set(counter-collection-env
+    "${PRELOAD_ENV}" "ROCPROFILER_TOOL_OUTPUT_FILE=spm-dispatch-collection-test.json"
+    "ROCPROFILER_TOOL_CONTEXTS=SPM_DISPATCH_COLLECTION")
 
-set_source_files_properties(kernel_branch.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
-set_source_files_properties(kernel_branch.cpp PROPERTIES LANGUAGE HIP)
-set_source_files_properties(kernel_lds.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
-set_source_files_properties(kernel_lds.cpp PROPERTIES LANGUAGE HIP)
-set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
-
-# Agent profiling test
-add_executable(spm-api-agent-test)
-target_sources(spm-api-agent-test PRIVATE main.cpp common.cpp agent.cpp kernel_branch.cpp
-                                          kernel_lds.cpp)
-target_link_libraries(spm-api-agent-test PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                                 Threads::Threads)
-
-add_test(NAME spm-api-agent-test COMMAND $<TARGET_FILE:spm-api-agent-test>)
+add_test(NAME test-spm-dispatch-collection-execute COMMAND $<TARGET_FILE:vector-ops>)
 
 set_tests_properties(
-    spm-api-agent-test
+    test-spm-dispatch-collection-execute
     PROPERTIES TIMEOUT
-               120
+               45
                LABELS
                "integration-tests"
                ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+               "${counter-collection-env}"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
+               FIXTURES_SETUP
+               test-spm-dispatch-collection)
 
-# Dispatch profiling test
-add_executable(spm-api-dispatch-test)
-target_sources(spm-api-dispatch-test PRIVATE main.cpp common.cpp dispatch.cpp
-                                             kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(spm-api-dispatch-test PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                                    Threads::Threads)
+# copy to binary directory
+rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
 
-add_test(NAME spm-api-dispatch-test COMMAND $<TARGET_FILE:spm-api-dispatch-test>)
+add_test(NAME test-spm-dispatch-collection-validate
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
+                 ${CMAKE_CURRENT_BINARY_DIR}/spm-dispatch-collection-test.json)
 
 set_tests_properties(
-    spm-api-dispatch-test
+    test-spm-dispatch-collection-validate
     PROPERTIES TIMEOUT
-               120
+               45
                LABELS
                "integration-tests"
-               ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+               DEPENDS
+               test-spm-dispatch-collection-execute
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
-               DISABLED
-               ${IS_DISABLED})
+               FIXTURES_REQUIRED
+               test-spm-dispatch-collection)

@@ -90,7 +90,7 @@ aql_data_callback(size_t /**/, void* data, size_t size, int /*flags*/, void* use
     }
     // Prealloc SE_NUM for MI300.
     for(auto& v : counters)
-        v.shaders.resize(8);
+        v.shaders.resize(4);
 
     auto status =
         spm_packet->sym.spm_decode_fn(spm_packet->aql_desc, decode_cb, data, size, &counters);
