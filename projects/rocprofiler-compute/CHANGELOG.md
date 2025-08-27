@@ -115,7 +115,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Usage of rocm-smi
 * Hardware IP block based filtering has been removed in favor of analysis report block based filtering
-* Removed aggregated analysis view from TUI analyze mode
+* Removed aggregated analysis view from TUI analyze mode.
 
 ## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
