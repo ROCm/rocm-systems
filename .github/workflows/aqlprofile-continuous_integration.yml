@@ -1,6 +1,8 @@
 name: AqlProfile Continuous Integration
 
 on:
+  schedule:
+    - cron: '0 7 * * *'
   workflow_dispatch:
   push:
     branches:
