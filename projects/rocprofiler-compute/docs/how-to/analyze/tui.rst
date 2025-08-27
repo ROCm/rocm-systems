@@ -60,7 +60,7 @@ hierarchical categories to provide a more organized, top-down analysis approach:
 #. Kernel Selection Header with Top Stats
 
    Supports interactive kernel selection to toggle between kernel(s) to view individual kernel
-   analysis results
+   analysis results.
 
 #. High Level Analysis
 
