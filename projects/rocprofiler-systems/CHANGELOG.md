@@ -1,6 +1,19 @@
+<!-- markdownlint-disable MD024 -->
+
 # Changelog for ROCm Systems Profiler
 
 Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/).
+
+## ROCm Systems Profiler 1.2.0 for ROCm 7.1
+
+### Added
+
+- ``ROCPROFSYS_ROCM_GROUP_BY_QUEUE`` configuration setting to allow grouping of events by hardware queue, instead of the default grouping.
+- Support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
+
+## Changed
+
+- Updated the grouping of "kernel dispatch" and "memory copy" events in Perfetto traces. They are now grouped together by HIP Stream rather than separately and by hardware queue.
 
 ## ROCm Systems Profiler 1.1.0 for ROCm 7.0
 
@@ -10,9 +23,6 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - How-to document for VCN and JPEG activity sampling and tracing.
 - Support for tracing Fortran applications.
 - Support for tracing MPI API in Fortran.
-- Initial support for rocPD database output with the `ROCPROFSYS_USE_ROCPD` configuration setting.
-- By default, group "kernel dispatch" and "memory copy" events by HIP stream ID in Perfetto traces.
-  - Add the "ROCPROFSYS_ROCM_GROUP_BY_QUEUE" configuration setting to group events by queue, instead.
 
 ### Changed
 
@@ -111,4 +121,4 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - Perfetto can no longer open Omnitrace proto files. Loading the Perfetto trace output `.proto` file in `ui.perfetto.dev` can
   result in a dialog with the message, "Oops, something went wrong! Please file a bug." The information in the dialog will
   refer to an "Unknown field type." The workaround is to open the files with the previous version of the Perfetto UI found
-  at https://ui.perfetto.dev/v46.0-35b3d9845/#!/.
+  at <https://ui.perfetto.dev/v46.0-35b3d9845/#!/>.

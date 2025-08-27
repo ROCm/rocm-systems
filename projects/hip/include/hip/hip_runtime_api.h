@@ -1194,6 +1194,7 @@ typedef enum hipMemAllocationType {
    * location while the application is actively using it
    */
   hipMemAllocationTypePinned = 0x1,
+  hipMemAllocationTypeUncached = 0x40000000,
   hipMemAllocationTypeMax = 0x7FFFFFFF
 } hipMemAllocationType;
 /**
@@ -2921,6 +2922,16 @@ hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int
  * @see hipStreamCreateWithFlags
  */
 hipError_t hipStreamGetFlags(hipStream_t stream, unsigned int* flags);
+/**
+ * @brief Queries the Id of a stream.
+ *
+ * @param[in] stream  Stream to be queried
+ * @param[in,out] flags  Pointer to an unsigned long long in which the stream's id is returned
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorInvalidHandle.
+ *
+ * @see hipStreamCreateWithFlags, hipStreamGetFlags, hipStreamCreateWithPriority, hipStreamGetPriority
+ */
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId);
 /**
  * @brief Queries the priority of a stream.
  *
@@ -9137,7 +9148,7 @@ hipError_t hipMemAddressReserve(void** ptr, size_t size, size_t alignment, void*
  * @param [out] handle - value of the returned handle.
  * @param [in] size - size of the allocation.
  * @param [in] prop - properties of the allocation.
- * @param [in] flags - hipDeviceMallocUncached for uncached allocation, or 0 for default
+ * @param [in] flags - currently unused, must be zero.
  * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
  * @warning This API is marked as Beta. While this feature is complete, it can
  *          change and might have outstanding issues.

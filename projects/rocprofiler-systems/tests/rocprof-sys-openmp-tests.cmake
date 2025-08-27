@@ -51,7 +51,7 @@ if(NOT EXISTS "${_rocm_llvm_lib}/libomptarget.so" AND ROCPROFSYS_USE_ROCM)
 endif()
 
 if(ROCPROFSYS_OPENMP_USING_LIBOMP_LIBRARY AND ROCPROFSYS_USE_OMPT)
-    set(_OMPT_PASS_REGEX "\\|_ompt_")
+    set(_OMPT_PASS_REGEX "\\|_omp_")
 else()
     set(_OMPT_PASS_REGEX "")
 endif()
