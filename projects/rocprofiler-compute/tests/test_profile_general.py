@@ -896,8 +896,47 @@ def test_roofline_empty_kernel_names_handling(binary_handler_profile_rocprof_com
     workload_dir = test_utils.get_output_dir()
 
     returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
+
+@pytest.mark.misc
+def test_roofline_kernel_filter(binary_handler_profile_rocprof_compute):
+    """
+    Test roofline multi-attempt profiling with `--kernel`
+    Expect to be able to re-profile from same workload if kernels are valid.
+    (Validity of --kernels tested in test_roofline_kernel_filter_error_handling already)
+    """
+    if soc in ("MI100"):
+        pytest.skip("Skipping roofline test for MI100")
+        return
+
+    options = [
+        "--device",
+        "0",
+        "--roof-only",
+        "--kernel-names",
+    ]
+    workload_dir = test_utils.get_output_dir()
+
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+    # Don't clean output dir, use same workload
+    options.extend(["--kernel", config["kernel_name_1"]])
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
+        config, workload_dir, options, check_success=True, roof=True
+    )
+
+    # Test nonexistent kernel on roof profile using existing profiling data
+    # Since already profiled, throw error if non-existent kernel requested for roofline
+    options.append("nonexistent_kernel_name_that_should_not_match_anything")
+    returncode = binary_handler_profile_rocprof_compute(  # noqa: F841
         config, workload_dir, options, check_success=False, roof=True
     )
+    assert returncode == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -934,6 +973,10 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
         assert True
         return
 
+    # Test `--kernel` filtering outputs are present and labelled correctly
+    filter_kernelName = "kernelName_legend_" + config["kernel_name_1"]
+    filter_empirRoof = "empirRoof_gpu-0_" + config["kernel_name_1"]
+
     plot_configurations = [
         {
             "options": ["--device", "0", "--roof-only", "--roofline-data-type", "FP32"],
@@ -944,8 +987,15 @@ def test_roof_plot_modes(binary_handler_profile_rocprof_compute):
             "expected_files": ["empirRoof_gpu-0_FP16.pdf"],
         },
         {
-            "options": ["--device", "0", "--roof-only", "--kernel-names"],
-            "expected_files": ["kernelName_legend.pdf"],
+            "options": [
+                "--device",
+                "0",
+                "--roof-only",
+                "--kernel-names",
+                "--kernel",
+                config["kernel_name_1"],
+            ],
+            "expected_files": [filter_kernelName, filter_empirRoof],
         },
     ]
 
