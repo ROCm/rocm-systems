@@ -15,7 +15,7 @@
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
 /projects/hip-tests/                                                  @ROCm/hip-tests-reviewers
-/projects/rdc/                                                        @dmitrii-galantsev @bill-shuzhou-liu
+/projects/rdc/                                                        @dmitrii-galantsev @bill-shuzhou-liu @adam360x
 /projects/rocm-core/                                                  @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru
 /projects/rocm-smi-lib/                                               @bill-shuzhou-liu @dmitrii-galantsev @charis-poag-amd @oliveiradan
 /projects/rocminfo/                                                   @dayatsin-amd @shwetagkhatri
@@ -77,10 +77,10 @@
 /projects/hip/docs/                                                   @ROCm/hip-reviewers @ROCm/lrt-docs-reviewers
 /projects/hip/include/                                                @ROCm/hip-reviewers @ROCm/lrt-docs-reviewers
 
-/projects/rdc/**/*.md                                                 @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/**/*.rst                                                @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/**/.readthedocs.yaml                                    @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
-/projects/rdc/docs/                                                   @dmitrii-galantsev @bill-shuzhou-liu @ROCm/rocm-documentation
+/projects/rdc/**/*.md                                                 @dmitrii-galantsev @bill-shuzhou-liu @adam360x @ROCm/rocm-documentation
+/projects/rdc/**/*.rst                                                @dmitrii-galantsev @bill-shuzhou-liu @adam360x @ROCm/rocm-documentation
+/projects/rdc/**/.readthedocs.yaml                                    @dmitrii-galantsev @bill-shuzhou-liu @adam360x @ROCm/rocm-documentation
+/projects/rdc/docs/                                                   @dmitrii-galantsev @bill-shuzhou-liu @adam360x @ROCm/rocm-documentation
 
 /projects/rocm-core/**/*.md                                           @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @ROCm/rocm-documentation
 /projects/rocm-core/**/*.rst                                          @nunnikri @frepaul @raramakr @ashutom @amd-isparry @arvindcheru @ROCm/rocm-documentation
