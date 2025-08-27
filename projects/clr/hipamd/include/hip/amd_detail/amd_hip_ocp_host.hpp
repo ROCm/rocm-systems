@@ -793,11 +793,11 @@ __OCP_FP_HOST_DEVICE_STATIC__ OutType fp6_cvt_packedx32(InType in, int8_t scale 
                                                         uint32_t seed = 0) {
   // This is tightly coupled with the definitions of the amd_ocp_types
   constexpr bool in_float = std::is_same<InType, __amd_floatx32_storage_t>::value ||
-      std::is_same<InType, __amd_fp16x32_storage_t>::value ||
-      std::is_same<InType, __amd_bf16x32_storage_t>::value;
+                            std::is_same<InType, __amd_fp16x32_storage_t>::value ||
+                            std::is_same<InType, __amd_bf16x32_storage_t>::value;
   constexpr bool out_float = std::is_same<OutType, __amd_floatx32_storage_t>::value ||
-      std::is_same<OutType, __amd_fp16x32_storage_t>::value ||
-      std::is_same<OutType, __amd_bf16x32_storage_t>::value;
+                             std::is_same<OutType, __amd_fp16x32_storage_t>::value ||
+                             std::is_same<OutType, __amd_bf16x32_storage_t>::value;
   using other_type = std::conditional<in_float, OutType, InType>::type;
 
   struct fp6x32_packed {

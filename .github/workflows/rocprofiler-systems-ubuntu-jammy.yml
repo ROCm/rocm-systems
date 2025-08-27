@@ -474,7 +474,7 @@ jobs:
           -DROCPROFSYS_USE_ROCM=OFF
           -DROCPROFSYS_USE_RCCL=OFF
           -DROCPROFSYS_MAX_THREADS=64
-          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp-target"
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl;videodecode;jpegdecode;openmp"
           -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
           -LE "transpose|rccl|videodecode|jpegdecode|network"

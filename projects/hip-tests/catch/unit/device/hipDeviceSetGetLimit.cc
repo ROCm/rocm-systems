@@ -200,8 +200,8 @@ bool isSetScratchLimitSupported() {
   std::cout << "Device Id = " << deviceId << " props.major = " << props.major
             << " props.minor = " << props.minor << std::endl;
   return ((props.major == 9 && props.minor >= 4) || (props.major == 12 && props.minor >= 5))
-      ? true
-      : false;
+             ? true
+             : false;
 #else
   std::cout << "Only Supported for Linux" << std::endl;
   return false;

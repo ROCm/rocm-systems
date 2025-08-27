@@ -130,12 +130,9 @@ inline hipError_t hipOccupancyMaxPotentialBlockSize(int* gridSize, int* blockSiz
                                                  blockSizeLimit);
 }
 
-template <class T>
-inline hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(int* gridSize, int* blockSize,
-                                                             T kernel,
-                                                             size_t dynSharedMemPerBlk = 0,
-                                                             int blockSizeLimit = 0,
-                                                             unsigned int flags = 0) {
+template <class T> inline hipError_t hipOccupancyMaxPotentialBlockSizeWithFlags(
+    int* gridSize, int* blockSize, T kernel, size_t dynSharedMemPerBlk = 0, int blockSizeLimit = 0,
+    unsigned int flags = 0) {
   using namespace hip_impl;
 
   hip_impl::hip_init();

@@ -245,6 +245,14 @@ add_test(
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
+    NAME test_profile_pc_sampling
+    COMMAND
+        ${Python3_EXECUTABLE} -m pytest -s -m pc_sampling
+        --junitxml=tests/test_profile_pc_sampling.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+add_test(
     NAME test_profile_sets_func
     COMMAND
         ${Python3_EXECUTABLE} -m pytest -m sets_func
@@ -467,6 +475,7 @@ add_custom_target(
         --include-package-data=plotly --include-package=kaleido
         --include-package-data=kaleido --include-package=rocprof_compute_analyze
         --include-package-data=rocprof_compute_analyze
+        --include-package=rocprof_compute_tui --include-package-data=rocprof_compute_tui
         --include-package=rocprof_compute_soc --include-package-data=rocprof_compute_soc
         --include-package=utils --include-package-data=utils rocprof-compute
     # Remove library rpath from executable
