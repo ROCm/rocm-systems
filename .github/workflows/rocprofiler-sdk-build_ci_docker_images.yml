@@ -92,7 +92,6 @@ jobs:
       - name: Build & Push (to Docker Hub; cache to GHA)
         uses: docker/build-push-action@v6
         with:
-          context: .
           file: ./projects/rocprofiler-sdk/Docker/Dockerfile.ci
           platforms: linux/amd64
           push: true
