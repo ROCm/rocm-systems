@@ -15,7 +15,7 @@ RUN apt update --yes \
             cmake \
             git \
             gnupg \
-            libdrm-dev \
+            libdrm-amdgpu-dev \
             libpython3-dev \
             lsb-release \
             pkg-config \
