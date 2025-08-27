@@ -1421,6 +1421,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "code object tracing service configure");
 
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(marker_api_callback_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       nullptr),
+        "marker core api tracing service configure");
+
     ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                          marker_api_callback_ctx,
                          ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API,
@@ -1765,6 +1774,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     //                                                  0,
     //                                                  hip_api_buffered_buffer),
     //     "buffer tracing service configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
+                                                     nullptr,
+                                                     0,
+                                                     marker_api_buffered_buffer),
+        "buffer tracing service configure - MARKER_CORE_API");
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                          marker_api_buffered_ctx,
