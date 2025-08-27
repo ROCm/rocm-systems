@@ -93,7 +93,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: projects/rocprofiler-sdk/Docker/Dockerfile.ci
+          file: ./projects/rocprofiler-sdk/Docker/Dockerfile.ci
           platforms: linux/amd64
           push: true
           build-args: |
