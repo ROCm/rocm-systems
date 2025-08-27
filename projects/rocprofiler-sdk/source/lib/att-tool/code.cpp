@@ -72,8 +72,7 @@ CodeFile::~CodeFile()
                   vec.end(),
                   [](const std::pair<pcinfo_t, std::unique_ptr<CodeLine>>& a,
                      const std::pair<pcinfo_t, std::unique_ptr<CodeLine>>& b) {
-                      if(a.first.marker_id == b.first.marker_id) return a.first.addr < b.first.addr;
-                      return a.first.marker_id < b.first.marker_id;
+                      return a.first < b.first;
                   });
 
         std::stringstream ofs;
@@ -92,7 +91,7 @@ CodeFile::~CodeFile()
             if(kernel_names.find(pc) != kernel_names.end())
             {
                 csv_encoder::write_row(ofs,
-                                       pc.marker_id,
+                                       pc.code_object_id,
                                        pc.addr,
                                        "; " + kernel_names.at(pc).name,
                                        0,
@@ -102,7 +101,7 @@ CodeFile::~CodeFile()
                                        kernel_names.at(pc).demangled);
             }
             csv_encoder::write_row(ofs,
-                                   pc.marker_id,
+                                   pc.code_object_id,
                                    pc.addr,
                                    line->code_line->inst,
                                    line->hitcount,
@@ -138,16 +137,16 @@ CodeFile::~CodeFile()
         {
             std::stringstream code;
             code << "[\"; " << kernel_names.at(line.first).name << "\",0," << (isa.line_number - 1)
-                 << ",\"" << kernel_names.at(line.first).demangled << "\"," << line.first.marker_id
-                 << "," << line.first.addr << ",0,0,0,0]";
+                 << ",\"" << kernel_names.at(line.first).demangled << "\","
+                 << line.first.code_object_id << "," << line.first.addr << ",0,0,0,0]";
             jcode.push_back(nlohmann::json::parse(code.str()));
         }
 
         std::stringstream code;
         code << "[\"" << isa.code_line->inst << "\",0," << isa.line_number << ",\""
-             << isa.code_line->comment << "\"," << line.first.marker_id << "," << line.first.addr
-             << "," << isa.hitcount << "," << isa.latency << "," << isa.stall << "," << isa.idle
-             << "]";
+             << isa.code_line->comment << "\"," << line.first.code_object_id << ","
+             << line.first.addr << "," << isa.hitcount << "," << isa.latency << "," << isa.stall
+             << "," << isa.idle << "]";
 
         jcode.push_back(nlohmann::json::parse(code.str()));
 

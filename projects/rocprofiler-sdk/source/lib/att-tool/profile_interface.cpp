@@ -91,7 +91,7 @@ get_trace_data(rocprofiler_thread_trace_decoder_record_type_t trace_id,
         for(size_t j = 0; j < wave.instructions_size; j++)
         {
             const auto& inst = wave.instructions_array[j];
-            if(inst.pc.marker_id == 0 && inst.pc.addr == 0) continue;
+            if(inst.pc.code_object_id == 0 && inst.pc.addr == 0) continue;
 
             try
             {
@@ -148,26 +148,27 @@ ToolData::get(pcinfo_t _pc)
     if(isa_map.find(_pc) != isa_map.end()) return *isa_map.at(_pc);
 
     // Attempt to disassemble full kernel
-    if(_pc.marker_id != 0u) try
+    if(_pc.code_object_id != 0u) try
         {
             rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator symbol_table;
-            for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.marker_id))
-                symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.marker_id});
+            for(auto& [vaddr, symbol] : cfile->table->getSymbolMap(_pc.code_object_id))
+                symbol_table.insert({symbol.vaddr, symbol.mem_size, _pc.code_object_id});
 
             auto addr_range = symbol_table.find_codeobj_in_range(_pc.addr);
             try
             {
-                auto symbol = cfile->table->getSymbolMap(_pc.marker_id).at(addr_range.addr);
+                auto symbol = cfile->table->getSymbolMap(_pc.code_object_id).at(addr_range.addr);
                 auto pair   = KernelName{symbol.name, demangle(symbol.name)};
-                cfile->kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.marker_id}, pair);
+                cfile->kernel_names.emplace(pcinfo_t{addr_range.addr, _pc.code_object_id}, pair);
             } catch(...)
             {
-                ROCP_INFO << "Missing kernelSymbol at " << _pc.marker_id << ':' << addr_range.addr;
+                ROCP_INFO << "Missing kernelSymbol at " << _pc.code_object_id << ':'
+                          << addr_range.addr;
             }
 
             for(auto addr = addr_range.addr; addr < addr_range.addr + addr_range.size;)
             {
-                pcinfo_t info{.addr = addr, .marker_id = addr_range.id};
+                pcinfo_t info{.addr = addr, .code_object_id = addr_range.id};
                 auto& cline = *(isa_map.emplace(info, std::make_unique<CodeLine>()).first->second);
 
                 cline.line_number         = isa_map.size() + cfile->kernel_names.size() - 1;
@@ -187,7 +188,7 @@ ToolData::get(pcinfo_t _pc)
     cline.line_number        = isa_map.size();
     cfile->line_numbers[_pc] = cline.line_number;
 
-    cline.code_line = cfile->table->get(_pc.marker_id, _pc.addr);
+    cline.code_line = cfile->table->get(_pc.code_object_id, _pc.addr);
 
     return cline;
 }

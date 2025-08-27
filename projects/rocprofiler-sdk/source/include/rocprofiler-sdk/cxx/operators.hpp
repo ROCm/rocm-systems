@@ -228,9 +228,9 @@ operator==(rocprofiler_version_triplet_t lhs, rocprofiler_version_triplet_t rhs)
 }
 
 inline bool
-operator==(rocprofiler_thread_trace_decoder_pc_t a, rocprofiler_thread_trace_decoder_pc_t b)
+operator==(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
 {
-    return a.addr == b.addr && a.marker_id == b.marker_id;
+    return std::tie(lhs.code_object_id, lhs.addr) == std::tie(rhs.code_object_id, rhs.addr);
 }
 
 // definitions of operator!=
@@ -330,9 +330,9 @@ operator<(rocprofiler_version_triplet_t lhs, rocprofiler_version_triplet_t rhs)
 }
 
 inline bool
-operator<(rocprofiler_thread_trace_decoder_pc_t a, rocprofiler_thread_trace_decoder_pc_t b)
+operator<(rocprofiler_thread_trace_decoder_pc_t lhs, rocprofiler_thread_trace_decoder_pc_t rhs)
 {
-    return (a.marker_id == b.marker_id) ? (a.addr < b.addr) : (a.marker_id < b.marker_id);
+    return std::tie(lhs.code_object_id, lhs.addr) < std::tie(rhs.code_object_id, rhs.addr);
 }
 
 // definitions of operator>, operator<=, operator>=

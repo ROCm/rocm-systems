@@ -44,8 +44,8 @@ TEST(att_decoder_waitcnt_test, gfx9)
 
     auto append_isa = [&](size_t line_number, const char* line) {
         pcinfo_t pc{};
-        pc.addr      = line_number + LINE_OFFSET;
-        pc.marker_id = 0;
+        pc.addr           = line_number + LINE_OFFSET;
+        pc.code_object_id = 0;
 
         auto code             = std::make_unique<CodeLine>();
         code->code_line       = std::make_shared<CodeLine::Instruction>();
@@ -129,8 +129,8 @@ TEST(att_decoder_waitcnt_test, gfx10)
 
     auto append_isa = [&](size_t line_number, const char* line) {
         pcinfo_t pc{};
-        pc.addr      = line_number + LINE_OFFSET;
-        pc.marker_id = 0;
+        pc.addr           = line_number + LINE_OFFSET;
+        pc.code_object_id = 0;
 
         auto code             = std::make_unique<CodeLine>();
         code->code_line       = std::make_shared<CodeLine::Instruction>();
@@ -222,8 +222,8 @@ TEST(att_decoder_waitcnt_test, gfx12)
 
     auto append_isa = [&](size_t line_number, const char* line) {
         pcinfo_t pc{};
-        pc.addr      = line_number + LINE_OFFSET;
-        pc.marker_id = 0;
+        pc.addr           = line_number + LINE_OFFSET;
+        pc.code_object_id = 0;
 
         auto code             = std::make_unique<CodeLine>();
         code->code_line       = std::make_shared<CodeLine::Instruction>();

@@ -41,7 +41,7 @@ struct std::hash<rocprofiler_thread_trace_decoder_pc_t>
 {
     size_t operator()(const rocprofiler_thread_trace_decoder_pc_t& a) const noexcept
     {
-        return (a.marker_id << 32) ^ (a.marker_id >> 32) ^ a.addr;
+        return (a.code_object_id << 32) ^ (a.code_object_id >> 32) ^ a.addr;
     }
 };
 
