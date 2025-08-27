@@ -167,7 +167,7 @@ jobs:
             ${{ env.ROCM_PATH }}*/lib/python*/site-packages/rocpd
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
         with:
           key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           max-size: 2G
@@ -461,7 +461,7 @@ jobs:
           ln -s /usr/local/bin/curl /usr/bin/curl
 
       - name: Setup ccache
-        uses: hendrikmuhs/ccache-action@v1.2
+        uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
         with:
           key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}
           max-size: 2G
@@ -673,7 +673,7 @@ jobs:
       run: echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Setup ccache
-      uses: hendrikmuhs/ccache-action@v1.2
+      uses: hendrikmuhs/ccache-action@63069e3931dedbf3b63792097479563182fe70d1 # v1.2.18
       with:
         key: ccache-${{ matrix.os }}-linux-mi325-1gpu-ossci-rocm-${{ matrix.runner }}-${{ matrix.sanitizer}}
         max-size: 2G
