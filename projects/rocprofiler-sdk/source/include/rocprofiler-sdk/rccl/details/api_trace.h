@@ -81,6 +81,14 @@ typedef ncclResult_t (*ncclAllReduce_fn_t)(const void*      sendbuff,
                                            ncclRedOp_t      op,
                                            struct ncclComm* comm,
                                            hipStream_t      stream);
+typedef ncclResult_t (*ncclAllReduceWithBias_fn_t)(const void*      sendbuff,
+                                                   void*            recvbuff,
+                                                   size_t           count,
+                                                   ncclDataType_t   datatype,
+                                                   ncclRedOp_t      op,
+                                                   struct ncclComm* comm,
+                                                   hipStream_t      stream,
+                                                   const void*      acc);
 typedef ncclResult_t (*ncclAllToAll_fn_t)(const void*    sendbuff,
                                           void*          recvbuff,
                                           size_t         count,
@@ -223,14 +231,7 @@ typedef ncclResult_t (*ncclCommRegister_fn_t)(const ncclComm_t comm,
                                               void**           handle);
 
 typedef ncclResult_t (*ncclCommDeregister_fn_t)(const ncclComm_t comm, void* handle);
-typedef ncclResult_t (*ncclAllReduceWithBias_fn_t)(const void*      sendbuff,
-                                                   void*            recvbuff,
-                                                   size_t           count,
-                                                   ncclDataType_t   datatype,
-                                                   ncclRedOp_t      op,
-                                                   struct ncclComm* comm,
-                                                   hipStream_t      stream,
-                                                   const void*      acc);
+
 typedef struct rcclApiFuncTable
 {
     uint64_t                      size;
