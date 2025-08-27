@@ -771,7 +771,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit, profiling_config):
 
 
 def init_metric_evaluator(
-    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict
+    raw_pmc_df: Union[pd.DataFrame, dict], ammolite_vars: dict, empirical_peaks: dict
 ) -> None:
     if isinstance(raw_pmc_df, dict):
         raw_pmc_df_keys = set(raw_pmc_df.keys())
@@ -790,7 +790,7 @@ def init_metric_evaluator(
     # The process-local globals are used for performance optimization.
     globals().update(raw_pmc_df_items)
     globals().update(ammolite_vars)
-
+    globals().update(empirical_peaks)
 
 def run_metric_evaluator(row_expr: str) -> str:
     try:
@@ -820,6 +820,36 @@ def run_metric_evaluator(row_expr: str) -> str:
         else:
             console_error("analysis", str(ae))
 
+def create_empirical_peaks_dict(empirical_peaks_df):
+    """Create empirical peaks dictionary"""
+    empirical_peaks = {}
+    
+    if not empirical_peaks_df.empty:
+        peak_data_row = empirical_peaks_df.iloc[0]
+        for col in empirical_peaks_df.columns:
+            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
+    else:
+        peak_names = [
+            "FP16Flops",
+            "FP32Flops", 
+            "FP64Flops",
+            "MFMAF64Flops",
+            "MFMAF32Flops",
+            "MFMAF16Flops",
+            "MFMABF16Flops",
+            "MFMAF8Flops",
+            "MFMAI8Ops",
+            "HBMBw",
+            "L2Bw",
+            "L1Bw",
+            "LDSBw",
+            "MFMA_FLOPs_F6F4",
+        ]
+        # initialize peaks to 0
+        for peak_name in peak_names:
+            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
+    
+    return empirical_peaks
 
 @demarcate
 def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, config):
@@ -927,37 +957,10 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             "wave_size is not available in sysinfo.csv, please provide the correct "
             "value using --specs-correction"
         )
-
-    empirical_peaks = {}
-
-    if not empirical_peaks_df.empty:
-        peak_data_row = empirical_peaks_df.iloc[0]
-
-        for col in empirical_peaks_df.columns:
-            empirical_peaks[f"ammolite__{col}_empirical_peak"] = peak_data_row[col]
-    else:
-        peak_names = [
-            "FP16Flops",
-            "FP32Flops",
-            "FP64Flops",
-            "MFMAF64Flops",
-            "MFMAF32Flops",
-            "MFMAF16Flops",
-            "MFMABF16Flops",
-            "MFMAF8Flops",
-            "MFMAI8Ops",
-            "HBMBw",
-            "L2Bw",
-            "L1Bw",
-            "LDSBw",
-            "MFMA_FLOPs_F6F4",
-        ]
-        # init peaks to 0
-        for peak_name in peak_names:
-            empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
+    
+    empirical_peaks = create_empirical_peaks_dict(empirical_peaks_df)
 
     # TODO: fix all $normUnit in Unit column or title
-    globals().update(empirical_peaks)
     # build and eval all derived build-in global variables
     ammolite__build_in = {}
 
@@ -1029,12 +1032,17 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                     )
                                     if matched_vars:
                                         for v in matched_vars:
-                                            print(
-                                                "Var ",
-                                                v,
-                                                ":",
-                                                eval(compile(v, "<string>", "eval")),
-                                            )
+                                            try:
+                                                value = eval(compile(v, "<string>", "eval"))
+                                                print("Var ", v, ":", value)
+                                            except NameError:
+                                                if "_empirical_peak" in v:
+                                                    if v in empirical_peaks:
+                                                        print("Var ", v, ":", empirical_peaks[v])
+                                                    else:
+                                                        print("Var ", v, ": [empirical peak not found]")
+                                                else:
+                                                    print("Var ", v, ": [not available in main thread]")
                                     matched_cols = re.findall(
                                         r"raw_pmc_df\['\w+'\]\['\w+'\]", row[expr]
                                     )
@@ -1069,6 +1077,17 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
                                         print(
                                             eval(compile(row[expr], "<string>", "eval"))
                                         )
+                                        print("~" * 40)
+                                    except NameError as ne:
+                                        if "empirical_peak" in str(ne):
+                                            console_warning(
+                                                "Skipping debug evaluation. Empirical peak variables "
+                                                "not available in main thread: {}".format(str(ne))
+                                            )
+                                        else:
+                                            console_warning(
+                                                "Skipping debug evaluation. Variable not available: {}".format(str(ne))
+                                            )
                                         print("~" * 40)
                                     except TypeError:
                                         console_warning(
@@ -1107,7 +1126,6 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
     ammolite_vars = {
         key: val for key, val in locals().items() if key.startswith("ammolite__")
     }
-    combined_locals = {**ammolite_vars, **empirical_peaks}
     # Empirically, 16 is about as much as we need.
     processes = min(16, multiprocessing.cpu_count() // 2)
 
@@ -1115,7 +1133,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
     with multiprocessing.Pool(
         processes=processes,
         initializer=init_metric_evaluator,
-        initargs=(raw_pmc_df, combined_locals),
+        initargs=(raw_pmc_df, ammolite_vars, empirical_peaks),
     ) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)
 
