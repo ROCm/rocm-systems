@@ -180,8 +180,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Support for Roofline plot on CLI (single run) analysis.
 
-* Roofline support for RHEL 10 OS.
-
 * `FP4` and `FP6` data types have been added for roofline profiling on AMD Instinct MI350 series.
 
 #### rocprofv3 support
