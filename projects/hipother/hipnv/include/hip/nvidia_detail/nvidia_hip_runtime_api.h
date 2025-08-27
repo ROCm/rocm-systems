@@ -1921,6 +1921,10 @@ typedef enum CUmemAllocationGranularity_flags_enum hipMemAllocationGranularity_f
 typedef enum cudaMemLocationType hipMemLocationType;
 #define hipMemLocationTypeInvalid cudaMemLocationTypeInvalid
 #define hipMemLocationTypeDevice cudaMemLocationTypeDevice
+#define hipMemLocationTypeNone cudaMemLocationTypeNone
+#define hipMemLocationTypeHost cudaMemLocationTypeHost
+#define hipMemLocationTypeHostNuma cudaMemLocationTypeHostNuma
+#define hipMemLocationTypeHostNumaCurrent cudaMemLocationTypeHostNumaCurrent
 #define hipMemHandleTypeNone cudaMemHandleTypeNone
 #define hipMemHandleTypePosixFileDescriptor cudaMemHandleTypePosixFileDescriptor
 #define hipMemHandleTypeWin32 cudaMemHandleTypeWin32
@@ -2036,15 +2040,41 @@ inline static hipError_t hipHostMalloc(void** ptr, size_t size, unsigned int fla
   return hipCUDAErrorTohipError(cudaHostAlloc(ptr, size, flags));
 }
 
+
 inline static hipError_t hipMemAdvise(const void* dev_ptr, size_t count, hipMemoryAdvise advice,
                                       int device) {
+#if CUDA_VERSION >= 12020
+  cudaMemLocation loc = {};
+  if (device == hipCpuDeviceId) {
+    loc.type = cudaMemLocationTypeHost;
+    loc.id = 0;
+  } else {
+    loc.type = cudaMemLocationTypeDevice;
+    loc.id = device;
+  }
+  return hipCUDAErrorTohipError(
+      cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), loc));
+#else
   return hipCUDAErrorTohipError(
       cudaMemAdvise(dev_ptr, count, hipMemoryAdviseTocudaMemoryAdvise(advice), device));
+#endif
 }
 
 inline static hipError_t hipMemPrefetchAsync(const void* dev_ptr, size_t count, int device,
                                              hipStream_t stream __dparm(0)) {
+#if CUDA_VERSION >= 12020
+  cudaMemLocation loc = {};
+  if (device == hipCpuDeviceId) {
+    loc.type = cudaMemLocationTypeHost;
+    loc.id = 0;
+  } else {
+    loc.type = cudaMemLocationTypeDevice;
+    loc.id = device;
+  }
+  return hipCUDAErrorTohipError(cudaMemPrefetchAsync(dev_ptr, count, loc, 0u, stream));
+#else
   return hipCUDAErrorTohipError(cudaMemPrefetchAsync(dev_ptr, count, device, stream));
+#endif
 }
 
 inline static hipError_t hipMemPrefetchAsync_v2(const void* dev_ptr, size_t count,
