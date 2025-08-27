@@ -955,7 +955,7 @@ def eval_metric(dfs, dfs_type, sys_info, empirical_peaks_df, raw_pmc_df, debug, 
             empirical_peaks[f"ammolite__{peak_name}_empirical_peak"] = 0
 
     # TODO: fix all $normUnit in Unit column or title
-
+    globals().update(empirical_peaks)
     # build and eval all derived build-in global variables
     ammolite__build_in = {}
 
