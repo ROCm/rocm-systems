@@ -40,7 +40,6 @@ a single workload from ``rocprof-compute profile`` generated output directories.
 
 3. You can see the center window update with a top header for kernel selection and collapsed contents beneath.
 Select a kernel of interest to load the corresponding analysis results. The top kernel is selected by default.
-kernel.
 
 .. image:: ../../data/analyze/tui_kernel_selection.png
    :align: center
