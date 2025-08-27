@@ -166,6 +166,48 @@ GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_
 
 - N/A
 
+## amd_smi_lib for ROCm 7.0.1
+
+### Added
+
+### Changed
+
+### Removed
+
+- **Fixed gpuboard and baseboard temperatures enums in amdsmi Python Library**.  
+  - AmdSmiTemperatureType had issues with referencing the right attribute, so we removed the following duplicate enums:
+    - `AmdSmiTemperatureType.GPUBOARD_NODE_FIRST`
+    - `AmdSmiTemperatureType.GPUBOARD_VR_FIRST`
+    - `AmdSmiTemperatureType.BASEBOARD_FIRST`
+
+### Optimized
+
+### Resolved Issues
+
+- **Fixed `amd-smi monitor` errors on guest systems**.  
+
+  ```shell
+  $ amd-smi monitor
+  AttributeError: 'Namespace' object has no attribute 'violation'
+  ```
+
+Now properly shows:
+
+  ```shell
+  $ amd-smi monitor
+  GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
+    0    0   12 W   40 °C   44 °C     9 MHz    8 %    1 %    N/A    0 %    0.2/ 25.4 GB
+  ```
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
+
 ## amd_smi_lib for ROCm 7.0.0
 
 ### Added
