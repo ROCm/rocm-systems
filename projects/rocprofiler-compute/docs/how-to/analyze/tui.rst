@@ -64,10 +64,20 @@ hierarchical categories to provide a more organized, top-down analysis approach:
 #. High Level Analysis:
 
    Experimental performance metrics layout, reorganized performance metrics grouping to display the new
-   GPU Speed-of-Light section, Compute Throughput section, and Memory Throughput section
+   GPU Speed-of-Light section, Compute Throughput section, and Memory Throughput section.
 
 #. Detailed Block Analysis
+
+   Displays analysis results grouped by metric blocks, similar to the CLI output.
+   When applicable, performance metrics are shown as charts (instead of tables only),
+   providing a more visual representation.
+
 #. Source Level analysis
+
+   Displays the PC Sampling section.
+   Source Level analysis does not have PC sampling enabled by default during the
+   profiling stage. Refer to :doc:`../pc_sampling` for details on how to build and enable PC sampling
+   manually.
 
 You are recommended to follow this top-down hierarchical structure to conduct a thorough performance
 analysis, starting with the broad overview and progressively drilling down to specific details.

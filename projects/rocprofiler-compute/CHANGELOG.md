@@ -23,6 +23,39 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * Add support for analysis report output as a sqlite database using ``--output-format db`` analysis mode option
 
+* Add `Compute Throughput` panel to TUI's `High Level Analysis` category with the following metrics:
+  * VALU FLOPs
+  * VALU IOPs
+  * MFMA FLOPs (F8)
+  * MFMA FLOPs (BF16)
+  * MFMA FLOPs (F16)
+  * MFMA FLOPs (F32)
+  * MFMA FLOPs (F64)
+  * MFMA FLOPs (F6F4) (in gfx950)
+  * MFMA IOPs (Int8)
+  * SALU Utilization
+  * VALU Utilization
+  * MFMA Utilization
+  * VMEM Utilization
+  * Branch Utilization
+  * IPC
+
+* Add `Memory Throughput` panel to TUI's `High Level Analysis` category  with the following metrics:
+  * vL1D Cache BW
+  * vL1D Cache Utilization
+  * Theoretical LDS Bandwidth
+  * LDS Utilization
+  * L2 Cache BW
+  * L2 Cache Utilization
+  * L2-Fabric Read BW
+  * L2-Fabric Write BW
+  * sL1D Cache BW
+  * L1I BW
+  * Address Processing Unit Busy
+  * Data-Return Busy
+  * L1I-L2 Bandwidth
+  * sL1D-L2 BW
+
 ### Changed
 
 * Add notice for change in default output format to `rocpd` in a future release
@@ -46,14 +79,6 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Atomic/Read/Write Bandwidth (section 1703)
   * Atomic/Read/Write Bandwidth - (HBM/PCIe/Infinity Fabric) (section 1706)
 
-* Add `Utilization` to metric name for the following `Bandwidth` related metrics whose `Unit` is `Percent`
-  * Theoretical Bandwidth Utilization (section 1201)
-  * L1I-L2 Bandwidth Utilization (section 1301)
-  * Bandwidth Utilization (section 1301)
-  * Bandwidth Utilization (section 1401)
-  * sL1D-L2 BW Utilization (section 1401)
-  * Bandwidth Utilization (section 1601)
-
 * Update `System Speed-of-Light` panel to `GPU Speed-of-Light` in TUI with the following metrics:
   * Theoretical LDS Bandwidth
   * vL1D Cache BW
@@ -65,44 +90,25 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * SIMD Utilization
   * Clock Rate
 
-* Add `Compute Throughput` panel to TUI with the following metrics:
-  * VALU FLOPs
-  * VALU IOPs
-  * MFMA FLOPs (F8)
-  * MFMA FLOPs (BF16)
-  * MFMA FLOPs (F16)
-  * MFMA FLOPs (F32)
-  * MFMA FLOPs (F64)
-  * MFMA FLOPs (F6F4) (in gfx950)
-  * MFMA IOPs (Int8)
-  * SALU Utilization
-  * VALU Utilization
-  * MFMA Utilization
-  * VMEM Utilization
-  * Branch Utilization
-  * IPC
-
-* Add `Memory Throughput` panel to TUI with the following metrics:
-  * vL1D Cache BW
-  * vL1D Cache Utilization
-  * Theoretical LDS Bandwidth
-  * LDS Utilization
-  * L2 Cache BW
-  * L2 Cache Utilization
-  * L2-Fabric Read BW
-  * L2-Fabric Write BW
-  * sL1D Cache BW
-  * L1I BW
-  * Address Processing Unit Busy
-  * Data-Return Busy
-  * L1I-L2 Bandwidth
-  * sL1D-L2 BW
-
 * Analysis output:
   * Replace `-o / --output` analyze mode option with `--output-format` and `--output-name`
     * Add ``--output-format`` analysis mode option to select the output format of the analysis report.
     * Add ``--output-name`` analysis mode option to override the default file/folder name.
   * Replace `--save-dfs` analyze mode option with `--output-format csv`
+
+### Removed
+
+* Usage of rocm-smi
+* Hardware IP block based filtering has been removed in favor of analysis report block based filtering
+* Removed aggregated analysis view from TUI analyze mode.
+
+### Optimized
+
+* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
+
+* Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
+
+* Improve post-analysis runtime performance by caching and multi-processing
 
 ### Resolved issues
 
@@ -114,19 +120,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Known issues
 
-### Optimized
-
-* Improved `--time-unit` option in analyze mode to apply time unit conversion across all analysis sections, not just kernel top stats.
-
-* Improve logic to obtain rocprof supported counters which prevents unnecessary warnings
-
-* Improve post-analysis runtime performance by caching and multi-processing
-
-### Removed
-
-* Usage of rocm-smi
-* Hardware IP block based filtering has been removed in favor of analysis report block based filtering
-* Removed aggregated analysis view from TUI analyze mode.
+### Upcoming changes
 
 ## ROCm Compute Profiler 3.2.3 for ROCm 7.0.0
 
