@@ -135,6 +135,8 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
+        elif self.__args.output_format == "db":
+            self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
 
@@ -427,6 +429,10 @@ class RocProfCompute:
 
             run_tui(self.__args, self.__supported_archs)
             return
+        elif self.__analyze_mode == "db":
+            from rocprof_compute_analyze.analysis_db import db_analysis
+
+            analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
             console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
 

@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from pathlib import Path as path
 from typing import Optional, Tuple
 
@@ -1650,3 +1651,7 @@ def parse_sets_yaml(arch) -> dict:
         if set_option:
             sets_info[set_option] = set_item
     return sets_info
+
+
+def get_uuid(length=8):
+    return uuid.uuid4().hex[:length]

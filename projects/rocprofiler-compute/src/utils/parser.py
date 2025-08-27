@@ -169,6 +169,7 @@ DEFAULT_PEAKS = [
     "LDSBw",
     "MFMA_FLOPs_F6F4",
 ]
+PC_SAMPLING_NOT_ISSUE_PREFIX = "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
 
 # ------------------------------------------------------------------------------
 # Utility Functions
@@ -985,7 +986,7 @@ def collect_expressions_for_evaluation(
                 else:
                     row[expr] = ""
 
-
+                    
 @demarcate
 def eval_metric(
     dfs: dict[int, pd.DataFrame],
@@ -1034,7 +1035,7 @@ def eval_metric(
     with multiprocessing.Pool(
         processes=processes,
         initializer=init_metric_evaluator,
-        initargs=(raw_pmc_df, ammolite_vars),
+        initargs=(raw_pmc_df, ammolite_vars, empirical_peaks),
     ) as pool:
         outs = pool.map(run_metric_evaluator, row_exprs)
 
@@ -1214,9 +1215,7 @@ def search_pc_sampling_record(
         )
     )
 
-    rocp_inst_not_issued_prefix_len = len(
-        "ROCPROFILER_PC_SAMPLING_INSTRUCTION_NOT_ISSUED_REASON_"
-    )
+    rocp_inst_not_issued_prefix_len = len(PC_SAMPLING_NOT_ISSUE_PREFIX)
 
     # Populate grouped_data
     for item in records:
