@@ -48,7 +48,6 @@ jobs:
             projects/rocprofiler-sdk/Docker/Dockerfile.ci
 
       - name: Get the latest therock build
-        if: github.event_name == 'schedule'
         id: therock
         run: |
           sudo apt-get install -y python3-pip
@@ -91,7 +90,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build & Push (to Docker Hub; cache to GHA)
-        if: github.event_name == 'schedule'
         uses: docker/build-push-action@v6
         with:
           context: .
