@@ -1099,22 +1099,43 @@ def process_kokkos_trace_output(workload_dir, fbase):
     marker_api_trace_csvs = glob.glob(
         workload_dir + "/out/pmc_1/*/*_marker_api_trace.csv"
     )
+    # counter collection csv files are generated for each process
     existing_marker_files_csv = [d for d in marker_api_trace_csvs if path(d).is_file()]
+    existing_counter_files_csv = [d for d in [d.replace('marker_api_trace','counter_collection') for d in existing_marker_files_csv] if path(d).is_file()]
+    if len(existing_counter_files_csv) != len(existing_marker_files_csv):
+        console_warning("The number of kokkos marker trace files and counter collection files do not match.")
+        
 
     # concate and output marker api trace info
-    combined_results = pd.concat(
+    combined_results_marker = pd.concat(
         [pd.read_csv(f) for f in existing_marker_files_csv], ignore_index=True
     )
+    combined_results_counter = pd.concat(   
+        [pd.read_csv(f) for f in existing_counter_files_csv], ignore_index=True
+    )
 
-    combined_results.to_csv(
+    combined_results = pd.merge(
+        combined_results_marker,
+        combined_results_counter,
+        how="inner",
+        on="Correlation_Id")
+
+    combined_results = combined_results[combined_results['Kernel_Name'].str.contains('kokkos', case=False, na=False)]
+
+    combined_results_marker.to_csv(
         workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
         index=False,
     )
+    combined_results.to_csv(workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_kernel_trace.csv", index=False)
 
     if path(workload_dir + "/out").exists():
         shutil.copyfile(
             workload_dir + "/out/pmc_1/results_" + fbase + "_marker_api_trace.csv",
             workload_dir + "/" + fbase + "_marker_api_trace.csv",
+        )
+        shutil.copyfile(
+            workload_dir + "/out/pmc_1/results_" + fbase + "_kokkos_kernel_trace.csv",
+            workload_dir + "/" + fbase + "_kokkos_kernel_trace.csv",
         )
 
 
