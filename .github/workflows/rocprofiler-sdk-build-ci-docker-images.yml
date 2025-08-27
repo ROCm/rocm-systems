@@ -92,9 +92,9 @@ jobs:
           build-args: |
             BASE_TAG=${{ matrix.os }}
             GPU_TYPE=${{ matrix.gpu }}
-            GFX94X_KEY=${{ steps.therock.outputs.gfx94X }}
-            GFX110X_KEY=${{ steps.therock.outputs.gfx110X }}
-            GFX120X_KEY=${{ steps.therock.outputs.gfx120X }}
+            GFX94X_FILE_NAME=${{ steps.therock.outputs.gfx94X }}
+            GFX110X_FILE_NAME=${{ steps.therock.outputs.gfx110X }}
+            GFX120X_FILE_NAME=${{ steps.therock.outputs.gfx120X }}
           tags: |
             docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-latest
           cache-from: type=gha,scope=rocprofiler-ci-${{ matrix.os }}-${{ matrix.gpu }}
