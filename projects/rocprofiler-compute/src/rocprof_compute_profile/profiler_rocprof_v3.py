@@ -27,7 +27,7 @@ import shlex
 from pathlib import Path
 
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
-from utils.logger import console_error, console_log, demarcate
+from utils.logger import console_log, demarcate
 
 
 class rocprof_v3_profiler(RocProfCompute_Base):
