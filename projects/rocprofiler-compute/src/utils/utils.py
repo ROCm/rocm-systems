@@ -38,8 +38,7 @@ import tempfile
 import time
 import uuid
 from pathlib import Path as path
-from typing import Optional
-from typing import Union
+from typing import Optional, Union
 
 import pandas as pd
 import yaml

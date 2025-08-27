@@ -28,6 +28,7 @@ from decimal import Decimal
 from typing import Dict
 
 from plotille import Canvas
+
 from .utils import format_scientific_notation_if_needed
 
 
