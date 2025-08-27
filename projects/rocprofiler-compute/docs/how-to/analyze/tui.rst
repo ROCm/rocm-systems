@@ -46,7 +46,7 @@ Select a kernel of interest to load the corresponding analysis results. The top 
    :alt: ROCm Compute Profiler TUI home screen
    :width: 800
 
-4. After the analysis results are loaded, you can start interactive analysis with detailed metrics by
+4. After the analysis results are loaded, you can start interactive analysis with the detailed metrics by
 uncollapse contents to view tables, charts, and graphs visualizing the analysis data.
 The TUI supports basic keyboard shortcuts, including quit application commands for easy navigation.
 
