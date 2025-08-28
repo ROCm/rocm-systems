@@ -111,25 +111,8 @@ static void producer(spm_state_t* s) {
     s->prod_buf = s->cons_buf;
     s->cons_buf = s->dest_buf;
     s->dest_buf = tmp;
-#if SUPPORT_XCC
-    // In the initial XCC SPM design, 'size_copied' and 'is_data_loss' are stored in
-    // kfd_ioctl_spm_buffer_header. They are no longer stored in kfd_ioctl_spm_args.
-    // But we still need accumulated version for some quick checks and KFD will add
-    // them back to kfd_ioctl_spm_args.
-    // This is only a temporary patch as KFD will fix this in ROCm 6.5
-    char* base = (char*)s->cons_buf;
-    s->size_copied = 0;
-    s->is_data_loss = false;
-    for (int i = 0; i < s->num_xcc; i++) {
-      auto buf_info = (struct kfd_ioctl_spm_buffer_header*)base;
-      s->size_copied += buf_info->bytes_copied;
-      s->is_data_loss |= buf_info->has_data_loss;
-      base += s->buf_size_xcc;
-    }
-#else
     s->size_copied = args.size_copied;
     s->is_data_loss = args.is_data_loss;
-#endif
     s->data_ready = true;
     s->work_cond.notify_one();
     lock.unlock();
