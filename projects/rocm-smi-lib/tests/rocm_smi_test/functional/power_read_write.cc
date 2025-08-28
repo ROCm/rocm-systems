@@ -189,7 +189,9 @@ void TestPowerReadWrite::Run(void) {
 
     ASSERT_EQ(status.current, new_prof);
 
-    ret = rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
-    ret = rsmi_dev_power_profile_set(dv_ind, 0, RSMI_PWR_PROF_PRST_BOOTUP_DEFAULT);
+    // Restore original power profile and performance level
+    // assertion check not necessary because we are restoring the original state
+    rsmi_dev_perf_level_set(dv_ind, RSMI_DEV_PERF_LEVEL_AUTO);
+    rsmi_dev_power_profile_set(dv_ind, 0, orig_profile);
   }
 }
