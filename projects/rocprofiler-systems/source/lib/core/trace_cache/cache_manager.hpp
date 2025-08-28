@@ -23,7 +23,6 @@
 #pragma once
 
 #include "buffer_storage.hpp"
-#include "core/trace_cache/rocpd_post_processing.hpp"
 #include "metadata_registry.hpp"
 #include "storage_parser.hpp"
 

@@ -51,16 +51,16 @@ namespace rocpd
 {
 namespace data_storage
 {
-database::database(int pid)
+database::database(const std::string& _tag)
 {
-    auto db_name = std::string{ "rocpd" + std::to_string(pid) + ".db" };
-    // auto abs_db_path = rocprofsys::get_database_absolute_path(db_name);
-    // create_directory_for_database_file(abs_db_path);
-    ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", db_name.c_str());
+    auto db_name     = std::string{ "rocpd" };
+    auto abs_db_path = rocprofsys::get_database_absolute_path(db_name, _tag);
+    create_directory_for_database_file(abs_db_path);
+    ROCPROFSYS_VERBOSE(0, "Database: %s\r\n", abs_db_path.c_str());
 
     validate_sqlite3_result(sqlite3_open(":memory:", &_sqlite3_db_temp), "",
                             "database open failed!");
-    validate_sqlite3_result(sqlite3_open(db_name.c_str(), &_sqlite3_db), "",
+    validate_sqlite3_result(sqlite3_open(abs_db_path.c_str(), &_sqlite3_db), "",
                             "database open failed!");
 }
 

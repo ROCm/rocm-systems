@@ -36,7 +36,6 @@
 #include <stdexcept>
 #include <stdint.h>
 #include <string.h>
-#include <thread>
 #include <type_traits>
 #include <unistd.h>
 

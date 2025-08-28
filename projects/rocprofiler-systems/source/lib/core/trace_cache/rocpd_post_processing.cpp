@@ -28,7 +28,7 @@
 #include "library/thread_info.hpp"
 #include "node_info.hpp"
 #include "rocpd/data_processor.hpp"
-#include "rocpd/rocpd_factory.hpp"
+#include "rocpd/data_storage/database.hpp"
 #include "trace_cache/metadata_registry.hpp"
 #include "trace_cache/sample_type.hpp"
 #include "trace_cache/storage_parser.hpp"
@@ -663,10 +663,12 @@ rocpd_post_processing::get_cpu_freq_sample_callback() const
 }
 
 rocpd_post_processing::rocpd_post_processing(metadata_registry& md,
-                                             agent_manager& agent_mngr, int pid)
+                                             agent_manager&     agent_mngr,
+                                             const std::string& _database_tag)
 : m_metadata(md)
 , m_agent_manager(agent_mngr)
-, m_data_processor(rocpd::rocpd_factory::create_data_processor(pid))
+, m_data_processor(std::make_shared<rocpd::data_processor>(
+      std::make_shared<rocpd::data_storage::database>(_database_tag)))
 {}
 
 void

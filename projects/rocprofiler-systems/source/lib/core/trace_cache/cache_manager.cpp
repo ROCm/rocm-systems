@@ -105,10 +105,10 @@ cache_manager::post_process_bulk()
 
         std::map<int, cache_files> cache_map{};
 
+        // TODO: Rewrite, reuse same lambda..
         auto parse_and_fill_cache = [&](const std::string& filename) {
             if(filename.find("buffered_storage_") != std::string::npos)
             {
-                // Extract parent PID and PID from buffered_storage_<parent_pid>_<pid>.bin
                 auto first_underscore = filename.find("buffered_storage_");
                 if(first_underscore != std::string::npos)
                 {
@@ -136,7 +136,6 @@ cache_manager::post_process_bulk()
             }
             else if(filename.find("metadata_") != std::string::npos)
             {
-                // Extract parent PID and PID from metadata_<parent_pid>_<pid>.json
                 auto first_underscore = filename.find("metadata_");
                 if(first_underscore != std::string::npos)
                 {
@@ -169,7 +168,7 @@ cache_manager::post_process_bulk()
 
         rocpd_threads.emplace_back([this]() {
             rocpd_post_processing _post_processing(
-                m_metadata, agent_manager::get_instance(), getpid());
+                m_metadata, agent_manager::get_instance(), std::to_string(getpid()));
             storage_parser _parser(getpid(), filename);
             _post_processing.register_parser_callback(_parser);
             _post_processing.post_process_metadata();
@@ -182,23 +181,27 @@ cache_manager::post_process_bulk()
             if(!files.buff_storage.empty() && !files.metadata.empty())
             {
                 rocpd_threads.emplace_back([pid = pid, files = files]() {
-                    std::cout << "\nCreating database for [" << pid
-                              << "]: " << files.buff_storage << " " << files.metadata
-                              << std::endl;
+                    ROCPROFSYS_DEBUG("Creating database for [%d] from buffered storage "
+                                     "file: %s and from metadata file: %s",
+                                     pid, files.buff_storage.c_str(),
+                                     files.metadata.c_str());
                     metadata_registry metadata;
                     auto              res = metadata.load_from_file(files.metadata);
                     if(!res)
                     {
-                        std::cout << "LOAD FROM FILE FOR METADATA FAILED" << std::endl;
+                        ROCPROFSYS_WARNING(0, "Load from file for metadata failed: %s\n",
+                                           files.metadata.c_str());
                         return;
                     }
                     agent_manager         agent_mngr(metadata.get_agents());
-                    rocpd_post_processing _post_processing(metadata, agent_mngr, pid);
+                    rocpd_post_processing _post_processing(metadata, agent_mngr,
+                                                           std::to_string(pid));
                     storage_parser        _parser(getpid(), files.buff_storage);
                     _post_processing.register_parser_callback(_parser);
                     _post_processing.post_process_metadata();
                     _parser.consume_storage();
                     _post_processing.get_data_processor()->flush();
+                    std::remove(files.metadata.c_str());  // Remove metadata file
                 });
             }
         }

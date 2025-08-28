@@ -36,7 +36,7 @@ class rocpd_post_processing
 {
 public:
     rocpd_post_processing(metadata_registry& metadata, agent_manager& agent_mngr,
-                          int pid);
+                          const std::string& _database_tag);
 
     void register_parser_callback(storage_parser& parser);
     void post_process_metadata();

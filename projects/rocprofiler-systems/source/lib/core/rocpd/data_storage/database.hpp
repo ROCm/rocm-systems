@@ -38,8 +38,8 @@ static std::mutex _mutex;
 class database
 {
 public:
-    explicit database(int pid);
-    database()                      = default;
+    explicit database(const std::string& _tag);
+    database()                      = delete;
     database(database&)             = delete;
     database& operator=(database&)  = delete;
     database(database&&)            = default;
@@ -59,6 +59,8 @@ private:
         ss << "Database Error\n";
         ((ss << args << " "), ...);
         ss << "\nQuery: " << query << "\n";
+        // Fetch error message of last sqlite3_* call
+        const auto* error_message = sqlite3_errstr(sqlite3_error_code);
         switch(sqlite3_error_code)
         {
             case SQLITE_OK:
@@ -98,7 +100,7 @@ private:
             }
             break;
         }
-        ss << " [Sqlite3 error: " << sqlite3_errstr(sqlite3_error_code);
+        ss << " [Sqlite3 error: " << error_message;
         ss << " (Extended error message: " << sqlite3_errmsg(_sqlite3_db_temp) << ")]";
         throw std::runtime_error(ss.str());
     }
