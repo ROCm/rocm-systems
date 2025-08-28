@@ -244,8 +244,8 @@ TEST_CASE("Unit_hipDeviceGetAttribute_NegTst") {
   }
 }
 
-template <size_t n>
-using AttributeToStringMap = std::array<std::pair<hipDeviceAttribute_t, const char*>, n>;
+template <size_t n> using AttributeToStringMap =
+    std::array<std::pair<hipDeviceAttribute_t, const char*>, n>;
 
 namespace {
 

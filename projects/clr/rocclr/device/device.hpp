@@ -1763,8 +1763,8 @@ class Device : public RuntimeObject {
     return (info().svmCapabilities_ &
             (CL_DEVICE_SVM_COARSE_GRAIN_BUFFER | CL_DEVICE_SVM_FINE_GRAIN_BUFFER |
              CL_DEVICE_SVM_FINE_GRAIN_SYSTEM)) != 0
-        ? true
-        : false;
+               ? true
+               : false;
   }
 
   //! check svm FGS support capability.

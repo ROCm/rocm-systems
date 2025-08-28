@@ -27,9 +27,8 @@
  * - Sets attributes of a memory pool
  */
 
-template <typename T>
-static void MemPoolSetGetAttribute(const hipMemPool_t mempool, const hipMemPoolAttr attr,
-                                   T& set_value) {
+template <typename T> static void MemPoolSetGetAttribute(const hipMemPool_t mempool,
+                                                         const hipMemPoolAttr attr, T& set_value) {
   T get_value = 100;
   HIP_CHECK(hipMemPoolSetAttribute(mempool, attr, &set_value));
   HIP_CHECK(hipMemPoolGetAttribute(mempool, attr, &get_value));

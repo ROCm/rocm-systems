@@ -24,13 +24,19 @@ project(clr)
 ##########
 # Defaults
 ##########
-if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
+if (CMAKE_CXX_COMPILER_ID STREQUAL "MSVC"
+    OR CMAKE_CXX_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
     add_compile_options("/wd4267" "/wd4244" "/wd4996")
     string(REPLACE "/GR" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     string(REPLACE "/W3" "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
     if (CMAKE_BUILD_TYPE STREQUAL "Debug")
         add_compile_options(/MTd)
         add_compile_options(-D_ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH)
+    endif()
+    if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+        # Unlike when targeting MSFT's MSVC, when targeting clang-cl,
+        # CMake does not add these automatically.  Add them ourselves.
+        add_compile_options("/DWIN32" "/D_WINDOWS" "/EHsc")
     endif()
 endif()
 

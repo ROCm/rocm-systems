@@ -160,9 +160,9 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_NonUniformWorkGroup") {
                     HIP_LAUNCH_PARAM_END};
   // Memcpy from A to Ad
   HIP_CHECK(hipMemcpy(Ad, A, sizeBytes, hipMemcpyDefault));
-  REQUIRE(hipErrorInvalidValue ==
-          hipExtModuleLaunchKernel(Function, arraylength, 1, 1, localWorkSize, 1, 1, 0, 0, NULL,
-                                   reinterpret_cast<void**>(&config), 0));
+  REQUIRE(hipErrorInvalidValue == hipExtModuleLaunchKernel(Function, arraylength, 1, 1,
+                                                           localWorkSize, 1, 1, 0, 0, NULL,
+                                                           reinterpret_cast<void**>(&config), 0));
   HIP_CHECK(hipDeviceSynchronize());
   HIP_CHECK(hipFree(Ad));
   HIP_CHECK(hipFree(Bd));

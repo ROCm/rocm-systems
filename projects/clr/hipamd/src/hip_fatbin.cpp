@@ -37,10 +37,9 @@ template <typename comgr_T> class ComgrUniqueHandle {
   // constructor which takes ownership of a correctly initialzed handle
   ComgrUniqueHandle(comgr_T& handle) : comgr_obj_(handle) { handle = {0}; };
 
-  template <typename T = comgr_T,
-            std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
-                                 std::is_same_v<T, amd_comgr_action_info_t>,
-                             bool> = true>
+  template <typename T = comgr_T, std::enable_if_t<std::is_same_v<T, amd_comgr_data_set_t> ||
+                                                       std::is_same_v<T, amd_comgr_action_info_t>,
+                                                   bool> = true>
   [[nodiscard]] amd_comgr_status_t Create() {
     if constexpr (std::is_same_v<T, amd_comgr_data_set_t>) {
       return amd::Comgr::create_data_set(&comgr_obj_);
@@ -736,9 +735,9 @@ hipError_t FatBinaryInfo::BuildProgram(const int device_id) {
 
   // If Program was already built skip this step and return success
   if (dev_programs_[device_id]->IsProgramBuilt(*g_devices[device_id]->devices()[0]) == false) {
-    if (CL_SUCCESS !=
-        dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr, nullptr, nullptr,
-                                        kOptionChangeable, kNewDevProg)) {
+    if (CL_SUCCESS != dev_programs_[device_id]->build(g_devices[device_id]->devices(), nullptr,
+                                                      nullptr, nullptr, kOptionChangeable,
+                                                      kNewDevProg)) {
       return hipErrorNoBinaryForGpu;
     }
     if (!dev_programs_[device_id]->load()) {
