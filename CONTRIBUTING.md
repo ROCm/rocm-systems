@@ -19,7 +19,7 @@ To limit your local checkout to only the project(s) you work on and improve perf
 git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-systems.git
 cd rocm-systems
 git sparse-checkout init --cone
-git sparse-checkout set projects/rocblas shared/tensile
+git sparse-checkout set projects/rocprofiler-sdk shared/rocprofiler-compute
 git checkout develop # or the branch you are starting from
 ```
 
@@ -33,7 +33,7 @@ The checkout command of the two projects lasted less than 90 seconds.
 If your work involves changing projects or introducing new projects, you can update your sparse-checkout environment:
 
 ```bash
-git sparse-checkout set projects/hipsparse projects/rocsparse
+git sparse-checkout set projects/hip projects/clr projects/hip-tests
 ```
 
 This keeps your working directory clean and fast, as you won't need to clone the entire super-repo.
@@ -127,6 +127,41 @@ Existing testing and CI infrastructure will be updated to directly point to the 
 Specific checks will become mandatory for pull requests before merging. Initially, these will be limited to compilation, but will expand to correctness tests and eventually performance tests.
 Hardware and operating system coverage will also expand for these checks over time.
 Please refer to [this documentation](/docs/continuous-integration.md) for further details on the current signals that will be provided through CI for pull requests and commits.
+
+---
+
+## Large File Storage
+
+[Data Version Control](https://dvc.org) is the system for large file storage in this super-repo. It provides staging capabilities on top of what Git LFS typically provides that ROCm CI/CD workflows can make use of. Files are stored in an S3 bucket that has public-read access.
+
+Currently, `DVC` utilization is limited to the `pal` libraries in the `shared/amdgpu-windows-interop` directory.
+
+[Installing DVC](https://dvc.org/doc/install)
+
+Retrieving large files:
+
+```bash
+git pull
+dvc pull
+```
+
+Switching to versions in other branches or commits:
+
+```bash
+git checkout feature-branch
+dvc checkout
+```
+
+Write-access requires authentication. Please reach out to a project lead for credentials. To make updates to files maintained by `DVC`:
+
+```bash
+dvc add [path-to-large-file-modified]
+dvc push
+git status
+git add [dvc-files-mentioned-from-status-output]
+git commit -m "commit message"
+git push
+```
 
 ---
 
