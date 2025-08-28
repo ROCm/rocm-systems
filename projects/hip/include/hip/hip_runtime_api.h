@@ -4532,6 +4532,24 @@ hipError_t hipMallocPitch(void** ptr, size_t* pitch, size_t width, size_t height
  */
 hipError_t hipMemAllocPitch(hipDeviceptr_t* dptr, size_t* pitch, size_t widthInBytes, size_t height,
                             unsigned int elementSizeBytes);
+
+/**
+ * @brief Submit a batch of count independent decompression operations.
+ * 
+ * @param[in] paramsArray The array of structures describing the independent decompression
+ * operations.
+ * @param[in] count The number of entries in paramsArray array.
+ * @param[in] flags Must be 0
+ * @param[in] errorIndex The index into paramsArray of the decompression operation for which the
+ * error returned by this function pertains to.
+ * @param[in] stream The stream where the work will be enqueued.
+ * 
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidContext,
+ * #hipErrorInvalidValue, #hipErrorInvalidHandle
+ */
+hipError_t hipMemBatchDecompressAsync(hipMemDecompressParams* paramsArray, size_t count,
+                                      unsigned int flags, size_t* errorIndex, hipStream_t stream);
+
 /**
  *  @brief Free memory allocated by the HIP-Clang hip memory allocation API.
  *  This API performs an implicit hipDeviceSynchronize() call.

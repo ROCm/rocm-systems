@@ -491,6 +491,24 @@ typedef enum hipMemcpySrcAccessOrder {
   hipMemcpySrcAccessOrderMax = 0x7FFFFFFF
 } hipMemcpySrcAccessOrder;
 
+typedef enum hipMemDecompressAlgorithm {
+  hipMemDecompressUnsupported = 0,
+  hipMemDecompressAlgorithmDeflate = 1<<0,
+  hipMemDecompressAlgorithmSnappy = 1<<1,
+  hipMemDecompressAlgorithmLZ4 = 1<<2,
+} hipMemDecompressAlgorithm;
+/**
+ * Struct representing decrompression parameters
+ */
+typedef struct hipMemDecompressParams {
+  hipMemDecompressAlgorithm algo;
+  void* dst;
+  u_int32_t dstActBytes;
+  size_t dstNumBytes;
+  const void* src;
+  size_t srcNumBytes;
+} hipMemDecompressParams;
+
 /**
  * Attributes for copies within a batch.
  */
