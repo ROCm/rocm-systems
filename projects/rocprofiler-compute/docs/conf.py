@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 # Configuration file for the Sphinx documentation builder.
 #
 # This file only contains a selection of the most common options. For a full
@@ -214,4 +213,4 @@ extlinks = {
 }
 
 # Uncomment if facing rate limit exceed issue with local build
-external_projects_remote_repository = ""
+# external_projects_remote_repository = ""

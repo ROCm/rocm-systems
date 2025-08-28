@@ -43,8 +43,8 @@ struct instance
     using buffer_t = common::container::record_header_buffer;
 
     mutable std::array<buffer_t, 2> buffers       = {};
-    mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT; // writer and reader lock.
-    mutable std::atomic<uint32_t>   buffer_idx    = {};  // array index
+    mutable std::atomic_flag        syncer        = ATOMIC_FLAG_INIT;  // writer and reader lock.
+    mutable std::atomic<uint32_t>   buffer_idx    = {};                // array index
     mutable std::atomic<uint64_t>   drop_count    = {};
     uint64_t                        watermark     = 0;
     uint64_t                        context_id    = 0;  // rocprofiler_context_id_t value

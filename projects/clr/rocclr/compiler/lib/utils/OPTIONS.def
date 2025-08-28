@@ -1,0 +1,1293 @@
+﻿/* Copyright (c) 2010 - 2021 Advanced Micro Devices, Inc.
+
+ Permission is hereby granted, free of charge, to any person obtaining a copy
+ of this software and associated documentation files (the "Software"), to deal
+ in the Software without restriction, including without limitation the rights
+ to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ copies of the Software, and to permit persons to whom the Software is
+ furnished to do so, subject to the following conditions:
+
+ The above copyright notice and this permission notice shall be included in
+ all copies or substantial portions of the Software.
+
+ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ THE SOFTWARE. */
+
+/*
+ * Description:
+ *
+ * This is the file that contains definitions of all options to clBuildProgram().
+ * And any changes to option (add/remove/modify) should be done here. This option
+ * processing is thread-safe, that is, each option is not implemented as a static
+ * variable that is assessible to all threads but as a local variable that is
+ * accessible only to its definining thread. For example,
+ *
+ *    option::Options localOptions;
+ *    option::parseAllOptions(cppstr, localOptions);
+ *
+ * where 'localOptions' is an option object that contains all option variables and any
+ * code that needs to access the option has to do so via 'localOptions'. (That is why
+ * 'localOptions' has been passed down to many parts that need to access option
+ * variables.)  For instance, the following will be used to check if -g is present:
+ *
+ *    if (localOptions.oVariables->EnableDebug) {
+ *       <-g is present>;
+ *    }
+ *
+ *
+ * MACROS for making changes to this file:
+ *
+ * Two macros : OPTION for runtime options that have option variables and NOPTION for others
+ * that do Not have option variables. The OPTION are ones that are referenced by the runtime
+ * via their option variables like the one shown above. The NOPTION are ones that are either
+ * passed into component option processors directly, or alias runtime options. An alias runtime
+ * option is one that refers to another option or a group of others and has no corresponding
+ * option variable in the above option object.  For example,
+ * -D NAME=<sth> is passed into the front end and the runtime has no variable for it in the
+ * above option object. Another example is -cl-opt-disable, which is a runtime alias option.
+ * It is equivalent to -O0 and used to set -O0. It has no variable in the option object either.
+ *
+ * Here are these two macros:
+ *   OPTION(type, attr, sn, ln, var, ideft, imix, imax, sdeft, desc)
+ *  NOPTION(type, attr, sn, ln, var, ideft, imix, imax, sdeft, desc)
+ *
+ * Note: As mentioned above, NOPTION is for component options or alias runtime options so
+ * when using it make sure that either the option group is not OA_RUNTIME or that you
+ * have OA_MISC_ALIAS set.
+ *
+ *  For convenience,  FLAG marco is provided as well. FLAG macro is very close to a flag
+ *  used in flags.hpp.  It is define as below:
+ *     FLAG(type, vis, sn, var, deft, desc)
+ *
+ *     type: option type defined as OptionType enum:
+ *              OT_BOOL    : bool
+ *              OT_INT32   : int32
+ *              OT_UINT32  : uint32
+ *              OT_CSTRING : char*
+ *              OT_uCHAR   : unsigned char
+ *
+ *     attr: option attributes, divided in several groups:
+ *              OptionValue : value attribute. Use exactly one.
+ *                 OVA_OPTIONAL   : value is optional
+ *                 OVA_REQUIRED   : value is required to appear
+ *                 OVA_DISALLOWED : value may not be specified
+ *
+ *              OptionForm :  form attribute. Use exactly one.
+ *                 OFA_NORMAL   : normal form, no prefix
+ *                 OFA_PREFIX_F : -f<flag>, machine-independent (-f[no-]<option>)
+ *                 OFA_PREFIX_M : -m<flag>, machine-dependent (-m[no-]<option>)
+ *                 OFA_PREFIX_W : -W<flag>, warning (TODO (-w[no-]<option>)
+ *
+ *              OptionGroup:  which component this option is for. Use at least 1.
+ *                 OA_RUNTIME :  runtime option
+ *                 OA_CLC     :  front end (clc) option
+ *                 OA_LINK_EXE:  program link-time option
+ *                 OA_LINK_LIB:  library link-time option
+ *
+ *              OptionValueSeparator : option value separator. Use at least 1.
+ *                 OA_SEPARATOR_NONE  : no separator, such as -O1, -O2, etc.
+ *                 OA_SEPARATOR_EQUAL : '=' as separator
+ *                 OA_SEPARATOR_SPACE : ' ' as separator
+ *
+ *              OptionVisibility : visibility attribute. Use exactly one.
+ *                 OVIS_PUBLIC   :  supported & ducumented option (shown by -h).
+ *                 OVIS_SUPPORT  :  supported (undocumented, tentative) option (unshown by -h)
+ *                 OVIS_INTERNAL :  internal one and not available in product (unshown by -h).
+ *
+ *              OptionMisc : misc attributes
+ *                 OA_MISC_ALIAS : indicate the option is alias option. It is optional.
+ *
+ *        All the attributes can be combined together by bit-OR. For example,
+ *               -g : OA_RUNTIME|OVA_DISALLOWED|OFA_NORMAL|OVIS_PUBLIC
+ *          and
+ *               -f[no-]bin-llvmir : OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_PUBLIC
+ *
+ *        Note that OVIS_PUBLIC is default (0 value enum is default), the above -g is
+ *        equivalent to:
+ *               -g : OA_RUNTIME|OVA_DISALLOWED|OFA_NORMAL
+ *
+ *     vis: visibility attribute defined as OptionVisibility:
+ *
+ *     sn    : short name (char*). (-sn)
+ *     ln    : long name (char*). (--ln)
+ *     var   : variable name (literal) for the option.
+ *             This will add a field name 'var' in option::Options.oVariables. So, it can
+ *             can be accessed via localOption.oVariables->var.
+ *     ideft : default value for integer option (OT_BOOL|INT32|UINT32)
+ *
+ *     imin
+ *     imax  : integer option range (imin, imax)
+ *
+ *     sdeft : default value for OT_CSTRING (char*)
+ *     desc  : option description shown by -h (char*)
+ *
+ *  For example:
+ *
+ *    -D[]name[=val]
+ *      NOPTION(OT_CSTRING, \
+ *              OA_CLC|OVA_REQUIRED|OA_SEPARATOR_NONE|OA_SEPARATOR_SPACE, \
+ *              "D", NULL, \
+ *              PP_D, \
+ *              0, 0, 0, NULL, \
+ *              "Predefine name as macro")
+ *
+ *     where sn = "D", ln = NULL (no long name). PP_D is a variable name. Since this is
+ *     NOPTION, no varialbe in option object for this. But we still need PP_D (as option ID)
+ *     All unused parameters are set to 0.
+ *
+ *   -O[0|1|2|3|4|5|s|g]
+ *     OPTION(OT_UCHAR, \
+ *            OA_RUNTIME|OVIS_INTERNAL|OVA_OPTIONAL|OA_SEPARATOR_NONE, \
+ *            "O", NULL, \
+ *            OptLevel, \
+ *            '3', 0, 's', NULL, \
+ *            "Set optimization level to <number>(0-4, 5(-Os equivalent), g")
+ *
+ *     where sn = "O", var = "OptLevel", ideft is 3 (Which means -O will mean -O3). And code
+ *     can use the following for checking the option level:
+ *        if (localOptions.oVariables->OptLevel == amd::option::OPT_O0) {
+ *          ...
+ *        }
+ *
+ *    Examples of using FLAG
+ *      -abc=0|1  (0 default),  internal boolean option
+ *        FLAG(OT_BOOL, OVIS_INTERNAL, "abc", FlagABC, 0, "description of -abc..")
+ *
+ *      -regthreshold=<int> (32 default), public int option
+ *        FLAG(OT_INT32, OVIS_PUBLIC, "regthreshold", RegThreshold, 32, "set register threshold")
+ *
+ *      -version=<str> (OpenCL2.0 default), public string option
+ *        FLAG(OT_CSTRING, OVIS_PUBLIC, "version", Version, "OpenCL2.0", "set version string")
+ *
+ */
+
+/* Indent for help message if the help message (description) is in multiple lines. */
+#define HINDENT	"\t    "
+
+/*
+   OpenCL Standard options
+*/
+
+// -cl-single-precision-constant
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "cl-single-precision-constant", NULL, \
+       SinglePrecisionConstant, \
+       false, 0, 0, NULL, \
+       "Treat double floating-point constant as single one.")
+
+// -cl-denorms-are-zero
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-denorms-are-zero", NULL, \
+       DenormsAreZero,   \
+       false, 0, 0, NULL, \
+       "Flush denormalized floating numbers to zero.")
+
+// -cl-opt-disable
+NOPTION(OT_BOOL, \
+       OA_RUNTIME|OA_MISC_ALIAS|OVA_DISALLOWED, \
+       "cl-opt-disable", NULL, \
+       OptDisable, \
+       false, 0, 0, NULL, \
+       "Disable optimization (equivalent to -O0)")
+
+// -cl-strict-aliasing
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "cl-strict-aliasing", NULL, \
+       StricAliasing, \
+       false, 0, 0, NULL, \
+       "Compiler assumes the strict aliasing rule.")
+
+// -cl-mad-enable
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "cl-mad-enable", NULL, \
+       MadEnable, \
+       false, 0, 0, NULL, \
+       "Enable MAD")
+
+// -cl-no-signed-zeros
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-no-signed-zeros", NULL,
+       NoSignedZeros, \
+       false, 0, 0, NULL, \
+       "Ignore the signedness of zero")
+
+// -cl-unsafe-math-optimizations
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-unsafe-math-optimizations", NULL, \
+       UnsafeMathOpt, \
+       false, 0, 0, NULL, \
+       "Allow unsafe optimization")
+
+// -cl-finite-math-only
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-finite-math-only", NULL, \
+       FiniteMathOnly,
+       false, 0, 0, NULL, \
+       "Assume no NaN nor infinite")
+
+// -cl-fast-relaxed-math
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-fast-relaxed-math", NULL, \
+       FastRelaxedMath, \
+       false, 0, 0, NULL, \
+       "Do aggressive math optimization")
+
+// -cl-fp32-correctly-rounded-divide-sqrt
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "cl-fp32-correctly-rounded-divide-sqrt", NULL, \
+       FP32RoundDivideSqrt, \
+       false, 0, 0, NULL, \
+       "Correctly round single-precision FP divide & sqrt")
+
+// -w
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "w", NULL, \
+       DisableAllWarnings, \
+       false, 0, 0, NULL, \
+       "Disable all warnings")
+
+// -Werror
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "Werror", NULL, \
+       WarnToError, \
+       false, 0, 0, NULL, \
+       "Treat any warn as an error")
+
+// -cl-std
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "cl-std", NULL, \
+       CLStd, \
+       0, 0, 0, "CL1.2", \
+       "CL version supported")
+
+// -frontend
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+       "frontend", NULL, \
+       Frontend, \
+       0, 0, 0, "", \
+       "Choose OpenCL frontend (clang|edg)")
+
+// -spir-std
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "spir-std", NULL, \
+       SPIRStd, \
+       0, 0, 0, "1.2", \
+       "SPIR version supported")
+
+// -D name and -D name=definition
+NOPTION(OT_CSTRING, \
+        OA_CLC|OVA_REQUIRED|OA_SEPARATOR_NONE|OA_SEPARATOR_SPACE, \
+        "D", NULL, \
+        PP_D, \
+        0, 0, 0, NULL, \
+        "Predefine name as macro")
+
+// -cl-kernel-arg-info
+NOPTION(OT_BOOL, \
+        OA_RUNTIME|OVA_DISALLOWED, \
+        "cl-kernel-arg-info", NULL, \
+        false, \
+        0, 0, 0, NULL, \
+        "Kernel argument info")
+
+// -cl-internal-kernel
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OVIS_SUPPORT, \
+       "cl-internal-kernel", NULL, \
+       clInternalKernel, \
+       false, 0, 0, NULL, \
+       "Internal kernel")
+
+// -I dir
+NOPTION(OT_CSTRING, \
+        OA_CLC|OVA_REQUIRED|OA_SEPARATOR_NONE|OA_SEPARATOR_SPACE, \
+        "I", NULL, \
+        PP_I, \
+        0, 0, 0, NULL, \
+        "Add directory dir for header file search")
+
+// -create-library
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_LIB|OVA_DISALLOWED, \
+       "create-library", NULL, \
+       clCreateLibrary, \
+       false, 0, 0, NULL, \
+       "Create library")
+
+// -enable-link-options
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_LIB|OVA_DISALLOWED, \
+       "enable-link-options", NULL, \
+       clEnableLinkOptions, \
+       false, 0, 0, NULL, \
+       "Enable Link Options")
+
+//  -cl-uniform-work-group-size
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_LINK_EXE|OVA_DISALLOWED, \
+       "cl-uniform-work-group-size", NULL, \
+       UniformWorkGroupSize, \
+       false, 0, 0, NULL, \
+       "Allow only uniform workgroup size")
+
+
+/*****************************************************************/
+/*
+   AMD options
+*/
+
+// -h  --help
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+       "h", "help", \
+       ShowHelp, \
+       0, 0, 0, NULL, \
+       "Show a description of options")
+
+// -g
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED, \
+       "g", NULL, \
+       EnableDebug, \
+       false, 0, 0, NULL, \
+       "Produce debugging information")
+
+//  -legacy
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OA_SEPARATOR_NONE|OFA_NORMAL, \
+       "legacy", NULL, \
+       Legacy, \
+       false, 0, 0, NULL, \
+       "Forces compilation via legacy (AMDIL)")
+
+//  -binary_is_spirv
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OA_SEPARATOR_NONE|OFA_NORMAL, \
+       "binary_is_spirv", NULL, \
+       BinaryIsSpirv, \
+       false, 0, 0, NULL, \
+       "Program is created from SPIRV binary")
+
+//  -falias, -fno-alias
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "alias", NULL, \
+       AssumeAlias, \
+       false, 0, 0, NULL, \
+       "Assume pointers do [not] alias. This option is no longer in use.")
+
+// -m64
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "m64", NULL, \
+       GPU64BitIsa, \
+       false, 0, 0, NULL, \
+       "To enable the generation of 64-bit gpu isa code (default is 32-bit)")
+
+// -m32 (alias to -m64)
+NOPTION(OT_BOOL, \
+       OA_RUNTIME|OA_MISC_ALIAS|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "m32", NULL, \
+       GPU32BitIsa, \
+       true, 0, 0, NULL, \
+       "To enable the generation of 32-bit gpu isa code (default)")
+
+//  -fper-pointer-uav, -fno-per-pointer-uav
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "per-pointer-uav", NULL, \
+       PerPointerUAV, \
+       false, 0, 0, NULL, \
+       "Specify that UAVs per pointer should be used(HD5XXX and HD6XXX series GPU\'s only).")
+
+//  -fbin-source  -fno-bin-source
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-source", NULL, \
+       BinSOURCE, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have SOURCE")
+
+//  -fonly-bin-source
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "only-bin-source", NULL, \
+       OnlyBinSOURCE, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have SOURCE")
+
+//  -fbin-llvmir  -fno-bin-llvmir
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-llvmir", NULL, \
+       BinLLVMIR, \
+       true, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have LLVMIR")
+
+//  -fbin-spir  -fno-bin-spir
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-spir", NULL, \
+       BinSPIR, \
+       true, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have SPIR")
+
+//  -fbin-cg, -fno-bin-cg
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-cg", NULL, \
+       BinCG, \
+       true, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have output from code generator")
+
+//  -fbin-amdil  -fno-bin-amdil
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-amdil", NULL, \
+       BinAMDIL, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have AMDIL")
+
+//  -fbin-hsail  -fno-bin-hsail
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-hsail", NULL, \
+       BinHSAIL, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have HSAIL")
+
+//  -fbin-exe  -fno-bin-exe
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F|OVIS_SUPPORT, \
+       "bin-exe", NULL, \
+       BinEXE, \
+       true, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have Executable")
+
+//  -fbin-bif30
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-bif30", NULL, \
+       BinBIF30, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to be BIF3.0 format")
+
+//  -fbin-as  -fno-bin-as
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-as", NULL, \
+       BinAS, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have X86 assembly text")
+
+//  -fbin-disasm  -fno-bin-disasm
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-disasm", NULL, \
+       BinDISASM, \
+       false, 0, 0, NULL, \
+       "Allow OpenCL binary to [not] have X86 assembly text")
+
+//  -fbin-encrypt  -fno-bin-encrypt
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-encrypt", NULL, \
+       BinEncrypt, \
+       false, 0, 0, NULL, \
+       "Generate an encrypted OpenCL binary (not by default)")
+
+//  -fbin-gpu64  -fno-bin-gpu64 (default)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "bin-gpu64", NULL, \
+       EnableGpuElf64, \
+       false, 0, 0, NULL, \
+       "Generate 64-bit ELF binary for GPU (default: 32-bit)")
+
+//  -fdebug-linker  -fno-debug-linker
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "debug-linker", NULL, \
+       EnableDebugLinker, \
+       false, 0, 0, NULL, \
+       "Enable debug output for linker")
+
+// -fc99-inline  -fno-c99-inline (default)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "c99-inline", NULL, \
+       EnableC99Inline, \
+       false, 0, 0, NULL, \
+       "Enable c99 style inlining mode")
+
+// -Wf,<options>  : pass comma-separated <options> to the frontend (clc)
+OPTION(OT_CSTRING, \
+        OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_NONE, \
+        "Wf,", NULL, \
+        WFComma, \
+        0, 0, 0, NULL, \
+        "Pass comma-separated <options> to the frontend")
+
+// -x <lang>  : lang should be clc, clc++ or spir
+OPTION(OT_CSTRING, \
+        OA_RUNTIME|OVA_REQUIRED|OA_SEPARATOR_SPACE, \
+        "x", NULL, \
+        XLang, \
+        0, 0, 0, NULL, \
+        "-x clc|clc++|spir")
+
+// -Wb,<options>  : pass comma-separated <options> to the backend (llvm)
+OPTION(OT_CSTRING, \
+        OA_RUNTIME|OA_LINK_EXE|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_NONE, \
+        "Wb,", NULL, \
+        WBComma, \
+        0, 0, 0, NULL, \
+        "Pass comma-separated <options> to the backend (llvm)")
+
+// -Wh,<options>  : pass comma-separated <options> to the finalizer (sc)
+OPTION(OT_CSTRING, \
+        OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_NONE, \
+        "Wh,", NULL, \
+        WHComma, \
+        0, 0, 0, NULL, \
+        "Pass comma-separated <options> to the finalizer (sc)")
+
+// -O[0|1|2|3|4|5|s|g]
+OPTION(OT_UCHAR, \
+       OA_RUNTIME|OVA_OPTIONAL|OA_SEPARATOR_NONE, \
+       "O", NULL, \
+       OptLevel, \
+       '3', 0, 's', NULL, \
+       "Set optimization level to <number>(0|1|2|3|4|5(-Os equivalent)|g)")
+
+// -srt/--sr-threshold=<positive integer> : Scalar Replacement threshold
+OPTION(OT_UINT32, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "srt", "sr-threshold", \
+       SRThreshold, \
+       128, 0, 0x3FFFFFFF, NULL, \
+       "Set scalar replacement threshold to <number>")
+
+// -apt/--ap-threshold=<positive integer> : Argument Promotion threshold
+OPTION(OT_UINT32, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "apt", "ap-threshold", \
+       APThreshold, \
+       1024, 0, 0x3FFFFFFF, NULL, \
+       "Set argument promotion threshold to <number>")
+
+// -unroll-count=<positive integer> : loop unroll count
+// default is 0, meaning auto-unrolling
+OPTION(OT_UINT32, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "unroll-count", NULL, \
+       LUCount, \
+       0, 0, 0x3FFFFFFF, NULL, \
+       "Set loop unroll count to <number> for all loops")
+
+// -unroll-threshold=<positive integer> : loop unroll threshold
+// default is 150.
+OPTION(OT_UINT32, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "unroll-threshold", NULL, \
+       LUThreshold, \
+       150, 0, 0x3FFFFFFF, NULL, \
+       "Set loop unroll threshold to <number> for all loops")
+
+// -unroll-allow-partial : allow partial unroll
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "unroll-allow-partial", NULL, \
+       LUAllowPartial, \
+       true, 0, 0, NULL, \
+       "Allow unrolling loops partially")
+
+// -licm=0|1 (deafault is 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "licm", OptLICM, 1, "Enable/disable LLVM Optimization LICM")
+
+// -mem2reg=0|1 (default is 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "mem2reg", OptMem2reg, 1, "Enable/disable mem2reg (for -O0 only)")
+
+// -aa=0|1 (default 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "aa", OptAA, 1, "Enable/disable Module AA pass")
+
+// -ebb=0|1 (default 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "ebb", CGEBB, 1, "Enable/disable Codegen EBB")
+
+// -bfo=0|1 (default 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "bfo", CGBFO, 1, "Enable/disable Codegen BitField Optim")
+
+// -mimage-support -mno-image-support (default yes)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_M, \
+       "image-support", NULL, \
+       ImageSupport, \
+       true, 0, 0, NULL, \
+       "Define __IMAGE_SUPPORT__ indicating device support for images")
+
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_M, \
+       "fast-fma", NULL, \
+       FastFMA, \
+       false, 0, 0, NULL, \
+       "Define FP_FAST_FMA indicating fma function is faster than multiply and add for double")
+
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_M, \
+       "fast-fmaf", NULL, \
+       FastFMAF, \
+       false, 0, 0, NULL, \
+       "Define FP_FAST_FMA indicating fma function is faster than multiply and add for float")
+
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_M, \
+       "small-global-objects", NULL, \
+       SmallGlobalObjects, \
+       false, 0, 0, NULL, \
+       "Assume no global allocation is > 4G and does not span the 4G boundary")
+
+// -memcombine-max-vec-gen=<value> (default 16)
+FLAG(OT_UINT32, OVIS_SUPPORT, "memcombine-max-vec-gen", OptMemCombineMaxVecGen, 16, \
+     "Maximum width (#bytes) of vector loads/stores generated by memory\n"
+     HINDENT "access combining. Set it to 1 to disable memory access combining.")
+
+// -SRAE-threshold=<value> (default 1024)
+FLAG(OT_UINT32, OVIS_SUPPORT, "SRAE-threshold", OptSRAEThreshold, 1024, \
+     "Maximum size of the local array element aggregrates that\n"
+     HINDENT " will be scalar replaced.")
+
+// -liveness=0|1 (default 0)
+FLAG(OT_BOOL, OVIS_SUPPORT, "liveness", OptLiveness, 0, "Enable/disable Liveness Analysis")
+
+// -prt-opt-liveness=0|1 (default 0)
+FLAG(OT_BOOL, OVIS_SUPPORT, "prt-opt-liveness", OptPrintLiveness, 0, \
+     "Print liveness information at the end of Opt.")
+
+// -wgs=<x,y,z> (default NULL : use default work group size 256,1,1)
+FLAG(OT_CSTRING, OVIS_SUPPORT, "wgs", WorkGrpSize, 0, "Work group size (ie 256,1,1).")
+
+// -buildlog=<0|stdout|stderr|<filename>> : output build log into the given output.
+FLAG(OT_CSTRING, OVIS_SUPPORT, "buildlog", BuildLog, 0, "Redirect log of clBuildProgram.")
+
+// -fdiv2fmul=0|1 (default 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "fdiv2fmul", EnableFDiv2FMul, 1, \
+     "Enable/disable float f/c ==> f * (1.0f/c) for GPU (default : on)")
+
+// -stack-alignment=<n>
+FLAG(OT_UINT32, OVIS_SUPPORT, "stack-alignment", CPUStackAlignment, 64, \
+     "Override CPU stack alignment (64 bytes by default).")
+
+// -slc=0|1 or --simplifylibcall (default 1)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "slc", "simplifylibcall", \
+       OptSimplifyLibCall, \
+       1, 0, 0, NULL, \
+       "Enable/disable optimization to simplify lib calls (on by default)")
+
+//  -finline  -fno-inline
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "inline", NULL, \
+       Inline, \
+       true, 0, 0, NULL, \
+       "Disabling (-fno-inline) GPU inlining for testing")
+
+//  -fsc-keep-calls  -fno-sc-keep-calls
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-keep-calls", NULL, \
+       SCKeepCalls, \
+       false, 0, 0, NULL, \
+       "SC does not inline function calls in AMDIL")
+
+//  -fsc-selective-inline  -fno-sc-selective-inline
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-selective-inline", NULL, \
+       SCSelectiveInline, \
+       true, 0, 0, NULL, \
+       "SC inlines functions that are called only once and keep other functions")
+
+//  -fsc-use-mubuf -fno-sc-use-mubuf
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-use-mubuf", NULL, \
+       SCUseMUBuf, \
+       false, 0, 0, NULL, \
+       "SC uses MUBUF whenever possible")
+
+
+//  -fsc-disable-loop-unroll
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-disable-loop-unroll", NULL, \
+       SCDisableLoopUnroll, \
+       false, 0, 0, NULL, \
+       "SC does not unroll loops")
+
+//  -fsc-disable-merge-memory
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-disable-merge-memory", NULL, \
+       SCDisableMergeMemory, \
+       false, 0, 0, NULL, \
+       "SC does not merge memory loads and stores")
+
+//  -fsc-bias-schedule-to-minimize-regs
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-bias-schedule-to-minimize-regs", NULL, \
+       SCBiasScheduleToMinimizeRegs, \
+       false, 0, 0, NULL, \
+       "Scheduler heuristic bias: force minimize register stategy")
+
+//  -fsc-bias-schedule-to-minimize-insts
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-bias-schedule-to-minimize-insts", NULL, \
+       SCBiasScheduleToMinimizeInsts, \
+       false, 0, 0, NULL, \
+       "Scheduler heuristic bias: force minimize instructions stategy")
+
+//  -fsc-min-reg-schedule
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-min-reg-schedule", NULL, \
+       SCMinRegSchedule, \
+       false, 0, 0, NULL, \
+       "Scheduler: schedule to minimize register usage")
+
+//  -fsc-schedule-no-reorder
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-schedule-no-reorder", NULL, \
+       SCScheduleNoReorder, \
+       false, 0, 0, NULL, \
+       "Scheduler: turn off instruction reordering")
+
+//  -fsc-use-buffer-for-hsa-global
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-use-buffer-for-hsa-global", NULL, \
+       SCUseBufferForHsaGlobal, \
+       false, 0, 0, NULL, \
+       "HSA: use buffer instructions instead of flat for global memory")
+
+//  -fsc-live-sched  -fno-sc-live-sched
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-live-sched", NULL, \
+       SCLiveSched, \
+       false, 0, 0, NULL, \
+       "SC turn on/off liveness based instruction scheduling (default off)")
+
+//  -fsc-post-ra-sched (default false)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "sc-post-ra-sched", NULL, \
+       SCPostRASched, \
+       false, 0, 0, NULL, \
+       "Run instruction scheduling after register allocation (default off)")
+
+// -scras=int or --sc-si-opt-reg-alloc-strategy (default 4)
+// 4 let OCL compiler choose SC reg alloc strategy by heuristic
+// keep this updated with SCShaderSi.h
+OPTION(OT_UINT32, \
+      OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+      "scras", "sc-si-opt-reg-alloc-strategy", \
+      SCSIOptRegAllocStrategy, \
+      4, 0, 4, NULL, \
+      "Set SI+ shader compiler register allocation strategy 0-SC default, "
+      "1-balanced, 2-minimize GPRs, 3-minimize moves, 4-heuristic(default 4).")
+
+//  -fuser-no-inline  -fno-user-no-inline
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "user-no-inline", NULL, \
+       AddUserNoInline, \
+       true, 0, 0, NULL, \
+       "Adding (-fuser-no-inline) noinline attribute to user functions")
+
+//  -flib-no-inline  -fno-lib-no-inline
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "lib-no-inline", NULL, \
+       AddLibNoInline, \
+       true, 0, 0, NULL, \
+       "Adding (-flib-no-inline) noinline attribute to opencl library functions")
+
+// -scopt=int or --sc-opt-level (default -1)
+// -1 let shader compiler choose optimization level
+OPTION(OT_INT32, \
+      OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+      "scopt", "sc-opt-level", \
+      SCOptLvl, \
+      -1, -1, 4, NULL, \
+      "Set AMDIL shader compiler optimization level -1,0,1,2,3,4 (default -1 "
+      "auto).")
+
+// -ilcth=int or --inline-cost-threshold (default 14000)
+OPTION(OT_UINT32, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "ilcth", "inline-cost-threshold", \
+       InlineCostThreshold, \
+       14000, 0, 0xFFFFFFFF, NULL, \
+       "Set cost threshold for inliner (default 14000).")
+
+// -ilsth=int or --inline-size-threshold (default 50)
+OPTION(OT_UINT32, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "ilsth", "inline-size-threshold", \
+       InlineSizeThreshold, \
+       50, 0, 0xFFFFFFFF, NULL, \
+       "Set size threshold for inliner (default 50).")
+
+// -ilkth=int or --inline-kernel-size-threshold (default 100000)
+OPTION(OT_UINT32, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "ilkth", "inline-kernel-size-threshold", \
+       InlineKernelSizeThreshold, \
+       100000, 0, 0xFFFFFFFF, NULL, \
+       "Set kernel size threshold for inliner (default 100000).")
+
+// -wokth=int or --waves-opt-kernel-threshold (default 0)
+OPTION(OT_UINT32, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "wokth", "waves-opt-kernel-threshold", \
+       WavesOptKernelThreshold, \
+       0xFFFFFFFF, 0, 0xFFFFFFFF, NULL, \
+       "Enable waves optimization when kernel size is greater than this threshold.")
+
+//  -fdef-res-id  -fno-def-res-id
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "def-res-id", NULL, \
+       DefaultResourceId, \
+       false, 0, 0, NULL, \
+       "Use default resource id when AMDIL contains non-kernel functions.")
+
+//  -fstack-uav  -fno-stack-uav
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "stack-uav", NULL, \
+       UseStackUAV, \
+       false, 0, 0, NULL, \
+       "Use stack uav instead of private uav for stack variables.")
+
+//  -fmacro-call  -fno-macro-call
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "macro-call", NULL, \
+       UseMacroForCall, \
+       true, 0, 0, NULL, \
+       "Use outline macro for function call in AMDIL.")
+
+//  -fdebug-call  -fno-debug-call
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "debug-call", NULL, \
+       DebugCall, \
+       false, 0, 0, NULL, \
+       "Allow function call for debug options in AMDIL.")
+
+//  -fmulti-level-call  -fno-multi-level-call
+OPTION(OT_BOOL, \
+       OA_LINK_EXE|OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "multi-level-call", NULL, \
+       AllowMultiLevelCall, \
+       true, 0, 0, NULL, \
+       "Allow multi-level function call in AMDIL.")
+
+// -use-debugil
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "use-debugil", NULL, \
+       UseDebugIL, \
+       false, 0, 0, NULL, \
+       "Enable recompilation from DebugIL.")
+
+// -kernel=<kernel-name>
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "kernel", NULL, \
+       Kernel, \
+       0, 0, 0, NULL, \
+       "Specify the kernel to compile for.")
+
+// -just-kernel=<kernel-name>
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "just-kernel", NULL, \
+       JustKernel, \
+       0, 0, 0, NULL, \
+       "Recompilation for <kernel-name> only (for -use-debugil)")
+
+// -fenable-dump/-fno-enable-dump
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "enable-dump", NULL, \
+       EnableDumpKernel, \
+       true, 0, 0, NULL, \
+       "Enable dumpping kernel intermediates")
+
+// -dump-prefix=<prefix> : set the prefix of any dump file to "prefix"
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+       "dump-prefix", NULL, \
+       DumpPrefix, \
+       0, 0, 0, "_temp",\
+       "Set prefix of temporary files used for dumpping")
+
+// -dump-flags=<value> : set which intermediates will be dumpped out under the current directory.
+OPTION(OT_UINT32, \
+        OA_RUNTIME|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_EQUAL, \
+        "dump-flags", NULL, \
+        DumpFlags, \
+        0, 0, 0xFFFFFFFF, NULL, \
+        "Select which intermediates will be dumpped out")
+
+// -save-temps[=prefix] : store the usually temporary intermediate files permanently
+// under the current directory. The "prefix" is used as a prefix to all temporary files.
+// "_temp_" is used if prefix is not given.
+NOPTION(OT_CSTRING, \
+        OA_RUNTIME|OA_MISC_ALIAS|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+        "save-temps", NULL, \
+        SaveTemps, \
+        0, 0, 0, NULL, \
+        "Store temporary files in the current directory")
+
+// -save-temps-all[=prefix] : store all the temporary intermediate files such as .cl, .i, .bc,
+// .il, and .isa, exe. The "prefix" is used as a prefix to all temporary files.
+NOPTION(OT_CSTRING, \
+        OA_RUNTIME|OA_LINK_EXE|OA_MISC_ALIAS|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+        "save-temps-all", NULL, \
+        SaveTempsAll, \
+        0, 0, 0, NULL, \
+        "Store all temporary files in the current directory")
+
+// -o <prefix> : store the binary into a file with 'prefix'. And the "prefix" is used as
+// a prefix to all temporary files and the binary (BIF) file.
+NOPTION(OT_CSTRING, \
+        OA_RUNTIME|OA_MISC_ALIAS|OVIS_SUPPORT|OVA_REQUIRED|OA_SEPARATOR_SPACE, \
+        "o", NULL, \
+        Output, \
+        0, 0, 0, NULL, \
+        "Store the binary into file with prefix 'prefix'")
+
+// -cl[=<filename>], --load-cl-dll[=<filename>]
+// The name of the frontend DLL that is to be opened. By default it is 'amdcl'
+OPTION(OT_CSTRING, \
+        OA_LINK_LIB|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "cl", "--load-cl-dll", \
+        UseCL, \
+        0, 0, 0, NULL, \
+        "Specify the CL library(without extension) to load and run compiler library from.")
+
+
+// -fe[=<filename>], --load-fe-dll[=<filename>]
+// The name of the frontend DLL that is to be opened. By default it is 'amdfe'
+OPTION(OT_CSTRING, \
+        OA_LINK_LIB|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "fe", "--load-fe-dll", \
+        UseFE, \
+        0, 0, 0, NULL, \
+        "Specify the FE library(without extension) to load and run frontend from.")
+
+// -opt[=<filename>], --load-opt-dll[=<filename>]
+// The name of the opt DLL that is to be opened. By default it is 'amdopt'
+OPTION(OT_CSTRING, \
+        OA_LINK_EXE|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "use-opt", "--load-opt-dll", \
+        UseLLVM, \
+        0, 0, 0, NULL, \
+        "Specify the OPT library(without extension) to load and run optimizations from.")
+
+
+// -link[=<filename>], --load-link-dll[=<filename>]
+// The name of the link DLL that is to be opened. By default it is 'amdlink'
+OPTION(OT_CSTRING, \
+        OA_LINK_EXE|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "use-link", "--load-link-dll", \
+        UseLINK, \
+        0, 0, 0, NULL, \
+        "Specify the link library(without extension) to load and run linking from.")
+
+// -cg[=<filename>], --load-cg-dll[=<filename>]
+// The name of the code generator DLL that is to be opened. By default it is 'amdcg'
+OPTION(OT_CSTRING, \
+        OA_LINK_LIB|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "cg", "--load-cg-dll", \
+        UseCG, \
+        0, 0, 0, NULL, \
+        "Specify the CG library(without extension) to load and run code generator from.")
+
+
+// -be[=<filename>], --load-be-dll[=<filename>]
+// The name of the frontend DLL that is to be opened. By default it is 'amdbe'
+OPTION(OT_CSTRING, \
+        OA_LINK_LIB|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "be", "--load-be-dll", \
+        UseBE, \
+        0, 0, 0, NULL, \
+        "Specify the BE library(without extension) to load and run backend from.")
+
+
+// -sc[=<filename>], --load-sc-dll[=<filename>]
+// The name of the sc DLL that is to be opened. By default it is 'amdsc'
+OPTION(OT_CSTRING, \
+        OA_CLC|OVIS_SUPPORT|OVA_OPTIONAL|OA_SEPARATOR_EQUAL|OFA_NORMAL, \
+        "-sc", "--load-sc-dll", \
+        UseSC, \
+        0, 0, 0, NULL, \
+        "Specify the SC library(without extension) to load and run SC from.")
+
+//  -fuse-jit, -fno-use-jit
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "use-jit", NULL, \
+       UseJIT, \
+       true, 0, 0, NULL, \
+       "Use JIT for CPU target, disabled if debugging is enabled")
+
+//  -fforce-jit, -fno-force-jit
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "force-jit", NULL, \
+       ForceJIT, \
+       false, 0, 0, NULL, \
+       "Force use JIT for CPU target, even if debugging is enabled")
+
+// -time
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "time", NULL, \
+       EnableBuildTiming, \
+       false, 0, 0, NULL, \
+       "Enable timing for Kernel build.")
+
+// -kernel-cache
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "kernel-cache", NULL, \
+       EnableKernelCaching, \
+       true, 0, 0, NULL, \
+       "Enable kernel caching functionality.")
+
+// -kernel-cache-wipe
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "kernel-cache-wipe", NULL, \
+       WipeKernelCache, \
+       false, 0, 0, NULL, \
+       "Wipe out kernel cache storage.")
+
+// -kernel-cache-enforce-miss
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "kernel-cache-enforce-miss", NULL, \
+       EnforceKernelCacheMiss, \
+       false, 0, 0, NULL, \
+       "Enforce kernel cache miss (actual compilation).")
+
+// -print-compile-phases
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "print-compile-phases", NULL, \
+       PrintCompilePhases, \
+       false, 0, 0, NULL, \
+       "Print compile phases info.")
+
+//  -fforce-llvm, -fno-force-llvm
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "force-llvm", NULL, \
+       ForceLLVM, \
+       false, 0, 0, NULL, \
+       "Forces LLVM recompilation from binaries")
+
+//  -fdisable-avx, -fno-disable-avx
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "disable-avx", NULL, \
+       DisableAVX, \
+       false, 0, 0, NULL, \
+       "Disable AVX code generation.")
+
+//  -fmad-enable, -fno-mad-enable  (when -cl-mad-enable is turned on,
+//  this option is no longer needed.)
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "mad-enable", NULL, \
+       EnableMAD, \
+       false, 0, 0, NULL, \
+       "Enable mad for a*b+c.")
+
+//  -ffma-enable, -fno-fma-enable
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "fma-enable", NULL, \
+       EnableFMA, \
+       false, 0, 0, NULL, \
+       "Enable fma for a*b+c.")
+
+// -fuse-native=[all|<func1>,<func2>,…]
+OPTION(OT_CSTRING, \
+       OA_RUNTIME|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+       "fuse-native", NULL, \
+       OptUseNative, \
+       0, 0, 0, NULL, \
+       "Replace math function calls with that native version.")
+
+// -verify-hwspir
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "verify-hwspir", NULL, \
+       verifyHWSpir, \
+       false, 0, 0, NULL, \
+       "Enable the heavy weight spir verification pass.")
+
+// -verify-lwspir
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "verify-lwspir", NULL, \
+       verifyLWSpir, \
+       false, 0, 0, NULL, \
+       "Enable the light weight spir verification pass.")
+
+// -sc-dev-format
+OPTION(OT_BOOL, \
+    OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED, \
+    "sc-dev-format", NULL, \
+    SCDevFormat, \
+    false, 0, 0, NULL, \
+    "Emit the IL in a format compatible with SC\'s dev.exe.")
+
+// -faa-for-barrier  -fno-a-for-barrier
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_INTERNAL|OVA_DISALLOWED|OFA_PREFIX_F, \
+       "aa-for-barrier", NULL, \
+       AAForBarrier, \
+       true, 0, 0, NULL, \
+       "Use AMDAliasAnalysis for correct barrier behavior. If disabled, remove noalias to ensure correct barrier behavior.")
+
+// -sc-xnack-iommu
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_NORMAL, \
+       "sc-xnack-iommu", NULL, \
+       SCXnackIommu, \
+       false, 0, 0, NULL, \
+       "Enable SC XNACK workaround if IOMMUv2 is being used")
+
+// -limit-vector-registers=<value> (default 0 = hardware specific)
+FLAG(OT_UINT32, OVIS_SUPPORT|OVIS_INTERNAL|OVA_REQUIRED, \
+    "limit-vector-registers", OptLimitVecRegisters, 0, \
+    "Maximum number of vector registers that are available to the compiler.")
+
+// -limit-scalar-registers=<value> (default 0 = hardware specific, GCN and later only)
+FLAG(OT_UINT32, OVIS_SUPPORT|OVIS_INTERNAL|OVA_REQUIRED, \
+    "limit-scalar-registers", OptLimitScalarRegisters, 0, \
+    "Maximum number of scalar registers that are available to the compiler.")
+
+// -set-vector-registers=<value> (default 0 = no change)
+FLAG(OT_UINT32, OVIS_SUPPORT|OVIS_INTERNAL|OVA_REQUIRED, \
+    "set-vector-registers", OptSetVecRegisters, 0, \
+    "Set the number of vector registers used in ISA (no effect if less than actual value).")
+
+// -set-scalar-registers=<value> (default 0 = no change)
+FLAG(OT_UINT32, OVIS_SUPPORT|OVIS_INTERNAL|OVA_REQUIRED, \
+    "set-scalar-registers", OptSetScalarRegisters, 0, \
+    "Set the number of scalar registers used in ISA (no effect if less than actual value).")
+
+// -set-lds=<value> (default 0 = no change)
+FLAG(OT_UINT32, OVIS_SUPPORT|OVIS_INTERNAL|OVA_REQUIRED, \
+    "set-lds", OptSetLDS, 0, \
+    "Set LDS usage in bytes in ISA (no effect if less than actual value).")
+
+// -lower-atomics=0|1 (default is 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "lower-atomics", LowerAtomics, 1,\
+    "Enable/disable pass lowering OCL atomics to LLVM intrinsics (only for x86/x64)")
+
+// -lower-pipe-builtins=0|1 (default is 1)
+FLAG(OT_BOOL, OVIS_SUPPORT, "lower-pipe-builtins", LowerPipeBuiltins, 1,\
+    "Enable/disable pass lowering OCL pipe builtin functions to internal library functions ")
+
+// -fe-gen-spirv
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "fe-gen-spirv", NULL, \
+       FEGenSPIRV, \
+       false, 0, 0, NULL, \
+       "Let frontend generate SPIR-V.")
+
+// -round-trip-spirv
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED, \
+       "round-trip-spirv", NULL, \
+       RoundTripSPIRV, \
+       false, 0, 0, NULL, \
+       "Do round-trip translation of SPIR-V in pre-linking for testing purpose.")
+
+// -force-wave-size-32
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_NORMAL, \
+       "force-wave-size-32", NULL, \
+       SCForceWaveSize32, \
+       false, 0, 0, NULL, \
+       "Force wave size 32 for compute shader compilation")
+
+// -force-wgp-mode
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_NORMAL, \
+       "force-wgp-mode", NULL, \
+       SCForceWgpMode, \
+       false, 0, 0, NULL, \
+       "Force wgp mode for compute shader compilation")
+
+// -xnack
+OPTION(OT_BOOL, \
+       OA_RUNTIME|OVIS_SUPPORT|OVA_DISALLOWED|OFA_NORMAL, \
+       "xnack", NULL, \
+       SCXnack, \
+       false, 0, 0, NULL, \
+       "Enable the xnack feature for Finalizer/SC")
+
+// -code-object-version=<num> : code object version
+OPTION(OT_UINT32, \
+       OA_RUNTIME|OVA_OPTIONAL|OA_SEPARATOR_EQUAL, \
+       "code-object-version", NULL, \
+       LCCodeObjectVersion, \
+       5, 4, 5, NULL, \
+       "Specify code object ABI version. Allowed values are 4, and 5. Defaults to 5. (COMGR only)")
+
+// -fsanitze=tool
+NOPTION(OT_CSTRING, \
+       OA_CLC|OVA_REQUIRED|OA_SEPARATOR_EQUAL|OFA_PREFIX_F, \
+       "sanitize", NULL, \
+       FSanitize, \
+       0, 0, 0, "address", \
+       "Enable sanitizer instrumentation")
+/*
+   Do not remove the following line. Any option should be
+   added above this line.
+*/
+#undef HINDENT

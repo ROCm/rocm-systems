@@ -368,7 +368,7 @@ hsa_status_t Runtime::FreeMemory(void* ptr) {
   }
 
   if (alloc_flags & core::MemoryRegion::AllocateAsan)
-    assert(region->owner()->driver().ReturnAsanHeaderPage(ptr) == HSA_STATUS_SUCCESS);
+    assert(HSAKMT_CALL(hsaKmtReturnAsanHeaderPage(ptr)) == HSAKMT_STATUS_SUCCESS);
 
   const hsa_status_t err = region->Free(ptr, size);
   if (err != HSA_STATUS_SUCCESS) {
@@ -924,6 +924,81 @@ hsa_status_t Runtime::InteropUnmap(void* ptr) {
   return HSA_STATUS_SUCCESS;
 }
 
+/* This should be called memory_lock_ held */
+Runtime::AddressHandle* Runtime::VMemoryFindReservedAddressHandle(const void* va) {
+  auto reservedAddressIt = reserved_address_map_.upper_bound(va);
+  if (reservedAddressIt != reserved_address_map_.begin()) {
+    reservedAddressIt--;
+    if ((reservedAddressIt->first <= va) &&
+        ((reinterpret_cast<const uint8_t*>(va)) <=
+         (reinterpret_cast<const uint8_t*>(reservedAddressIt->first) +
+          reservedAddressIt->second.size))) {
+      return &(reservedAddressIt->second);
+    }
+  }
+  return nullptr;
+}
+
+/* This should be called memory_lock_ held */
+hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* info,
+                                     void* (*alloc)(size_t), uint32_t* num_agents_accessible,
+                                     hsa_agent_t** accessible) {
+  /* Check if this memory was allocated via VMM */
+  auto mappedHandleIt = mapped_handle_map_.upper_bound(ptr);
+  if (mappedHandleIt != mapped_handle_map_.begin()) {
+    mappedHandleIt--;
+
+    if ((reinterpret_cast<const uint8_t*>(mappedHandleIt->first) + mappedHandleIt->second.size) >
+        ptr) {
+      /* Allocation found */
+      info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
+      info->agentBaseAddress = const_cast<void*>(ptr);
+      info->hostBaseAddress = const_cast<void*>(ptr);
+      info->sizeInBytes = mappedHandleIt->second.size;
+      info->agentOwner = mappedHandleIt->second.mem_handle->agentOwner()->public_handle();
+
+      if (alloc && num_agents_accessible && accessible) {
+        std::vector<hsa_agent_t> allowed_agents;
+
+        for (auto agentPermsIt = mappedHandleIt->second.allowed_agents.begin();
+             agentPermsIt != mappedHandleIt->second.allowed_agents.end(); agentPermsIt++) {
+          allowed_agents.push_back((*agentPermsIt).second.targetAgent->public_handle());
+        }
+
+        AMD::callback_t<decltype(alloc)> Alloc(alloc);
+
+        *accessible = (hsa_agent_t*)Alloc(sizeof(hsa_agent_t) * allowed_agents.size());
+        if ((*accessible) == nullptr) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+        *num_agents_accessible = allowed_agents.size();
+        memcpy(*accessible, allowed_agents.data(), sizeof(hsa_agent_t) * allowed_agents.size());
+      }
+
+      return HSA_STATUS_SUCCESS;
+    }
+  }
+
+  /* This is not a mapped address. Check if it is a reserved address range */
+  auto addressHandle = VMemoryFindReservedAddressHandle(ptr);
+  if (addressHandle) {
+    info->type = HSA_EXT_POINTER_TYPE_RESERVED_ADDR;
+    info->agentBaseAddress = NULL;
+    info->hostBaseAddress = addressHandle->os_addr;
+    info->sizeInBytes = addressHandle->size;
+    info->agentOwner = {};
+
+    if (num_agents_accessible) {
+      *num_agents_accessible = 0;
+    }
+    return HSA_STATUS_SUCCESS;
+  }
+  /* Allocation not found */
+  info->type = HSA_EXT_POINTER_TYPE_UNKNOWN;
+
+  /* This is a helper function, return error to indicate ptr not found */
+  return HSA_STATUS_ERROR;
+}
+
 hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, void* (*alloc)(size_t),
                               uint32_t* num_agents_accessible, hsa_agent_t** accessible,
                               PtrInfoBlockData* block_info) {
@@ -954,6 +1029,12 @@ hsa_status_t Runtime::PtrInfo(const void* ptr, hsa_amd_pointer_info_t* info, voi
   {  // memory_lock protects access to the NMappedNodes array and fragment user data since these may
      // change with calls to memory APIs.
     ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
+
+    if (VMemoryPtrInfo(ptr, &retInfo, alloc, num_agents_accessible, accessible) ==
+        HSA_STATUS_SUCCESS) {
+      memcpy(info, &retInfo, retInfo.size);
+      return HSA_STATUS_SUCCESS;
+    }
 
     // We don't care if this returns an error code.
     // The type will be HSA_EXT_POINTER_TYPE_UNKNOWN if so.
@@ -1216,7 +1297,6 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   if (info.agentBaseAddress != ptr || info.sizeInBytes != len)
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-  Agent* agent = Agent::Convert(info.agentOwner);
   bool useFrag = (block.base != ptr || block.length != len);
   // Assume all pointers and blocks are 4Kb aligned.
   uint32_t fragOffset = (reinterpret_cast<uint8_t*>(ptr) -
@@ -1230,7 +1310,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
 
   if (!ipc_dmabuf_supported_) {
     HsaSharedMemoryHandle *sHandle = reinterpret_cast<HsaSharedMemoryHandle*>(handle);
-    if (agent->driver().ShareMemory(block.base, block.length, sHandle) != HSA_STATUS_SUCCESS)
+    if (HSAKMT_CALL(hsaKmtShareMemory(block.base, block.length, sHandle)) != HSAKMT_STATUS_SUCCESS)
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     hsa_status_t err = HSA_STATUS_SUCCESS;
@@ -1251,6 +1331,7 @@ hsa_status_t Runtime::IPCCreate(void* ptr, size_t len, hsa_amd_ipc_memory_t* han
   handle->handle[1] = dmaBufFdHandleHi;
   handle->handle[2] = getpid(); // socket server name handle
 
+  Agent *agent = Agent::Convert(info.agentOwner);
   handle->handle[3] = agent->device_type() == Agent::kAmdCpuDevice;
   // System sub allocations are not supported for now.
   if (handle->handle[3] && useFrag) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -1391,9 +1472,6 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
   bool isFragment = false;
   uint32_t fragOffset = 0;
 
-  if (Runtime::IsDifferentDriver(*agents, num_agents)) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  core::Driver* driver = &agents[0]->driver();
-
   auto fixFragment = [&](amdgpu_bo_handle ldrm_bo) {
     if (isFragment) {
       importAddress = reinterpret_cast<uint8_t*>(importAddress) + fragOffset;
@@ -1405,17 +1483,14 @@ hsa_status_t Runtime::IPCAttach(const hsa_amd_ipc_memory_t* handle, size_t len, 
     allocation_map_[importAddress].ldrm_bo = ldrm_bo;
   };
 
-  auto importMemory = [&](unsigned int numNodes, HSAuint32* nodes, amdgpu_bo_import_result* res) {
-    if (ipc_dmabuf_supported_) {
-      int ret = IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res, numNodes, nodes,
-                                &importAddress, &importSize);
-      if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-    } else {
-      hsa_status_t ret = driver->RegisterSharedHandle(
-          reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle), &importAddress,
-          &importSize);
-      if (ret != HSA_STATUS_SUCCESS) return ret;
-    }
+  auto importMemory = [&](unsigned int numNodes, HSAuint32 *nodes,
+                          amdgpu_bo_import_result *res) {
+    int ret = ipc_dmabuf_supported_ ?
+          IPCClientImport(importHandle.handle[2], dmaBufFDHandle, res,
+                          numNodes, nodes, &importAddress, &importSize) :
+          HSAKMT_CALL(hsaKmtRegisterSharedHandle(reinterpret_cast<const HsaSharedMemoryHandle*>(&importHandle),
+                                     &importAddress, &importSize));
+    if (ret != HSAKMT_STATUS_SUCCESS) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
     return HSA_STATUS_SUCCESS;
   };
@@ -2897,10 +2972,7 @@ hsa_status_t Runtime::SvmPrefetch(void* ptr, size_t size, hsa_agent_t agent,
   MAKE_NAMED_SCOPE_GUARD(OpGuard, [&]() { delete op; });
 
   Agent* dest = Agent::Convert(agent);
-  if (dest->device_type() == Agent::kAmdCpuDevice)
-    op->node_id = 0;
-  else
-    op->node_id = dest->node_id();
+  op->node_id = dest->node_id();
 
   op->base = reinterpret_cast<void*>(base);
   op->size = len;
@@ -3269,19 +3341,14 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
   int drm_fd, dmabuf_fd = 0;
   uint64_t offset = 0, ret;
   uint64_t drm_cpu_addr = 0;
-  bool reservedAddressFound = false;
 
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
-  auto reservedAddressIt = reserved_address_map_.upper_bound(va);
-  if (reservedAddressIt != reserved_address_map_.begin()) {
-    reservedAddressIt--;
-    if ((reservedAddressIt->first <= va) &&
-        ((reinterpret_cast<uint8_t*>(va) + size) <=
-         (reinterpret_cast<const uint8_t*>(reservedAddressIt->first) + reservedAddressIt->second.size))) {
-      reservedAddressFound = true;
-    }
+  auto addressHandle = VMemoryFindReservedAddressHandle(va);
+  if (addressHandle == nullptr ||
+      reinterpret_cast<uint8_t*>(va) + size >
+          reinterpret_cast<uint8_t*>(addressHandle->os_addr) + addressHandle->size) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  if (!reservedAddressFound) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   /* Confirm that this VA range has not been mapped yet */
   auto upperMappedHandleIt = mapped_handle_map_.upper_bound(va);
@@ -3329,12 +3396,11 @@ hsa_status_t Runtime::VMemoryHandleMap(void* va, size_t size, size_t in_offset,
 
   mapped_handle_map_.emplace(
       std::piecewise_construct, std::forward_as_tuple(va),
-      std::forward_as_tuple(&memoryHandleIt->second, &reservedAddressIt->second,
-                            offset, size, drm_fd,
-                            reinterpret_cast<void *>(drm_cpu_addr),
-                            HSA_ACCESS_PERMISSION_NONE, shareable_handle));
+      std::forward_as_tuple(&memoryHandleIt->second, addressHandle, offset, size, drm_fd,
+                            reinterpret_cast<void*>(drm_cpu_addr), HSA_ACCESS_PERMISSION_NONE,
+                            shareable_handle));
 
-  reservedAddressIt->second.use_count++;
+  addressHandle->use_count++;
   memoryHandleIt->second.use_count++;
 
   return HSA_STATUS_SUCCESS;
@@ -3519,7 +3585,6 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
                                        const hsa_amd_memory_access_desc_t* desc,
                                        const size_t desc_cnt) {
   std::list<std::pair<void*, MappedHandle*>> mappedHandles;
-  bool reservedAddressFound = false;
 
   // Validate all agents
   for (int i = 0; i < desc_cnt; i++) {
@@ -3530,17 +3595,12 @@ hsa_status_t Runtime::VMemorySetAccess(void* va, size_t size,
 
   ScopedAcquire<KernelSharedMutex> lock(&memory_lock_);
 
-  auto reservedAddressIt = reserved_address_map_.upper_bound(va);
-  if (reservedAddressIt != reserved_address_map_.begin()) {
-    reservedAddressIt--;
-    if ((reservedAddressIt->first <= va) &&
-        ((reinterpret_cast<uint8_t*>(va) + size) <=
-         (reinterpret_cast<const uint8_t*>(reservedAddressIt->first) +
-          reservedAddressIt->second.size))) {
-      reservedAddressFound = true;
-    }
+  auto addressHandle = VMemoryFindReservedAddressHandle(va);
+  if (addressHandle == nullptr ||
+      reinterpret_cast<uint8_t*>(va) + size >
+          reinterpret_cast<uint8_t*>(addressHandle->os_addr) + addressHandle->size) {
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
-  if (!reservedAddressFound) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
   // va + size may consist of multiple MappedHandle's. Build a list lf MappedHandles within this VA
   // range

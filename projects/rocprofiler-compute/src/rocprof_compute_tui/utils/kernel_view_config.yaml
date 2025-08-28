@@ -7,8 +7,14 @@ sections:
     collapsed: true
     class: "sysinfo-section"
     subsections:
-      - title: "System Speed-of-Light"
-        data_path: ["2. System Speed-of-Light", "2.1 System Speed-of-Light"]
+      - title: "GPU Speed-of-Light"
+        data_path: ["32. GPU Speed-of-Light", "32.1 GPU Speed-of-Light"]
+        collapsed: true
+      - title: "Compute Throughput"
+        data_path: ["33. Compute Throughput", "33.1 Compute Throughput"]
+        collapsed: true
+      - title: "Memory Throughput"
+        data_path: ["34. Memory Throughput", "34.1 Memory Throughput"]
         collapsed: true
       - title: "Memory Chart"
         data_path: ["3. Memory Chart", "3.1 Memory Chart"]
@@ -17,14 +23,19 @@ sections:
 
   - title: "Detailed Block Analysis"
     collapsed: true
-    class: "kernels-section"
-    dynamic_sections: true
-    skip_sections:
-      - "0. Top Stats"
-      - "1. System Info"
-      - "2. System Speed-of-Light"
-      - "3. Memory Chart"
-      - "4. Roofline"
+    class: "block-section"
+    subsections:
+      - arch_config_data: true
+        exclude_keys:
+          - "0. Top Stats"
+          - "1. System Info"
+          - "2. System Speed-of-Light"
+          - "3. Memory Chart"
+          - "4. Roofline"
+          - "32. GPU Speed-of-Light"
+          - "33. Compute Throughput"
+          - "34. Memory Throughput"
+        collapsed: true
 
   - title: "Source Level Analysis"
     collapsed: true

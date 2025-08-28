@@ -245,6 +245,7 @@ ompt_start_tool(unsigned int omp_version, const char* runtime_version) ROCPROFIL
 ompt_start_tool_result_t*
 ompt_start_tool(unsigned int omp_version, const char* runtime_version)
 {
+    ::rocprofiler::registration::init_logging();
     ::rocprofiler::registration::initialize();
     return rocprofiler_ompt_start_tool(omp_version, runtime_version);
 }

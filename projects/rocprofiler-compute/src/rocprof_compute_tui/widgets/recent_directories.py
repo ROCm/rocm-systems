@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 from typing import List
 
 from textual.app import ComposeResult

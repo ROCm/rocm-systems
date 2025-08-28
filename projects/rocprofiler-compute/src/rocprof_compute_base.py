@@ -23,7 +23,6 @@
 
 ##############################################################################
 
-
 import argparse
 import importlib
 import os
@@ -138,6 +137,8 @@ class RocProfCompute:
             self.__analyze_mode = "web_ui"
         elif self.__args.tui:
             self.__analyze_mode = "tui"
+        elif self.__args.output_format == "db":
+            self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
         return
@@ -159,7 +160,9 @@ class RocProfCompute:
 
     def parse_args(self):
         parser = argparse.ArgumentParser(
-            description="Command line interface for AMD's GPU profiler, ROCm Compute Profiler",
+            description=(
+                "Command line interface for AMD's GPU profiler, ROCm Compute Profiler"
+            ),
             prog="tool",
             formatter_class=lambda prog: argparse.RawTextHelpFormatter(
                 prog, max_help_position=30
@@ -176,7 +179,11 @@ class RocProfCompute:
             and self.__args.format_rocprof_output != "rocpd"
         ):
             console_warning(
-                f"The option --format-rocprof-output currently set to {self.__args.format_rocprof_output} will default to rocpd in a future release."
+                (
+                    f"The option --format-rocprof-output currently set to "
+                    f"{self.__args.format_rocprof_output} will default to rocpd "
+                    "in a future release."
+                )
             )
 
         if self.__args.mode == None:
@@ -188,7 +195,6 @@ class RocProfCompute:
                 "rocprof-compute requires you to pass a valid mode. Detected None."
             )
         elif self.__args.mode == "profile":
-
             # FIXME:
             #     Might want to get host name from detected spec
             if self.__args.subpath == "node_name":
@@ -225,9 +231,9 @@ class RocProfCompute:
             arch = self.__args.list_metrics
         if arch in self.__supported_archs.keys():
             ac = schema.ArchConfig()
-            ac.panel_configs = file_io.load_panel_configs(
+            ac.panel_configs = file_io.load_panel_configs([
                 self.__args.config_dir.joinpath(arch)
-            )
+            ])
             sys_info = self.__mspec.get_class_members().iloc[0]
             parser.build_dfs(archConfigs=ac, filter_metrics=[], sys_info=sys_info)
             for key, value in ac.metric_list.items():
@@ -255,7 +261,8 @@ class RocProfCompute:
 
         # Print header
         print(
-            f"{'Set Option':<35} {'Set Title':<35} {'Metric Name':<30} {'Metric ID':<10}"
+            f"{'Set Option':<35} {'Set Title':<35}"
+            f" {'Metric Name':<30} {'Metric ID':<10}"
         )
         print("-" * 115)
 
@@ -275,7 +282,8 @@ class RocProfCompute:
                     title_display = title if first_row else ""
 
                     print(
-                        f"{set_display:<35} {title_display:<35} {metric_name:<30} {metric_id:<10}"
+                        f"{set_display:<35} {title_display:<35}"
+                        f" {metric_name:<30} {metric_id:<10}"
                     )
                     first_row = False
             # Empty line between sets
@@ -285,7 +293,7 @@ class RocProfCompute:
         if sets_info:
             first_set = next(iter(sets_info.keys()))
             print(f"  rocprof-compute profile --set {first_set}  # Profile this set")
-        print(f"  rocprof-compute profile --list-sets        # Show this help")
+        print("  rocprof-compute profile --list-sets        # Show this help")
         print()
 
         sys.exit(0)
@@ -312,7 +320,9 @@ class RocProfCompute:
         # Update default path
         if self.__args.path == str(Path(os.getcwd()).joinpath("workloads")):
             self.__args.path = str(
-                Path(self.__args.path).joinpath(self.__args.name, self.__mspec.gpu_model)
+                Path(self.__args.path).joinpath(
+                    self.__args.name, self.__mspec.gpu_model
+                )
             )
 
         # instantiate desired profiler
@@ -376,7 +386,10 @@ class RocProfCompute:
         profiler.run_profiling(self.__version["ver"], config.PROJECT_NAME)
         time_end_prof = time.time()
         console_debug(
-            'finished "run_profiling" and finished rocprof\'s workload, time taken was {} m {} sec'.format(
+            (
+                'finished "run_profiling" and finished rocprof\'s workload, '
+                "time taken was {} m {} sec"
+            ).format(
                 int((time_end_prof - time_start_prof) / 60),
                 str((time_end_prof - time_start_prof) % 60),
             )
@@ -385,8 +398,7 @@ class RocProfCompute:
         time_end_post = time.time()
         console_debug(
             'time taken for "post_processing" was {} seconds'.format(
-                int((time_end_post - time_end_prof) / 60),
-                str((time_end_post - time_end_prof) % 60),
+                int(time_end_post - time_end_prof)
             )
         )
         self.__soc[self.__mspec.gpu_arch].post_profiling()
@@ -398,7 +410,8 @@ class RocProfCompute:
         self.print_graphic()
 
         console_warning(
-            "Database update mode is deprecated and will be removed in a future release "
+            "Database update mode is deprecated and will "
+            "be removed in a future release "
             "and no fixes will be made for this mode."
         )
 
@@ -436,6 +449,10 @@ class RocProfCompute:
 
             run_tui(self.__args, self.__supported_archs)
             return
+        elif self.__analyze_mode == "db":
+            from rocprof_compute_analyze.analysis_db import db_analysis
+
+            analyzer = db_analysis(self.__args, self.__supported_archs)
         else:
             console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
 
