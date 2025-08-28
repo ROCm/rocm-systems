@@ -18,8 +18,8 @@ versions are not guaranteed to work.
 
 * CMake (v3.15.0 or later) -- `python3 -m pip install cmake`
 * g++ (v5.4.0 or later)
-* libdrm-amdgpu-dev (for Ubuntu and Debian)
-* libdrm-amdgpu-devel (for RPM-based distributions)
+* libdrm-dev (for Ubuntu and Debian)
+* libdrm-devel (for RPM-based distributions)
 
 In order to build the AMD SMI Python package, the following components are
 required:

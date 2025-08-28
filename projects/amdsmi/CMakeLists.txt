@@ -318,7 +318,7 @@ install(
 add_subdirectory(goamdsmi_shim)
 
 #Debian package specific variables
-set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-amdgpu-dev")
+set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_DEBIAN_ASAN_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_DEV_PACKAGE_RECOMMENDS ${CPACK_DEBIAN_PACKAGE_RECOMMENDS})
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "sudo, libc6, python3 (>= 3.6.8), python3-pip, python3-setuptools, python3-wheel")
@@ -390,11 +390,11 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 # NOTE: RPM SUGGESTS DO NOT WORK! https://bugzilla.redhat.com/show_bug.cgi?id=1811358
-set(CPACK_RPM_PACKAGE_RECOMMENDS "python3-argcomplete")
+set(CPACK_RPM_PACKAGE_SUGGESTS "python3-argcomplete, libdrm-dev, libdrm-amdgpu-dev")
 set(CPACK_RPM_DEV_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 set(CPACK_RPM_ASAN_PACKAGE_SUGGESTS ${CPACK_RPM_PACKAGE_SUGGESTS})
 # python version gated by rhel8 :(
-set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, libdrm-amdgpu-devel")
+set(CPACK_RPM_PACKAGE_REQUIRES "sudo, python3 >= 3.6.8, python3-pip, python3-wheel, python3-setuptools")
 set(CPACK_RPM_DEV_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 

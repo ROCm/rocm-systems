@@ -924,11 +924,11 @@ amdsmi_status_t amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_hand
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm;
-    amdsmi_status_t status = libdrm.load("libdrm_amdgpu.so.1");
+    amdsmi_status_t status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so: " << strerror(errno)
+           << " | Failed to load libdrm.so.2: " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;
@@ -1730,11 +1730,11 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load("libdrm_amdgpu.so");
+    status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so: " << strerror(errno)
+           << " | Failed to load libdrm.so.2: " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;
@@ -1953,11 +1953,11 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm;
-    amdsmi_status_t status = libdrm.load("libdrm_amdgpu.so");
+    amdsmi_status_t status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so: " << strerror(errno)
+           << " | Failed to load libdrm.so.2: " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;
@@ -3888,11 +3888,11 @@ amdsmi_get_gpu_vbios_info(amdsmi_processor_handle processor_handle, amdsmi_vbios
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load("libdrm_amdgpu.so");
+    status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so: " << strerror(errno)
+           << " | Failed to load libdrm.so.2: " << strerror(errno)
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;
@@ -4450,11 +4450,11 @@ amdsmi_status_t amdsmi_get_gpu_driver_info(amdsmi_processor_handle processor_han
         return AMDSMI_STATUS_FILE_ERROR;
     }
     amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load("libdrm_amdgpu.so");
+    status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so"
+           << " | Failed to load libdrm.so.2"
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;
@@ -4927,11 +4927,11 @@ amdsmi_get_gpu_virtualization_mode(amdsmi_processor_handle processor_handle,
     }
 
     amd::smi::AMDSmiLibraryLoader libdrm;
-    status = libdrm.load("libdrm_amdgpu.so");
+    status = libdrm.load("libdrm.so.2");
     if (status != AMDSMI_STATUS_SUCCESS) {
         libdrm.unload();
         ss << __PRETTY_FUNCTION__
-           << " | Failed to load libdrm_amdgpu.so"
+           << " | Failed to load libdrm.so.2"
            << "; Returning: " << smi_amdgpu_get_status_string(status, false);
         LOG_ERROR(ss);
         return status;

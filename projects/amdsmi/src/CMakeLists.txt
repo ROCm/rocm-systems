@@ -78,7 +78,7 @@ set(${AMD_SMI}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 add_library(${AMD_SMI} ${SRC_LIST} ${INC_LIST})
-target_link_libraries(${AMD_SMI} pthread rt dl)
+target_link_libraries(${AMD_SMI} pthread rt dl ${DRM_LIBRARIES} ${AMDGPU_DRM_LIBRARIES})
 target_include_directories(${AMD_SMI} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/rocm_smi/include
                                               ${PROJECT_SOURCE_DIR}/common/shared_mutex ${ACA_INC_DIR})
 
