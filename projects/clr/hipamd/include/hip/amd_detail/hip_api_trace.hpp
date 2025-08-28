@@ -727,6 +727,7 @@ typedef hipError_t (*t_hipStreamGetCaptureInfo_v2)(
     hipGraph_t* graph_out, const hipGraphNode_t** dependencies_out, size_t* numDependencies_out);
 typedef hipError_t (*t_hipStreamGetDevice)(hipStream_t stream, hipDevice_t* device);
 typedef hipError_t (*t_hipStreamGetFlags)(hipStream_t stream, unsigned int* flags);
+typedef hipError_t (*t_hipStreamGetId)(hipStream_t stream, unsigned long long* streamId);
 typedef hipError_t (*t_hipStreamGetPriority)(hipStream_t stream, int* priority);
 typedef hipError_t (*t_hipStreamIsCapturing)(hipStream_t stream,
                                              hipStreamCaptureStatus* pCaptureStatus);
@@ -1631,6 +1632,7 @@ struct HipDispatchTable {
   t_hipMemGetHandleForAddressRange hipMemGetHandleForAddressRange_fn;
 
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 13
+  // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
   t_hipModuleGetFunctionCount hipModuleGetFunctionCount_fn;
   t_hipMemsetD2D8 hipMemsetD2D8_fn;
   t_hipMemsetD2D8Async hipMemsetD2D8Async_fn;
@@ -1649,8 +1651,9 @@ struct HipDispatchTable {
   t_hipGetDriverEntryPoint_spt hipGetDriverEntryPoint_spt_fn;
   t_hipMemPrefetchAsync_v2 hipMemPrefetchAsync_v2_fn;
   t_hipMemAdvise_v2 hipMemAdvise_v2_fn;
+  t_hipStreamGetId hipStreamGetId_fn;
+
   // HIP_RUNTIME_API_TABLE_STEP_VERSION = 14
-  // removed HIP_MEMSET_NODE_PARAMS replaced by hipMemsetParams
 
   // DO NOT EDIT ABOVE!
   // HIP_RUNTIME_API_TABLE_STEP_VERSION == 14

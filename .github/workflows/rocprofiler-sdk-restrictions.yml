@@ -30,7 +30,7 @@ jobs:
   regex:
     runs-on: ubuntu-22.04
     env:
-      FOLDERS: "projects/rocprofiler-sdk/source/lib/common projects/rocprofiler-sdk/source/lib/rocprofiler-sdk projects/rocprofiler-sdk/source/lib/rocprofiler-sdk-roctx"
+      FOLDERS: "source/lib/common source/lib/rocprofiler-sdk source/lib/rocprofiler-sdk-roctx source/lib/output source/lib/rocprofiler-sdk-tool"
 
     steps:
     - uses: actions/checkout@v4
@@ -42,10 +42,10 @@ jobs:
         python3 -m pip install -U cmake-format
 
     - name: Apply restriction
+      working-directory: projects/rocprofiler-sdk
       run: |
-        cd projects/rocprofiler-sdk
         set +e
-        FILES="$(find ${FOLDERS} -type f)"
+        FILES="$(find ${FOLDERS} -type f -not -name "*.md" -not -name "*.txt")"
         GREP="$(grep -E -n 'std::regex|<regex>' ${FILES})"
         if [ "${GREP}" != "" ]; then
           echo -e "\nError! std::regex is not allowed in ${FOLDERS}...\n"
