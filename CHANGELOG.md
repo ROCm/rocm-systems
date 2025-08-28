@@ -11,6 +11,132 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added `amdsmi_get_gpu_revision()` to Python API**  
   - This function retrieves the GPU revision ID. Available in `amdsmi_interface.py` as `amdsmi_get_gpu_revision()`.
 
+- **Added gpuboard and baseboard temperatures to `amd-smi metric` command**.  
+  - The metric command has been updated with various gpuboard and baseboard temperatures in degrees Celsius. Users can access these
+  values through the `-G/--gpuboard` or `-b/--baseboard` options or obtain all of them as normal using the `amd-smi metric` command without
+  any options. If the hardware does not support gpuboard or baseboard temperatures, then the values will be hidden from the default `metric` view.
+
+```conosle
+$ amd-smi metric -b
+GPU: 0
+    BASEBOARD:
+        TEMPERATURE:
+            FIRST: 78
+            UBB_FRONT: 55
+            UBB_BACK: 49
+            UBB_OAM7: 86
+            UBB_IBC: 94
+            UBB_UFPGA: 49
+            UBB_OAM1: 78
+            OAM_0_1_HSC: 54
+            OAM_2_3_HSC: 32
+            OAM_4_5_HSC: 14
+            OAM_6_7_HSC: 85
+            UBB_FPGA_0V72_VR: 43
+            UBB_FPGA_3V3_VR: 41
+            RETIMER_0_1_2_3_1V2_VR: 64
+            RETIMER_4_5_6_7_1V2_VR: 56
+            RETIMER_0_1_0V9_VR: 74
+            RETIMER_4_5_0V9_VR: 34
+            RETIMER_2_3_0V9_VR: 85
+            RETIMER_6_7_0V9_VR: 92
+            OAM_0_1_2_3_3V3_VR: 29
+            OAM_4_5_6_7_3V3_VR: 13
+            IBC_HSC: 41
+            IBC: 43
+
+$ amd-smi metric -G
+GPU: 0
+    GPUBOARD:
+        TEMPERATURE:
+            NODE_RETIMER_X: 43
+            NODE_OAM_X_IBC: 24
+            NODE_OAM_X_IBC_2: 56
+            NODE_OAM_X_VDD18_VR: 34
+            NODE_OAM_X_04_HBM_B_VR: 53
+            NODE_OAM_X_04_HBM_D_VR: 47
+            VR_FIRST: 58
+            VDDCR_VDD1: 78
+            VDDCR_VDD2: 35
+            VDDCR_VDD3: 73
+            VDDCR_SOC_A: 12
+            VDDCR_SOC_C: 57
+            VDDCR_SOCIO_A: 39
+            VDDCR_SOCIO_C: 75
+            VDD_085_HBM: 64
+            VDDCR_11_HBM_B: 92
+            VDDCR_11_HBM_D: 87
+            VDD_USR: 46
+            VDDIO_11_E32: 98
+
+$ amd-smi metric
+GPU: 0
+    USAGE:
+        GFX_ACTIVITY: 0 %
+        UMC_ACTIVITY: 0 %
+        ...
+    POWER:
+        SOCKET_POWER: 140 W
+        GFX_VOLTAGE: N/A
+        ...
+    CLOCK:
+        GFX_0:
+            CLK: 132 MHz
+            MIN_CLK: 500 MHz
+        ...
+    TEMPERATURE:
+        EDGE: N/A
+        HOTSPOT: 37 °C
+        ...
+    PCIE:
+        WIDTH: 16
+        SPEED: 32 GT/s
+        ...
+    GPUBOARD:
+        TEMPERATURE:
+            NODE_RETIMER_X: 43
+            NODE_OAM_X_IBC: 24
+            ...
+    BASEBOARD:
+        TEMPERATURE:
+            UBB_FPGA: 78
+            UBB_FRONT: 55
+            ...
+    ECC:
+        TOTAL_CORRECTABLE_COUNT: 0
+        TOTAL_UNCORRECTABLE_COUNT: 0
+        ...
+    ECC_BLOCKS:
+        UMC:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+        ...
+    FAN:
+        SPEED: N/A
+        MAX: N/A
+        ...
+    VOLTAGE_CURVE:
+        POINT_0_FREQUENCY: N/A
+        POINT_0_VOLTAGE: N/A
+        ...
+    OVERDRIVE: N/A
+    MEM_OVERDRIVE: N/A
+    PERF_LEVEL: AMDSMI_DEV_PERF_LEVEL_AUTO
+    XGMI_ERR: N/A
+    VOLTAGE:
+        VDDBOARD: N/A
+    ENERGY:
+        TOTAL_ENERGY_CONSUMPTION: 14292727.274 J
+    MEM_USAGE:
+        TOTAL_VRAM: 196592 MB
+        USED_VRAM: 283 MB
+        ...
+    THROTTLE:
+        ACCUMULATION_COUNTER: 100936627
+        PROCHOT_ACCUMULATED: 0
+        ...
+```
+
 ### Changed
 
 ### Removed
@@ -39,6 +165,48 @@ GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_
 ### Known Issues
 
 - N/A
+
+## amd_smi_lib for ROCm 7.0.1
+
+### Added
+
+### Changed
+
+### Removed
+
+- **Fixed gpuboard and baseboard temperatures enums in amdsmi Python Library**.  
+  - AmdSmiTemperatureType had issues with referencing the right attribute, so we removed the following duplicate enums:
+    - `AmdSmiTemperatureType.GPUBOARD_NODE_FIRST`
+    - `AmdSmiTemperatureType.GPUBOARD_VR_FIRST`
+    - `AmdSmiTemperatureType.BASEBOARD_FIRST`
+
+### Optimized
+
+### Resolved Issues
+
+- **Fixed `amd-smi monitor` errors on guest systems**.  
+
+  ```shell
+  $ amd-smi monitor
+  AttributeError: 'Namespace' object has no attribute 'violation'
+  ```
+
+Now properly shows:
+
+  ```shell
+  $ amd-smi monitor
+  GPU  XCP  POWER   GPU_T   MEM_T   GFX_CLK   GFX%   MEM%   ENC%   DEC%      VRAM_USAGE
+    0    0   12 W   40 °C   44 °C     9 MHz    8 %    1 %    N/A    0 %    0.2/ 25.4 GB
+  ```
+
+### Upcoming Changes
+
+- N/A
+
+### Known Issues
+
+- N/A
+
 
 ## amd_smi_lib for ROCm 7.0.0
 
