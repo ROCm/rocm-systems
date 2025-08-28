@@ -76,49 +76,51 @@ jobs:
         echo "DEBUG: match_found = '$(match_found)'"
       displayName: 'Debug match_found variable'
 
-    - ${{ if eq(variables.match_found, 'true') }}:
-      - script: |
-          rm -rf $(repo_name)
-          git clone $(gh_repo)
-        displayName: Checkout Code
+    - script: |
+        rm -rf $(repo_name)
+        git clone $(gh_repo)
+      displayName: Checkout Code
+      condition: eq(variables.match_found, 'true')
 
-      - script: |
-          set -e  
-          echo "Calling jenkins_api.py for PR #$(PR_NUM)"
-          cd $(repo_name)
-          docker run \
-            -v "$PWD:/src" \
-            -w /src \
-            -e GH_TOKEN="$(svc_acc_org_secret)" \
-            -e svc_acc_org_secret="$(svc_acc_org_secret)" \
-            $(base_image) \
-            bash -c "echo 'Fetching PR title from GitHub API...' && \
-            echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
-            export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
-            python3 jenkins_api.py \
-              -ghr '$(REPOSITORY_NAME)' \
-              -ghsha '$(HEAD_SHA)' \
-              -ghprn '$(PR_NUM)' \
-              -ghpru '$(PR_URL)' \
-              -ghprt \"\$TITLE\" \
-              -ghpat '$(GH_PAT)' \
-              -br   '$(BASE_REF)' \
-              -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
-        displayName: Invoke jenkins_api.py in Docker  
-        env:  
-          svc_acc_org_secret: $(svc_acc_org_secret)
+    - script: |
+        set -e  
+        echo "Calling jenkins_api.py for PR #$(PR_NUM)"
+        cd $(repo_name)
+        docker run \
+          -v "$PWD:/src" \
+          -w /src \
+          -e GH_TOKEN="$(svc_acc_org_secret)" \
+          -e svc_acc_org_secret="$(svc_acc_org_secret)" \
+          $(base_image) \
+          bash -c "echo 'Fetching PR title from GitHub API...' && \
+          echo 'repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM)' && \
+          export TITLE=\$(gh api repos/$(REPOSITORY_NAME)/pulls/$(PR_NUM) | jq -r .title) && \
+          python3 jenkins_api.py \
+            -ghr '$(REPOSITORY_NAME)' \
+            -ghsha '$(HEAD_SHA)' \
+            -ghprn '$(PR_NUM)' \
+            -ghpru '$(PR_URL)' \
+            -ghprt \"\$TITLE\" \
+            -ghpat '$(GH_PAT)' \
+            -br   '$(BASE_REF)' \
+            -et   '$(EVENT_TYPE)'" > /dev/null 2>&1
+      displayName: Invoke jenkins_api.py in Docker  
+      env:  
+        svc_acc_org_secret: $(svc_acc_org_secret)
+      condition: eq(variables.match_found, 'true')
 
-    - ${{ if ne(variables.match_found, 'true') }}:
-      - script: |
-          echo "Changes outside monitored paths. Skipping Jenkins trigger."
-          echo "Sending success status for PSDB..."
-          export GH_TOKEN=$(GH_PAT)
-          gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-            -f state=success \
-            -f context="PSDB" \
-            -f description="PSDB skipped"
-          gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-            -f state=success \
-            -f context="psdb-test" \
-            -f description="psdb-test skipped"
-        displayName: Send Skipped Status
+
+    - script: |
+        echo "Changes outside monitored paths. Skipping Jenkins trigger."
+        echo "Sending success status for PSDB..."
+        export GH_TOKEN=$(GH_PAT)
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="PSDB" \
+          -f description="PSDB skipped"
+        gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
+          -f state=success \
+          -f context="psdb-test" \
+          -f description="psdb-test skipped"
+      displayName: Send Skipped Status
+      condition: ne(variables.match_found, 'true')
