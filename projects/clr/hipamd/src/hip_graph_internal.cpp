@@ -356,12 +356,16 @@ hipError_t GraphExec::Init() {
   if (status != hipSuccess) {
     return status;
   }
+
+
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
     if (max_streams_ == 1) {
       // For graph nodes capture AQL packets to dispatch them directly during graph launch.
       status = CaptureAQLPackets();
+      DetectGraphTopology();
     }
   }
+  
   instantiateDeviceId_ = hip::getCurrentDevice()->deviceId();
   static_cast<ReferenceCountedObject*>(hip::getCurrentDevice())->retain();
   return status;
@@ -465,7 +469,7 @@ hipError_t GraphExec::EnqueueGraphWithSingleList(hip::Stream* hip_stream) {
   amd::AccumulateCommand* accumulate = nullptr;
   hipError_t status = hipSuccess;
   if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
-    accumulate = new amd::AccumulateCommand(*hip_stream, {}, nullptr);
+    accumulate = new amd::AccumulateCommand(*hip_stream, {}, {} ,{}, nullptr);
   }
   for (int i = 0; i < topoOrder_.size(); i++) {
     if (topoOrder_[i]->GraphCaptureEnabled()) {
@@ -703,7 +707,14 @@ hipError_t GraphExec::Run(hip::Stream* launch_stream) {
     repeatLaunch_ = true;
   }
 
-  if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
+
+  if (isStraightLineKernels_ && max_streams_ == 1 &&
+      instantiateDeviceId_ == launch_stream->DeviceId()) {
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Using batched submission for straight-line %zu kernels",
+            straightLineSequence_.size());
+    status = RunStraightLineBatchOptimized(launch_stream);
+  } else if (max_streams_ == 1 && instantiateDeviceId_ == launch_stream->DeviceId()) {
     if (DEBUG_CLR_GRAPH_PACKET_CAPTURE) {
       // If the graph has kernels that does device side allocation,  during packet capture, heap is
       // allocated because heap pointer has to be added to the AQL packet, and initialized during
@@ -808,4 +819,96 @@ void GraphKernelArgManager::ReadBackOrFlush() {
     }
   }
 }
+
+// ================================================================================================
+bool GraphExec::IsAllKernelNodes() const {
+  for (const auto& node : topoOrder_) {
+    if (node->GetType() != hipGraphNodeTypeKernel) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// ================================================================================================
+bool GraphExec::IsStraightLineTopology() const {
+  for (size_t i = 0; i < topoOrder_.size(); ++i) {
+    const auto& node = topoOrder_[i];
+    if (i == 0) {
+      // First node should have no dependencies
+      if (!node->GetDependencies().empty()) return false;
+    } else {
+      // Other nodes should have exactly one dependency (the previous node)
+      const auto& dependencies = node->GetDependencies();
+      if (dependencies.size() != 1 || dependencies[0] != topoOrder_[i - 1]) {
+        return false;
+      }
+    }
+    // Each node should have at most one outgoing edge
+    if (node->GetEdges().size() > 1) return false;
+  }
+  return true;
+}
+
+// ================================================================================================
+void GraphExec::CacheNodePackets(GraphKernelNode* kernelNode) {
+  std::vector<uint8_t*>& gpuPackets = kernelNode->GetAqlPackets();
+  const std::string& kernelName = kernelNode->GetKernelName();
+
+  // Append packets and kernel names to list
+  cachedGpuPackets_.insert(cachedGpuPackets_.end(), gpuPackets.begin(), gpuPackets.end());
+  for (size_t i = 0; i < gpuPackets.size(); ++i) {
+    cachedKernelNames_.push_back(kernelName);
+  }
+}
+
+// ================================================================================================
+void GraphExec::BuildStraightLineSequence() {
+  straightLineSequence_.reserve(topoOrder_.size());
+  cachedGpuPackets_.clear();
+  cachedKernelNames_.clear();
+
+  for (const auto& node : topoOrder_) {
+    auto* kernelNode = static_cast<GraphKernelNode*>(node);
+    straightLineSequence_.push_back(kernelNode);
+    if (kernelNode->GraphCaptureEnabled()) {
+      CacheNodePackets(kernelNode);
+    }
+  }
+}
+
+// ================================================================================================
+void GraphExec::DetectGraphTopology() {
+  isStraightLineKernels_ = false;
+  straightLineSequence_.clear();
+
+  if (max_streams_ != 1 || topoOrder_.empty()) return;
+
+  if (IsAllKernelNodes() && IsStraightLineTopology()) {
+    isStraightLineKernels_ = true;
+    BuildStraightLineSequence();
+    ClPrint(amd::LOG_INFO, amd::LOG_CODE,
+            "[hipGraph] Detected straight-line kernel sequence with %zu nodes for constant-time "
+            "optimization",
+            straightLineSequence_.size());
+  }
+}
+
+// ================================================================================================
+hipError_t GraphExec::RunStraightLineBatchOptimized(hip::Stream* stream) {
+  if (!isStraightLineKernels_ || cachedGpuPackets_.empty()) {
+    return EnqueueGraphWithSingleList(stream);
+  }
+
+  // Create AccumulateCommand with all cached packets at once
+  amd::AccumulateCommand* accumulate =
+      new amd::AccumulateCommand(*stream, cachedGpuPackets_, cachedKernelNames_, {}, nullptr);
+
+  // Submit the batch
+  accumulate->enqueue();
+  accumulate->release();
+
+  return hipSuccess;
+}
+// ================================================================================================
 }  // namespace hip

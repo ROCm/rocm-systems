@@ -1164,6 +1164,7 @@ inline bool VirtualGPU::dispatchAqlPacket(uint8_t* aqlpacket, const std::string&
     return false;
   }
 
+
   vcmd->addKernelName(kernelName);
   amd::ScopedLock lock(execution());
 
@@ -3736,9 +3737,67 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
 
 // ================================================================================================
 void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
-  // Make sure VirtualGPU has an exclusive access to the resources
   amd::ScopedLock lock(execution());
   profilingBegin(vcmd);
+
+  auto& packets = vcmd.getAccumulatedPackets();
+  const auto& kernelNames = vcmd.getKernelNames();
+  const auto total_packets = vcmd.getPacketCount();
+  const uint32_t queueSize = gpu_queue_->size;
+  const uint32_t queueMask = queueSize - 1;
+  const uint32_t sw_queue_size = queueMask;
+
+  if (total_packets == 0) {
+    const Settings& settings = dev().settings();
+    if (settings.barrier_value_packet_) {
+      dispatchBarrierValuePacket(kBarrierVendorPacketNopScopeHeader, true);
+    } else {
+      dispatchBarrierPacket(kNopPacketHeader, false);
+    }
+    printf("Empty Accumulate dispatch: SWq=0x%zx, HWq=0x%zx, id=%d, total_packets=%u, "
+           "queue_size=%u, rptr=%u, wptr=%u, doorbell=0x%zx\n",
+           gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, total_packets,
+           gpu_queue_->size,
+           hsa_queue_load_read_index_relaxed(gpu_queue_),
+           hsa_queue_load_write_index_relaxed(gpu_queue_),
+           gpu_queue_->doorbell_signal.handle);
+    profilingEnd();
+    return;
+  }
+
+  uint64_t current_write = hsa_queue_load_write_index_relaxed(gpu_queue_);
+  uint64_t current_read = hsa_queue_load_read_index_relaxed(gpu_queue_);
+  
+  while ((current_write - current_read + total_packets) >= sw_queue_size) {
+    amd::Os::yield();
+    current_write = hsa_queue_load_write_index_relaxed(gpu_queue_);
+    current_read = hsa_queue_load_read_index_scacquire(gpu_queue_);
+  }
+
+  uint64_t start_index = hsa_queue_add_write_index_screlease(gpu_queue_, total_packets);
+
+  for (size_t i = 0; i < total_packets; ++i) {
+    uint64_t packet_index = start_index + i;
+    uint32_t queue_mask = gpu_queue_->size - 1;
+
+    void* queue_slot = static_cast<char*>(gpu_queue_->base_address) +
+                       ((packet_index & queue_mask) * sizeof(hsa_kernel_dispatch_packet_t));
+
+    std::memcpy(queue_slot, packets[i], sizeof(hsa_kernel_dispatch_packet_t));
+    const hsa_kernel_dispatch_packet_t* orig_packet =
+        reinterpret_cast<const hsa_kernel_dispatch_packet_t*>(packets[i]);
+    packet_store_release(static_cast<uint32_t*>(queue_slot), orig_packet->header,
+                         orig_packet->setup);
+  }
+  hsa_signal_store_screlease(gpu_queue_->doorbell_signal, start_index + total_packets - 1);
+  ClPrint(amd::LOG_DEBUG, amd::LOG_AQL,
+          "Batch AQL Dispatch: SWq=0x%zx, HWq=0x%zx, id=%d, total_packets=%u, "
+          "start_index=%lu, queue_size=%u, rptr=%u, wptr=%u, doorbell=0x%zx",
+          gpu_queue_, gpu_queue_->base_address, gpu_queue_->id, total_packets,
+          start_index, gpu_queue_->size,
+          hsa_queue_load_read_index_relaxed(gpu_queue_),
+          hsa_queue_load_write_index_relaxed(gpu_queue_),
+          gpu_queue_->doorbell_signal.handle);
 
   const Settings& settings = dev().settings();
   if (settings.barrier_value_packet_) {
@@ -3746,8 +3805,8 @@ void VirtualGPU::submitAccumulate(amd::AccumulateCommand& vcmd) {
   } else {
     dispatchBarrierPacket(kNopPacketHeader, false);
   }
-
   profilingEnd();
+
 }
 
 // ================================================================================================
@@ -3759,7 +3818,6 @@ void VirtualGPU::submitAcquireExtObjects(amd::AcquireExtObjectsCommand& vcmd) {
   addSystemScope();
   profilingEnd();
 }
-
 // ================================================================================================
 void VirtualGPU::submitReleaseExtObjects(amd::ReleaseExtObjectsCommand& vcmd) {
   // Make sure VirtualGPU has an exclusive access to the resources

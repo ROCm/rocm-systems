@@ -1367,15 +1367,21 @@ class Marker : public Command {
 
 class AccumulateCommand : public Command {
  private:
+  
+  std::vector<uint8_t*> gpuPackets_;
   //! Kernel names and timestamps list for activity profiling
   std::vector<std::string> kernelNames_;
   std::vector<std::pair<uint64_t, uint64_t>> tsList_;
 
  public:
   //! Create a new Marker
-  AccumulateCommand(HostQueue& queue, const EventWaitList& eventWaitList = nullWaitList,
+  AccumulateCommand(HostQueue& queue, const std::vector<uint8_t*>& gpuPackets,
+                    const std::vector<std::string>& kernelNames,
+                    const EventWaitList& eventWaitList = nullWaitList,
                     const Event* waitingEvent = nullptr)
-      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent) {}
+      : Command(queue, CL_COMMAND_TASK, eventWaitList, 0, waitingEvent),
+        gpuPackets_(gpuPackets),
+        kernelNames_(kernelNames) {}
 
   //! Add kernel name to the list if available
   void addKernelName(const std::string& kernelName) { kernelNames_.push_back(kernelName); }
@@ -1384,6 +1390,12 @@ class AccumulateCommand : public Command {
   void addTimestamps(uint64_t startTs, uint64_t endTs) {
     tsList_.push_back(std::make_pair(startTs, endTs));
   }
+
+  //! Return the GPU packets
+  const std::vector<uint8_t*>& getAccumulatedPackets() const { return gpuPackets_; }
+
+  // Return the number of GPU packets
+  size_t getPacketCount() const { return gpuPackets_.size(); }
 
   //! Return the kernel names
   const std::vector<std::string>& getKernelNames() const { return kernelNames_; }

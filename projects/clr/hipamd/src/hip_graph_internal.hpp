@@ -793,8 +793,15 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   static void DecrementRefCount(cl_event event, cl_int command_exec_status, void* user_data);
   hipError_t AllocKernelArgForGraphNode();
   void GetKernelArgSizeForGraph(size_t& kernArgSizeForGraph);
+  std::vector<std::string> GetKernelNames() { return cachedKernelNames_; }
   hipError_t EnqueueGraphWithSingleList(hip::Stream* hip_stream);
   bool TopologicalOrder() { return Graph::TopologicalOrder(topoOrder_); }
+  bool IsAllKernelNodes() const;
+  void CacheNodePackets(GraphKernelNode* kernelNode);
+  bool IsStraightLineTopology() const;
+  void DetectGraphTopology();
+  void BuildStraightLineSequence() ;
+  hipError_t RunStraightLineBatchOptimized(hip::Stream* stream);
 
  protected:
   //! Topological order of the graph doesn't include nodes embedded as part of the child graph
@@ -805,6 +812,13 @@ class GraphExec : public amd::ReferenceCountedObject, public Graph {
   int instantiateDeviceId_ = -1;
   bool hasHiddenHeap_ = false;  //!< Hidden heap indicator for Kernel node
   bool repeatLaunch_ = false;
+
+  bool isStraightLineKernels_ = false;
+  std::vector<GraphKernelNode*> straightLineSequence_;
+
+  private:
+  std::vector<uint8_t*> cachedGpuPackets_;
+  std::vector<std::string> cachedKernelNames_; 
 };
 
 class ChildGraphNode : public GraphNode, public GraphExec {
@@ -1303,6 +1317,9 @@ class GraphKernelNode : public GraphNode {
     const GraphKernelNode* kernelNode = static_cast<GraphKernelNode const*>(node);
     return SetParams(&kernelNode->kernelParams_);
   }
+
+  // Optimized submission for straight-line graphs
+  hipError_t SubmitOptimized(hip::Stream* stream);
 
   static hipError_t validateKernelParams(const hipKernelNodeParams* pNodeParams, hipFunction_t func,
                                          int devId) {
