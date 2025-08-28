@@ -863,6 +863,8 @@ hipError_t hipMemcpy3DBatchAsync(size_t numOps, struct hipMemcpy3DBatchOp* opLis
                                  unsigned long long flags, hipStream_t stream);
 hipError_t hipMemcpy3DPeer(hipMemcpy3DPeerParms* p);
 hipError_t hipMemcpy3DPeerAsync(hipMemcpy3DPeerParms* p, hipStream_t stream);
+hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
 }  // namespace hip
 
 namespace hip {
@@ -1398,6 +1400,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipMemcpy3DBatchAsync_fn = hip::hipMemcpy3DBatchAsync;
   ptrDispatchTable->hipMemcpy3DPeer_fn = hip::hipMemcpy3DPeer;
   ptrDispatchTable->hipMemcpy3DPeerAsync_fn = hip::hipMemcpy3DPeerAsync;
+  ptrDispatchTable->hipKernelGetAttribute_fn = hip::hipKernelGetAttribute;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2062,13 +2065,14 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipGetDriverEntryPoint_spt_fn, 492);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemPrefetchAsync_v2_fn, 493);
 HIP_ENFORCE_ABI(HipDispatchTable, hipMemAdvise_v2_fn, 494);
 HIP_ENFORCE_ABI(HipDispatchTable, hipStreamGetId_fn, 495);
+HIP_ENFORCE_ABI(HipDispatchTable, hipKernelGetAttribute_fn, 496);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 496)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 497)
 
 static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 14,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "

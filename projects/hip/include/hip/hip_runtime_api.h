@@ -692,6 +692,8 @@ typedef struct hipIpcEventHandle_st {
 typedef struct ihipModule_t* hipModule_t;
 typedef struct ihipModuleSymbol_t* hipFunction_t;
 typedef struct ihipLinkState_t* hipLinkState_t;
+typedef struct ihipLibrary_t* hipLibrary_t;
+typedef struct ihipKernel_t* hipKernel_t;
 /**
  * HIP memory pool
  */
@@ -6345,6 +6347,28 @@ hipError_t hipModuleGetFunction(hipFunction_t* function, hipModule_t module, con
  * #hipErrorNotFound,
  */
 hipError_t hipModuleGetFunctionCount(unsigned int* count, hipModule_t mod);
+
+/**
+ * @brief Returns information about a kernel.
+ *
+ * @param[out] pi Returned attribute value
+ * @param[in] attrib Attribute requested
+ * @param[in] kernel Kernel to query attribute of
+ * @param[in] dev Device to query attribute of
+ *
+ * @returns #hipSuccess, #hipErrorDeinitialized, #hipErrorNotInitialized, #hipErrorInvalidHandle,
+ #hipErrorInvalidValue, #hipErrorInvalidDevice
+ *
+ * Returns in *pi the integer value of the attribute attrib for the kernel kernel for the requested
+ device dev. The supported attributes are:
+ *
+ * @see hipLibraryLoadData, hipLibraryLoadFromFile, hipLibraryUnload, hipKernelSetAttribute,
+ hipLibraryGetKernel, hipLaunchKernel, hipKernelGetFunction, hipLibraryGetModule,
+ hipModuleGetFunction, hipFuncGetAttribute
+ */
+hipError_t hipKernelGetAttribute(int* pi, hipFuncAttribute attrib, hipKernel_t kernel,
+                                 hipDevice_t dev);
+
 
 /**
  * @brief Find out attributes for a given function.
