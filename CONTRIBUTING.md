@@ -135,22 +135,25 @@ Please refer to [this documentation](/docs/continuous-integration.md) for furthe
 [Data Version Control](https://dvc.org) is the system for large file storage in this super-repo. It provides staging capabilities on top of what Git LFS typically provides that ROCm CI/CD workflows can make use of. Files are stored in an S3 bucket that has public-read access.
 
 Currently, `DVC` utilization is limited to the `pal` libraries in the `shared/amdgpu-windows-interop` directory.
+If your development does not involve these files, you do not need to install `DVC`.
 
-[Installing DVC](https://dvc.org/doc/install)
+### [Installing DVC](https://dvc.org/doc/install)
 
-Retrieving large files:
+### Retrieving large files:
 
 ```bash
 git pull
 dvc pull
 ```
 
-Switching to versions in other branches or commits:
+### Switching to versions in other branches or commits:
 
 ```bash
 git checkout feature-branch
 dvc checkout
 ```
+
+### Update large files
 
 Write-access requires authentication. Please reach out to a project lead for credentials. To make updates to files maintained by `DVC`:
 
