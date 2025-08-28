@@ -687,53 +687,6 @@ class GpuPmcBuilder : public PmcBuilder, protected Primitives {
           }
         }
       }
-    sdma_mask = 0;
-    if (counters_vec.get_attr() & CounterBlockAidAttr)
-      for (const auto& counter_des : counters_vec) {
-        const auto* block_info = counter_des.block_info;
-        const auto& block_des = counter_des.block_des;
-        const auto* reg_table = get_reg_table(counter_des);
-        const auto& reg_info = reg_table[counter_des.index];
-
-        if (!(block_info->attr & CounterBlockAidAttr))
-          // skip all non-AID blocks
-          continue;
-
-        // MI300 AID blocks: UMC/RPB/ATC/SDMA event insert master XCC PRED_EXEC packet here
-        PrecExecBuilder<Builder> prec_exec_builder(builder, cmd_buffer, VIRTUALXCCID_SELECT,
-                                                   xcc_number_ > 1);
-
-        const auto target_aid_index = GetTargetAid(counter_des);
-        uint64_t smn_control_addr = get_smn_addr(reg_info.control_addr, target_aid_index);
-
-        if (block_info->attr & CounterBlockUmcAttr) {
-          // Stop UMC
-        } else if (block_info->attr & (CounterBlockRpbAttr | CounterBlockAtcAttr)) {
-          // Stop RPB/ATC
-          builder.BuildWritePConfigRegPacket(cmd_buffer, smn_control_addr, 0);
-        } else if (block_info->attr & CounterBlockSdmaAttr) {
-          // Stop SDMA
-          if (reg_info.control_addr.offset == 0) {
-            // MI100: stopped per instance
-            const uint32_t mask = 1u << counter_des.block_des.index;
-            if ((sdma_mask & mask) == 0) {
-              sdma_mask |= mask;
-              auto control_addr = (reg_info.control_addr.offset == 0) ? reg_info.select_addr
-                                                                      : reg_info.control_addr;
-              builder.BuildWritePConfigRegPacket(cmd_buffer, control_addr,
-                                                 Primitives::sdma_stop_value(counter_des));
-            }
-          } else if (xcc_number_ > 1) {
-            // MI300 SDMA event: insert master XCC PRED_EXEC packet here
-            builder.BuildWritePConfigRegPacket(cmd_buffer, smn_control_addr,
-                                               Primitives::sdma_stop_value(counter_des));
-          } else {
-            // MI200: stopped per counter to choose which counter to read
-            builder.BuildWritePConfigRegPacket(cmd_buffer, reg_info.control_addr,
-                                               Primitives::sdma_stop_value(counter_des));
-          }
-        }
-      }
 
     // Issue barrier command to wait commands to complete
     SetPerfmonCntl(cmd_buffer, Primitives::cp_perfmon_cntl_stop_value(), counters_vec.get_attr());
