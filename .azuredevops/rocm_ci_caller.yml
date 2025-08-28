@@ -94,13 +94,12 @@ jobs:
       - script: |
           echo "Changes outside monitored paths. Skipping Jenkins trigger."
           echo "Sending success status for PSDB..."
+          export GH_TOKEN=$(GH_PAT)
           gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-            -H "Authorization: token $(GH_PAT)" \
             -f state=success \
             -f context="PSDB" \
             -f description="PSDB skipped"
           gh api repos/$(REPOSITORY_NAME)/statuses/$(HEAD_SHA) \
-            -H "Authorization: token $(GH_PAT)" \
             -f state=success \
             -f context="psdb-test" \
             -f description="psdb-test skipped"
