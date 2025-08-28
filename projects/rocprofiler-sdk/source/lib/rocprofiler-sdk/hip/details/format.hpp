@@ -279,9 +279,11 @@ struct formatter<hipMemLocationType> : rocprofiler::hip::details::base_formatter
         {
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Invalid);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Device);
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 14
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, Host);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, HostNuma);
             ROCP_SDK_HIP_FORMAT_CASE_STMT(hipMemLocationType, HostNumaCurrent);
+#endif
             ROCP_SDK_HIP_FORMAT_DFLT_CASE(hipMemLocationType);
         }
         return fmt::format_to(ctx.out(), "Unknown");
